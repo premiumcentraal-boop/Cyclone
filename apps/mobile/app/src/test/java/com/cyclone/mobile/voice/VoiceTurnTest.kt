@@ -200,6 +200,13 @@ class VoiceTurnTest {
         assertEquals(VoicePhase.CLOSED, r.turn.phase)
     }
 
+    @Test fun `a silenced microphone says so instead of a generic miss`() {
+        val r = Run()
+        r.on(VoiceEvent.Tap)
+        r.on(VoiceEvent.Failed(VoiceFailure.MIC_SILENCED))
+        assertEquals(VoiceCopy.MIC_SILENCED, r.said.last())
+    }
+
     @Test fun `none closes quietly`() {
         val r = Run()
         r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("what a nice day"))

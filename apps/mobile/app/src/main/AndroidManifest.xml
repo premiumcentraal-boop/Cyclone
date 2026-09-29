@@ -30,6 +30,11 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- Drive (alpha.71): Android's speech recognizer. Without this query Android 11+ hides it from Cyclone, so
+             on-device speech to text and the fallback for a silenced microphone could never find it. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
         <!-- Plan 29: which clock app takes a direct timer, to confirm it by its running-timer notification. -->
         <intent>
             <action android:name="android.intent.action.SET_TIMER" />

@@ -77,6 +77,8 @@ class VoiceCapture(private val context: Context) {
         val echo = if (AcousticEchoCanceler.isAvailable()) runCatching { AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull() else null
         val noise = if (NoiseSuppressor.isAvailable()) runCatching { NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull() else null
         val detector = VoiceActivity(tuning)
+        // A background app's microphone can be silenced by Android: exact zeros. Found within 0.6 s, not after 4.
+        val silenced = MicSilence()
         val all = ShortArray(rate * tuning.maxClipMs / 1000 + rate)
         var count = 0
         val chunk = ShortArray(rate / 50)
@@ -89,6 +91,7 @@ class VoiceCapture(private val context: Context) {
                 val n = record.read(chunk, 0, chunk.size)
                 if (n < 0) return Outcome.Failed(VoiceFailure.MIC_BUSY)
                 if (n == 0) continue
+                if (silenced.feed(chunk, n)) return Outcome.Failed(VoiceFailure.MIC_SILENCED)
                 val room = minOf(n, all.size - count)
                 System.arraycopy(chunk, 0, all, count, room)
                 count += room

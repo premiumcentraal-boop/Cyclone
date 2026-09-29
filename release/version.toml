@@ -1,4 +1,4 @@
-# Cyclone V5 alpha.71 dev1: the app redesign (R5) - every in-app page on one glass world over the Cyclone rain, navigation as darker chrome glass, Home in the AI page's style, and Visual quality: Auto, Full or Lite.
+# Cyclone V5 alpha.71 dev1: the app redesign (R5) - every in-app page on one glass world over the Cyclone rain, navigation as darker chrome glass, Home in the AI page's style, Visual quality (Auto, Full or Lite), the Drive intro and movable button, and Drive hearing the owner again with Android's speech recognizer as fallback.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
 product_version = "5.0.0-alpha.71.dev1"

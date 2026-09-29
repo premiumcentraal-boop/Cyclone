@@ -31,6 +31,8 @@ object VoiceCopy {
     const val NOT_HEARD = "I didn't catch that. Tap me to try again."
     const val MIC_BUSY = "The microphone is busy. Try again in a moment."
     const val NO_MIC = "Cyclone needs the microphone. Allow it in Cyclone's setup."
+    /** Both Drive's microphone and Android's recognizer heard only silence. */
+    const val MIC_SILENCED = "I can't hear the microphone right now. Open Cyclone once, then tap me again."
 
     /** Captions on AI mode, one per state. */
     const val CAPTION_LISTENING = "Listening…"

@@ -62,6 +62,11 @@ class VoiceSession(context: Context) {
     private var stoppedTalkingAt = 0L
     private var awaitingAckSound = false
     private var liveTaskId: String? = null
+    /**
+     * Set when Drive's own recording could not hear the owner (a silenced or busy microphone) or its transcription
+     * failed: the rest of this Drive session uses Android's speech recognizer (alpha.71).
+     */
+    @Volatile private var systemRecognizer = false
 
     init {
         speech.prepare(DriverMode.load(app).language)
@@ -154,19 +159,19 @@ class VoiceSession(context: Context) {
         clip = null
         heardText = null
         val settings = DriverMode.settings.value
+        val recognizer = settings.onDeviceStt || systemRecognizer
         listenJob = scope.launch {
             // A car kit's microphone link comes up while the earcon plays (plan 32 D3).
-            val car = if (settings.bluetoothMic && !settings.onDeviceStt) async { capture.routeToCar() } else null
+            val car = if (settings.bluetoothMic && !recognizer) async { capture.routeToCar() } else null
             // The earcon first: the detector learns the room's noise, not our own sound.
             earconJob?.join()
-            VoiceService.start(app)
+            // Alpha.71: the microphone service must hold the microphone before recording starts. Starting it is
+            // asynchronous, and a recording opened before it was silenced by Android while Cyclone is in the
+            // background (Drive's usual place, over Maps): the owner spoke and nothing was heard.
+            VoiceService.startAndWait(app)
             try {
-                if (settings.onDeviceStt) {
-                    when (val result = onDevice.listen(settings.language) { micLevel.value = it }) {
-                        is OnDeviceStt.Result.Text -> { heardText = result.text; heard(); dispatch(VoiceEvent.Heard) }
-                        OnDeviceStt.Result.NothingHeard -> dispatch(VoiceEvent.NothingHeard)
-                        is OnDeviceStt.Result.Failed -> dispatch(VoiceEvent.Failed(result.failure))
-                    }
+                if (recognizer) {
+                    listenWithRecognizer(settings.language)
                 } else {
                     val tuning = VoiceActivity.Tuning(endSilenceMs = settings.endSilenceMs)
                     // Once the owner is really talking, open the connection to OpenRouter so the transcription skips
@@ -177,7 +182,15 @@ class VoiceSession(context: Context) {
                     when (val result = capture.record(tuning, car = car?.await(), onSpeech = warm) { micLevel.value = it }) {
                         is VoiceCapture.Outcome.Clip -> { clip = result.samples; heard(); dispatch(VoiceEvent.Heard) }
                         VoiceCapture.Outcome.NothingHeard -> dispatch(VoiceEvent.NothingHeard)
-                        is VoiceCapture.Outcome.Failed -> dispatch(VoiceEvent.Failed(result.failure))
+                        is VoiceCapture.Outcome.Failed -> if (result.failure in RECOGNIZER_TAKES_OVER) {
+                            // Drive's recording cannot hear the owner: Android's recognizer, which records in its own
+                            // process, listens instead, in this same turn, and for the rest of the session.
+                            systemRecognizer = true
+                            capture.releaseCar()
+                            listenWithRecognizer(settings.language, silencedBefore = result.failure == VoiceFailure.MIC_SILENCED)
+                        } else {
+                            dispatch(VoiceEvent.Failed(result.failure))
+                        }
                     }
                 }
             } finally {
@@ -186,6 +199,18 @@ class VoiceSession(context: Context) {
                 micLevel.value = 0f
                 VoiceService.stop(app)
             }
+        }
+    }
+
+    /** Android's speech recognizer: it listens and transcribes in one go, so the transcript skips OpenRouter. */
+    private suspend fun listenWithRecognizer(language: String, silencedBefore: Boolean = false) {
+        when (val result = onDevice.listen(language) { micLevel.value = it }) {
+            is OnDeviceStt.Result.Text -> { heardText = result.text; heard(); dispatch(VoiceEvent.Heard) }
+            OnDeviceStt.Result.NothingHeard -> dispatch(VoiceEvent.NothingHeard)
+            // Both ways failed after a silenced recording: say so, instead of a generic "didn't catch that".
+            is OnDeviceStt.Result.Failed -> dispatch(VoiceEvent.Failed(
+                if (silencedBefore && result.failure == VoiceFailure.NOT_HEARD) VoiceFailure.MIC_SILENCED else result.failure,
+            ))
         }
     }
 
@@ -215,6 +240,8 @@ class VoiceSession(context: Context) {
                     val model = model(key) { it.stt } ?: return@withContext VoiceEvent.Failed(VoiceFailure.OFFLINE)
                     VoiceEvent.Transcript(OpenRouterStt(OpenRouterVoice(key), model).transcribe(samples, DriverMode.settings.value.language, ::track))
                 } catch (error: VoiceCallException) {
+                    // The next tap listens with Android's recognizer instead of sending another clip (alpha.71).
+                    if (error.failure != VoiceFailure.NO_KEY) systemRecognizer = true
                     VoiceEvent.Failed(error.failure)
                 } finally {
                     samples.fill(0)
@@ -349,6 +376,8 @@ class VoiceSession(context: Context) {
     companion object {
         const val STILL_WORKING_MS = 60_000L
         private const val JEV_WAIT_MS = 3_000L
+        /** Drive's recording failed in a way Android's own recognizer can get around (it records in its own process). */
+        private val RECOGNIZER_TAKES_OVER = setOf(VoiceFailure.MIC_SILENCED, VoiceFailure.MIC_BUSY)
         private val TERMINAL = setOf(TaskPhase.DONE, TaskPhase.FAILED, TaskPhase.STOPPED)
     }
 }

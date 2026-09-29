@@ -25,7 +25,11 @@ sealed interface VoiceAnswer {
     data object Stop : VoiceAnswer
 }
 
-enum class VoiceFailure { NO_KEY, OFFLINE, NOT_HEARD, MIC_BUSY, NO_MIC }
+enum class VoiceFailure {
+    NO_KEY, OFFLINE, NOT_HEARD, MIC_BUSY, NO_MIC,
+    /** The recording ran but Android gave it only silence (alpha.71): the session retries with the system recognizer. */
+    MIC_SILENCED,
+}
 
 enum class TaskOutcome { DONE, FAILED, STOPPED }
 
@@ -410,6 +414,7 @@ data class VoiceTurn(
         VoiceFailure.NOT_HEARD -> VoiceCopy.NOT_HEARD
         VoiceFailure.MIC_BUSY -> VoiceCopy.MIC_BUSY
         VoiceFailure.NO_MIC -> VoiceCopy.NO_MIC
+        VoiceFailure.MIC_SILENCED -> VoiceCopy.MIC_SILENCED
     }
 
     private fun same() = Step(this, emptyList())

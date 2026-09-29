@@ -28,8 +28,12 @@ class VoiceActivity(private val tuning: Tuning = Tuning()) {
         val minSpeechMs: Int = 400,
         /** Voice is this many times louder than the noise floor (RMS). */
         val floorRatio: Double = 2.5,
-        /** Below this RMS (of 32767) nothing is voice, however quiet the room. */
-        val absoluteMin: Double = 350.0,
+        /**
+         * Below this RMS (of 32767) nothing is voice, however quiet the room. Alpha.71 lowered it from 350: the
+         * VOICE_RECOGNITION source has no gain control, and a phone in a car mount hears normal speech at 150–400.
+         * The noise floor ratio and the speech zero-crossing range still keep noise out.
+         */
+        val absoluteMin: Double = 120.0,
     ) {
         init {
             require(endSilenceMs in 300..2_000) { "endSilenceMs out of range" }
