@@ -52,6 +52,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -124,6 +127,9 @@ internal fun CycloneSettingsPage426(
     val essentialsReady = listOf(phoneControl.ready, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
     val setupCards = remember { com.cyclone.mobile.setup.SetupState.cards(context) }
     val setupDone = remember(refreshTick) { com.cyclone.mobile.setup.SetupState.done(context).size }
+    remember(context) { com.cyclone.mobile.ui.v32.ask.VisualQuality.load(context) }
+    val qualityMode by com.cyclone.mobile.ui.v32.ask.VisualQuality.mode.collectAsState()
+    val resolvedQuality by com.cyclone.mobile.ui.v32.ask.VisualQuality.resolved.collectAsState()
 
     fun modelValue(): String = V39AiChatContract.modelForStored(selectedModel).label
     fun effortValue(): String = reasoningEffort.takeIf { it.isNotBlank() }?.let(::reasoningEffortLabel) ?: "Model default"
@@ -140,6 +146,11 @@ internal fun CycloneSettingsPage426(
             com.cyclone.mobile.ui.overlay.tracefield.TraceFieldMode.FIELD ->
                 com.cyclone.mobile.ui.overlay.tracefield.TraceFieldPrefs.style(context).label
         }
+    }
+    fun visualQualityValue(): String = when (qualityMode) {
+        com.cyclone.mobile.ui.v32.ask.QualityMode.AUTO ->
+            "Auto · " + if (resolvedQuality == com.cyclone.mobile.ui.v32.ask.GlassQuality.LITE) "Lite" else "Full"
+        else -> qualityMode.label
     }
     fun backgroundValue(): String = if (background.setupFailure == null) "Ready" else "Setup"
 
@@ -158,6 +169,7 @@ internal fun CycloneSettingsPage426(
                     Settings426Row("Voice", "Voice", Icons.Rounded.RecordVoiceOver, "OpenRouter"),
                 ),
                 "Appearance" to listOf(
+                    Settings426Row(VISUAL_QUALITY, VISUAL_QUALITY, Icons.Rounded.AutoAwesome, visualQualityValue()),
                     Settings426Row("Working indicator", "Working indicator", Icons.Rounded.Tune, workingIndicatorValue()),
                 ),
                 "Phone" to listOf(
@@ -213,6 +225,35 @@ internal fun CycloneSettingsPage426(
                 Settings426Surface {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         WorkingIndicatorSettings(context)
+                    }
+                }
+            }
+
+            VISUAL_QUALITY -> item {
+                Settings426Surface {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        val modes = com.cyclone.mobile.ui.v32.ask.QualityMode.entries
+                        CycloneLiquidChoiceBar(
+                            options = modes.map { it.label },
+                            selectedIndex = modes.indexOf(qualityMode).coerceAtLeast(0),
+                            onSelect = { index -> com.cyclone.mobile.ui.v32.ask.VisualQuality.setMode(context, modes[index]) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            com.cyclone.mobile.ui.v32.ask.QualityPolicy.explain(
+                                qualityMode, resolvedQuality,
+                                com.cyclone.mobile.ui.v32.ask.VisualQuality.device,
+                                com.cyclone.mobile.ui.v32.ask.VisualQuality.steppedDown,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "Full blurs and bends the rain under every panel. Lite keeps the same look with less work: " +
+                                "one shared blur, no cast shadows on cards and a calmer rain. Auto picks for this phone " +
+                                "and moves to Lite if frames start to slow.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -403,6 +444,20 @@ internal fun CycloneSettingsPage426(
 }
 
 private const val SET_UP_CYCLONE = "Set up Cyclone"
+private const val VISUAL_QUALITY = "Visual quality"
+
+/** R5: each Settings group has its own tile colour on the rain, so a group is found by colour before words. */
+internal fun settingsGroupTile(group: String): Color = when (group) {
+    "AI" -> Color(0xFF7B61FF)
+    "Drive" -> Color(0xFF30B85A)
+    "Appearance" -> Color(0xFF3E7BFA)
+    "Phone" -> Color(0xFFFF9F0A)
+    "Profiles" -> Color(0xFF32ADE6)
+    "Knowledge" -> Color(0xFF5E5CE6)
+    "Connections" -> Color(0xFF64D2FF)
+    "Privacy & safety" -> Color(0xFF0A84FF)
+    else -> Color(0xFF8E8E93)
+}
 
 @Composable
 private fun Settings426Root(
@@ -426,7 +481,7 @@ private fun Settings426Root(
                     CycloneSurface(Modifier.fillMaxWidth()) {
                         Column {
                             rows.forEachIndexed { index, row ->
-                                Settings426ListRow(row, onClick = { onOpen(row.id) }, onInfo = onInfo)
+                                Settings426ListRow(row, settingsGroupTile(groupTitle), onClick = { onOpen(row.id) }, onInfo = onInfo)
                                 if (index != rows.lastIndex) {
                                     CycloneHairline(Modifier.padding(start = 58.dp, end = 14.dp))
                                 }
@@ -440,15 +495,15 @@ private fun Settings426Root(
 }
 
 @Composable
-private fun Settings426ListRow(row: Settings426Row, onClick: () -> Unit, onInfo: (com.cyclone.mobile.setup.SetupCard) -> Unit) {
+private fun Settings426ListRow(row: Settings426Row, tile: Color, onClick: () -> Unit, onInfo: (com.cyclone.mobile.setup.SetupCard) -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CycloneMatrixIconTile(size = 38.dp) {
+        CycloneMatrixIconTile(size = 38.dp, fill = tile) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(row.icon, null, Modifier.size(19.dp), tint = TealMatrix.Teal)
+                Icon(row.icon, null, Modifier.size(19.dp), tint = matrixAccent())
             }
         }
         Text(row.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
@@ -569,6 +624,7 @@ private fun Settings426Surface(content: @Composable () -> Unit) {
 private fun Settings426DetailSubtitle(section: String): String? = when (section) {
     "Driver mode" -> "A large voice button for the car: talk, and Cyclone tells you when it is done."
     "Voice" -> "The voice, the models and how fast Cyclone answers on this phone."
+    VISUAL_QUALITY -> "How much glass work the app does: Full, Lite, or Auto for this phone."
     "Working indicator" -> "The Trace Field overlay shown while Cyclone works: mode, style and a live preview."
     "Model & API" -> "Choose the model Cyclone uses and secure your API access."
     "Default intelligence" -> "Set the default reasoning level for new tasks."

@@ -119,7 +119,9 @@ import com.cyclone.mobile.ui.v32.ask.AskModelSheet
 import com.cyclone.mobile.ui.v32.ask.AskRainField
 import com.cyclone.mobile.ui.v32.ask.AskScrim
 import com.cyclone.mobile.ui.v32.ask.AskVideoField
+import com.cyclone.mobile.ui.v32.ask.AskGreetingPool
 import com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop
+import com.cyclone.mobile.ui.v32.ask.LocalAskWorld
 import com.cyclone.mobile.ui.v32.ask.LocalAskShine
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -423,21 +425,28 @@ internal fun V39AiChatPage(
     val backgroundVideo by AskBackground.video.collectAsState()
     LaunchedEffect(Unit) { AskBackground.load(context) }
 
+    // R5: inside the app the glass world owns the rain (with the scene while this page is in front), the backdrop,
+    // the shine and the quality; the page only adds its greeting pool. Standing alone it still draws its own.
+    val world = LocalAskWorld.current
     CompositionLocalProvider(
-        LocalAskBackdrop provides backdrop,
-        LocalAskShine provides shine,
+        LocalAskBackdrop provides if (world) LocalAskBackdrop.current else backdrop,
+        LocalAskShine provides if (world) LocalAskShine.current else shine,
         LocalGlassPalette provides GlassPalette.SMOKE,
     ) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xFF050608)),
+            .then(if (world) Modifier else Modifier.background(Color(0xFF050608))),
     ) {
-        // The owner may pick a video from their phone instead (logo panel › Background video); the rain is the default.
-        val video = backgroundVideo
-        if (video != null) AskVideoField(video, Modifier.matchParentSize().layerBackdrop(backdrop))
-        else AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))
-        AskScrim(Modifier.matchParentSize(), greeting = homeCanvas)
+        if (world) {
+            if (homeCanvas) AskGreetingPool(Modifier.matchParentSize())
+        } else {
+            // The owner may pick a video from their phone instead (logo panel › Background video); the rain is the default.
+            val video = backgroundVideo
+            if (video != null) AskVideoField(video, Modifier.matchParentSize().layerBackdrop(backdrop))
+            else AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))
+            AskScrim(Modifier.matchParentSize(), greeting = homeCanvas)
+        }
         com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
 
         Column(

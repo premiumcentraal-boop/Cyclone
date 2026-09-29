@@ -127,7 +127,7 @@ internal fun AskModelSheet(
 
     Column(
         modifier.fillMaxWidth()
-            .smokedGlass(LocalAskBackdrop.current, 28.dp, AskGlass.SHEET_SMOKE, LocalAskShine.current, 0.25f)
+            .askGlass(28.dp, GlassTier.CHROME, 0.25f, smoke = AskGlass.SHEET_SMOKE)
             .clip(ContinuousRoundedRectangle(28.dp))
             .semantics { contentDescription = "Model and thinking" }
             .padding(vertical = 12.dp),
@@ -241,7 +241,7 @@ internal fun AskMenuDrawer(
 
     Column(
         Modifier.fillMaxHeight().widthIn(max = 340.dp).fillMaxWidth(0.86f)
-            .smokedGlass(LocalAskBackdrop.current, 32.dp, AskGlass.SHEET_SMOKE, LocalAskShine.current, 0.1f, shape)
+            .askGlass(32.dp, GlassTier.CHROME, 0.1f, shape, smoke = AskGlass.SHEET_SMOKE)
             .clip(shape)
             .semantics { contentDescription = "Menu" }
             .padding(top = 14.dp, bottom = 10.dp),
@@ -392,7 +392,7 @@ internal fun AskLogoPanel(modifier: Modifier = Modifier, onSettings: (section: S
     }
     Column(
         modifier.widthIn(max = 320.dp).fillMaxWidth(0.86f)
-            .smokedGlass(LocalAskBackdrop.current, 28.dp, AskGlass.SHEET_SMOKE, LocalAskShine.current, 0.3f)
+            .askGlass(28.dp, GlassTier.CHROME, 0.3f, smoke = AskGlass.SHEET_SMOKE)
             .clip(ContinuousRoundedRectangle(28.dp))
             .semantics { contentDescription = "Cyclone" }
             .padding(vertical = 12.dp),

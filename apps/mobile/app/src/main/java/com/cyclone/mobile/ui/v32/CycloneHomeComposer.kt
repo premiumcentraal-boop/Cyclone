@@ -61,7 +61,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.ui.v32.ask.askWhorls
-import com.cyclone.mobile.ui.v32.ask.smokedGlass
+import com.cyclone.mobile.ui.v32.ask.GlassTier
+import com.cyclone.mobile.ui.v32.ask.askGlass
 
 @Composable
 fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) -> Unit) {
@@ -102,8 +103,7 @@ fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) ->
             if (askBackdrop != null) {
                 Box(
                     Modifier.fillMaxWidth().heightIn(min = 64.dp)
-                        .smokedGlass(askBackdrop, 33.dp, shine = com.cyclone.mobile.ui.v32.ask.LocalAskShine.current, shineOffset = 0.7f,
-                            shape = com.kyant.capsule.ContinuousCapsule)
+                        .askGlass(33.dp, GlassTier.CHROME, 0.7f, com.kyant.capsule.ContinuousCapsule)
                         .askWhorls(),
                     contentAlignment = Alignment.Center,
                 ) { inner() }

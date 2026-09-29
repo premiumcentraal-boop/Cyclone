@@ -26,8 +26,9 @@ class AskScreenR3ContractTest {
         assertTrue(page.contains("val backdrop = rememberLayerBackdrop()"))
         assertTrue(page.contains("AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))"))
         assertTrue(page.contains("AskScrim(Modifier.matchParentSize(), greeting = homeCanvas)"))
-        assertTrue(page.contains("LocalAskBackdrop provides backdrop"))
-        assertTrue(page.contains("LocalAskShine provides shine"))
+        // R5: inside the app the glass world's backdrop and shine are used; standing alone the page records its own.
+        assertTrue(page.contains("LocalAskBackdrop provides if (world) LocalAskBackdrop.current else backdrop"))
+        assertTrue(page.contains("LocalAskShine provides if (world) LocalAskShine.current else shine"))
         assertTrue(page.contains("LocalGlassPalette provides GlassPalette.SMOKE"))
         assertTrue(page.indexOf("AskRainField(") < page.indexOf("AskHeader("))
     }
@@ -53,7 +54,7 @@ class AskScreenR3ContractTest {
         assertTrue(glass.contains("const val SHINE_MS = 6_000"))
         // Without a recorded backdrop the glass is painted graphite, not transparent.
         assertTrue(glass.contains("if (backdrop == null)"))
-        assertTrue(glass.contains(".background(AskGlass.Painted, shape)"))
+        assertTrue(glass.contains(".background(if (chrome) AskGlass.PaintedChrome else AskGlass.Painted, shape)"))
     }
 
     @Test fun noTealOnTheAiScreen() {

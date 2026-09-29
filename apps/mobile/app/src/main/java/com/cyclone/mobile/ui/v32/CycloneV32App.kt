@@ -62,7 +62,8 @@ import java.time.LocalTime
 
 @Composable
 fun CycloneMobileV32App() {
-    CycloneV32Theme {
+    // R5 (docs/design/redesign/rounds/R5-app.md): one glass world for every in-app page.
+    CycloneV32Theme(glass = true) {
         val context = LocalContext.current
         var destination by rememberSaveable { mutableStateOf(V32Destination.HOME) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -94,8 +95,10 @@ fun CycloneMobileV32App() {
         LaunchedEffect(Unit) { if (com.cyclone.mobile.setup.SetupState.shouldOpen(context)) setupOpen = true }
 
         val phoneReady = v32AccessibilityEnabled(context)
-        // Teal Matrix owns every destination, so the system bars always match the teal canvas.
-        CycloneSignatureSystemBars(enabled = true)
+        // The glass world owns every destination, so the system bars match its graphite canvas.
+        CycloneSignatureSystemBars(enabled = true, glass = true)
+        // The rain runs once for the whole app; the AI page in front adds the official scene (or the owner's video).
+        com.cyclone.mobile.ui.v32.ask.AskGlassWorld(aiStage = destination == V32Destination.AI && !settingsOpen && !marketOpen) {
         CycloneSignatureTheme(enabled = destination == V32Destination.AI && !settingsOpen) {
             Box(Modifier.fillMaxSize()) {
                 Scaffold(
@@ -174,6 +177,7 @@ fun CycloneMobileV32App() {
                     }
                 }
             }
+        }
         }
     }
 }

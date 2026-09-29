@@ -73,7 +73,7 @@ internal fun AskRoundChip(
     Box(
         modifier
             .size(size)
-            .smokedGlass(LocalAskBackdrop.current, size / 2, shine = LocalAskShine.current, shineOffset = shineOffset)
+            .askGlass(size / 2, GlassTier.CHROME, shineOffset = shineOffset, shape = ContinuousCapsule)
             .clip(CircleShape)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
@@ -106,7 +106,7 @@ internal fun AskHeader(
                 Modifier
                     .heightIn(min = 44.dp)
                     .widthIn(max = 250.dp)
-                    .smokedGlass(LocalAskBackdrop.current, 22.dp, shine = LocalAskShine.current, shineOffset = 0.2f, shape = ContinuousCapsule)
+                    .askGlass(22.dp, GlassTier.CHROME, shineOffset = 0.2f, shape = ContinuousCapsule)
                     .clip(ContinuousCapsule)
                     .clickable(role = Role.Button, onClick = onModel)
                     .semantics { contentDescription = "Model: $modelLabel. Choose a model" }
@@ -198,7 +198,7 @@ internal fun AskHome(
             val shape = ContinuousRoundedRectangle(24.dp)
             Column(
                 Modifier.fillMaxWidth()
-                    .smokedGlass(LocalAskBackdrop.current, 24.dp, shine = LocalAskShine.current, shineOffset = 0.45f)
+                    .askGlass(24.dp, shineOffset = 0.45f)
                     .clip(shape),
             ) {
                 recent.forEachIndexed { index, mission ->
@@ -233,7 +233,7 @@ private fun AskSuggestionChip(suggestion: AskCopy.Suggestion, modifier: Modifier
     Row(
         modifier
             .heightIn(min = 58.dp)
-            .smokedGlass(LocalAskBackdrop.current, 18.dp, shine = LocalAskShine.current, shineOffset = shineOffset)
+            .askGlass(18.dp, shineOffset = shineOffset)
             .clip(shape)
             .clickable(role = Role.Button, onClickLabel = "Write in the Ask bar", onClick = onClick)
             .semantics { contentDescription = "${suggestion.title}. ${suggestion.detail}" }

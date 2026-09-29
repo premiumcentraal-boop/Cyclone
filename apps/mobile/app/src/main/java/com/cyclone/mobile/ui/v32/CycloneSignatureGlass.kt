@@ -3,6 +3,9 @@ package com.cyclone.mobile.ui.v32
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import com.cyclone.mobile.ui.v32.ask.askGlass
+import com.cyclone.mobile.ui.v32.ask.askWhorls
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -64,6 +67,19 @@ internal val LocalCycloneSignatureTheme = compositionLocalOf { false }
 @Composable
 internal fun CycloneSignatureTheme(enabled: Boolean = true, content: @Composable () -> Unit) {
     if (!enabled) { content(); return }
+    if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) {
+        // R5: on the rain Material parts take the neutral glass scheme (white and graphite), never teal.
+        CompositionLocalProvider(
+            LocalCycloneSignatureTheme provides true,
+            LocalCycloneOverlayChrome provides true,
+            LocalCycloneLiquidBackdrop provides null,
+            LocalTealMatrixField provides false,
+            LocalContentColor provides com.cyclone.mobile.ui.v32.ask.AskGlass.Ink,
+        ) {
+            MaterialTheme(colorScheme = com.cyclone.mobile.ui.v32.ask.AskGlassScheme, content = content)
+        }
+        return
+    }
     CompositionLocalProvider(
         LocalCycloneSignatureTheme provides true,
         LocalCycloneOverlayChrome provides true,
@@ -107,6 +123,27 @@ internal fun CycloneSignatureGlass(
     refract: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) {
+        // R5: every card, tray and capsule built on this material is smoked glass over the app's rain.
+        val shape = com.kyant.capsule.ContinuousRoundedRectangle(cornerRadius)
+        CompositionLocalProvider(
+            LocalCycloneInsideLiquidHost provides true,
+            LocalCycloneOverlayChrome provides true,
+        ) {
+            CycloneSignatureTheme {
+                Box(
+                    modifier
+                        .askGlass(cornerRadius, shineOffset = 0.4f, shape = shape)
+                        .then(if (textured) Modifier.askWhorls() else Modifier)
+                        .then(if (focused) Modifier.border(1.2.dp, Color.White.copy(alpha = .35f), shape) else Modifier)
+                        .clip(shape),
+                    contentAlignment = Alignment.Center,
+                    content = content,
+                )
+            }
+        }
+        return
+    }
     // Teal glass (controls layer only): the surface renders the living canvas itself, frosted and
     // lensed, so no layer capture or blur pass runs. Off the canvas (floating overlay) it stays painted.
     val live = refract && !solidBacking && LocalTealMatrixField.current
@@ -302,11 +339,11 @@ internal fun SignatureAction(
 
 /** Match system-bar contrast while this destination is visible, then restore the host state. */
 @Composable
-internal fun CycloneSignatureSystemBars(enabled: Boolean = true) {
+internal fun CycloneSignatureSystemBars(enabled: Boolean = true, glass: Boolean = false) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }
         .filterIsInstance<android.app.Activity>().firstOrNull()
-    androidx.compose.runtime.DisposableEffect(activity, enabled) {
+    androidx.compose.runtime.DisposableEffect(activity, enabled, glass) {
         val window = activity?.window
         if (window == null || !enabled) return@DisposableEffect onDispose {}
         val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
@@ -316,8 +353,10 @@ internal fun CycloneSignatureSystemBars(enabled: Boolean = true) {
         val navigationColor = window.navigationBarColor
         controller.isAppearanceLightStatusBars = false
         controller.isAppearanceLightNavigationBars = false
-        window.statusBarColor = android.graphics.Color.rgb(6, 26, 32)
-        window.navigationBarColor = android.graphics.Color.rgb(6, 26, 32)
+        // R5: the glass world's graphite canvas; the teal canvas elsewhere.
+        val bars = if (glass) android.graphics.Color.rgb(5, 6, 8) else android.graphics.Color.rgb(6, 26, 32)
+        window.statusBarColor = bars
+        window.navigationBarColor = bars
         onDispose {
             controller.isAppearanceLightStatusBars = statusLight
             controller.isAppearanceLightNavigationBars = navigationLight

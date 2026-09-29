@@ -40,7 +40,7 @@ import kotlin.math.roundToInt
  * off it is one still frame; if the shader cannot run, a dark gradient stands in.
  */
 @Composable
-fun AskRainField(modifier: Modifier = Modifier, withScene: Boolean = true) {
+fun AskRainField(modifier: Modifier = Modifier, withScene: Boolean = true, quality: GlassQuality = GlassQuality.FULL) {
     val density = LocalDensity.current.density
     val context = LocalContext.current
     val rain = remember(density) { AskRain.create(density) }
@@ -74,15 +74,23 @@ fun AskRainField(modifier: Modifier = Modifier, withScene: Boolean = true) {
         }
     }
     if (rain != null && !still) {
-        LaunchedEffect(rain) {
-            var start = -1L
+        // R5: Lite draws 20 frames a second instead of 30; while a list scrolls the rain holds still (AskMotion) and
+        // picks up where it stopped, so the glass above it keeps its cached blur.
+        val frameNs = if (quality == GlassQuality.LITE) AskRain.LITE_FRAME_NS else AskRain.FRAME_NS
+        LaunchedEffect(rain, frameNs) {
+            var previous = -1L
+            var elapsed = 0L
             var last = 0L
             while (true) {
                 withFrameNanos { now ->
-                    if (start < 0L) start = now
-                    if (now - last >= AskRain.FRAME_NS) {
+                    if (previous < 0L) previous = now
+                    val step = now - previous
+                    previous = now
+                    if (AskMotion.holding(android.os.SystemClock.uptimeMillis())) return@withFrameNanos
+                    elapsed += step
+                    if (now - last >= frameNs) {
                         last = now
-                        clock.floatValue = AskRain.START_S + ((now - start) / 1_000_000_000f) % AskRain.LOOP_S
+                        clock.floatValue = AskRain.START_S + (elapsed / 1_000_000_000f) % AskRain.LOOP_S
                     }
                 }
             }
@@ -146,6 +154,8 @@ internal class AskRain private constructor(private val shader: RuntimeShader, pr
         const val LOOP_S = 3_600f
         /** About 30 fps: the rain is calm, so half the display rate is plenty and saves battery. */
         const val FRAME_NS = 32_000_000L
+        /** R5 Lite: 20 frames a second. */
+        const val LITE_FRAME_NS = 50_000_000L
         /** The mock-up's density: 90 digits across a 1080 px (360 dp) screen. */
         const val CELL_W_DP = 4f
         const val CELL_H_DP = 6f

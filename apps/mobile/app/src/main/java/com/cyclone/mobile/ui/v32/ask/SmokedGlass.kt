@@ -6,6 +6,11 @@ import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.State
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -27,17 +32,23 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
-/** R3 smoked glass tokens (docs/design/redesign/rounds/R3-ai-screen.md). */
+/** R3/R5 smoked glass tokens (docs/design/redesign/rounds/R3-ai-screen.md, R5-app.md). */
 object AskGlass {
-    /** How much black the glass adds over the blurred rain: clearly darker than the scene, still its colour. */
+    /** How much black content glass adds over the blurred rain: clearly darker than the scene, still its colour. */
     const val SMOKE = 0.52f
     /** Selected rows and the user's own bubble: a lighter smoke. */
     const val LIGHT_SMOKE = 0.34f
     /** Sheets over a dimmed page sit a little lighter so they lift off it. */
     const val SHEET_SMOKE = 0.44f
+    /** R5: navigation glass (tab bar, header buttons, the Ask bar, sheets) is clearly darker than content glass. */
+    const val CHROME_SMOKE = 0.72f
     const val BLUR_DP = 20f
+    const val CHROME_BLUR_DP = 26f
+    const val LITE_SHARED_BLUR_DP = 20f
     const val LENS_HEIGHT_DP = 12f
     const val LENS_AMOUNT_DP = 20f
+    const val CHROME_LENS_HEIGHT_DP = 16f
+    const val CHROME_LENS_AMOUNT_DP = 28f
     /** One shine band crosses each surface every [SHINE_MS]. */
     const val SHINE_MS = 6_000
     val Ink = Color(0xF5FFFFFF)
@@ -48,21 +59,59 @@ object AskGlass {
     val Veil = Color(0x47000000)
     /** Without a backdrop (no layer yet) the glass is painted in this graphite. */
     val Painted = Color(0xE0121418)
+    val PaintedChrome = Color(0xF00B0C0F)
     val Done = Color(0xFF34C759)
     val Waiting = Color(0xFFFFB340)
     val Problem = Color(0xFFFF6B5E)
 }
 
-/** The rain the page records for its glass; null outside the AI screen, where glass is painted. */
+/** Which layer a glass surface belongs to (R5): content panels, or the navigation that floats above them. */
+enum class GlassTier { CONTENT, CHROME }
+
+/** The rain the page records for its glass; null outside the glass world, where glass is painted. */
 val LocalAskBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+/** Lite: the same rain, blurred once per frame for every content panel to share. Null in Full. */
+val LocalAskBlurredBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
 /** The shared shine phase (0..1, one sweep per [AskGlass.SHINE_MS]); read only while drawing. */
 val LocalAskShine = staticCompositionLocalOf<State<Float>?> { null }
 
 /**
+ * Smoked glass from the page's locals (backdrop, shared blur, shine, quality): the one call surfaces use.
+ * [smoke] null takes the tier's smoke.
+ */
+fun Modifier.askGlass(
+    radius: Dp,
+    tier: GlassTier = GlassTier.CONTENT,
+    shineOffset: Float = 0f,
+    shape: CornerBasedShape = ContinuousRoundedRectangle(radius),
+    smoke: Float? = null,
+): Modifier = composed {
+    smokedGlass(
+        backdrop = LocalAskBackdrop.current,
+        radius = radius,
+        smoke = smoke ?: if (tier == GlassTier.CHROME) AskGlass.CHROME_SMOKE else AskGlass.SMOKE,
+        shine = LocalAskShine.current,
+        shineOffset = shineOffset,
+        shape = shape,
+        tier = tier,
+        quality = LocalGlassQuality.current,
+        blurred = LocalAskBlurredBackdrop.current,
+    )
+}
+
+/**
  * Smoked glass (R3): a live blur of the rain beneath, lensed at the rim like thick glass, then clearly darkened so text
  * reads on it. It keeps the rain's colours. A thin white highlight runs along the rim; [shine] draws one soft diagonal
  * band that crosses the surface every six seconds, offset by [shineOffset] so neighbours do not flash together.
+ *
+ * R5 adds the [tier] and the [quality]:
+ * - CHROME glass is darker, blurs more, bends more at the rim, catches a brighter highlight and casts a deeper shadow,
+ *   so navigation always reads as the layer above the content.
+ * - LITE content glass shows the rain blurred once for every panel ([blurred]), without its own lens or cast shadow.
+ *   Chrome keeps the full recipe in both qualities.
+ * - The shine is painted on its own layer above the glass, so its movement never re-runs the blur.
  */
 fun Modifier.smokedGlass(
     backdrop: Backdrop?,
@@ -71,30 +120,58 @@ fun Modifier.smokedGlass(
     shine: State<Float>? = null,
     shineOffset: Float = 0f,
     shape: CornerBasedShape = ContinuousRoundedRectangle(radius),
+    tier: GlassTier = GlassTier.CONTENT,
+    quality: GlassQuality = GlassQuality.FULL,
+    blurred: Backdrop? = null,
 ): Modifier {
+    val chrome = tier == GlassTier.CHROME
     if (backdrop == null) {
         return this
-            .background(AskGlass.Painted, shape)
-            .border(0.8.dp, AskGlass.Hairline, shape)
-            .drawWithCache { onDrawBehind { drawShine(shine, shineOffset) } }
+            .background(if (chrome) AskGlass.PaintedChrome else AskGlass.Painted, shape)
+            .border(if (chrome) 1.dp else 0.8.dp, if (chrome) AskGlass.Hairline.copy(alpha = 0.3f) else AskGlass.Hairline, shape)
+            .shineLayer(shine, shineOffset, shape)
     }
+    val lite = quality == GlassQuality.LITE && !chrome
+    val source = if (lite && blurred != null) blurred else backdrop
     return drawBackdrop(
-        backdrop = backdrop,
+        backdrop = source,
         shape = { shape },
         effects = {
             vibrancy()
-            blur(AskGlass.BLUR_DP.dp.toPx())
-            lens(AskGlass.LENS_HEIGHT_DP.dp.toPx(), AskGlass.LENS_AMOUNT_DP.dp.toPx())
+            when {
+                chrome -> {
+                    blur(AskGlass.CHROME_BLUR_DP.dp.toPx())
+                    lens(AskGlass.CHROME_LENS_HEIGHT_DP.dp.toPx(), AskGlass.CHROME_LENS_AMOUNT_DP.dp.toPx())
+                }
+                // Lite content: the shared layer is already blurred; with no shared layer, a lighter blur and no lens.
+                lite -> if (blurred == null) blur(12.dp.toPx())
+                else -> {
+                    blur(AskGlass.BLUR_DP.dp.toPx())
+                    lens(AskGlass.LENS_HEIGHT_DP.dp.toPx(), AskGlass.LENS_AMOUNT_DP.dp.toPx())
+                }
+            }
         },
-        highlight = { Highlight(width = 0.9.dp, alpha = 0.85f) },
-        shadow = { Shadow(radius = 18.dp, offset = DpOffset(0.dp, 6.dp), color = Color.Black.copy(alpha = 0.32f)) },
+        highlight = { if (chrome) Highlight(width = 1.2.dp, alpha = 1f) else Highlight(width = 0.9.dp, alpha = 0.85f) },
+        shadow = when {
+            chrome -> ({ Shadow(radius = 26.dp, offset = DpOffset(0.dp, 10.dp), color = Color.Black.copy(alpha = 0.45f)) })
+            lite -> null
+            else -> ({ Shadow(radius = 18.dp, offset = DpOffset(0.dp, 6.dp), color = Color.Black.copy(alpha = 0.32f)) })
+        },
         onDrawSurface = {
             drawRect(Color.Black.copy(alpha = smoke))
-            // A faint top sheen: glass catches the light from above.
-            drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.07f), 0.45f to Color.Transparent))
-            drawShine(shine, shineOffset)
+            // A faint top sheen: glass catches the light from above; chrome catches a little more.
+            drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = if (chrome) 0.10f else 0.07f), 0.45f to Color.Transparent))
         },
-    )
+    ).shineLayer(shine, shineOffset, shape)
+}
+
+/** The shine on a layer of its own, clipped to the glass: only this small layer redraws as it moves. */
+private fun Modifier.shineLayer(shine: State<Float>?, offset: Float, shape: CornerBasedShape): Modifier {
+    if (shine == null) return this
+    return graphicsLayer {}.drawWithCache {
+        val outline = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawWithCache)) }
+        onDrawBehind { clipPath(outline) { drawShine(shine, offset) } }
+    }
 }
 
 private fun DrawScope.drawShine(shine: State<Float>?, offset: Float) {

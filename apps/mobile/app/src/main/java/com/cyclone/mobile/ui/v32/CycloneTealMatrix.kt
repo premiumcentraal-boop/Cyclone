@@ -79,6 +79,12 @@ internal object TealMatrix {
     val Hairline = Color(0xFF2A5A5F)
 }
 
+/** The accent for icons and actions: teal on the teal canvas, white on the R5 rain. */
+@Composable
+@androidx.compose.runtime.ReadOnlyComposable
+internal fun matrixAccent(): Color =
+    if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) com.cyclone.mobile.ui.v32.ask.AskGlass.Ink else TealMatrix.Teal
+
 /** Semantic glass tint. Only the rim, mists and backing change; copy stays equally readable. */
 internal enum class MatrixTone(val accent: Color) {
     NEUTRAL(SignatureTeal),
@@ -183,8 +189,22 @@ internal fun CycloneMatrixIconTile(
     modifier: Modifier = Modifier,
     size: Dp = 40.dp,
     tint: Color = TealMatrix.Teal,
+    /** R5: a coloured tile (Settings' groups); null keeps the soft white glass square. */
+    fill: Color? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) {
+        // R5: a soft white glass square like the AI page's list tiles, or a colour tile where a group has one.
+        Box(
+            modifier.size(size)
+                .clip(com.kyant.capsule.ContinuousRoundedRectangle(size * .3f))
+                .background(fill?.copy(alpha = .88f) ?: Color.White.copy(alpha = .12f))
+                .border(.6.dp, Color.White.copy(alpha = .14f), com.kyant.capsule.ContinuousRoundedRectangle(size * .3f)),
+            contentAlignment = Alignment.Center,
+            content = content,
+        )
+        return
+    }
     Box(
         modifier
             .size(size)
@@ -231,7 +251,7 @@ internal fun CycloneMatrixQuickAction(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             CycloneMatrixIconTile(size = 32.dp) {
-                Icon(icon, null, Modifier.size(18.dp), tint = TealMatrix.Teal)
+                Icon(icon, null, Modifier.size(18.dp), tint = matrixAccent())
             }
             Text(
                 label,
@@ -274,14 +294,16 @@ internal fun CycloneMatrixAttention(modifier: Modifier = Modifier, size: Dp = 24
  */
 @Composable
 internal fun CycloneMatrixRing(fraction: Float?, modifier: Modifier = Modifier, size: Dp = 24.dp) {
+    val accent = matrixAccent()
+    val bright = if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) Color.White else TealMatrix.Bright
     Canvas(modifier.size(size)) {
         val stroke = 2.4.dp.toPx()
         val inset = stroke / 2f
         val arcSize = Size(this.size.width - stroke, this.size.height - stroke)
-        drawArc(TealMatrix.Teal.copy(alpha = .18f), 0f, 360f, false, Offset(inset, inset), arcSize, style = Stroke(stroke))
+        drawArc(accent.copy(alpha = .18f), 0f, 360f, false, Offset(inset, inset), arcSize, style = Stroke(stroke))
         val sweep = 360f * (fraction?.coerceIn(.06f, 1f) ?: .72f)
         drawArc(
-            Brush.sweepGradient(listOf(TealMatrix.Teal.copy(alpha = .35f), TealMatrix.Bright, TealMatrix.Teal)),
+            Brush.sweepGradient(listOf(accent.copy(alpha = .35f), bright, accent)),
             -90f, sweep, false, Offset(inset, inset), arcSize, style = Stroke(stroke, cap = StrokeCap.Round),
         )
     }
@@ -359,7 +381,7 @@ internal fun CycloneMatrixSectionHeader(title: String, actionLabel: String? = nu
                     .heightIn(min = 44.dp)
                     .padding(horizontal = 6.dp, vertical = 13.dp),
                 style = MaterialTheme.typography.labelLarge,
-                color = TealMatrix.Teal,
+                color = matrixAccent(),
             )
         }
     }

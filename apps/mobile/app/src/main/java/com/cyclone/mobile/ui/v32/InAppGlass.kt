@@ -60,7 +60,8 @@ import com.cyclone.mobile.ui.overlay.glass.VoiceOrbButton
 import com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette
 import com.cyclone.mobile.ui.overlay.glass.tiltGlass
 import com.cyclone.mobile.ui.v32.ask.askWhorls
-import com.cyclone.mobile.ui.v32.ask.smokedGlass
+import com.cyclone.mobile.ui.v32.ask.GlassTier
+import com.cyclone.mobile.ui.v32.ask.askGlass
 
 /**
  * Plan 27 inside the app: the same glass stack as the overlay. The plane pill sits above the task, the card folds into
@@ -167,8 +168,8 @@ internal fun GlassComposerBar(
     // R3: on the AI screen the bar is smoked glass over the rain, with the fingerprint dots in silver at both ends.
     val askBackdrop = com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop.current
     val material = if (askBackdrop != null) {
-        Modifier.smokedGlass(askBackdrop, 33.dp, shine = com.cyclone.mobile.ui.v32.ask.LocalAskShine.current, shineOffset = 0.7f,
-            shape = com.kyant.capsule.ContinuousCapsule).askWhorls()
+        // R5: the Ask bar is navigation glass (the darker chrome tier), above every content panel.
+        Modifier.askGlass(33.dp, GlassTier.CHROME, 0.7f, com.kyant.capsule.ContinuousCapsule).askWhorls()
     } else {
         Modifier.tiltGlass(33.dp)
     }

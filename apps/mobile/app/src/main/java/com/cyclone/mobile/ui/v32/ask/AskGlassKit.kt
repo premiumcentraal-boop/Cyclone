@@ -63,6 +63,14 @@ fun AskGlassPage(
     greetingShade: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    // R5: under the app's glass world the page adds only its greeting pool; the rain, backdrop and shine are shared.
+    if (LocalAskWorld.current) {
+        Box(modifier.fillMaxSize()) {
+            if (greetingShade) AskGreetingPool(Modifier.matchParentSize())
+            content()
+        }
+        return
+    }
     val backdrop = rememberLayerBackdrop()
     val shine = rememberInfiniteTransition(label = "Glass page shine").animateFloat(
         initialValue = 0f,
@@ -97,7 +105,7 @@ fun AskChip(
     Row(
         modifier
             .heightIn(min = 58.dp)
-            .smokedGlass(LocalAskBackdrop.current, 18.dp, shine = LocalAskShine.current, shineOffset = shineOffset)
+            .askGlass(18.dp, shineOffset = shineOffset)
             .clip(ContinuousRoundedRectangle(18.dp))
             .clickable(role = Role.Button, onClickLabel = onClickLabel, onClick = onClick)
             .semantics { contentDescription = "$title. $detail" }
@@ -139,7 +147,7 @@ fun AskSectionHeader(title: String, action: String? = null, onAction: (() -> Uni
 fun AskGlassList(modifier: Modifier = Modifier, shineOffset: Float = 0.45f, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier.fillMaxWidth()
-            .smokedGlass(LocalAskBackdrop.current, 24.dp, shine = LocalAskShine.current, shineOffset = shineOffset)
+            .askGlass(24.dp, shineOffset = shineOffset)
             .clip(ContinuousRoundedRectangle(24.dp)),
         content = content,
     )
@@ -206,7 +214,7 @@ fun AskStatePip(state: AskPipState, progress: Float? = null) {
 fun AskStatusChip(label: String, positive: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.heightIn(min = 36.dp)
-            .smokedGlass(LocalAskBackdrop.current, 18.dp, shine = LocalAskShine.current, shineOffset = 0.25f, shape = ContinuousCapsule)
+            .askGlass(18.dp, GlassTier.CHROME, shineOffset = 0.25f, shape = ContinuousCapsule)
             .clip(ContinuousCapsule)
             .clickable(role = Role.Button, onClickLabel = "Open settings", onClick = onClick)
             .semantics { contentDescription = "Settings, $label" }

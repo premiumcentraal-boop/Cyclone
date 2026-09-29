@@ -73,7 +73,12 @@ fun CycloneV32TopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (settingsOpen) {
+            if (settingsOpen && com.cyclone.mobile.ui.v32.ask.inAskGlass()) {
+                // R5: back is a chrome glass chip, like the header chips on Home and the AI page.
+                com.cyclone.mobile.ui.v32.ask.AskRoundChip("Back", onBack, shineOffset = 0.1f) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(20.dp), tint = com.cyclone.mobile.ui.v32.ask.AskGlass.Ink)
+                }
+            } else if (settingsOpen) {
                 IconButton(onClick = onBack, modifier = Modifier.size(42.dp)) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
                 }
@@ -89,7 +94,9 @@ fun CycloneV32TopBar(
             }
             Text(
                 if (settingsOpen) "Settings" else title,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleLarge.copy(
+                    shadow = if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) com.cyclone.mobile.ui.v32.ask.AskTextShadow else null,
+                ),
                 modifier = Modifier.weight(1f),
             )
             if (!settingsOpen) {

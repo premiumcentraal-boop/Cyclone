@@ -1,5 +1,6 @@
 package com.cyclone.mobile.ui.v32
 
+import com.cyclone.mobile.ui.v32.ask.askGlass
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -89,6 +90,17 @@ internal fun CycloneLiquidTray(
     contentPadding: Dp = 4.dp,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) {
+        // R5: on the rain a tray is navigation glass (the darker chrome tier).
+        Box(
+            modifier.height(height).fillMaxWidth()
+                .askGlass(height / 2, com.cyclone.mobile.ui.v32.ask.GlassTier.CHROME, 0.2f, ContinuousCapsule)
+                .padding(contentPadding),
+            contentAlignment = Alignment.Center,
+            content = content,
+        )
+        return
+    }
     if (LocalTiltGlass.current) {
         // Tilt Glass: a tray only holds choices, so it is a soft veil capsule with no edge of its own.
         Box(
@@ -157,6 +169,12 @@ internal fun CycloneLiquidPanel(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) {
+        CompositionLocalProvider(LocalCycloneInsideLiquidHost provides true) {
+            Box(modifier.fillMaxWidth().askGlass(cornerRadius, shineOffset = 0.35f).padding(contentPadding), content = content)
+        }
+        return
+    }
     if (LocalCycloneSignatureTheme.current) {
         CycloneSignatureGlass(modifier.fillMaxWidth(), cornerRadius = cornerRadius, refract = true) {
             Box(Modifier.padding(contentPadding), content = content)
@@ -226,6 +244,11 @@ internal fun CycloneLiquidSelectionLens(
     val frost = if (dark) Color.White.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.62f)
     val base = modifier.offset(x = targetOffset).width(lensWidth).height(height)
 
+    if (com.cyclone.mobile.ui.v32.ask.inAskGlass()) {
+        // R5: the chosen option is a white veil sliding inside the smoked tray.
+        Box(base.background(Color.White.copy(alpha = .16f), ContinuousCapsule).border(.8.dp, Color.White.copy(alpha = .22f), ContinuousCapsule))
+        return
+    }
     if (LocalTiltGlass.current) {
         // Tilt Glass: the chosen option is the lit teal capsule inside the veil.
         Box(base.clip(ContinuousCapsule).background(SignatureTeal.copy(alpha = .22f)).litRim(width = 1.dp, cornerRadius = height / 2))

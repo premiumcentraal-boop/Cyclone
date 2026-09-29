@@ -66,7 +66,7 @@ class CycloneTealMatrixTest {
         assertTrue(home.contains("item.progress,"))
         assertTrue(home.contains("CycloneHomeComposer(seed = seed)"))
         assertTrue(home.contains("LaunchedEffect(task) { CycloneRecentActivity.record(task) }"))
-        assertTrue(home.contains("CycloneSignatureSystemBars(enabled = true)"))
+        assertTrue(home.contains("CycloneSignatureSystemBars(enabled = true, glass = true)"))
     }
 
     @Test fun homeComposerIsTheAskCycloneGlassCapsule() {
