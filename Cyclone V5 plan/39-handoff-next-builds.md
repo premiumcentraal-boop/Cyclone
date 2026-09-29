@@ -23,6 +23,8 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.69–70 (the other agent):** the AI screen redesign and its official scene. They took the release numbers
   plan 35 had given to recipes and fleet health, so **every planned build below is two numbers later than plan 35
   says**. Use the next free number; don't try to match plan 35's.
+- **alpha.71 (the other agent):** the app redesign (R5, `docs/design/redesign/rounds/R5-app.md`) with Home (R4) and
+  Visual quality (Auto / Full / Lite). The builds below shift by one more: B1 is alpha.72, and so on.
 - **Test counts at alpha.68:**
   - phone: 2096 tests, 0 failures;
   - gateway suite: passes;
