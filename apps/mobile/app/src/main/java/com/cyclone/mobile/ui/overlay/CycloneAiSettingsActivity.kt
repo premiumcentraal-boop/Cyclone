@@ -226,6 +226,63 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
+                // Plan 42: Speed. Which mode takes a request: Instant (one obvious action), Flash (a few routine steps) or the Mind.
+                var modes by remember { mutableStateOf(com.cyclone.mobile.mind.modes.CycloneModes.settings(context)) }
+                fun save(next: com.cyclone.mobile.mind.modes.ModeSettings) {
+                    modes = next
+                    com.cyclone.mobile.mind.modes.CycloneModes.save(context, next)
+                }
+                Text("Speed", fontWeight = FontWeight.Bold)
+                Text(
+                    when (modes.speed) {
+                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly; for anything else one quick decision picks Instant, " +
+                            "Flash (a few routine steps) or the full Mind. Unsure always goes to the smarter mode."
+                        com.cyclone.mobile.mind.modes.Speed.COMMANDS -> "Clear commands like \"swipe up\", \"open my camera\", \"take a selfie\" or " +
+                            "\"call Mam\" happen instantly, with no model. Everything else goes to the Mind."
+                        com.cyclone.mobile.mind.modes.Speed.MIND -> "Every request is a Mind mission, as before."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.cyclone.mobile.mind.modes.Speed.entries.forEach { speed ->
+                        FilterChip(selected = modes.speed == speed, onClick = { save(modes.copy(speed = speed)) }, label = { Text(speed.label) })
+                    }
+                }
+                Text(
+                    "Instant never types, sends, pays, deletes or posts, and never acts on a password, code or card screen: those go " +
+                        "to the Mind, which asks you. A call waits 2 seconds so you can stop it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Live voice: keep listening", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "After a quick action the mic stays open for ${modes.keepListeningSeconds} s, for the rest of your sentence " +
+                                "(\"… and take a selfie\") or the next command.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = modes.keepListeningSeconds > 0, onCheckedChange = { save(modes.copy(keepListeningSeconds = if (it) 8 else 0)) })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Live voice: quiet when it worked", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "A quick action that worked is confirmed with a sound, not words.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = modes.silentSuccess, onCheckedChange = { save(modes.copy(silentSuccess = it)) })
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
                 // Plan 41: Fast mode, the Pilot. Off by default; the full Mind always takes over when the fast model is unsure.
                 var fast by remember { mutableStateOf(com.cyclone.mobile.mind.pilot.FastMode.settings(context)) }
                 fun save(next: com.cyclone.mobile.mind.pilot.FastModeSettings) {

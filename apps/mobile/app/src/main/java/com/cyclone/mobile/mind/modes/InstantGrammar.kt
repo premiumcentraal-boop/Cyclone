@@ -97,6 +97,18 @@ object InstantGrammar {
     /** True when [text] is already a complete command Instant can do: Live commits it without waiting for silence. */
     fun complete(text: String, world: GrammarWorld = GrammarWorld()): Boolean = parse(text, world) is GrammarResult.Match
 
+    /**
+     * Live voice (plan 42 §5): true when [text] reads as one Instant command even before the phone's world is known
+     * (an app or a label is checked by the router on the phone). Such a sentence skips the understanding call and the
+     * spoken "On it."; the router still sends it up a mode when it isn't one.
+     */
+    fun quick(text: String): Boolean {
+        val tokens = words(text)
+        if (tokens.isEmpty() || tokens.size > MAX_WORDS || tokens.drop(1).any { it in JOINERS }) return false
+        val t = tokens.joinToString(" ")
+        return complete(text) || OPEN.matches(t) || TAP.matches(t)
+    }
+
     /** While the owner is still talking: what the command is becoming, so the phone can get ready (plan 42 §5.2). */
     fun prefix(text: String): InstantIntent? {
         val t = words(text).joinToString(" ")

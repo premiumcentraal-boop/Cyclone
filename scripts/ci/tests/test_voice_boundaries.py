@@ -84,10 +84,17 @@ class VoiceBoundaries(unittest.TestCase):
         session = code((VOICE / "VoiceSession.kt").read_text(encoding="utf-8"))
         # Alpha.72: listening starts the service and waits until it holds the microphone (startAndWait), still once.
         self.assertEqual(session.count("VoiceService.start"), 1)
-        listen = session[session.index("private fun listen()"):]
+        listen = session[session.index("private fun listen("):]
         listen = listen[: listen.index("\n    private fun ")]
         self.assertIn("VoiceService.startAndWait(app)", listen)
         self.assertIn("VoiceService.stop(app)", listen)
+        # Plan 42 (Live): the mic reopens by itself only right after a quick command the owner just gave, and closes on silence.
+        turn = code((VOICE / "VoiceTurn.kt").read_text(encoding="utf-8"))
+        self.assertEqual(turn.count("VoiceEffect.KeepListening(keepListeningMs)"), 1)
+        quick = turn[turn.index("private fun quickDone("):]
+        quick = quick[: quick.index("\n    private fun ")]
+        self.assertIn("VoiceEffect.KeepListening(keepListeningMs)", quick)
+        self.assertIn("if (!quickLive) return same()", quick)
         # No wake word: nothing in voice/ listens without the turn asking for it.
         for name, text in voice_sources():
             self.assertNotRegex(code(text).lower(), r"wake ?word|hotword|alwayson", name)
