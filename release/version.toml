@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.69 dev1: the AI screen redesign (R3) - the Cyclone rain behind dark smoked glass that takes its colours, the model selector in the header, a greeting with suggestions and recent runs, a menu drawer and a logo panel, and an optional background video the owner picks from their phone.
+# Cyclone V5 alpha.70 dev1: the AI screen's official scene - the owner-approved zoom film now runs as live code: a 725 KB baked scene gives every digit its light and colour, and the rain shader draws the Cyclone digits live over it.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.69.dev1"
+product_version = "5.0.0-alpha.70.dev1"
 channel = "development"
-android_version_code = 214
+android_version_code = 215
 python_version = "5.0.0-alpha.68.dev1"
 
 [components]
-mobile = "5.0.0-alpha.69.dev1"
+mobile = "5.0.0-alpha.70.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha69-dev1-ai-screen"
+candidate_generation = "cyclone-v5-alpha70-dev1-ai-scene"
