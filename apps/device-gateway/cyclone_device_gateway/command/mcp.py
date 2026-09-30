@@ -412,6 +412,8 @@ def fetch_file(url: str, dest: "Any", *, limit: int, allow_loopback: bool, timeo
                url_policy: Callable[[str], bool] | None = None) -> tuple[str, int, str]:
     """Download a generated file into [dest] (a Path): https to a public host, up to three redirects, each re-checked,
     at most [limit] bytes. Returns (content type, size, sha256)."""
+    # A constrained local output must reach that local server, even if Windows has a proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()) if url_policy is not None else _OPENER
     for _ in range(4):
         url = check_url(url, what="file address")
         if url_policy is not None and not url_policy(url):
@@ -420,7 +422,7 @@ def fetch_file(url: str, dest: "Any", *, limit: int, allow_loopback: bool, timeo
             raise McpError("The file is on a private network address; Cyclone does not fetch from there.")
         request = urllib.request.Request(url, method="GET", headers={"Accept": "video/*, image/*, audio/*"})
         try:
-            response = _OPENER.open(request, timeout=timeout)  # noqa: S310 - checked above
+            response = opener.open(request, timeout=timeout)  # noqa: S310 - checked above
         except urllib.error.HTTPError as exc:
             location = exc.headers.get("Location") if exc.code in (301, 302, 303, 307, 308) else None
             if not location:

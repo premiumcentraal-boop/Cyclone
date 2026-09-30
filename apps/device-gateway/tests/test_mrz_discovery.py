@@ -238,9 +238,14 @@ def test_output_redirect_cannot_escape_linked_route(world, tmp_path):
         thread.join(timeout=2)
 
 
-def test_linked_local_program_can_keep_a_real_studio_output(world):
+def test_linked_local_program_can_keep_a_real_studio_output(world, monkeypatch):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from cyclone_device_gateway.command import mcp
     import hashlib
+    class RefuseProxy:
+        def open(self, *args, **kwargs):
+            raise AssertionError("Studio output must not use the system proxy opener")
+    monkeypatch.setattr(mcp, "_OPENER", RefuseProxy())
     payload = b"\x89PNG\r\n\x1a\nfixture-image"
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
