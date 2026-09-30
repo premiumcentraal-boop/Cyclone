@@ -407,3 +407,27 @@ That makes three alphas after B1, or B1 moves again if you want this first.
 - column resizing by dragging (widths are stored, but there is no handle yet);
 - everything from T2 on.
 
+**T2, cross-referencing (alpha.80):**
+- **Relations** (`command/tables.py`):
+  - they point at a table (two-way by default, with the way back made in the target, and both sides kept in step on
+    every create, update, undo and delete) or at `sys:accounts|routines|tasks|phones`;
+  - links must exist;
+  - deleting a relation drops its way back and the rollups over it;
+  - a table deleted for good drops the relations that point at it;
+  - relations, rollups and formulas can't change type.
+- **Rollups:** ten kinds, each with a `resultType`, so they filter and sort as numbers, dates or text.
+- **Formulas:**
+  - `command/formula.py` is a tokenizer and recursive-descent parser;
+  - it has no eval, at most 1,000 characters and a depth limit, and treats a circle of formulas as empty;
+  - the functions are `if`, `concat`, `round`, `floor`, `ceil`, `abs`, `min`, `max`, `length`, `lower`, `upper`,
+    `contains`, `empty`, `format`, `toNumber`, `dateBetween` and `now`;
+  - renames are rewritten into expressions.
+- **Rows** come back with `links` (labels and where each id lives); `GET …/properties/{id}/candidates` feeds the
+  picker.
+- **Views:** `timeline`, `calendar`, `gallery` and `list`; `dateProp` defaults to the first date property.
+- **Glass:**
+  - link chips open the linked row from its own table (the peek names that table);
+  - a relation picker with search;
+  - relation, rollup and formula setup;
+  - the timeline (a 42-day window of status-coloured bars), the month calendar, the gallery and the list.
+
