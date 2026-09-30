@@ -140,6 +140,7 @@ class MrzDiscovery:
                 state["connectionStatus"] = self.store._row(link["connection_id"])["status"]
             else:
                 state["connectionId"] = None
+                state["settingsChanged"] = False
         return state
 
     def _link(self) -> Any:
@@ -182,6 +183,9 @@ class MrzDiscovery:
                              detail="Studio is ready for jobs." if ready else "Studio found. Check the worker, Photoshop and template before generating.")
                 if flags["dryRun"]:
                     state["detail"] = "Studio is in dry-run mode: output is a placeholder." if ready else "Studio found in dry-run mode; the worker or template is not ready."
+                # An owner may have used the paste route before discovery started.
+                # Associate only the exact saved recipe; this grants no execution or tools.
+                self._adopt(spec, api)
             except (OSError, ValueError, mcp.McpError) as exc:
                 state["detail"] = str(exc) if isinstance(exc, ValueError) else "Studio is offline or unreachable. Cyclone will keep checking."
                 state["state"] = "attention" if isinstance(exc, ValueError) else "offline"
@@ -215,24 +219,52 @@ class MrzDiscovery:
                     if state["settingsChanged"]:
                         raise CommandError("Studio's recipe changed. Remove the old MRZ connection after its jobs finish, then connect and approve the new recipe.")
                     return self.store.get(link["connection_id"])
-                rows = list(self.store._c._db.execute("SELECT * FROM connection"))
-            # A recipe pasted earlier is the same connection, not a second copy.
-            found = None
-            for row in rows:
-                if "config" in spec and row["kind"] == "local":
-                    launch = json.loads(row["launch"])
-                    expected = spec["config"]["mcpServers"]["employee-id"]
-                    if launch["launcher"] == expected["command"] and launch["args"] == expected["args"]:
-                        found = self.store.get(row["id"])
-                        break
-                elif "url" in spec and row["kind"] == "remote" and row["url"] == spec["url"]:
-                    found = self.store.get(row["id"])
-                    break
-            result = found or self.store.add(spec)
+            result = self.store.add(spec)
             with self.store._c._lock:
                 self.store._c._db.execute("INSERT OR REPLACE INTO mrz_connection VALUES(1,?,?,?)", (result["id"], state["apiBase"], fingerprint(state["apiBase"], spec)))
                 self.store._c._audit("owner", "connection.mrz", result["id"], {"apiBase": state["apiBase"]})
             return result
+
+    def adopt_paste(self) -> None:
+        """An owner-added recipe gets the same durable association without another Connect click."""
+        with self._lock:
+            spec, state = self._spec, dict(self._state)
+        if spec and state["state"] == "found":
+            self._adopt(spec, state["apiBase"])
+
+    def existing_paste(self, launch: dict[str, Any]) -> dict[str, Any] | None:
+        """Repeated paste of the saved MRZ recipe reuses its connection and approvals."""
+        with self._lock:
+            spec, state = self._spec, dict(self._state)
+        if not spec or "config" not in spec or state["state"] != "found":
+            return None
+        expected = spec["config"]["mcpServers"]["employee-id"]
+        if launch["launcher"] != expected["command"] or launch["args"] != expected["args"] or launch.get("envKeys"):
+            return None
+        self._adopt(spec, state["apiBase"])
+        with self.store._c._lock:
+            link = self._link()
+            if link and link["recipe_hash"] == fingerprint(state["apiBase"], spec):
+                return self.store.get(link["connection_id"])
+        return None
+
+    def _adopt(self, spec: dict[str, Any], api: str) -> None:
+        with self.store._c._lock:
+            if self._link():
+                return
+            for row in self.store._c._db.execute("SELECT * FROM connection ORDER BY created_at, id"):
+                matches = False
+                if "config" in spec and row["kind"] == "local":
+                    launch = json.loads(row["launch"])
+                    expected = spec["config"]["mcpServers"]["employee-id"]
+                    matches = (launch["launcher"] == expected["command"] and launch["args"] == expected["args"]
+                               and not launch.get("envKeys"))
+                elif "url" in spec and row["kind"] == "remote":
+                    matches = row["url"] == spec["url"]
+                if matches:
+                    self.store._c._db.execute("INSERT OR REPLACE INTO mrz_connection VALUES(1,?,?,?)", (row["id"], api, fingerprint(api, spec)))
+                    self.store._c._audit("engine", "connection.mrz_adopt", row["id"], {"apiBase": api})
+                    return
 
     def recover(self, connection_id: str, tool: str) -> None:
         """An allowed call may reconnect its approved MCP, never replay a mutation or grant tools."""

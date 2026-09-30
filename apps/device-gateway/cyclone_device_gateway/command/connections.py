@@ -358,7 +358,9 @@ class ConnectionStore:
                 raise CommandError("That server is already connected.") from exc
             self._apply_card_rules(connection_id, card)
             self._c._audit("owner", "connection.add", connection_id, {"url": url})
-        return self.refresh(connection_id)
+        result = self.refresh(connection_id)
+        self.mrz.adopt_paste()
+        return result
 
     def refresh(self, connection_id: str) -> dict[str, Any]:
         """Look at the server again: how to reach it, how to sign in, its tools. Network outside the lock. Each step
@@ -650,6 +652,9 @@ class ConnectionStore:
             raise CommandError("Add one local server at a time.")
         launch = launches[0]
         env = {k: v for k, v in launch.pop("env").items() if v}  # a README's empty placeholder is not a saved key
+        existing = self.mrz.existing_paste(launch)
+        if existing is not None:
+            return existing
         name = body.get("name") or launch["name"]
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60 or INLINE_SECRET.search(name):
             raise CommandError("name is 1..60 characters.")
@@ -666,7 +671,9 @@ class ConnectionStore:
             if env:
                 self.grants.put(f"env:{connection_id}", env)
             self._c._audit("owner", "connection.add_local", connection_id, {"launcher": launch["launcher"], "pinned": launch["pinned"], "hash": launch["hash"]})
-        return self._set_status(connection_id, "needs_approval", "Approve it to run it on this PC.", [{"step": "Waiting for your OK to run it", "ok": False}])
+        result = self._set_status(connection_id, "needs_approval", "Approve it to run it on this PC.", [{"step": "Waiting for your OK to run it", "ok": False}])
+        self.mrz.adopt_paste()
+        return result
 
     def update_local(self, connection_id: str, body: Any) -> dict[str, Any]:
         """A changed config: the new command must be approved again; the card shows what changed."""

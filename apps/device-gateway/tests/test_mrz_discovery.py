@@ -73,12 +73,30 @@ def test_offline_to_online_and_missing_file_http_fallback(world):
 def test_connect_is_idempotent_retains_approval_boundary_and_adopts_paste(world):
     world.mrz.scan()
     pasted = world.center.connections.add({"config": world.mrz.snapshot()["recipe"]})
+    assert world.mrz.snapshot()["connectionId"] == pasted["id"]
     result = world.mrz.connect()
     assert result["id"] == pasted["id"]
     assert result["status"] == "needs_approval"
     assert result["allowed"] == [] and not result["running"]
     assert world.mrz.connect()["id"] == result["id"]
+    assert world.center.connections.add({"config": world.mrz.snapshot()["recipe"]})["id"] == result["id"]
     assert len(world.center.connections.list()) == 1
+
+
+def test_paste_before_discovery_is_adopted_without_execution(world):
+    pasted = world.center.connections.add({"config": recipe(world.data)[2]["config"]})
+    assert world.mrz.snapshot()["connectionId"] is None
+    assert world.mrz.scan()["connectionId"] == pasted["id"]
+    assert pasted["status"] == "needs_approval" and not pasted["running"]
+    assert world.center.connections.calls() == []
+
+
+def test_similar_program_with_different_args_is_not_adopted(world):
+    config = recipe(world.data)[2]["config"]
+    config["mcpServers"]["employee-id"]["args"].append("--another-service")
+    pasted = world.center.connections.add({"config": config})
+    assert world.mrz.scan()["connectionId"] is None
+    assert world.mrz.connect()["id"] != pasted["id"]
 
 
 def test_link_survives_runtime_update_and_removal_requires_new_owner_connect(world):
@@ -214,6 +232,46 @@ def test_output_redirect_cannot_escape_linked_route(world, tmp_path):
             fetch_file(base + "/api/jobs/job1/files/result.png", tmp_path / "result", limit=1000, allow_loopback=True,
                        url_policy=lambda url: world.mrz.artifact_allowed(cid, url))
         assert seen == ["/api/jobs/job1/files/result.png"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_linked_local_program_can_keep_a_real_studio_output(world):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import hashlib
+    payload = b"\x89PNG\r\n\x1a\nfixture-image"
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_GET(self):
+            assert self.path == "/api/jobs/job1/files/result.png"
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.end_headers()
+            self.wfile.write(payload)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    world.data["studio"]["api_base"] = base
+    world.file.write_text(json.dumps(world.data))
+    cid = world.mrz.connect()["id"]
+    try:
+        row = world.center.connections._row(cid)
+        made = world.center.connections._keep(
+            {"content": [{"type": "text", "text": json.dumps({"output_url": base + "/api/jobs/job1/files/result.png"})}]}, row,
+            {"id": "call_fixture", "tool": "employee_id_status", "task_id": None}, {})
+        assert len(made) == 1
+        aid = made[0]
+        artifact, file = world.center.connections.artifact(aid)
+        assert file.read_bytes() == payload
+        assert artifact["sha256"] == hashlib.sha256(payload).hexdigest()
+        assert artifact["connectionId"] == cid
+        with pytest.raises(McpError, match="job-output routes"):
+            world.center.connections._save_url(base + "/private.png", row,
+                                               {"id": "call_fixture", "tool": "employee_id_status", "task_id": None}, "")
     finally:
         server.shutdown()
         server.server_close()
