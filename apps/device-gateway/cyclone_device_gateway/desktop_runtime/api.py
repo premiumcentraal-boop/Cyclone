@@ -10,7 +10,7 @@ import secrets
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -183,6 +183,9 @@ class DesktopRuntime:
         # Alpha 87: keep Cyclone on each phone current, and know why it stopped (health reports, freezes).
         from ..phone_care.service import PhoneCareService
         self.care = PhoneCareService(self.fleet, settings.runtime_dir / "phone-care", diagnostics=self.live_diagnostics)
+        # Alpha 88: wakes a stopped Cyclone app on its own, and runs the owner's one-click connection fixes.
+        from .connection_medic import ConnectionMedic
+        self.medic = ConnectionMedic(self.fleet, self.live_diagnostics)
         self.pairing = PairingCoordinator(self.fleet, self.live_diagnostics)
         self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
@@ -247,8 +250,10 @@ class DesktopRuntime:
         self.trust.start()
         self.command.start()
         self.care.start()
+        self.medic.start()
 
     def stop(self) -> None:
+        self.medic.stop()
         self.care.stop()
         self.command.stop()
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
@@ -518,6 +523,15 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.get("/v1/devices/{device_id}/trust", dependencies=[Depends(auth)])
     def trust_status(device_id: str):
         return _call(lambda: runtime.trust.status(device_id))
+
+    @router.post("/v1/devices/{device_id}/connection/fix", dependencies=[Depends(auth)])
+    def connection_fix(device_id: str, body: dict[str, Any] = Body(...)):
+        # One of a few fixed repairs (start Cyclone, open Accessibility settings, open Cyclone); never a free command.
+        if not isinstance(body, dict) or set(body) != {"action"} or not isinstance(body.get("action"), str):
+            raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": "Send {action}."})
+        result = _call(lambda: runtime.medic.fix(device_id, body["action"]))
+        result["device"] = enrich_device_public(runtime.fleet.get(device_id), _safe_trust_status(runtime, device_id))
+        return result
 
     @router.post("/v1/devices/{device_id}/trust/begin", dependencies=[Depends(auth)])
     def trust_begin(device_id: str):

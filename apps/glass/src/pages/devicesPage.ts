@@ -6,7 +6,7 @@
  * The phone and the gateway own the trust; this page only starts requests, waits and shows state.
  */
 import type { GlassContext } from "../app.js";
-import { deviceReadiness, type GlassDevice } from "../services/devices.js";
+import { deviceReadiness, fixConnection, type ConnectionActionKind, type GlassDevice } from "../services/devices.js";
 import { GatewayError } from "../services/gateway.js";
 import {
   beginConnect,
@@ -20,6 +20,7 @@ import { actionButton, chip, emptyState, pageHeader, type Tone } from "../ui/com
 import { el, setChildren } from "../ui/dom.js";
 import { icon } from "../ui/icons.js";
 import { deviceGate } from "./deviceGate.js";
+import { connectionLine } from "./connectionLine.js";
 import { createPhoneCareView, type PhoneCareDeps, type PhoneCareView } from "./phoneCareView.js";
 import type { GlassPage } from "./page.js";
 
@@ -118,6 +119,23 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
     }
   };
 
+  /** The connection line's one action: connect, install (phone care), or one of the gateway's fixed repairs. */
+  const act = async (device: GlassDevice, kind: ConnectionActionKind): Promise<void> => {
+    if (kind === "connect") return connect(device);
+    if (kind === "install") {
+      careFor(device);
+      await cares.get(device.id)?.update();
+      return;
+    }
+    try {
+      await fixConnection(ctx.client, device.id, kind);
+    } catch (error) {
+      setFlow(device.id, { step: "failed", message: failureText(error) });
+      return;
+    }
+    await ctx.refreshDevices();
+  };
+
   const scan = async (): Promise<void> => {
     scanning = true;
     render();
@@ -175,7 +193,9 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
     const tone: Tone = readiness.ready ? "success" : readiness.reason === "disconnected" ? "danger" : "warning";
     const status = readiness.ready ? "Connected" : readiness.reason === "disconnected" ? "Phone offline" : readiness.reason === "needs-update" ? "Update Cyclone" : "Reconnecting";
     const card = deviceCard(device, chip(status, tone));
-    if (!readiness.ready) card.append(el("p", "device-problem", readiness.message));
+    const line = connectionLine(device.connection, (kind) => act(device, kind));
+    if (line) card.append(line);
+    else if (!readiness.ready) card.append(el("p", "device-problem", readiness.message));
     card.append(careFor(device));
 
     const actions = el("div", "device-actions");
@@ -214,9 +234,15 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
   function availableCard(device: GlassDevice): HTMLElement {
     const flow = flows.get(device.id);
     const card = deviceCard(device, chip("Not connected", "neutral"));
+    // "Connect this phone" is the card's own button; any other broken link (Cyclone stopped, the PC already asked
+    // on the phone) shows as the connection line.
+    const verdict = device.connection && device.connection.code !== "TRUST_NEEDED" ? device.connection : null;
+    const line = flow ? null : connectionLine(verdict, (kind) => act(device, kind));
+    if (line) card.append(line);
     // An out-of-date phone app can be updated before connecting (it may be why connecting fails).
     card.append(careFor(device));
-    if (!flow || flow.step === "declined" || flow.step === "expired" || flow.step === "failed") {
+    const askedOnPhone = verdict?.code === "TRUST_CONFIRM";
+    if (!askedOnPhone && (!flow || flow.step === "declined" || flow.step === "expired" || flow.step === "failed")) {
       const actions = el("div", "device-actions");
       const go = actionButton(flow ? "Try again" : "Connect", { icon: "plug", variant: "primary" });
       go.addEventListener("click", () => void connect(device));
@@ -229,6 +255,11 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
 
   function unreachableCard(device: GlassDevice): HTMLElement {
     const card = deviceCard(device, chip(device.state === "UNAUTHORIZED" ? "Allow USB debugging" : "Offline", "warning"));
+    const line = connectionLine(device.connection, (kind) => act(device, kind));
+    if (line) {
+      card.append(line);
+      return card;
+    }
     card.append(
       el(
         "p",

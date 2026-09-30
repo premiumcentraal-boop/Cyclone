@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import re
 import secrets
@@ -70,6 +70,9 @@ class DeviceSession:
     provider: str | None = None
     provider_instance_id: str | None = None
     input_owner: str = "HUMAN"
+    # Alpha 88: the phone's own control owner (AGENT/HUMAN) from its last status, and whether Cyclone's process runs.
+    phone_controller: str | None = None
+    app_running: bool | None = None
 
     def public(self) -> dict[str, Any]:
         suffix = self.serial[-4:] if len(self.serial) >= 4 else self.serial
@@ -538,6 +541,8 @@ class DeviceFleetManager:
             return
         self._remembered[serial] = RememberedSession(session.device_id, session.credential, session.local_port)
         self._cleanup_session(session)
+        # adb no longer lists the phone: never keep reporting its last "device" state as USB-authorized (alpha 88).
+        session.adb_device = replace(session.adb_device, state="absent")
         session.bridge_ok = False
         session.next_reconnect_at_ms = 0
         session.bridge_error_class = "ADB_DISCONNECTED"
@@ -605,6 +610,15 @@ class DeviceFleetManager:
             session.bridge_gateway_enabled = _optional_bool(value.get("gatewayEnabled"))
             session.bridge_socket_listening = _optional_bool(value.get("socketListening"))
             session.accessibility_connected = _optional_bool(value.get("accessibilityConnected"))
+            # The phone owns who is in control. When the owner takes over on the phone, the PC mirrors it and any
+            # AI control granted from the PC ends; the PC never overrides the phone (alpha 88).
+            controller = value.get("controllerOwner")
+            if controller in {"AGENT", "HUMAN"}:
+                session.phone_controller = controller
+                if controller == "HUMAN":
+                    session.input_owner = "HUMAN"
+            if value:
+                session.app_running = True
             version = value.get("appVersion")
             session.mobile_version = (
                 version if isinstance(version, str) and len(version) <= 64 and _MOBILE_VERSION_RE.fullmatch(version) else None

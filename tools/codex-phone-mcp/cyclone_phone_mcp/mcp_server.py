@@ -44,6 +44,7 @@ INSTRUCTIONS = (
     "user_authorized is only an MCP intent acknowledgement and never bypasses Android policy. "
     "request_ai_control=true asks Companion to yield input; it never steals a locked phone and never bypasses Android policy. "
     "PHONE_APP_BUSY means the phone is connected but Cyclone on it is still busy: wait about a second and retry the same call; it is not a disconnect. "
+    "Each phone_devices row carries connection {code, title, message, action}: the first broken link (cable, USB Allow, app stopped, Allow this PC, locked phone, PC Gateway off, Accessibility). When a call fails, read it and tell the owner that one step instead of guessing. "
     "Do not expose secrets or use arbitrary shell/root/ADB commands."
 )
 

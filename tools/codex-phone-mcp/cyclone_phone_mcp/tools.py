@@ -418,14 +418,30 @@ class PhoneTools:
         finally:
             self.recorder.record(name, arguments, result, ok, int((time.perf_counter() - started) * 1000))
 
+    def _only_paired_phone(self) -> str:
+        """With no device_id, the one paired phone in the PC's fleet (alpha 88): status and capabilities then read the
+        same phone phone_devices shows, instead of the legacy single-phone surface that can disagree with it."""
+        fleet = getattr(self.gateway, "_fleet_devices", None)
+        if not callable(fleet):
+            return ""
+        try:
+            devices, surface = fleet()
+        except Exception:
+            return ""
+        if surface != "fleet" or not isinstance(devices, list):
+            return ""
+        paired = [str(d.get("deviceId") or d.get("id") or "") for d in devices if isinstance(d, dict) and d.get("paired") is True]
+        paired = [d for d in paired if d]
+        return paired[0] if len(paired) == 1 else ""
+
     def phone_status(self, args: dict[str, Any]) -> Any:
-        device_id = _device_id(args)
+        device_id = _device_id(args) or self._only_paired_phone()
         if device_id:
             return _with_sessions_inventory(redact(self.gateway.device_status(device_id)))
         return _with_sessions_inventory(redact(self.gateway.status()))
 
     def phone_capabilities(self, args: dict[str, Any]) -> Any:
-        device_id = _device_id(args)
+        device_id = _device_id(args) or self._only_paired_phone()
         refresh = bool(args.get("refresh", False))
         if device_id:
             return redact(self.gateway.device_capabilities(device_id, refresh=refresh))
