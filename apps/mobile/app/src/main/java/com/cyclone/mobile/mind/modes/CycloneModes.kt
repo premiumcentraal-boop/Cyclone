@@ -18,6 +18,8 @@ data class ModeSettings(
     val keepListeningSeconds: Int = 8,
     /** Live voice: a quick action that worked is confirmed with a sound and a buzz, not words. */
     val silentSuccess: Boolean = true,
+    /** Alpha 89: the phone model (taught by JEV) acts on what it has earned, only learns, or is off. */
+    val phoneModel: com.cyclone.mobile.mind.decide.PhoneModelUse = com.cyclone.mobile.mind.decide.PhoneModelUse.EARNED,
 )
 
 /** What happened to a request, for the surface that asked (Live voice speaks it; the Ask bar shows it). */
@@ -43,13 +45,13 @@ object CycloneModes {
     fun settings(context: Context): ModeSettings {
         val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return ModeSettings(Speed.of(p.getString("speed", null)), p.getInt("keep_listening_s", 8).coerceIn(0, 20),
-            p.getBoolean("silent_success", true))
+            p.getBoolean("silent_success", true), com.cyclone.mobile.mind.decide.PhoneModelUse.of(p.getString("phone_model", null)))
     }
 
     fun save(context: Context, settings: ModeSettings) {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString("speed", settings.speed.wire).putInt("keep_listening_s", settings.keepListeningSeconds.coerceIn(0, 20))
-            .putBoolean("silent_success", settings.silentSuccess).apply()
+            .putBoolean("silent_success", settings.silentSuccess).putString("phone_model", settings.phoneModel.wire).apply()
     }
 
     @Volatile private var current: Running? = null
@@ -105,6 +107,8 @@ object CycloneModes {
         var confirmWindow: (String, Long) -> Boolean = { _, _ -> false }
         val hands = AndroidInstantHands(context, request, device, { text, ms -> confirmWindow(text, ms) }, { running.stopped })
         var handedOver = false
+        // Alpha 89: every routed request becomes a lesson with its outcome (the phone model learns from JEV's verified ones).
+        var learn: (com.cyclone.mobile.mind.decide.Outcome) -> Unit = {}
         try {
             val fast = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
             // Alpha.78: decisions go to the one decision provider (JEV, text only, until OpenAI Decisions is live).
@@ -114,21 +118,39 @@ object CycloneModes {
             // gesture or an app to open reads it once, right before the move.
             val screen = if (blocker == null && (box != null || InstantGrammar.needsScreen(request))) trace.time("read the screen") { hands.look() } else null
             val world = GrammarWorld(screen?.labels.orEmpty(), device.apps().map { it.label to it.packageName })
-            val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar) }
+            val phone = if (settings.speed == Speed.AUTO) runCatching {
+                com.cyclone.mobile.mind.decide.PhoneBrain.decider(context, settings.phoneModel, fast.sureness.bar)
+            }.getOrNull() else null
+            val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar, phone) }
+            trace.step("decided by ${route.by.name.lowercase()}" + (if (route.decideMs > 0) " in ${route.decideMs} ms" else "") +
+                (route.shadow?.let { " · phone model: ${it.mode}${if (it.intent != "none") " ${it.intent}" else ""}" }.orEmpty()))
+            learn = { outcome ->
+                learn = {}
+                runCatching {
+                    com.cyclone.mobile.mind.decide.PhoneBrain.record(context, com.cyclone.mobile.mind.decide.Lesson(
+                        atMs = System.currentTimeMillis(), request = request, candidates = world.labels.take(25),
+                        decider = route.by, decision = route.decision ?: ModeRouter.guessOf(route.mode, route.command),
+                        decideMs = route.decideMs, shadow = route.shadow, outcome = outcome,
+                        provider = if (route.by == com.cyclone.mobile.mind.decide.Decider.DECISIONS) com.cyclone.mobile.mind.decide.Decisions.active().name else null,
+                    ), fast.sureness.bar)
+                }
+            }
             trace.step("routed to ${route.mode.name.lowercase()}" + (route.command?.let { " (${it.intent.name.lowercase()}${it.direction?.let { d -> " $d" }.orEmpty()})" }.orEmpty()) + ": ${route.why}")
             when (route.mode) {
-                Mode.IGNORE -> done(ModeResult(Mode.IGNORE, null, true))
+                Mode.IGNORE -> { learn(com.cyclone.mobile.mind.decide.Outcome.NONE); done(ModeResult(Mode.IGNORE, null, true)) }
                 Mode.ANSWER -> {
+                    learn(com.cyclone.mobile.mind.decide.Outcome.NONE)
                     if (chrome) {
                         OverlayChromeRuntime.missionWorking(running.id, route.answer)
                         OverlayChromeRuntime.missionFinished(running.id, true, route.answer.orEmpty())
                     }
                     done(ModeResult(Mode.ANSWER, route.answer, true))
                 }
-                Mode.FLASH, Mode.MIND -> { handedOver = true; mission(context, request, null, route.mode, null, done) }
+                Mode.FLASH, Mode.MIND -> { learn(com.cyclone.mobile.mind.decide.Outcome.HANDED); handedOver = true; mission(context, request, null, route.mode, null, done) }
                 Mode.INSTANT -> {
                     val command = route.command ?: return mission(context, request, null, Mode.FLASH, null, done).also { handedOver = true }
                     blocker?.let { why ->
+                        learn(com.cyclone.mobile.mind.decide.Outcome.NONE)
                         handedOver = true
                         trace.step("handed to the Mind: $why")
                         return mission(context, request, null, Mode.MIND, RunBaton(request, listOf(Mode.INSTANT), emptyList(), why), done)
@@ -140,20 +162,24 @@ object CycloneModes {
                     when {
                         // Stopped by the owner (Stop, "no", or a newer request): nothing more happens.
                         running.stopped && !outcome.cancelled -> {
+                            learn(com.cyclone.mobile.mind.decide.Outcome.FAILED)
                             trace.step("stopped by the owner")
                             if (chrome) OverlayChromeRuntime.missionFinished(running.id, false, "Stopped")
                             done(ModeResult(Mode.INSTANT, null, true))
                         }
                         promotion != null -> {
+                            learn(com.cyclone.mobile.mind.decide.Outcome.PROMOTED)
                             handedOver = true
                             trace.step("handed up to ${promotion.to.name.lowercase()}: ${promotion.reason}")
                             mission(context, request, null, promotion.to, outcome.baton(request), done)
                         }
                         outcome.cancelled -> {
+                            learn(com.cyclone.mobile.mind.decide.Outcome.CANCELLED)
                             if (chrome) OverlayChromeRuntime.missionFinished(running.id, true, "Cancelled")
                             done(ModeResult(Mode.INSTANT, "Cancelled.", true))
                         }
                         else -> {
+                            learn(if (outcome.done) com.cyclone.mobile.mind.decide.Outcome.VERIFIED else com.cyclone.mobile.mind.decide.Outcome.FAILED)
                             if (chrome) OverlayChromeRuntime.missionFinished(running.id, true, InstantCopy.done(outcome))
                             done(ModeResult(Mode.INSTANT, if (voice && settings.silentSuccess) null else InstantCopy.done(outcome), true))
                         }
@@ -162,6 +188,7 @@ object CycloneModes {
             }
         } catch (error: Exception) {
             trace.step("error: ${error.javaClass.simpleName}")
+            learn(com.cyclone.mobile.mind.decide.Outcome.FAILED)
             // Never lose a request: anything unexpected goes to the Mind.
             if (!handedOver) {
                 handedOver = true

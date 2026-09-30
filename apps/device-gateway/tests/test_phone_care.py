@@ -342,3 +342,21 @@ def test_the_care_routes_need_the_bearer_and_start_only_this_pcs_update(tmp_path
     assert done["headline"] == "Updated"
     assert session.adb.commands == [["install", "-r", f"/cache/{PC}/Cyclone-{PC}.apk"]]
     assert client.get("/v1/devices/nope/care", headers=auth).status_code == 404
+
+
+def test_decision_numbers_reach_the_pc_as_counts_and_times_only(tmp_path):
+    raw = {**REPORT, "decisions": {
+        "provider": "JEV (TypeSafe)", "phoneModel": "earned", "speed": "auto", "lessons": 120, "lastDay": 30,
+        "byDecider": {"grammar": 40, "decisions": 70, "phone": 10, "../x": 5}, "onPhoneShare": 0.42,
+        "decisionsMs": {"p50": 420, "p95": 1100, "count": 70}, "phoneModelMs": {"p50": 3, "p95": 6, "count": 10},
+        "instantVerified": 0.97, "instantChecked": 60, "shadowAgreement": 0.99, "shadowChecked": 70, "teaching": 90,
+        "earned": ["volume_up", "Bad Intent"], "actions": [{"intent": "volume_up", "samples": 55, "agreement": 0.99, "earned": True}],
+        "request": "text mom i'm late"}}
+    clean = h.clean_report(raw)
+    decisions = clean["decisions"]
+    assert decisions["earned"] == ["volume_up"] and "../x" not in decisions["byDecider"]
+    assert decisions["decisionsMs"] == {"p50": 420, "p95": 1100, "count": 70}
+    assert "text mom" not in json.dumps(decisions)
+    merged = h.merge({}, clean, NOW)
+    answer = verdict(history=merged)
+    assert answer["details"]["decisions"]["onPhoneShare"] == 0.42

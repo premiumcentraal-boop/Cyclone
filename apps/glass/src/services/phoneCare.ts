@@ -36,6 +36,21 @@ export interface CareUpdate {
   errorDetail: string | null;
 }
 
+export interface CareDecisions {
+  provider: string | null;
+  speed: string | null;
+  phoneModel: string | null;
+  lessons: number;
+  onPhoneShare: number | null;
+  decisionsP50: number | null;
+  decisionsP95: number | null;
+  instantVerified: number | null;
+  instantChecked: number;
+  shadowAgreement: number | null;
+  shadowChecked: number;
+  earned: string[];
+}
+
 export interface PhoneCare {
   deviceId: string;
   status: CareStatus;
@@ -55,6 +70,8 @@ export interface PhoneCare {
     update: CareUpdate | null;
     diagnosticsPath: string | null;
     healthCollectedAtMs: number | null;
+    /** Alpha 89: how this phone decides requests (the grammar, JEV, the phone model). */
+    decisions: CareDecisions | null;
   };
 }
 
@@ -101,6 +118,7 @@ export function parsePhoneCare(raw: unknown): PhoneCare {
       } : null,
       diagnosticsPath: str(d.diagnosticsPath),
       healthCollectedAtMs: num(d.healthCollectedAtMs),
+      decisions: parseDecisions(d.decisions),
     },
   };
 }
@@ -123,3 +141,23 @@ export const phoneCareApi = {
   get: async (client: GatewayClient, device: string) => parsePhoneCare(await client.get(base(device))),
   update: async (client: GatewayClient, device: string) => parsePhoneCare(await client.post(`${base(device)}/update`)),
 };
+
+function parseDecisions(raw: unknown): CareDecisions | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = obj(raw);
+  const ms = obj(r.decisionsMs);
+  return {
+    provider: str(r.provider), speed: str(r.speed), phoneModel: str(r.phoneModel),
+    lessons: num(r.lessons) ?? 0, onPhoneShare: num(r.onPhoneShare),
+    decisionsP50: num(ms.p50), decisionsP95: num(ms.p95),
+    instantVerified: num(r.instantVerified), instantChecked: num(r.instantChecked) ?? 0,
+    shadowAgreement: num(r.shadowAgreement), shadowChecked: num(r.shadowChecked) ?? 0,
+    earned: strings(r.earned).filter((e) => /^[a-z_]{1,40}$/.test(e)),
+  };
+}
+
+/** "volume_up" → "Volume up". */
+export function actionLabel(intent: string): string {
+  const words = intent.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}

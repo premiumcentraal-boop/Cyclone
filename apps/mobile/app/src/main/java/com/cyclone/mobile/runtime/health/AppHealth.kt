@@ -30,7 +30,16 @@ object AppHealth {
             .put("exits", JSONArray(exits(app).map { it.toJson() }))
             .put("stalls", JSONArray(MainThreadWatchdog.recent().takeLast(10).map { it.toJson() }))
             .put("watchdog", JSONObject().put("thresholdMs", Stalls.THRESHOLD_MS))
+            // Alpha 89: how requests are decided (counts and times only, never request text).
+            .put("decisions", decisions(app) ?: JSONObject.NULL)
     }
+
+    private fun decisions(context: Context): JSONObject? = runCatching {
+        val bar = com.cyclone.mobile.mind.pilot.FastMode.settings(context).sureness.bar
+        val use = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).phoneModel
+        com.cyclone.mobile.mind.decide.PhoneBrain.stats(context, bar, use)
+            .put("speed", com.cyclone.mobile.mind.modes.CycloneModes.settings(context).speed.wire)
+    }.getOrNull()
 
     fun exits(context: Context): List<AppExit> = runCatching {
         val manager = context.getSystemService(ActivityManager::class.java) ?: return emptyList()

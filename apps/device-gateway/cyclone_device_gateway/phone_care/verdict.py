@@ -79,5 +79,7 @@ def compose(*, reachable: bool, pc_version: str, phone: InstalledApp | None, pho
         "exits": list(reversed(history.get("exits") or []))[:10],
         "stalls": list(reversed(history.get("stalls") or []))[:10],
         "healthCollectedAtMs": history.get("collectedAtMs"),
+        # Alpha 89: how this phone decides requests (JEV, the phone model), for developers.
+        "decisions": history.get("decisions"),
     }
     return answer

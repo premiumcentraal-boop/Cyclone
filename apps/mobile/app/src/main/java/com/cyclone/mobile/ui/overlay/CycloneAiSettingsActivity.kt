@@ -235,8 +235,9 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 Text("Speed", fontWeight = FontWeight.Bold)
                 Text(
                     when (modes.speed) {
-                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly; for anything else one quick decision (JEV, " +
-                            "text only) picks Instant, Flash (a few routine steps) or the full Mind. Unsure always goes to the smarter mode."
+                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly. For anything else JEV decides in one quick " +
+                            "call: Instant, Flash (a few routine steps) or the full Mind. The phone model learns from JEV and takes over the actions " +
+                            "it has proven it gets right. Unsure always goes to the smarter mode."
                         com.cyclone.mobile.mind.modes.Speed.COMMANDS -> "Clear commands like \"swipe up\", \"open my camera\", \"take a selfie\" or " +
                             "\"call Mam\" happen instantly, with no model. Everything else goes to the Mind."
                         com.cyclone.mobile.mind.modes.Speed.MIND -> "Every request is a Mind mission, as before."
@@ -248,6 +249,24 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                     com.cyclone.mobile.mind.modes.Speed.entries.forEach { speed ->
                         FilterChip(selected = modes.speed == speed, onClick = { save(modes.copy(speed = speed)) }, label = { Text(speed.label) })
                     }
+                }
+                if (modes.speed == com.cyclone.mobile.mind.modes.Speed.AUTO) {
+                    // Alpha 89: the phone model, taught by JEV. It acts only on actions it has earned (98% agreement with JEV).
+                    val bar = remember { com.cyclone.mobile.mind.pilot.FastMode.settings(context).sureness.bar }
+                    val stats = remember(modes.phoneModel) {
+                        runCatching { com.cyclone.mobile.mind.decide.PhoneBrain.stats(context, bar, modes.phoneModel) }.getOrNull()
+                    }
+                    Text("Phone model", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.mind.decide.PhoneModelUse.entries.forEach { use ->
+                            FilterChip(selected = modes.phoneModel == use, onClick = { save(modes.copy(phoneModel = use)) }, label = { Text(use.label) })
+                        }
+                    }
+                    Text(
+                        phoneModelSummary(stats),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 Text(
                     "Instant never types, sends, pays, deletes or posts, and never acts on a password, code or card screen: those go " +
@@ -778,4 +797,17 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
             content = content,
         )
     }
+}
+
+/** One line about how requests are decided on this phone (alpha 89). */
+private fun phoneModelSummary(stats: org.json.JSONObject?): String {
+    if (stats == null || stats.optInt("lessons") == 0) {
+        return "It learns on this phone from the requests JEV decides. Nothing it learns leaves the phone."
+    }
+    val parts = mutableListOf<String>()
+    stats.optDouble("onPhoneShare").takeIf { !it.isNaN() }?.let { parts += "${(it * 100).toInt()}% decided on this phone" }
+    stats.optJSONObject("decisionsMs")?.optLong("p50", -1)?.takeIf { it > 0 }?.let { parts += "JEV answers in ${it} ms (median)" }
+    val earned = stats.optJSONArray("earned")?.length() ?: 0
+    parts += if (earned == 0) "no actions earned yet" else "$earned ${if (earned == 1) "action" else "actions"} earned"
+    return parts.joinToString(" · ") + ". Nothing it learns leaves the phone."
 }

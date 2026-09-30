@@ -47,7 +47,8 @@ class ModesGuard(unittest.TestCase):
         self.assertIn("if (speed == Speed.MIND) return Route(Mode.MIND", router)
         modes = read("mind/modes/CycloneModes.kt")
         self.assertIn("Speed.of(p.getString(\"speed\", null))", modes)
-        self.assertIn("?: COMMANDS", router, "Instant for commands is the default")
+        # Alpha 89: Auto is the default (JEV decides what the grammar doesn't; the phone model takes over what it earned).
+        self.assertIn("?: AUTO }", router, "Auto is the default")
         # A stop never turns into a mission.
         self.assertLess(modes.index("running.stopped && !outcome.cancelled"), modes.index("promotion != null ->"))
 
