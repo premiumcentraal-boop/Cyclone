@@ -431,3 +431,22 @@ That makes three alphas after B1, or B1 moves again if you want this first.
   - relation, rollup and formula setup;
   - the timeline (a 42-day window of status-coloured bars), the month calendar, the gallery and the list.
 
+
+**T5 + T6, Accounts rebuilt with sign-up mapping (alpha.81; profiles skipped at the owner's request):**
+- **Phone** (`mind/signup/`):
+  - `SignupMap` / `SignupRecorder`: pages, field labels, kinds, required, format hints, picker choices and the step a
+    person must do (email or SMS code, CAPTCHA, selfie, ID document, phone call);
+  - the recorder refuses anything typed in the mission (typed text and owner-filled values), anything that reads like
+    a value (an address, a long number, a secret) and extra keys; at most 15 pages, 20 fields, 40 choices;
+  - a mapping mission (`cc.start` with `signupMap`, only for an installed app, never with sealed secrets or a post)
+    gets `signup_page`, `signup_final` and `signup_done`; `signup_final` asks the owner in code before the control
+    that creates the account;
+  - maps live in `Cyclone Brain/Signup/<package>.json`; `signup.maps` and `signup.forget` share them with the PC.
+- **Gateway** (`command/signup.py`):
+  - keeps the last maps per phone (validated again: strict keys, no values) and serves them when the phone is away;
+  - starts mapping tasks (recipe `signup_map:<package>`, whose account: mine, company or client);
+  - turns a map into a Cyclone Table: one column per field (passwords, codes and photos never), statuses Draft →
+    Created / Failed, Whose account, Phone and Cyclone account relations, Notes; one table per phone and app.
+- **Glass:** Accounts is phones → installed apps (accounts and sign-up state first) → an app's accounts, its map page
+  by page, Map the sign-up, and the sign-up table inline; the list of all accounts stays below.
+- **Not yet:** creating accounts from table rows (T7), the Verification desk (T8), profiles (T4).
