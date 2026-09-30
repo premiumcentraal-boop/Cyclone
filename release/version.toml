@@ -1,20 +1,20 @@
-# Cyclone V5 alpha.84 dev1: Profiles from the PC (plan 43 T4) - Glass lists a phone's profiles, switches the phone between them, and manages each Cyclone profile's apps (add one Profile A has, remove one from that profile); only Cyclone-owned profiles, never creating or deleting one. Glass 1.0.0-alpha.46; runtime 5.0.0-alpha.84.dev1.
+# Cyclone V5 alpha.85 dev1: Sign-up mapping you can see and stop - Accounts says why a mapping waits (phone busy, overlay, your answer in Inbox), offers Cancel mapping and shows the last try; on the phone a mapping or Account Setup run always takes the front screen or waits, never a hidden background screen. Glass 1.0.0-alpha.47; runtime 5.0.0-alpha.85.dev1.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.84.dev1"
+product_version = "5.0.0-alpha.85.dev1"
 channel = "development"
-android_version_code = 229
-python_version = "5.0.0-alpha.84.dev1"
+android_version_code = 230
+python_version = "5.0.0-alpha.85.dev1"
 
 [components]
-mobile = "5.0.0-alpha.84.dev1"
+mobile = "5.0.0-alpha.85.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.46"
-device_gateway = "5.0.0-alpha.84.dev1"
-mcp = "5.0.0-alpha.84.dev1"
+glass = "1.0.0-alpha.47"
+device_gateway = "5.0.0-alpha.85.dev1"
+mcp = "5.0.0-alpha.85.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha84-dev1-profiles"
+candidate_generation = "cyclone-v5-alpha85-dev1-mapping-visible"

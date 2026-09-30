@@ -41,6 +41,7 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.82:** plan 43 T7, Create accounts (the owner asked for no pre-send checks, app block list or caps for now).
 - **alpha.83:** plan 43 T3, action buttons.
 - **alpha.84:** plan 43 T4, profiles from the PC (list, switch, each profile's apps).
+- **alpha.85:** fix, sign-up mapping you can see and stop (cause, Cancel mapping, last try; sign-up runs only in front).
 - **alpha.79:** plan 43 T1, Cyclone Tables. The owner chose plan 43's tables and buttons (T1–T3) before B1, so B1
   comes after T3.
 - **Test counts at alpha.68:**
