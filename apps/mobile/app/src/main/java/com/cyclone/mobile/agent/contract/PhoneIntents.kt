@@ -130,9 +130,10 @@ object PhoneIntents {
         return listOf(
             // 24-hour display: 09:05 / 9:05 / 23:09, not followed by am/pm
             Regex("(?i)(?<![\\d:])0?$h24:$mm(?![\\d:])(?!\\s*(?:a\\.?\\s?m|p\\.?\\s?m))"),
-            // 12-hour display with the right meridiem, or none printed next to the time
+            // 12-hour display with the right meridiem, or none printed next to the time. With no meridiem, a padded
+            // hour ("09:00") is a 24-hour display, so it is 9 AM and never 9 PM.
             Regex("(?i)(?<![\\d:])0?$h12:$mm\\s*$meridiem"),
-            Regex("(?i)(?<![\\d:])0?$h12:$mm(?![\\d:])(?!\\s*$other)"),
+            Regex("(?i)(?<![\\d:])$h12:$mm(?![\\d:])(?!\\s*$other)"),
         ).distinctBy { it.pattern }
     }
 

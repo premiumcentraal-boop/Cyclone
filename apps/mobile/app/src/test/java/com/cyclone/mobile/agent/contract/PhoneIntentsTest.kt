@@ -77,4 +77,15 @@ class PhoneIntentsTest {
         assertFalse("open-only goals may report navigation", CompletionClaimAudit.navigationOnly("open clock", "Clock is open."))
         assertFalse(CompletionClaimAudit.navigationOnly("which gmail am I logged in with", "Gmail is open; the account is jane@gmail.com"))
     }
+
+    @Test fun aPaddedHourIsA24HourTimeSoNineAmIsNeverNinePm() {
+        val clock = "com.google.android.deskclock"
+        fun visible(label: String, hour: Int) =
+            PhoneIntents.alarmVisible(clock, listOf(PhoneIntents.Row("Alarm $label Alarm is currently enabled.", null)), PhoneIntents.Alarm(hour, 0, null))
+        assertFalse("09:00 is 9 AM", visible("Sunday 09:00", 21))
+        assertTrue(visible("9:00 PM", 21))
+        assertTrue(visible("21:00", 21))
+        assertTrue(visible("Sunday 09:00", 9))
+        assertTrue(visible("9:00 AM", 9))
+    }
 }
