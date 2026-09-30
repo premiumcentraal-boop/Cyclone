@@ -18,7 +18,7 @@ class DriveVoiceFallbackContractTest {
 
     @Test fun recordingWaitsForTheMicrophoneService() {
         val session = voice("VoiceSession.kt")
-        val listen = session.substringAfter("private fun listen(waitMs: Int? = null) {").substringBefore("private suspend fun listenWithRecognizer(")
+        val listen = session.substringAfter("private fun listen(waitMs: Int? = null) {").substringBefore("private fun heard()")
         assertTrue(listen.indexOf("VoiceService.startAndWait(app)") in 0 until listen.indexOf("capture.record("))
         val service = voice("VoiceService.kt")
         assertTrue(service.contains(".onSuccess { _foreground.value = true }"))
@@ -29,11 +29,13 @@ class DriveVoiceFallbackContractTest {
         assertTrue(voice("VoiceCapture.kt").contains("if (silenced.feed(chunk, n)) return Outcome.Failed(VoiceFailure.MIC_SILENCED)"))
         val session = voice("VoiceSession.kt")
         assertTrue(session.contains("private val RECOGNIZER_TAKES_OVER = setOf(VoiceFailure.MIC_SILENCED, VoiceFailure.MIC_BUSY)"))
-        assertTrue(session.contains("is VoiceCapture.Outcome.Failed -> if (result.failure in RECOGNIZER_TAKES_OVER) {"))
-        assertTrue(session.contains("systemRecognizer = true"))
-        assertTrue(session.contains("val recognizer = settings.onDeviceStt || systemRecognizer"))
-        // A failed transcription also moves the next tap to the recognizer, except a missing key (it needs the key anyway).
-        assertTrue(session.contains("if (error.failure != VoiceFailure.NO_KEY) systemRecognizer = true"))
+        // Alpha.78: the ear policy decides, in the same turn: a deaf recording hands to the recognizer, a broken
+        // recognizer hands back to the recording. Never one-way for the rest of the session.
+        assertTrue(session.contains("if (result.failure in RECOGNIZER_TAKES_OVER) ears.recorderDeaf() else null"))
+        assertTrue(session.contains("ears.recognizerBroken()"))
+        assertTrue(!session.contains("systemRecognizer"))
+        // A network or model error in transcription never switches ears.
+        assertTrue(session.contains("a network or model error never switches ears"))
     }
 
     @Test fun theRecognizerIsVisibleAndFallsBackToTheStandardOne() {
@@ -48,9 +50,12 @@ class DriveVoiceFallbackContractTest {
         // The recognizer's transcript goes straight into the turn; no audio or text is written anywhere.
         listOf("VoiceSession.kt", "SpeechToText.kt", "MicSilence.kt", "VoiceCapture.kt").forEach { name ->
             val text = voice(name)
-            listOf("getSharedPreferences", "writeText(", "FileOutputStream", "Log.").forEach {
+            listOf("getSharedPreferences", "writeText(", "FileOutputStream").forEach {
                 assertTrue("$name uses $it", !text.contains(it))
             }
+            // No logcat. (Alpha.78: the voice run log goes to the run history through VoiceRunSink, with the owner's
+            // words like any run's goal, never audio.)
+            assertTrue("$name uses Android's Log", !Regex("\\bLog\\.").containsMatchIn(text))
         }
     }
 }

@@ -235,8 +235,8 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 Text("Speed", fontWeight = FontWeight.Bold)
                 Text(
                     when (modes.speed) {
-                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly; for anything else one quick decision picks Instant, " +
-                            "Flash (a few routine steps) or the full Mind. Unsure always goes to the smarter mode."
+                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly; for anything else one quick decision (JEV, " +
+                            "text only) picks Instant, Flash (a few routine steps) or the full Mind. Unsure always goes to the smarter mode."
                         com.cyclone.mobile.mind.modes.Speed.COMMANDS -> "Clear commands like \"swipe up\", \"open my camera\", \"take a selfie\" or " +
                             "\"call Mam\" happen instantly, with no model. Everything else goes to the Mind."
                         com.cyclone.mobile.mind.modes.Speed.MIND -> "Every request is a Mind mission, as before."
@@ -310,17 +310,24 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                             FilterChip(selected = fast.route == route, onClick = { save(fast.copy(route = route)) }, label = { Text(route.label) })
                         }
                     }
-                    var model by remember(fast.route) { mutableStateOf(fast.activeModel) }
-                    androidx.compose.material3.OutlinedTextField(
-                        value = model,
-                        onValueChange = { value ->
-                            model = value.take(120)
-                            save(if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) fast.copy(decisionModel = model) else fast.copy(model = model))
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text(if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) "Decision model (OpenRouter)" else "Fast model (OpenRouter)") },
-                    )
+                    if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) {
+                        // Alpha.78: the decision model is Cyclone's decision provider, not a free choice. JEV now (text only);
+                        // OpenAI Decisions takes over in an update once it is available.
+                        Text(
+                            "${com.cyclone.mobile.mind.decide.Decisions.active().label}, text only. OpenAI Decisions replaces it once it's available.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        var model by remember(fast.route) { mutableStateOf(fast.model) }
+                        androidx.compose.material3.OutlinedTextField(
+                            value = model,
+                            onValueChange = { value -> model = value.take(120); save(fast.copy(model = model)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Fast model (OpenRouter)") },
+                        )
+                    }
                     Text("How sure before acting", style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         com.cyclone.mobile.mind.pilot.FastSureness.entries.forEach { level ->
@@ -331,7 +338,7 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                         Column(Modifier.weight(1f)) {
                             Text("Screenshots when needed", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) "Decision models get text only for now."
+                                if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) "JEV reads text only: no screenshots are taken for it."
                                 else "Only when the screen's text isn't enough, never with a password, code or card field on screen.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,

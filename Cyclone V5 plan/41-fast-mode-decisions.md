@@ -405,6 +405,46 @@ Pilot is built on it and is what alpha.76 ships.
 
 Side-channel calls are not counted in the mission's usage. Physical use is UNVERIFIED.
 
+## 15. Frozen: OpenAI Decisions; JEV connected (alpha.78, the owner's call of 2026-09-30)
+
+OpenAI's Decisions API is not on OpenRouter yet and has no public contract to build against. The owner froze it.
+Until it is available, **JEV answers every Cyclone decision, text only**. This is an emergency build, shaped so that
+OpenAI Decisions replaces it in one small update.
+
+**The port:** `mind/decide/Decisions.kt`
+- **`DecisionProvider`:**
+  - `JEV`: live. Model `~typesafe/jev-latest`, OpenRouter's decisions endpoint, `vision = false`.
+  - `OPENAI_DECISIONS`: frozen. `live = false`, no endpoint or model yet, `vision = true`.
+- **`Decisions.ACTIVE`:** the one switch. `Decisions.active()` falls back to JEV while the chosen provider is frozen or
+  has no endpoint or model.
+- **`ProviderDecisionBox`:** the modes router's decision box (Speed → Auto, Instant's follow-up controls). A provider
+  without vision never gets a screenshot, and `DecisionBox.sees` tells callers not to take one: capturing it costs
+  time for nothing.
+- **`Decisions.post`:** the one HTTP call for decisions (short deadline, nothing logged). The Pilot's "Decision model"
+  route uses it too, with the active provider's model; that model is no longer a free text field in Settings.
+- **Drive's JEV watch** (`voice/JevShadow`, `voice/OpenRouterVoice.decide`) keeps its own call, because voice may not
+  import mind code. It only watches and never decides.
+
+**What JEV can't do, and what happens instead:**
+- **No screenshots.** An icon-only control (a camera shutter with no name) is picked from the labels only; when that
+  isn't enough, Instant hands the run up to Flash or the Mind.
+- **The Pilot on the decision route** gets text only (its screenshot switch applies only to a provider with vision).
+
+**Switching to OpenAI Decisions** (one small update, when it is on OpenRouter or its official docs are out):
+1. **Read the official contract:** the endpoint, the model id, the request shape (state plus typed questions), the
+   answer shape, image input, the limits and the price.
+2. **In `DecisionProvider.OPENAI_DECISIONS`:** set `model`, `endpoint` and `live = true`, and set `vision` to what the
+   docs say.
+3. **Only if its request or answer differs** from the decisions shape: adapt `BoxWire.decisionsBody` /
+   `PilotWire.decisionsBody` and the tolerant readers (`BoxWire.parseDecisions`, `PilotWire.parseDecisions`). Add a
+   test with a real example answer from the docs.
+4. **If it needs its own key** (not OpenRouter): a key store beside `OpenRouterSecretStore`, used only by
+   `Decisions.post` for that provider. Never logged.
+5. **Measure first:** set `ACTIVE` only after a Lab comparison of OpenAI Decisions against JEV on the modes and Pilot
+   questions (watch-only first, as JEV was): answer rate, agreement with the Mind, confidence calibration and time.
+6. **Update:** `DecisionsTest`, `scripts/ci/tests/test_decisions_guard.py` (it pins `ACTIVE = JEV` and the frozen
+   entry today), the Settings copy ("JEV … OpenAI Decisions replaces it"), the release notes and this section.
+
 ## 13. Sources
 
 - [DevDay 2026 Recap (OpenAI)](https://openai.com/index/devday-2026-recap/)

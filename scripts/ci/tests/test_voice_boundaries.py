@@ -46,7 +46,13 @@ class VoiceBoundaries(unittest.TestCase):
                 self.assertRegex(imported, r"^com\.cyclone\.mobile\.(voice|task\.TaskCommands?|owner\.|ai\.OpenRouterSecretStore|"
                                  r"ui\.overlay\.(OverlayChromeRuntime|glass\.VoicePress)|runtime\.background\.(TaskPhase|WorkspaceTaskUi)|"
                                  r"mind\.mission\.MindRedaction|R$)", f"voice/{name} imports {imported}")
-        self.assertEqual(overlay_uses, {"submitRequest"})
+        # Alpha.78: and voice's Stop for a quick action it started (it only cancels that action; missions stop via Task Kit).
+        self.assertEqual(overlay_uses, {"submitRequest", "stopVoiceRequest"})
+        runtime = code((BASE / "ui/overlay/OverlayChromeRuntime.kt").read_text(encoding="utf-8"))
+        stop = runtime[runtime.index("fun stopVoiceRequest()"):]
+        stop = stop[: stop.index("\n    }")]
+        self.assertIn("CycloneModes.cancel()", stop)
+        self.assertNotIn("MindMissions", stop)
         session = code((VOICE / "VoiceSession.kt").read_text(encoding="utf-8"))
         self.assertIn("OverlayChromeRuntime.submitRequest(effect.goal, driving = true)", session)
         self.assertIn("TaskCommands.send(app, taskId, command)", session)

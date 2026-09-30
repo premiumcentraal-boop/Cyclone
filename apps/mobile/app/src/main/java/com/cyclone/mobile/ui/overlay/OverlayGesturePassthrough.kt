@@ -18,6 +18,17 @@ object OverlayGesturePassthrough {
 
     fun active(): Boolean = enabled
 
+    /**
+     * Alpha.78: Cyclone's other windows (Drive's voice panel and button) yield to an injected gesture too, so a swipe or
+     * tap Cyclone makes lands on the app, never on its own glass. A follower returns once its windows let touches through.
+     */
+    private val followers = java.util.concurrent.CopyOnWriteArrayList<(Boolean) -> Unit>()
+
+    fun follow(listener: (Boolean) -> Unit): () -> Unit {
+        followers += listener
+        return { followers -= listener }
+    }
+
     fun bind(applyFlags: (Boolean) -> Unit) {
         this.applyFlags = applyFlags
     }
@@ -31,6 +42,7 @@ object OverlayGesturePassthrough {
         if (entered) {
             enabled = true
             applyFlags?.invoke(true)
+            followers.forEach { runCatching { it(true) } }
         }
         try {
             return block()
@@ -38,6 +50,7 @@ object OverlayGesturePassthrough {
             if (depth.decrementAndGet() == 0) {
                 enabled = false
                 applyFlags?.invoke(false)
+                followers.forEach { runCatching { it(false) } }
             }
         }
     }
@@ -46,5 +59,6 @@ object OverlayGesturePassthrough {
         depth.set(0)
         enabled = false
         applyFlags = null
+        followers.clear()
     }
 }

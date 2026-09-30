@@ -53,7 +53,9 @@ class ModesGuard(unittest.TestCase):
 
     def test_voice_quick_commands_still_only_submit(self):
         session = read("voice/VoiceSession.kt")
-        self.assertIn("is VoiceEffect.Quick -> OverlayChromeRuntime.submitRequest(effect.goal, driving = true)", session)
+        quick = session[session.index("is VoiceEffect.Quick -> {"):]
+        quick = quick[: quick.index("is VoiceEffect.KeepListening")]
+        self.assertIn("OverlayChromeRuntime.submitRequest(effect.goal, driving = true)", quick)
         turn = read("voice/VoiceTurn.kt")
         self.assertIn("!answering && followUp == null && !taskLive && !quickLive", turn,
                       "a quick command never answers an open question or a readback")

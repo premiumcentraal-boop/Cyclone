@@ -143,7 +143,8 @@ object InstantRun {
      */
     private fun find(hands: InstantHands, box: DecisionBox?, bar: Double, pattern: Regex, question: String): String? {
         repeat(2) { attempt ->
-            val screen = hands.look(withImage = attempt > 0 || box != null) ?: return null
+            // A screenshot only for a box that can read one (JEV can't): taking it costs time for nothing.
+            val screen = hands.look(withImage = box?.sees == true) ?: return null
             if (screen.sensitive) return null
             screen.labels.filter { pattern.containsMatchIn(it) }.distinct().singleOrNull()?.let { return it }
             if (box != null && screen.labels.isNotEmpty()) {

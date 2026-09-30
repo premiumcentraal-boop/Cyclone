@@ -72,6 +72,9 @@ class VoiceService : Service() {
         }
 
         fun stop(context: Context) {
+            // Alpha.78: false at once. Stopping is asynchronous; a listen that starts before onDestroy ran must not read
+            // the old "true" and record before the new service holds the microphone.
+            _foreground.value = false
             runCatching { context.stopService(Intent(context, VoiceService::class.java)) }
         }
     }

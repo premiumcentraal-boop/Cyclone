@@ -118,7 +118,8 @@ object DriverOverlay {
     }
 
     private fun start(service: CycloneAccessibilityService, buttonDp: Int) {
-        val next = VoiceSession(service)
+        // Alpha.78: every voice run is written to the run history (Glass → Runs, diagnostics).
+        val next = VoiceSession(service, VoiceTraceSink(service))
         session = next
         windows = runCatching { Windows(service, next, buttonDp) }.getOrNull()
         val w = windows ?: return
@@ -155,10 +156,35 @@ object DriverOverlay {
             .apply { gravity = Gravity.BOTTOM }
         private var dimShown = false
         private var panelShown = false
+        /** A gesture Cyclone injects is in progress: the voice windows let touches through (alpha.78). */
+        private var yielding = false
+        private val main = android.os.Handler(android.os.Looper.getMainLooper())
+        private val unfollow = OverlayGesturePassthrough.follow { yieldNow -> onMainAndWait { yielding = yieldNow; applyTouch() } }
 
         init {
             place()
             wm.addView(button, buttonParams)
+        }
+
+        /** Touchable unless hidden or yielding to a gesture Cyclone is making. */
+        private fun applyTouch() {
+            val buttonOff = yielding || button.visibility == View.GONE
+            val buttonFlags = if (buttonOff) buttonParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                else buttonParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            if (buttonFlags != buttonParams.flags) { buttonParams.flags = buttonFlags; runCatching { wm.updateViewLayout(button, buttonParams) } }
+            val panelFlags = if (yielding) panelParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                else panelParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            if (panelFlags != panelParams.flags) { panelParams.flags = panelFlags; if (panelShown) runCatching { wm.updateViewLayout(panel, panelParams) } }
+        }
+
+        /** Runs [block] on the main thread and waits (at most 300 ms) until it ran and a frame passed. */
+        private fun onMainAndWait(block: () -> Unit) {
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) { block(); return }
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val posted = main.post {
+                try { block() } finally { android.view.Choreographer.getInstance().postFrameCallback { latch.countDown() } }
+            }
+            if (posted) latch.await(300, java.util.concurrent.TimeUnit.MILLISECONDS)
         }
 
         fun show(face: VoiceFace) {
@@ -167,9 +193,7 @@ object DriverOverlay {
             if ((button.visibility == View.GONE) != hidden) {
                 button.visibility = if (hidden) View.GONE else View.VISIBLE
                 // A hidden button must not take touches meant for the app underneath.
-                buttonParams.flags = if (hidden) buttonParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                    else buttonParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                runCatching { wm.updateViewLayout(button, buttonParams) }
+                applyTouch()
             }
             button.contentDescription = face.description
             button.state = face.stateDescription
@@ -184,6 +208,7 @@ object DriverOverlay {
         }
 
         fun remove() {
+            unfollow()
             runCatching { wm.removeView(button) }
             if (dimShown) runCatching { wm.removeView(dim) }
             if (panelShown) runCatching { wm.removeView(panel) }

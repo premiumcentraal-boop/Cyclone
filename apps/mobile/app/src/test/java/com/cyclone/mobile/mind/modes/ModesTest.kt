@@ -148,7 +148,8 @@ class ModesTest {
         var letCall = true
         var afterCamera = InstantScreen("Camera", listOf("Switch camera", "Shutter", "Gallery"))
         var afterDial = InstantScreen("Phone", listOf("Call", "Add contact"))
-        override fun look(withImage: Boolean) = screen
+        var screenshots = 0
+        override fun look(withImage: Boolean) = screen.also { if (withImage) screenshots++ }
         override fun gesture(intent: InstantIntent, direction: String?): InstantMove { did += "${intent.name.lowercase()} $direction"; return InstantMove(true, true, "") }
         override fun tapLabel(label: String): InstantMove { did += "tap $label"; return InstantMove(true, true, "") }
         override fun openApp(packageName: String): InstantMove { did += "open $packageName"; return InstantMove(true, true, "") }
@@ -239,5 +240,33 @@ class ModesTest {
         assertEquals("Opening the camera", InstantCopy.working(match("open my camera")))
         assertEquals("Took the photo.", InstantCopy.done(InstantOutcome(true, listOf("opened the front camera", "took the photo"), 2)))
         assertEquals("Done.", InstantCopy.done(InstantOutcome(true, emptyList(), 0)))
+    }
+
+    // ---- alpha.78 --------------------------------------------------------------------------------------------------
+
+    @Test fun aWordSaidTwiceByTheSpeechToTextStillOpensTheApp() {
+        assertEquals("com.whatsapp", match("open open WhatsApp").target)
+        assertEquals("down", match("swipe swipe down").direction)
+    }
+
+    @Test fun onlyATapNeedsTheScreenReadBeforeRouting() {
+        assertTrue(InstantGrammar.needsScreen("tap Pokémon GO"))
+        assertTrue(InstantGrammar.needsScreen("click on Settings"))
+        assertFalse(InstantGrammar.needsScreen("swipe down"))
+        assertFalse(InstantGrammar.needsScreen("open Telegram"))
+    }
+
+    @Test fun aBoxThatCantSeeNeverCostsAScreenshot() {
+        val phone = Phone().apply { afterCamera = InstantScreen("Camera", listOf("Mode", "Button 3", "Gallery")) }
+        val blind = DecisionBox { BoxReply(mapOf("next" to BoxAnswer("Button 3", 0.95))) }
+        assertTrue(InstantRun.run(match("take a picture"), phone, blind).done)
+        assertEquals(0, phone.screenshots)
+        val seeing = object : DecisionBox {
+            override fun ask(request: BoxRequest) = BoxReply(mapOf("next" to BoxAnswer("Button 3", 0.95)))
+            override val sees = true
+        }
+        val phone2 = Phone().apply { afterCamera = InstantScreen("Camera", listOf("Mode", "Button 3", "Gallery")) }
+        assertTrue(InstantRun.run(match("take a picture"), phone2, seeing).done)
+        assertEquals(1, phone2.screenshots)
     }
 }
