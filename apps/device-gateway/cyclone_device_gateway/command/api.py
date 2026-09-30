@@ -369,6 +369,11 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def relation_candidates(table_id: str, prop_id: str, q: str | None = Query(default=None, max_length=100)):
         return call(lambda: {"items": cc().tables.candidates(table_id, prop_id, q)})
 
+    # Plan 43 (T3): press a row's button. It only creates ordinary tasks; the phone's approvals still apply.
+    @router.post("/v1/cc/tables/{table_id}/rows/{row_id}/buttons/{prop_id}", dependencies=[Depends(auth)])
+    def press_button(table_id: str, row_id: str, prop_id: str):
+        return call(lambda: cc().buttons.press(table_id, row_id, prop_id))
+
     @router.post("/v1/cc/tables/{table_id}/properties/{prop_id}/delete", dependencies=[Depends(auth)])
     def delete_property(table_id: str, prop_id: str):
         return call(lambda: cc().tables.delete_property(table_id, prop_id))

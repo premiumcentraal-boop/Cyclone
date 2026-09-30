@@ -184,6 +184,9 @@ class CommandCenter:
         # Plan 43 (T1): tables, the owner's own databases with typed properties and saved views.
         from .tables import TableStore
         self.tables = TableStore(self)
+        # Plan 43 (T3): action buttons in tables.
+        from .buttons import ButtonStore
+        self.buttons = ButtonStore(self)
         # Plan 43 (T5 + T6): accounts by phone and app, and the sign-ups the phone mapped.
         from .signup import SignupStore
         self.signup = SignupStore(self)
@@ -894,6 +897,7 @@ class CommandCenter:
             self._follow_runs()
             self._dispatch(ready)
             self.signup.sync()
+            self.buttons.sync()
 
     def _fire_routines(self) -> None:
         now = self._clock()

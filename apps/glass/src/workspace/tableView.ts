@@ -13,10 +13,11 @@ import {
   addDays, calendarDays, cellText, daysBetween, defaultFilter, formatDate, effectiveType, linkLabels, nextColor, optionOf, parseInput, rowsOfGroup, spanOf, tablesApi,
   titleProp, valueForGroup, visibleProps, type Links, type RollupFn,
   type Cell, type DateValue, type Filter, type Group, type HistoryEntry, type PropType, type RowsResult, type Sort, type Table, type TableLayout,
-  type TableMeta, type TableOption, type TableProp, type TableRow, type TableView, type ViewConfig,
+  type TableMeta, type TableOption, type TableProp, type TableRow, type TableView, type ViewConfig, type ButtonCell,
 } from "../services/tables.js";
 import { el, setChildren } from "../ui/dom.js";
 import { createEditor, type Editor } from "./editor.js";
+import { createButtonEditor, describeActions } from "./buttonEditor.js";
 
 type TableBlock = Extract<Block, { type: "table" }>;
 
@@ -43,7 +44,7 @@ function chip(option: TableOption): HTMLElement {
 }
 
 /** Relation types that can't change shape once made (delete and add again). */
-const LINKED: readonly PropType[] = ["relation", "rollup", "formula"];
+const LINKED: readonly PropType[] = ["relation", "rollup", "formula", "button"];
 
 /**
  * A cell as the owner sees it: chips for choices, a check for checkboxes, links for web and mail, linked rows by name.
@@ -80,6 +81,13 @@ export function renderCell(prop: TableProp, value: Cell, links: Links = {}, open
     case "checkbox":
       box.textContent = value ? "☑" : "☐";
       break;
+    case "button": {
+      const run = value as ButtonCell;
+      const state = el("span", `tb-run tb-run-${run.state}`, run.label);
+      if (run.summary) state.title = run.summary;
+      box.append(state);
+      break;
+    }
     case "url": {
       const a = el("a", "tb-link", String(value).replace(/^https?:\/\//, ""));
       a.href = String(value);
@@ -400,6 +408,8 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
       });
       inner.append(text, open);
       td.append(inner);
+    } else if (prop.type === "button") {
+      td.append(pressButton(row, prop));
     } else {
       td.append(renderCell(prop, value, result?.links ?? {}, (tableId, id) => void openPeek(id, tableId)));
     }
@@ -413,6 +423,27 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
       startEdit(td, row, prop);
     });
     return td;
+  }
+
+  /** Plan 43 T3: a row's button and its latest run. Pressing it only starts work; the phone still asks before anything serious. */
+  function pressButton(row: TableRow, prop: TableProp): HTMLElement {
+    const box = el("span", "tb-button-cell");
+    const press = btn(prop.config.label ?? "Run", `tb-button tb-button-${prop.config.color ?? "purple"}`, table ? describeActions(prop, table) : undefined);
+    const run = row.cells[prop.id] as ButtonCell | null | undefined;
+    const busy = !!run && ["queued", "running", "needs_you"].includes(run.state);
+    press.disabled = busy;
+    press.addEventListener("click", async (e: MouseEvent) => {
+      e.stopPropagation();
+      press.disabled = true;
+      const pressed = await act(() => tablesApi.press(ctx.client, block.tableId, row.id, prop.id));
+      if (pressed) {
+        for (const url of pressed.open) if (typeof globalThis.open === "function") globalThis.open(url, "_blank", "noopener,noreferrer");
+        say(pressed.tasks.length ? `${prop.config.label}: started. It shows here while it runs.` : `${prop.config.label}: done.`, "ok");
+      }
+    });
+    box.append(press);
+    if (run) box.append(renderCell(prop, run));
+    return box;
   }
 
   function startEdit(td: HTMLElement, row: TableRow, prop: TableProp): void {
@@ -1006,7 +1037,7 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
         const prop = table!.properties.find((p) => p.id === f.property);
         if (!prop) return;
         const line = el("div", "tb-filter");
-        line.append(propSelect(table!.properties, f.property, (id) => {
+        line.append(propSelect(table!.properties.filter((p) => p.type !== "button"), f.property, (id) => {
           const p = table!.properties.find((x) => x.id === id)!;
           filters[i] = defaultFilter(p);
           drawBox();
@@ -1118,7 +1149,7 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
       const rows: HTMLElement[] = [el("div", "tb-menu-title", "Sort")];
       sorts.forEach((s, i) => {
         const line = el("div", "tb-filter");
-        line.append(propSelect(table!.properties, s.property, (id) => { sorts[i] = { ...sorts[i], property: id }; }));
+        line.append(propSelect(table!.properties.filter((p) => p.type !== "button"), s.property, (id) => { sorts[i] = { ...sorts[i], property: id }; }));
         const dir = el("select", "tb-select");
         for (const [v, label] of [["asc", "Ascending"], ["desc", "Descending"]] as const) {
           const o = el("option", "", label);
@@ -1135,7 +1166,7 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
       const add = btn("+ Add a sort", "tb-menu-row");
       add.addEventListener("click", () => {
         const used = new Set(sorts.map((s) => s.property));
-        const next = table!.properties.find((p) => !used.has(p.id));
+        const next = table!.properties.find((p) => !used.has(p.id) && p.type !== "button");
         if (next && sorts.length < 5) sorts = [...sorts, { property: next.id, direction: "asc" }];
         drawBox();
       });
@@ -1258,7 +1289,17 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
         error.textContent = err instanceof Error ? err.message : "That didn't work.";
       }
     };
-    if (type === "relation") {
+    if (type === "button") {
+      const editor = createButtonEditor(ctx, table!, existing);
+      out.append(editor.element);
+      save.addEventListener("click", () => {
+        try {
+          void finish(editor.read() as Record<string, unknown>);
+        } catch (err) {
+          error.textContent = err instanceof Error ? err.message : "That didn't work.";
+        }
+      });
+    } else if (type === "relation") {
       const target = el("select", "tb-select");
       target.setAttribute("aria-label", "Link to");
       const tables = await tablesApi.list(ctx.client).catch(() => []);
@@ -1352,7 +1393,7 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
       const target = prop.config.target ?? "";
       if (prop.type === "relation") box.append(el("p", "tb-muted", `Links to ${SYSTEM_TARGETS[target] ? `Cyclone · ${SYSTEM_TARGETS[target]}` : "another table"}${prop.config.backProp ? ", both ways" : ""}.`));
       else {
-        const edit = btn(prop.type === "formula" ? "Edit formula" : "Edit rollup", "tb-menu-row");
+        const edit = btn(prop.type === "formula" ? "Edit formula" : prop.type === "button" ? "Edit button" : "Edit rollup", "tb-menu-row");
         edit.addEventListener("click", () => void linkedSetup(box, prop.type, prop.name, prop));
         box.append(edit);
       }

@@ -58,12 +58,12 @@ EMAIL = re.compile(r"^[^\s@<>]{1,64}@[^\s@<>]{1,190}\.[^\s@<>]{2,24}$")
 URL = re.compile(r"^https?://[^\s<>\"]{1,1990}$")
 PHONE = re.compile(r"^\+?[0-9 ()./-]{3,30}$")
 
-#: Property types. Files, buttons and phone/profile come in T3–T4.
+#: Property types. Plan 43 T3 adds buttons (buttons.py); files and profiles come later.
 TYPES = ("title", "text", "number", "currency", "percent", "date", "select", "multi_select", "status", "checkbox",
-         "email", "url", "phone_number", "created_time", "edited_time", "relation", "rollup", "formula")
-COMPUTED = ("created_time", "edited_time", "rollup", "formula")
+         "email", "url", "phone_number", "created_time", "edited_time", "relation", "rollup", "formula", "button")
+COMPUTED = ("created_time", "edited_time", "rollup", "formula", "button")
 #: Plan 43 T2: types whose shape can't change after they are made (delete and add them again instead).
-LINKED = ("relation", "rollup", "formula")
+LINKED = ("relation", "rollup", "formula", "button")
 #: Cyclone's own records a relation can point at: the Command Center's accounts, routines, tasks, and the phones.
 SYSTEM_TARGETS = {"sys:accounts": "Accounts", "sys:routines": "Routines", "sys:tasks": "Tasks", "sys:phones": "Phones"}
 LINK_ID = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
@@ -86,7 +86,7 @@ OPS_FOR: dict[str, tuple[str, ...]] = {
     "number": NUMBER_OPS, "currency": NUMBER_OPS, "percent": NUMBER_OPS,
     "select": CHOICE_OPS, "status": CHOICE_OPS, "multi_select": MULTI_OPS, "checkbox": CHECK_OPS,
     "date": DATE_OPS, "created_time": DATE_OPS, "edited_time": DATE_OPS,
-    "relation": MULTI_OPS, "formula": FORMULA_OPS, "rollup": NUMBER_OPS,
+    "relation": MULTI_OPS, "formula": FORMULA_OPS, "rollup": NUMBER_OPS, "button": (),
 }
 GROUPABLE = ("select", "status", "checkbox", "multi_select")
 
@@ -195,6 +195,9 @@ def _options(value: Any, status: bool) -> list[dict[str, Any]]:
 
 
 def _config(kind: str, value: Any) -> dict[str, Any]:
+    if kind == "button":
+        from .buttons import button_config
+        return button_config(value)
     raw = value or {}
     if not isinstance(raw, dict):
         raise CommandError("A property's settings are an object.")
@@ -311,6 +314,8 @@ def display(prop: dict[str, Any], value: Any) -> str:
         return f"{len(value)} linked" if value else ""
     if kind in ("rollup", "formula"):
         return fx.text_of(value)
+    if kind == "button":
+        return str(value.get("label", "")) if isinstance(value, dict) else ""
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value)
@@ -465,6 +470,8 @@ class TableStore:
                 config["resultType"] = self._rollup_type(table_id, props, config)
             elif kind == "formula":
                 self._check_formula(props, config["expression"], None)
+            elif kind == "button":
+                self._c.buttons.check(props, config, None)
             prop = self._insert_prop(table_id, name, kind, config, prop_id=prop_id)
             self._touch(table_id)
             self._c._audit("owner", "table.property.add", table_id, {"property": prop["id"], "type": kind})
@@ -502,6 +509,8 @@ class TableStore:
                 config["resultType"] = self._rollup_type(table_id, props, config)
             elif kind == "formula":
                 self._check_formula(props, config["expression"], prop_id)
+            elif kind == "button":
+                self._c.buttons.check(props, config, prop_id)
             if name != prop["name"]:
                 self._rename_in_formulas(table_id, prop["name"], name)
             if kind != prop["type"]:
@@ -664,7 +673,7 @@ class TableStore:
                                           (row_id,)).fetchall()
             public = self._publics(table_id, props, [row])[0]
             return {**public, "blocks": json.loads(row["blocks"]), "links": self._labels(props, [public]),
-                    "table": self._public(table_id),
+                    "table": self._public(table_id), "buttonRuns": self._c.buttons.history(table_id, row_id),
                     "history": [{"at": h["at"], "actor": h["actor"], "change": json.loads(h["change"])} for h in history]}
 
     def create_row(self, table_id: str, body: Any, *, actor: str = "owner") -> dict[str, Any]:
@@ -1083,6 +1092,7 @@ class TableStore:
     def _publics(self, table_id: str, props: list[dict[str, Any]], raw_rows: list[Any]) -> list[dict[str, Any]]:
         """Rows as Glass sees them, with created/edited times, rollups and formulas worked out."""
         rows = [self._row_public(r, props) for r in raw_rows]
+        self._c.buttons.cells(table_id, props, rows)
         rollups = [p for p in props if p["type"] == "rollup"]
         formulas = [p for p in props if p["type"] == "formula"]
         if not rows or not (rollups or formulas):
@@ -1283,6 +1293,8 @@ def _read_value(prop: dict[str, Any], value: Any) -> Any:
         return float(len(value))
     if kind in ("number", "currency", "percent"):
         return float(value)
+    if kind == "button":
+        return display(prop, value)
     return value
 
 
@@ -1438,6 +1450,8 @@ def _sort_key(prop: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
             return (0, value) if isinstance(value, (int, float)) and not isinstance(value, bool) else (0, fx.text_of(value).lower())
         if kind == "relation":
             return (0, len(value))
+        if kind == "button":
+            return (0, value.get("at", 0) if isinstance(value, dict) else 0)
         if kind in ("select", "status"):
             return (0, order.get(value, len(order)))
         if kind == "multi_select":
