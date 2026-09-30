@@ -36,6 +36,7 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.76 (the other agent):** plan 41's parallel Pilot, Fast mode in Settings (off by default).
 - **alpha.77 (the other agent):** plan 42's Cyclone Live: the modes router, Instant and Live voice.
 - **alpha.78:** the voice-mode fixes and decisions via JEV.
+- **alpha.80:** plan 43 T2, cross-referencing (relations, rollups, formulas, timeline, calendar).
 - **alpha.79:** plan 43 T1, Cyclone Tables. The owner chose plan 43's tables and buttons (T1–T3) before B1, so B1
   comes after T3.
 - **Test counts at alpha.68:**
