@@ -331,6 +331,10 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def update_property(table_id: str, prop_id: str, body: dict[str, Any]):
         return call(lambda: cc().tables.update_property(table_id, prop_id, body_of(body)))
 
+    @router.get("/v1/cc/tables/{table_id}/properties/{prop_id}/candidates", dependencies=[Depends(auth)])
+    def relation_candidates(table_id: str, prop_id: str, q: str | None = Query(default=None, max_length=100)):
+        return call(lambda: {"items": cc().tables.candidates(table_id, prop_id, q)})
+
     @router.post("/v1/cc/tables/{table_id}/properties/{prop_id}/delete", dependencies=[Depends(auth)])
     def delete_property(table_id: str, prop_id: str):
         return call(lambda: cc().tables.delete_property(table_id, prop_id))

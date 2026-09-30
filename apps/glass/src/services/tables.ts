@@ -8,20 +8,43 @@ import type { GatewayClient } from "./gateway.js";
 
 export type PropType =
   | "title" | "text" | "number" | "currency" | "percent" | "date" | "select" | "multi_select" | "status" | "checkbox"
-  | "email" | "url" | "phone_number" | "created_time" | "edited_time";
+  | "email" | "url" | "phone_number" | "created_time" | "edited_time" | "relation" | "rollup" | "formula";
 export const PROP_TYPES: readonly PropType[] = ["title", "text", "number", "currency", "percent", "date", "select", "multi_select", "status",
-  "checkbox", "email", "url", "phone_number", "created_time", "edited_time"];
+  "checkbox", "email", "url", "phone_number", "created_time", "edited_time", "relation", "rollup", "formula"];
 export type OptionColor = "default" | "gray" | "brown" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink" | "red";
 export const COLORS: readonly OptionColor[] = ["default", "gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"];
 export type StatusGroup = "todo" | "doing" | "done";
-export type TableLayout = "table" | "board";
+export type TableLayout = "table" | "board" | "timeline" | "calendar" | "gallery" | "list";
+export const LAYOUTS: readonly TableLayout[] = ["table", "board", "timeline", "calendar", "gallery", "list"];
+export const LAYOUT_LABEL: Record<TableLayout, string> = { table: "Table", board: "Board", timeline: "Timeline", calendar: "Calendar", gallery: "Gallery", list: "List" };
+export const LAYOUT_ICON: Record<TableLayout, string> = { table: "▦", board: "▥", timeline: "▤", calendar: "🗓", gallery: "▣", list: "☰" };
+export type RollupFn = "count" | "count_values" | "sum" | "average" | "min" | "max" | "earliest" | "latest" | "show" | "percent_checked";
+export const ROLLUP_FNS: readonly RollupFn[] = ["count", "count_values", "sum", "average", "min", "max", "earliest", "latest", "show", "percent_checked"];
+export const ROLLUP_LABEL: Record<RollupFn, string> = {
+  count: "Count all", count_values: "Count values", sum: "Sum", average: "Average", min: "Min", max: "Max", earliest: "Earliest date",
+  latest: "Latest date", show: "Show original", percent_checked: "Percent checked",
+};
+/** Cyclone's own records a relation can point at. */
+export const SYSTEM_TARGETS: Record<string, string> = { "sys:accounts": "Accounts", "sys:routines": "Routines", "sys:tasks": "Tasks", "sys:phones": "Phones" };
 
 export interface TableOption { id: string; name: string; color: OptionColor; group?: StatusGroup }
-export interface PropConfig { options?: TableOption[]; currency?: string; decimals?: number; personal?: boolean; time?: boolean; wrap?: boolean }
+export interface PropConfig {
+  options?: TableOption[]; currency?: string; decimals?: number; personal?: boolean; time?: boolean; wrap?: boolean;
+  /** Relations: the table (or sys:…) it points at, and the property that is its way back. */
+  target?: string; backProp?: string; twoWay?: boolean;
+  /** Rollups: over which relation, which property there, how, and what it works out to. */
+  relation?: string; property?: string | null; fn?: RollupFn; resultType?: "number" | "date" | "text";
+  /** Formulas. */
+  expression?: string;
+}
 export interface TableProp { id: string; name: string; type: PropType; config: PropConfig; position: number }
 export interface Filter { property: string; op: string; value: unknown }
 export interface Sort { property: string; direction: "asc" | "desc" }
-export interface ViewConfig { filters: Filter[]; match: "and" | "or"; sorts: Sort[]; groupBy: string | null; hidden: string[]; widths: Record<string, number> }
+export interface ViewConfig {
+  filters: Filter[]; match: "and" | "or"; sorts: Sort[]; groupBy: string | null; hidden: string[]; widths: Record<string, number>;
+  /** Timeline and calendar: the date property rows are laid out by. */
+  dateProp: string | null;
+}
 export interface TableView { id: string; name: string; layout: TableLayout; config: ViewConfig; position: number }
 export interface TableMeta { id: string; title: string; icon: string; description: string; version: number; updatedAt: number; rows: number }
 export interface Table extends TableMeta { properties: TableProp[]; views: TableView[]; archivedAt: number | null }
@@ -29,19 +52,22 @@ export type DateValue = { start: string; end?: string };
 export type Cell = string | number | boolean | string[] | DateValue | null;
 export interface TableRow { id: string; cells: Record<string, Cell>; version: number; createdAt: number; updatedAt: number; hasPage: boolean }
 export interface Group { key: string | boolean | null; name: string; color: OptionColor; rowIds: string[] }
-export interface RowsResult { table: Table; view: TableView; rows: TableRow[]; total: number; groups: Group[] | null }
+/** What a relation cell points at, by id: its label and where it lives (a table id or sys:…). */
+export type Links = Record<string, { label: string; tableId: string }>;
+export interface RowsResult { table: Table; view: TableView; rows: TableRow[]; total: number; groups: Group[] | null; links: Links }
+export interface Candidate { id: string; label: string; tableId: string }
 export interface HistoryEntry { at: number; actor: string; change: Record<string, unknown> }
 
 export const TYPE_LABEL: Record<PropType, string> = {
   title: "Title", text: "Text", number: "Number", currency: "Currency", percent: "Percent", date: "Date", select: "Select",
   multi_select: "Multi-select", status: "Status", checkbox: "Checkbox", email: "Email", url: "URL", phone_number: "Phone",
-  created_time: "Created time", edited_time: "Edited time",
+  created_time: "Created time", edited_time: "Edited time", relation: "Relation", rollup: "Rollup", formula: "Formula",
 };
 export const TYPE_ICON: Record<PropType, string> = {
   title: "Aa", text: "≡", number: "#", currency: "€", percent: "%", date: "📅", select: "⌄", multi_select: "☰", status: "◐",
-  checkbox: "☑", email: "@", url: "↗", phone_number: "☎", created_time: "🕓", edited_time: "🕓",
+  checkbox: "☑", email: "@", url: "↗", phone_number: "☎", created_time: "🕓", edited_time: "🕓", relation: "↗", rollup: "Σ", formula: "ƒ",
 };
-export const COMPUTED: readonly PropType[] = ["created_time", "edited_time"];
+export const COMPUTED: readonly PropType[] = ["created_time", "edited_time", "rollup", "formula"];
 const TEXT_OPS = ["contains", "not_contains", "is", "is_not", "starts_with", "empty", "not_empty"];
 const NUMBER_OPS = ["eq", "ne", "gt", "lt", "gte", "lte", "empty", "not_empty"];
 const DATE_OPS = ["is", "before", "after", "on_or_before", "on_or_after", "empty", "not_empty"];
@@ -51,7 +77,15 @@ export const OPS_FOR: Record<PropType, string[]> = {
   select: ["is", "is_not", "empty", "not_empty"], status: ["is", "is_not", "empty", "not_empty"],
   multi_select: ["contains", "not_contains", "empty", "not_empty"], checkbox: ["is"],
   date: DATE_OPS, created_time: DATE_OPS, edited_time: DATE_OPS,
+  relation: ["contains", "not_contains", "empty", "not_empty"], rollup: NUMBER_OPS,
+  formula: ["contains", "is", "eq", "gt", "lt", "gte", "lte", "empty", "not_empty"],
 };
+
+/** The type a filter treats a property as: a rollup by what it works out to. */
+export function effectiveType(prop: TableProp): PropType {
+  if (prop.type !== "rollup") return prop.type;
+  return prop.config.resultType === "date" ? "date" : prop.config.resultType === "text" ? "text" : "number";
+}
 export const OP_LABEL: Record<string, string> = {
   contains: "contains", not_contains: "does not contain", is: "is", is_not: "is not", starts_with: "starts with", empty: "is empty",
   not_empty: "is not empty", eq: "=", ne: "≠", gt: ">", lt: "<", gte: "≥", lte: "≤", before: "is before", after: "is after",
@@ -83,6 +117,10 @@ function parseProp(raw: unknown): TableProp {
   if (typeof c.currency === "string") config.currency = c.currency;
   if (typeof c.decimals === "number") config.decimals = c.decimals;
   for (const flag of ["personal", "time", "wrap"] as const) if (c[flag] === true) config[flag] = true;
+  for (const key of ["target", "backProp", "relation", "expression"] as const) if (typeof c[key] === "string") config[key] = c[key] as string;
+  if (typeof c.property === "string") config.property = c.property;
+  if (ROLLUP_FNS.includes(c.fn as RollupFn)) config.fn = c.fn as RollupFn;
+  if (c.resultType === "number" || c.resultType === "date" || c.resultType === "text") config.resultType = c.resultType;
   return { id: str(r.id), name: str(r.name), type: oneOf(r.type, PROP_TYPES, "text"), config, position: num(r.position) };
 }
 
@@ -90,7 +128,7 @@ function parseView(raw: unknown): TableView {
   const r = obj(raw);
   const c = obj(r.config);
   return {
-    id: str(r.id), name: str(r.name, "View"), layout: oneOf(r.layout, ["table", "board"] as const, "table"), position: num(r.position),
+    id: str(r.id), name: str(r.name, "View"), layout: oneOf(r.layout, LAYOUTS, "table"), position: num(r.position),
     config: {
       filters: list(c.filters).map((f) => { const o = obj(f); return { property: str(o.property), op: str(o.op), value: o.value ?? null }; }),
       match: c.match === "or" ? "or" : "and",
@@ -98,6 +136,7 @@ function parseView(raw: unknown): TableView {
       groupBy: typeof c.groupBy === "string" ? c.groupBy : null,
       hidden: list(c.hidden).filter((h): h is string => typeof h === "string"),
       widths: Object.fromEntries(Object.entries(obj(c.widths)).filter(([, v]) => typeof v === "number")) as Record<string, number>,
+      dateProp: typeof c.dateProp === "string" ? c.dateProp : null,
     },
   };
 }
@@ -132,9 +171,17 @@ export function parseRow(raw: unknown): TableRow {
   };
 }
 
+export function parseLinks(raw: unknown): Links {
+  return Object.fromEntries(Object.entries(obj(raw)).map(([id, v]) => {
+    const o = obj(v);
+    return [id, { label: str(o.label, "Untitled"), tableId: str(o.tableId) }];
+  }));
+}
+
 export function parseRows(raw: unknown): RowsResult {
   const r = obj(raw);
   return {
+    links: parseLinks(r.links),
     table: parseTable(r.table), view: parseView(r.view), rows: list(r.rows).map(parseRow), total: num(r.total),
     groups: Array.isArray(r.groups) ? r.groups.map((g) => {
       const o = obj(g);
@@ -178,7 +225,7 @@ export const tablesApi = {
   },
   row: async (client: GatewayClient, id: string, row: string) => {
     const raw = obj(await client.get(`${base(id)}/rows/${enc(row)}`));
-    return { row: parseRow(raw), blocks: list(raw.blocks), history: list(raw.history).map((h) => {
+    return { row: parseRow(raw), blocks: list(raw.blocks), links: parseLinks(raw.links), table: raw.table ? parseTable(raw.table) : null, history: list(raw.history).map((h) => {
       const o = obj(h);
       return { at: num(o.at), actor: str(o.actor), change: obj(o.change) };
     }) as HistoryEntry[] };
@@ -194,6 +241,11 @@ export const tablesApi = {
   undo: async (client: GatewayClient, id: string, row: string) => parseRow(await client.post(`${base(id)}/rows/${enc(row)}/undo`)),
   archiveRow: (client: GatewayClient, id: string, row: string) => client.post(`${base(id)}/rows/${enc(row)}/archive`),
   restoreRow: async (client: GatewayClient, id: string, row: string) => parseRow(await client.post(`${base(id)}/rows/${enc(row)}/restore`)),
+  candidates: async (client: GatewayClient, id: string, prop: string, q?: string): Promise<Candidate[]> =>
+    list((await client.get<{ items?: unknown }>(`${base(id)}/properties/${enc(prop)}/candidates${q ? `?q=${enc(q)}` : ""}`))?.items).map((i) => {
+      const o = obj(i);
+      return { id: str(o.id), label: str(o.label, "Untitled"), tableId: str(o.tableId) };
+    }),
   exportUrl: (id: string, view: string | null) => `${base(id)}/export.csv${view ? `?view=${enc(view)}` : ""}`,
 };
 
@@ -247,8 +299,54 @@ export function cellText(prop: TableProp, value: Cell): string {
     case "date": case "created_time": case "edited_time":
       return typeof value === "object" && !Array.isArray(value) && value ? formatDate(value as DateValue) : "";
     case "number": case "currency": case "percent": return typeof value === "number" ? formatNumber(prop, value) : "";
+    case "relation": return (Array.isArray(value) ? value : []).length ? `${(value as string[]).length} linked` : "";
+    case "rollup": case "formula": return computedText(prop, value);
     default: return String(value);
   }
+}
+
+/** A rollup's or formula's value as text: numbers formatted, dates like dates, yes/no for booleans. */
+export function computedText(prop: TableProp, value: Cell): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") {
+    const rounded = Math.round(value * 100) / 100;
+    if (prop.type === "rollup" && prop.config.fn === "percent_checked") return `${rounded}%`;
+    return formatNumber({ ...prop, type: "number", config: { decimals: Number.isInteger(rounded) ? 0 : 2 } }, rounded);
+  }
+  if (typeof value === "object" && !Array.isArray(value)) return formatDate(value as DateValue);
+  return String(value);
+}
+
+/** Relation ids as their labels, in order (an unknown id reads as "Removed"). */
+export function linkLabels(value: Cell, links: Links): Array<{ id: string; label: string; tableId: string }> {
+  return (Array.isArray(value) ? value : []).map((id) => ({ id, label: links[id]?.label ?? "Removed", tableId: links[id]?.tableId ?? "" }));
+}
+
+/** Rows of a calendar month: 6 weeks from the Monday on or before the 1st. Each day as YYYY-MM-DD. */
+export function calendarDays(year: number, month: number): string[] {
+  const first = new Date(Date.UTC(year, month, 1));
+  const shift = (first.getUTCDay() + 6) % 7;
+  const start = Date.UTC(year, month, 1 - shift);
+  return Array.from({ length: 42 }, (_, i) => new Date(start + i * 86_400_000).toISOString().slice(0, 10));
+}
+
+/** A row's span on a timeline: start and end day (inclusive), or null without a date. */
+export function spanOf(value: Cell): { start: string; end: string } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof (value as DateValue).start !== "string") return null;
+  const d = value as DateValue;
+  const start = d.start.slice(0, 10);
+  const end = (d.end ?? d.start).slice(0, 10);
+  return end < start ? { start, end: start } : { start, end };
+}
+
+/** Days from a to b (YYYY-MM-DD). */
+export function daysBetween(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+}
+
+export function addDays(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 }
 
 /**
@@ -298,6 +396,9 @@ export function valueForGroup(prop: TableProp, group: Group, current: Cell): Cel
 
 /** A filter's value when it is first added: something sensible for its type. */
 export function defaultFilter(prop: TableProp): Filter {
+  if (prop.type === "relation") return { property: prop.id, op: "not_empty", value: null };
+  if (prop.type === "formula") return { property: prop.id, op: "contains", value: "" };
+  if (prop.type === "rollup") return defaultFilter({ ...prop, type: effectiveType(prop) });
   const op = OPS_FOR[prop.type][0];
   const value = prop.type === "checkbox" ? true
     : ["number", "currency", "percent"].includes(prop.type) ? 0
