@@ -449,4 +449,29 @@ That makes three alphas after B1, or B1 moves again if you want this first.
     Created / Failed, Whose account, Phone and Cyclone account relations, Notes; one table per phone and app.
 - **Glass:** Accounts is phones → installed apps (accounts and sign-up state first) → an app's accounts, its map page
   by page, Map the sign-up, and the sign-up table inline; the list of all accounts stays below.
-- **Not yet:** creating accounts from table rows (T7), the Verification desk (T8), profiles (T4).
+- **Not yet:** the Verification desk (T8), profiles (T4).
+
+**T7, Create accounts (alpha.82).** At the owner's request (2026-09-30), none of §6.3's pre-send checks, app block
+list or pacing caps for now; special cases are planned later. What stays: a person's step (code, CAPTCHA, selfie, ID)
+pauses the row for a person and is never solved; no device spoofing or evasion; passwords only in the vault.
+- **Gateway** (`command/signup.py`):
+  - `prepare` makes each Ready row's Cyclone account (or reuses the one from an earlier try);
+  - `create` starts one task per row (recipe `signup_run:<package>`, the row's phone, its account and vault item);
+  - at dispatch the phone gets `signupRun {package, values}` (the row's current values by field key, never a password);
+  - `sync` (every engine tick) writes Status and a Progress column from the task and the phone's `setup` progress;
+  - on success: the handle onto the account, and the row's Cyclone account link;
+  - `pause` (Paused; Ready starts again from the beginning, same account) and `cancel` (Failed), per row or table.
+- **Phone:**
+  - `AccountSetupPlan` puts the map and values in the prompt (password: `vault_fill`);
+  - `setup_page` (page, changed, check) and `setup_done` (created, handle, why) are offered only in this mode;
+  - `cc.status.setup` carries the progress;
+  - the final control is pressed without asking again: the press in Glass approved it.
+- **Glass** (`pages/createAccounts.ts`):
+  - Create accounts lists the Ready rows; confirming with the vault passphrase generates one password per account
+    into the vault (encrypted in the tab) and starts the runs;
+  - the tab seals each password to its phone when that task asks, then drops the key (after 15 minutes at most);
+  - Pause all, Cancel all.
+- **Not yet:**
+  - branches in a map;
+  - offering a re-map after drift (it is shown in Progress);
+  - the Verification desk (T8).
