@@ -8,7 +8,7 @@ import type { GlassContext } from "../app.js";
 import { loadApps, type PhoneApp } from "../services/apps.js";
 import { basisLabel, command, type CcAccount, type CcTask, type OwnerBasis } from "../services/command.js";
 import {
-  BASIS_CHOICES, CHECK_LABEL, KIND_LABEL, RECIPE, SIGNUP_STATE_LABEL, SIGNUP_STATE_TONE, accountAppRows, mapSummary, signupApi, tableColumns,
+  BASIS_CHOICES, CHECK_LABEL, KIND_LABEL, RECIPE, lastMappingTry, mappingDetail, SIGNUP_STATE_LABEL, SIGNUP_STATE_TONE, accountAppRows, mapSummary, signupApi, tableColumns,
   type AccountAppRow, type SignupMap,
 } from "../services/signup.js";
 import { el, setChildren } from "../ui/dom.js";
@@ -128,7 +128,7 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
       const [catalog, signups, all] = await Promise.all([
         full || !apps.length ? loadApps(ctx.client, device).then((c) => c.apps) : Promise.resolve(apps),
         signupApi.maps(ctx.client, device),
-        command.tasks(ctx.client, "open"),
+        command.tasks(ctx.client),
       ]);
       if (destroyed || mine !== seq) return;
       apps = catalog;
@@ -235,14 +235,33 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
     const box = card("ac-card");
     box.append(el("h3", "card-title", "Sign-up"));
     if (row.task) {
-      box.append(el("p", undefined, `The phone is mapping the sign-up now (${row.task.status === "needs_you" ? "it needs you" : row.task.status.replace("_", " ")}).`),
+      const task = row.task;
+      box.append(el("p", undefined, `Mapping the ${row.app.label} sign-up: ${mappingDetail(task)}`),
         el("p", "cc-hint", "It asks you for this first account's details, hands any code, CAPTCHA or ID check to you, and asks before it creates the account. Answer in Inbox or on the phone."));
       const inbox = actionButton("Open Inbox", { variant: "secondary", icon: "bell" });
       inbox.addEventListener("click", () => ctx.navigate({ name: "command", tab: "approvals" }));
+      const cancel = actionButton("Cancel mapping", { variant: "ghost", icon: "stop" });
+      cancel.addEventListener("click", async () => {
+        cancel.disabled = true;
+        try {
+          await command.cancelTask(ctx.client, task.id);
+          say(`Stopped mapping ${row.app.label}. You can start it again.`);
+        } catch (err) {
+          say((err as Error).message || "The mapping could not be cancelled.", "error");
+        }
+        await load(false);
+      });
       const actions = el("div", "cc-actions");
-      actions.append(inbox);
+      actions.append(inbox, cancel);
       box.append(actions);
       return box;
+    }
+    const lastTry = deviceId ? lastMappingTry(tasks, deviceId, row.packageName) : null;
+    if (!row.map && lastTry) {
+      const why = lastTry.cause || lastTry.run?.summary;
+      box.append(el("p", "cc-hint ac-last-try", lastTry.status === "succeeded"
+        ? `The last run finished without saving a map${why ? ` (${why})` : ""}. Map it again; answer the phone's questions so it can walk every page.`
+        : `Last try ${lastTry.status === "cancelled" ? "was cancelled" : "failed"}${why ? `: ${why}` : "."}`));
     }
     if (!row.map) {
       box.append(el("p", undefined, `Cyclone walks the ${row.app.label} sign-up once on this phone, creating your first account there, and remembers every page: the fields, their formats and the steps only you can do. After that, new accounts are rows in a table.`));

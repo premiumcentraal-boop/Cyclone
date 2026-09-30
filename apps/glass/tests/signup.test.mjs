@@ -129,7 +129,7 @@ test("Accounts: mapping a sign-up says whose account it is", async () => {
   button(view, "Map the sign-up").click();
   await flush();
   assert.deepEqual(started, [{ deviceId: "phone-a", package: "com.whatsapp", app: "WhatsApp", ownerBasis: "client" }]);
-  assert.match(view.element.textContent, /mapping the sign-up now/);
+  assert.match(view.element.textContent, /Mapping the WhatsApp sign-up: The phone is walking the sign-up now/);
   assert.match(view.element.textContent, /Mapping…/);
 });
 
@@ -143,4 +143,25 @@ test("Accounts: when the phone is away, the last maps show with a note", async (
   await flush();
   assert.match(view.element.textContent, /last maps it sent/);
   assert.match(view.element.textContent, /Sign-up mapped/);
+});
+
+test("Accounts: a stuck mapping says why, can be cancelled, and shows the last try", async () => {
+  installMiniDom();
+  let status = "waiting_device";
+  const cancelled = [];
+  const gateway = fakeGateway(routes({
+    "GET /v1/cc/tasks": () => ({ tasks: [{ id: "tsk_9", title: "Map the sign-up of WhatsApp", goal: "x", recipe: "signup_map:com.whatsapp",
+      deviceId: "phone-a", status, cause: status === "cancelled" ? "Cancelled from the Command Center." : "You have control of the phone.", createdAt: 5 }] }),
+    "POST /v1/cc/tasks/tsk_9/cancel": () => { cancelled.push(true); status = "cancelled"; return { id: "tsk_9", status: "cancelled" }; },
+  }));
+  const view = createCommandPage(ctx(gateway.fetch), "accounts");
+  mounted.push(view);
+  await flush();
+  appButton(view, "com.whatsapp").click();
+  assert.match(view.element.textContent, /You have control of the phone/);
+  button(view, "Cancel mapping").click();
+  await flush();
+  assert.equal(cancelled.length, 1);
+  assert.match(view.element.textContent, /Last try was cancelled: Cancelled from the Command Center/);
+  assert.ok(button(view, "Map the sign-up"), "it can be started again");
 });
