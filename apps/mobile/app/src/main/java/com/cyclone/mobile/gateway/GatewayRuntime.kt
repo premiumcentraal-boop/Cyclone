@@ -430,6 +430,10 @@ internal object GatewayDispatcher {
             GatewayV5CommandAdapter.install(context)
             GatewayV5CommandAdapter.dispatch(request.op, request.args)
         }
+        "profiles.list", "profiles.apps", "profiles.switch", "profiles.app" -> {
+            GatewayV5ProfilesAdapter.install(context)
+            GatewayV5ProfilesAdapter.dispatch(request.op, request.args)
+        }
         "signup.maps", "signup.forget" -> {
             GatewayV5SignupAdapter.install(context)
             GatewayV5SignupAdapter.dispatch(request.op, request.args)

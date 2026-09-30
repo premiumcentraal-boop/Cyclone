@@ -53,6 +53,10 @@ V5_OPS = frozenset({
     "manual.get",
     "signup.maps",
     "signup.forget",
+    "profiles.list",
+    "profiles.apps",
+    "profiles.switch",
+    "profiles.app",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -906,6 +910,9 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op in SIGNUP_OPS:
         _validate_signup_response(op, value, args)
         return value
+    if op in PROFILE_OPS:
+        _validate_profiles_response(op, value, args)
+        return value
     if op == "atlas.here":
         if set(value) != {"placeId", "roomId", "appVersion", "observedAt"}:
             raise _bad_knowledge("atlas.here")
@@ -1362,6 +1369,57 @@ def _setup_values(values: Any) -> dict[str, str]:
     return out
 
 
+PROFILE_OPS = frozenset({"profiles.list", "profiles.apps", "profiles.switch", "profiles.app"})
+PROFILE_ID = re.compile(r"^(main|Cyclone_[a-f0-9]{16})$")
+PROFILE_COLOR = re.compile(r"^#[0-9A-F]{8}$")
+
+
+def _profile_id(value: Any) -> str:
+    if not isinstance(value, str) or not PROFILE_ID.match(value):
+        raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "profileId is main or a Cyclone profile id.")
+    return value
+
+
+def _bad_profiles(message: str) -> DesktopRuntimeError:
+    return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android profiles result is malformed: {message}.")
+
+
+def _validate_profiles_response(op: str, value: dict[str, Any], args: dict[str, Any]) -> None:
+    """Plan 43 T4: profiles (labels, looks, which is in front) and a profile's apps (packages and labels only)."""
+    if op == "profiles.list":
+        if set(value) != {"profiles", "current"} or not isinstance(value["profiles"], list) or len(value["profiles"]) > 20:
+            raise _bad_profiles("list")
+        for p in value["profiles"]:
+            if not isinstance(p, dict) or set(p) != {"id", "label", "emoji", "color", "ready", "current", "inTrash"}:
+                raise _bad_profiles("profile keys")
+            if not PROFILE_ID.match(str(p["id"])) or not _short_text(p["label"], 40) or not _short_text(p["emoji"], 8, nullable=True):
+                raise _bad_profiles("profile identity")
+            if p["color"] is not None and not (isinstance(p["color"], str) and PROFILE_COLOR.match(p["color"])):
+                raise _bad_profiles("profile colour")
+            if not all(isinstance(p[k], bool) for k in ("ready", "current", "inTrash")):
+                raise _bad_profiles("profile facts")
+        if value["current"] is not None and not PROFILE_ID.match(str(value["current"])):
+            raise _bad_profiles("current")
+        return
+    if op == "profiles.apps":
+        if set(value) != {"apps", "available", "truncated"} or not isinstance(value["truncated"], bool):
+            raise _bad_profiles("apps")
+        for key in ("apps", "available"):
+            items = value[key]
+            if not isinstance(items, list) or len(items) > 500 or not all(
+                isinstance(a, dict) and set(a) == {"package", "label"} and SIGNUP_PACKAGE.match(str(a["package"])) and _short_text(a["label"], 80)
+                for a in items
+            ):
+                raise _bad_profiles(key)
+        return
+    if op == "profiles.switch":
+        if set(value) != {"switched", "current"} or value["switched"] is not True or value["current"] != args.get("profileId"):
+            raise _bad_profiles("switch")
+        return
+    if set(value) != {"done"} or value["done"] is not True:
+        raise _bad_profiles("app")
+
+
 SIGNUP_OPS = frozenset({"signup.maps", "signup.forget"})
 SIGNUP_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
 SIGNUP_KINDS = frozenset({"text", "first_name", "last_name", "full_name", "email", "phone", "username", "password", "birthday", "date",
@@ -1721,6 +1779,26 @@ class V5ContractService:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "package is an Android package name.")
         return self._call(device_id, "signup.forget", {"package": package})
 
+    # Plan 43 T4: the phone's profiles.
+
+    def profiles_list(self, device_id: str) -> dict[str, Any]:
+        return self._call(device_id, "profiles.list", {})
+
+    def profiles_apps(self, device_id: str, profile_id: str) -> dict[str, Any]:
+        return self._call(device_id, "profiles.apps", {"profileId": _profile_id(profile_id)})
+
+    def profiles_switch(self, device_id: str, profile_id: str) -> dict[str, Any]:
+        return self._call(device_id, "profiles.switch", {"profileId": _profile_id(profile_id)})
+
+    def profiles_app(self, device_id: str, profile_id: str, package: str, action: str) -> dict[str, Any]:
+        if _profile_id(profile_id) == "main":
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Profile A's apps are managed on the phone.")
+        if not isinstance(package, str) or not SIGNUP_PACKAGE.match(package) or package == "com.cyclone.mobile":
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "package is an Android package name, not Cyclone itself.")
+        if action not in ("install", "remove"):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "action is install or remove.")
+        return self._call(device_id, "profiles.app", {"profileId": profile_id, "package": package, "action": action})
+
     def manual_get(self, device_id: str, place_id: str, query: str | None = None) -> dict[str, Any]:
         """An app's manual (plan 36 §8): abilities with their paths, the self-quiz, scores and the manual as Markdown."""
         if not isinstance(place_id, str) or not KNOWLEDGE_PLACE_ID.match(place_id):
@@ -1879,6 +1957,18 @@ class V5ContractService:
             if args:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "signup.maps takes no arguments.")
             return self.signup_maps(device_id)
+        if op == "profiles.list":
+            if args:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "profiles.list takes no arguments.")
+            return self.profiles_list(device_id)
+        if op in ("profiles.apps", "profiles.switch"):
+            if set(args) != {"profileId"}:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, f"{op} takes profileId only.")
+            return self.profiles_apps(device_id, args["profileId"]) if op == "profiles.apps" else self.profiles_switch(device_id, args["profileId"])
+        if op == "profiles.app":
+            if set(args) != {"profileId", "package", "action"}:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "profiles.app takes profileId, package and action.")
+            return self.profiles_app(device_id, args["profileId"], args["package"], args["action"])
         if op == "signup.forget":
             if set(args) != {"package"}:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "signup.forget takes package only.")

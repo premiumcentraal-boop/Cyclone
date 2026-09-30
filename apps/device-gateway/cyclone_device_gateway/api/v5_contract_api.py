@@ -24,6 +24,25 @@ def create_v5_contract_router(runtime: Any, token: str) -> APIRouter:
     def apps_list(device_id: str):
         return _call(lambda: service.apps_list(device_id))
 
+    # Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
+    @router.get("/v1/devices/{device_id}/profiles", dependencies=[Depends(auth)])
+    def profiles_list(device_id: str):
+        return _call(lambda: service.profiles_list(device_id))
+
+    @router.get("/v1/devices/{device_id}/profiles/{profile_id}/apps", dependencies=[Depends(auth)])
+    def profiles_apps(device_id: str, profile_id: str):
+        return _call(lambda: service.profiles_apps(device_id, profile_id))
+
+    @router.post("/v1/devices/{device_id}/profiles/{profile_id}/switch", dependencies=[Depends(auth)])
+    def profiles_switch(device_id: str, profile_id: str):
+        return _call(lambda: service.profiles_switch(device_id, profile_id))
+
+    @router.post("/v1/devices/{device_id}/profiles/{profile_id}/apps", dependencies=[Depends(auth)])
+    def profiles_app(device_id: str, profile_id: str, body: dict[str, Any]):
+        if not isinstance(body, dict) or set(body) != {"package", "action"}:
+            raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": "Send {package, action: install|remove}."})
+        return _call(lambda: service.profiles_app(device_id, profile_id, body["package"], body["action"]))
+
     @router.get("/v1/devices/{device_id}/atlas/here", dependencies=[Depends(auth)])
     def atlas_here(device_id: str):
         return _call(lambda: service.atlas_here(device_id))

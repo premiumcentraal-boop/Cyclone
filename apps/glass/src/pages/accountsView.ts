@@ -16,6 +16,7 @@ import { actionButton, card, chip, emptyState, errorState, loadingState, searchI
 import { relativeTime } from "../ui/format.js";
 import { createTableBlock, type TableBlockView } from "../workspace/tableView.js";
 import { createAccountsPanel, type CreateAccountsPanel } from "./createAccounts.js";
+import { createProfilesBar } from "./profilesBar.js";
 
 const POLL_MS = 10_000;
 
@@ -52,18 +53,42 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
   let showTable = false;
   /** One Create accounts panel per sign-up table, kept while its passwords are being sent. */
   const panels = new Map<string, CreateAccountsPanel>();
+  /** Plan 43 T4: the chosen profile's apps (null = the whole phone, as Profile A sees it). */
+  let profilePackages: Set<string> | null = null;
+  const profileBar = createProfilesBar(ctx, say, (_profile, packages) => {
+    profilePackages = packages;
+    if (open && packages && !packages.has(open)) {
+      open = null;
+      closeTable();
+    }
+    if (state === "ready") {
+      renderList();
+      renderDetail();
+    }
+  });
 
   list.append(searchInput("Search apps", (value) => {
     query = value;
     renderList();
   }), results);
   layout.append(list, detail);
-  element.append(phones, note, layout);
+  element.append(phones, profileBar.element, note, layout);
 
-  const rows = (): AccountAppRow[] => (deviceId ? accountAppRows(apps, maps, accounts(), tasks, deviceId, query) : []);
+  /** The phone's apps, or the chosen profile's (apps the catalog doesn't know yet are listed by package). */
+  const visibleApps = (): PhoneApp[] => {
+    if (!profilePackages) return apps;
+    const known = apps.filter((a) => a.packageName && profilePackages!.has(a.packageName));
+    const seen = new Set(known.map((a) => a.packageName));
+    const extra = [...profilePackages].filter((p) => !seen.has(p)).map((p): PhoneApp => ({
+      placeId: `package:${p}`, kind: "package", label: p, packageName: p, origin: null, installed: true, installedVersion: null,
+      mapStatus: "unmapped", rooms: 0, doors: 0, lastVerifiedAt: null, needsRemap: false, personas: [], mappedVersions: [], scenarios: null,
+    }));
+    return [...known, ...extra];
+  };
+  const rows = (): AccountAppRow[] => (deviceId ? accountAppRows(visibleApps(), maps, accounts(), tasks, deviceId, query) : []);
   const openRow = (): AccountAppRow | null => {
     if (!open || !deviceId) return null;
-    return accountAppRows(apps, maps, accounts(), tasks, deviceId).find((r) => r.packageName === open) ?? null;
+    return accountAppRows(visibleApps(), maps, accounts(), tasks, deviceId).find((r) => r.packageName === open) ?? null;
   };
 
   function renderPhones(): void {
@@ -87,6 +112,7 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
 
   async function load(full: boolean): Promise<void> {
     renderPhones();
+    if (full) void profileBar.load(deviceId);
     if (!deviceId) {
       state = "ready";
       render();
@@ -369,6 +395,7 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
       destroyed = true;
       clearInterval(timer);
       closeTable();
+      profileBar.destroy();
       for (const panel of panels.values()) panel.destroy();
     },
   };

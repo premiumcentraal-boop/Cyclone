@@ -23,6 +23,8 @@ ALLOWED_OPS = {
     "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media",
     # Plan 43 T6: the sign-up maps the phone learned (schemas only), and forgetting one.
     "signup.maps", "signup.forget",
+    # Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
+    "profiles.list", "profiles.apps", "profiles.switch", "profiles.app",
     # Cyclone Marketplace: the phone's store of recipes and connections.
     "market.catalog", "market.install", "market.remove", "market.run",
     # Learn: one press per run turns what it saw and did into app knowledge on the phone.

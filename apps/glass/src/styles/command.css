@@ -169,3 +169,23 @@
 .ca-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: var(--text-sm); }
 .ca-row-error .muted { color: var(--danger); }
 .ca-status:empty { display: none; }
+
+/* Plan 43 (T4): a phone's profiles, switching from the PC, and a profile's apps. */
+.pf { display: flex; flex-direction: column; gap: 8px; }
+.pf[hidden] { display: none; }
+.pf-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-profile {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--text); font-size: var(--text-sm); cursor: pointer;
+}
+.pf-profile.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pf-dot { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; border-radius: 999px;
+  background: var(--surface-muted); font-size: 11px; }
+.pf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pf-actions .muted { font-size: var(--text-sm); }
+.pf-manager { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.pf-manager[hidden] { display: none; }
+.pf-title { margin: 4px 0 0; font-size: var(--text-sm); }
+.pf-apps { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; max-height: 40vh; overflow-y: auto; }
+.pf-app { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: var(--text-sm); }
+.pf-app .muted { font-family: var(--font-mono); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
