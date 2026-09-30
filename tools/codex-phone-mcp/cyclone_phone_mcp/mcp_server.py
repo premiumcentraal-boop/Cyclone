@@ -43,6 +43,7 @@ INSTRUCTIONS = (
     "sessionId / executionContext.sessionId aliases are accepted; do not invent default-foreground when session_id is missing. "
     "user_authorized is only an MCP intent acknowledgement and never bypasses Android policy. "
     "request_ai_control=true asks Companion to yield input; it never steals a locked phone and never bypasses Android policy. "
+    "PHONE_APP_BUSY means the phone is connected but Cyclone on it is still busy: wait about a second and retry the same call; it is not a disconnect. "
     "Do not expose secrets or use arbitrary shell/root/ADB commands."
 )
 

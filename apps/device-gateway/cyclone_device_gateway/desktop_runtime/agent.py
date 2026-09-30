@@ -26,6 +26,7 @@ from .layer2 import (
     layer2_error_from_execution,
     parse_layer2_error,
 )
+from . import phone_errors
 from .models import DesktopRuntimeError, RuntimeErrorCode, now_ms
 from .page_text import _compact_observation
 from .readiness import enrich_device_public
@@ -733,6 +734,8 @@ class DesktopAgentService:
             value = session.bridge().request(op, args, request_id=secrets.token_urlsafe(18))
             return value if isinstance(value, dict) else {"value": value}
         except BridgeOperationError as exc:
+            if exc.code == "PHONE_APP_BUSY":
+                raise phone_errors.busy() from exc
             mapping = {
                 "AUTH_REJECTED": RuntimeErrorCode.AUTH_REJECTED,
                 "CAPABILITY_UNAVAILABLE": RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
@@ -756,9 +759,10 @@ class DesktopAgentService:
             raise DesktopRuntimeError(
                 mapping.get(mapped or exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE),
                 f"Android Gateway rejected {op}.",
+                retryable=phone_errors.retryable(mapped or exc.code),
             ) from exc
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
-            raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, "Phone disconnected from Cyclone Gateway.", retryable=True) from exc
+            raise phone_errors.transport(exc) from exc
 
     def _require_ai_ownership(self, session: DeviceSession, request_ai_control: bool) -> None:
         owner = getattr(session, "input_owner", None)

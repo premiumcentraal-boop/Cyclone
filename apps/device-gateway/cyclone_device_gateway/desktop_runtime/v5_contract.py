@@ -8,6 +8,7 @@ from typing import Any
 
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from .fleet import DeviceFleetManager, DeviceSession
+from . import phone_errors
 from .models import DesktopRuntimeError, RuntimeErrorCode
 
 V5_CONTRACT_PROTOCOL = "cyclone.v5.run2.contract.v1"
@@ -2111,6 +2112,8 @@ class V5ContractService:
                 raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android V5 result must be an object.")
             return validate_android_response(op, value, args)
         except BridgeOperationError as exc:
+            if exc.code == "PHONE_APP_BUSY":
+                raise phone_errors.busy() from exc
             mapping = {
                 "AUTH_REJECTED": RuntimeErrorCode.AUTH_REJECTED,
                 "PROTOCOL_MISMATCH": RuntimeErrorCode.PROTOCOL_MISMATCH,
@@ -2134,10 +2137,7 @@ class V5ContractService:
             raise DesktopRuntimeError(
                 mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE),
                 f"Android rejected {op}.",
+                retryable=phone_errors.retryable(exc.code),
             ) from exc
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
-            raise DesktopRuntimeError(
-                RuntimeErrorCode.DEVICE_DISCONNECTED,
-                "Phone disconnected from Cyclone Gateway.",
-                retryable=True,
-            ) from exc
+            raise phone_errors.transport(exc) from exc

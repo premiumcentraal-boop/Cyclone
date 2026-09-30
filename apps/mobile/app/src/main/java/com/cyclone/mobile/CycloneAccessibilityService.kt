@@ -86,13 +86,12 @@ class CycloneAccessibilityService : AccessibilityService() {
             observationRevisions.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicLong() }.get(), profileId)
     }
 
-    private fun recordObservationEvent(event: AccessibilityEvent) {
-        val listed = windowsOnAllDisplays
+    private fun recordObservationEvent(event: AccessibilityEvent, listed: android.util.SparseArray<List<AccessibilityWindowInfo>>) {
         val owner = (0 until listed.size()).firstOrNull { i -> listed.valueAt(i).any { it.id == event.windowId } }
         val window = owner?.let { listed.valueAt(it).first { window -> window.id == event.windowId } }
         if (window?.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return
         if (window == null && event.packageName?.toString() == packageName &&
-            preferredForegroundRoot()?.packageName?.toString() != packageName) return
+            preferredForegroundRoot(listed.get(0).orEmpty())?.packageName?.toString() != packageName) return
         // A removed or unidentified window cannot safely be assigned to one display.
         val displays = owner?.let { listOf(listed.keyAt(it)) } ?: observationRevisions.keys.toList()
         displays.forEach { displayId ->
@@ -102,6 +101,8 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val PASTE_SETTLE_MS = 150L
+        /** How long the foreground task's package is reused between structural events. */
+        private const val HOST_TTL_MS = 1_000L
         @Volatile var instance: CycloneAccessibilityService? = null
             private set
     }
@@ -165,14 +166,23 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
-        runCatching { recordObservationEvent(event) }
+        // This runs on the main thread for every screen event (hundreds a second in a busy app): read Android's window
+        // list once per event, and resolve the foreground task's root (one call per window) only when the screen's
+        // structure changed. A freeze here is what the PC used to see as a lost phone (alpha 87).
+        val listed = runCatching { windowsOnAllDisplays }.getOrNull() ?: return
+        runCatching { recordObservationEvent(event, listed) }
+        val front = listed.get(0).orEmpty()
         // Background windows must not update the global foreground package, learning or UI state.
-        if (event.windowId != -1 && windowsOnAllDisplays.get(0).orEmpty().none { it.id == event.windowId }) return
+        if (event.windowId != -1 && front.none { it.id == event.windowId }) return
         try {
             val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() }
-            val eventWindow = windowsOnAllDisplays.get(0).orEmpty().firstOrNull { it.id == event.windowId }
-            val host = preferredForegroundRoot()
-            if (!TaskSurfaceWindows.eventBelongsToTask(eventWindow?.type, packageName.orEmpty(), host?.packageName?.toString())) return
+            val eventWindow = front.firstOrNull { it.id == event.windowId }
+            val structural = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            val refreshed = structural || hostStale(front)
+            val host = if (refreshed) preferredForegroundRoot(front).also { rememberHost(front, it) } else null
+            val hostPackage = if (refreshed) host?.packageName?.toString() else rememberedHostPackage
+            if (!TaskSurfaceWindows.eventBelongsToTask(eventWindow?.type, packageName.orEmpty(), hostPackage)) return
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 host?.packageName?.toString()?.let {
                     DeviceState.currentPackage = it
@@ -472,8 +482,21 @@ class CycloneAccessibilityService : AccessibilityService() {
             "chrome" in title || "webview" in cls || "web_view" in cls
     }
 
-    private fun preferredForegroundRoot(): AccessibilityNodeInfo? {
-        val listed = windowsOnAllDisplays.get(0).orEmpty()
+    // The foreground task's package from the last structural event, and the window layout it was read for.
+    @Volatile private var rememberedHostPackage: String? = null
+    private var rememberedHostWindows: List<Int> = emptyList()
+    private var rememberedHostAt = 0L
+
+    private fun hostStale(front: List<AccessibilityWindowInfo>): Boolean =
+        front.map { it.id } != rememberedHostWindows || android.os.SystemClock.uptimeMillis() - rememberedHostAt > HOST_TTL_MS
+
+    private fun rememberHost(front: List<AccessibilityWindowInfo>, host: AccessibilityNodeInfo?) {
+        rememberedHostPackage = host?.packageName?.toString()
+        rememberedHostWindows = front.map { it.id }
+        rememberedHostAt = android.os.SystemClock.uptimeMillis()
+    }
+
+    private fun preferredForegroundRoot(listed: List<AccessibilityWindowInfo> = windowsOnAllDisplays.get(0).orEmpty()): AccessibilityNodeInfo? {
         val active = rootInActiveWindow
         val selected = TaskSurfaceWindows.primary(listed.map { window ->
             TaskSurfaceWindows.Window(window.id, window.type, window.root?.packageName?.toString().orEmpty(),

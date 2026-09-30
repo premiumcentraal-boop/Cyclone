@@ -180,6 +180,9 @@ class DesktopRuntime:
         self.fleet.set_source_resolver(self.virtual_registry.metadata_for_serial)
         self.workspace = FleetWorkspaceStore(settings.runtime_dir / "fleet-workspace.json")
         self.live_diagnostics = FleetDiagnosticSupervisor(self.fleet)
+        # Alpha 87: keep Cyclone on each phone current, and know why it stopped (health reports, freezes).
+        from ..phone_care.service import PhoneCareService
+        self.care = PhoneCareService(self.fleet, settings.runtime_dir / "phone-care", diagnostics=self.live_diagnostics)
         self.pairing = PairingCoordinator(self.fleet, self.live_diagnostics)
         self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
@@ -243,8 +246,10 @@ class DesktopRuntime:
         self.live_diagnostics.start()
         self.trust.start()
         self.command.start()
+        self.care.start()
 
     def stop(self) -> None:
+        self.care.stop()
         self.command.stop()
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
         self.trust.stop()
@@ -798,6 +803,10 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     from ..command.api import create_command_router, create_oauth_callback_router
     app.include_router(create_command_router(desktop, settings.token))
     app.include_router(create_oauth_callback_router(desktop))
+    # Alpha 87: phone care (update the phone's Cyclone, why it stopped). Test doubles without it skip the routes.
+    if getattr(desktop, "care", None) is not None:
+        from ..phone_care.api import create_phone_care_router
+        app.include_router(create_phone_care_router(desktop.care, settings.token))
     # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
     app.state.glass_codes = LaunchCodes()
     app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))

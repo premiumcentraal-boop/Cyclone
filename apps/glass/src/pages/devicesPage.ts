@@ -20,6 +20,7 @@ import { actionButton, chip, emptyState, pageHeader, type Tone } from "../ui/com
 import { el, setChildren } from "../ui/dom.js";
 import { icon } from "../ui/icons.js";
 import { deviceGate } from "./deviceGate.js";
+import { createPhoneCareView, type PhoneCareDeps, type PhoneCareView } from "./phoneCareView.js";
 import type { GlassPage } from "./page.js";
 
 type Flow =
@@ -34,6 +35,8 @@ type Flow =
 export interface DevicesPageDeps {
   now(): number;
   sleep(ms: number): Promise<void>;
+  /** Phone care timing (tests pass a controlled clock). */
+  care?: PhoneCareDeps;
 }
 
 const defaultDeps: DevicesPageDeps = {
@@ -46,6 +49,16 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
   let destroyed = false;
   let scanning = false;
   const flows = new Map<string, Flow>();
+  // One phone care view per reachable phone, kept across renders so its state and polling survive.
+  const cares = new Map<string, PhoneCareView>();
+  const careFor = (device: GlassDevice): HTMLElement => {
+    let view = cares.get(device.id);
+    if (!view) {
+      view = createPhoneCareView(ctx.client, device.id, deps.care);
+      cares.set(device.id, view);
+    }
+    return view.element;
+  };
   const element = el("div", "page page-devices");
   const header = el("div");
   const body = el("div", "devices-body");
@@ -132,6 +145,13 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
     const available = ctx.devices.filter((device) => !device.paired && reachable(device));
     const unreachable = ctx.devices.filter((device) => !device.paired && !reachable(device));
 
+    const listed = new Set([...connected, ...available].map((device) => device.id));
+    for (const [id, view] of cares) {
+      if (!listed.has(id)) {
+        view.destroy();
+        cares.delete(id);
+      }
+    }
     const sections: HTMLElement[] = [];
     if (connected.length) sections.push(section("Connected", connected.map(connectedCard)));
     if (available.length) sections.push(section("Ready to connect", available.map(availableCard)));
@@ -156,6 +176,7 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
     const status = readiness.ready ? "Connected" : readiness.reason === "disconnected" ? "Phone offline" : readiness.reason === "needs-update" ? "Update Cyclone" : "Reconnecting";
     const card = deviceCard(device, chip(status, tone));
     if (!readiness.ready) card.append(el("p", "device-problem", readiness.message));
+    card.append(careFor(device));
 
     const actions = el("div", "device-actions");
     if (flow?.step === "confirm-disconnect") {
@@ -193,6 +214,8 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
   function availableCard(device: GlassDevice): HTMLElement {
     const flow = flows.get(device.id);
     const card = deviceCard(device, chip("Not connected", "neutral"));
+    // An out-of-date phone app can be updated before connecting (it may be why connecting fails).
+    card.append(careFor(device));
     if (!flow || flow.step === "declined" || flow.step === "expired" || flow.step === "failed") {
       const actions = el("div", "device-actions");
       const go = actionButton(flow ? "Try again" : "Connect", { icon: "plug", variant: "primary" });
@@ -272,6 +295,8 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
     destroy() {
       destroyed = true;
       flows.clear();
+      for (const view of cares.values()) view.destroy();
+      cares.clear();
     },
   };
 }

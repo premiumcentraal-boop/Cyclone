@@ -117,6 +117,8 @@ class RuntimeErrorCode(StrEnum):
     STALE_WORKSPACE = "STALE_WORKSPACE"
     QUEUE_EMPTY = "QUEUE_EMPTY"
     USER_UNVERIFIED = "USER_UNVERIFIED"
+    # Alpha 87: the phone is alive but its Cyclone app is still busy (not a lost connection).
+    PHONE_APP_BUSY = "PHONE_APP_BUSY"
 
 
 class DesktopRuntimeError(RuntimeError):
