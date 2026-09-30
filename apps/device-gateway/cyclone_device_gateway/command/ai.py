@@ -186,6 +186,18 @@ TOOLS: dict[str, tuple[str, str, dict[str, Any]]] = {
                                 ["title", "goal", "schedule"])),
     "run_routine": ("phone", "Propose running a routine now.", _schema({"routineId": _S}, ["routineId"])),
     "pause_routine": ("phone", "Propose pausing or resuming a routine.", _schema({"routineId": _S, "paused": {"type": "boolean"}}, ["routineId", "paused"])),
+    # Plan 43 (T3): tables and their buttons, for agents too. Personal columns are masked; a press is a proposal.
+    "list_tables": ("read", "The owner's tables: id, title, properties (name, type, options) and buttons.", _schema({}, [])),
+    "query_table": ("read", "A table's rows as a view shows them (filters and sorts computed), values as text. Personal columns are hidden.",
+                    _schema({"tableId": _S, "viewId": _S, "query": {"type": "string", "description": "Words to find in the rows."},
+                             "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, ["tableId"])),
+    "create_row": ("workspace", "Add a row. cells: {Property name: value}; choices by option name, dates YYYY-MM-DD, links by row id.",
+                   _schema({"tableId": _S, "cells": {"type": "object"}}, ["tableId", "cells"])),
+    "update_row": ("workspace", "Change some of a row's cells, by property name.", _schema({"tableId": _S, "rowId": _S, "cells": {"type": "object"}},
+                                                                                           ["tableId", "rowId", "cells"])),
+    "press_button": ("phone", "Propose pressing a row's button (it may start phone work).",
+                     _schema({"tableId": _S, "rowId": _S, "button": {"type": "string", "description": "The button property's name or id."}},
+                             ["tableId", "rowId", "button"])),
 }
 
 
@@ -716,6 +728,11 @@ class AiStore:
             "create_routine": lambda: f"Routine “{str(args.get('title', ''))[:60]}”",
             "run_routine": lambda: "Run a routine now",
             "pause_routine": lambda: "Resume a routine" if args.get("paused") is False else "Pause a routine",
+            "list_tables": lambda: "Read the tables",
+            "query_table": lambda: "Read a table",
+            "create_row": lambda: "Add a row",
+            "update_row": lambda: "Change a row",
+            "press_button": lambda: f"Press “{str(args.get('button', ''))[:40]}”",
         }
         return labels.get(name, lambda: f"Unknown tool {name[:40]}")()
 
@@ -801,6 +818,26 @@ class AiStore:
         if name == "list_connections":
             return {"connections": [{"id": x["id"], "name": x["name"], "kind": x["kind"], "status": x["status"], "allowedTools": x["allowed"]}
                                     for x in c.connections.list()]}
+        if name == "list_tables":
+            out = []
+            for meta in c.tables.list():
+                table = c.tables.get(meta["id"])
+                out.append({"id": table["id"], "title": table["title"], "rows": meta["rows"],
+                            "views": [{"id": v["id"], "name": v["name"], "layout": v["layout"]} for v in table["views"]],
+                            "properties": [{"name": p["name"], "type": p["type"], **({"options": [o["name"] for o in p["config"].get("options", [])]}
+                                                                                   if p["config"].get("options") else {}),
+                                            **({"personal": True} if p["config"].get("personal") else {}),
+                                            **({"button": p["config"]["label"]} if p["type"] == "button" else {})}
+                                           for p in table["properties"]]})
+            return {"tables": out}
+        if name == "query_table":
+            from .tables import _shown
+            data = c.tables.rows(args["tableId"], args.get("viewId"), args.get("query"), personal=False)
+            props = [p for p in data["table"]["properties"] if not p["config"].get("personal")]
+            limit = args.get("limit") or 30
+            return {"table": data["table"]["title"], "view": data["view"]["name"], "total": data["total"],
+                    "rows": [{"id": r["id"], **{p["name"]: _shown(p, r["cells"].get(p["id"]), data["links"]) for p in props}}
+                             for r in data["rows"][:limit]]}
         if name == "list_approvals":
             return {"waiting": [{"title": a["title"], "kind": a["kind"], "text": openapi.hide_secrets(a["text"])[:300], "deviceId": a["deviceId"]}
                                 for a in c.list_approvals()]}
@@ -951,6 +988,23 @@ class AiStore:
             if args.get("accountId") is not None and self._lookup("account", args["accountId"]) is None:
                 raise CommandError("There is no account with that id; use list_accounts.")
             return f"Create the routine “{title}” ({schedules.describe(spec)})", goal
+        if name in ("create_row", "update_row"):
+            table = self._c.tables.get(args["tableId"]) if isinstance(args.get("tableId"), str) else None
+            if table is None:
+                raise CommandError("No such table; use list_tables.")
+            cells = self._agent_cells(table, args.get("cells"))
+            if name == "update_row":
+                self._c.tables.get_row(table["id"], args.get("rowId"))
+            names = {p["id"]: p["name"] for p in table["properties"]}
+            what = ", ".join(names[k] for k in cells)
+            return (f"Add a row to “{table['title']}”" if name == "create_row" else f"Change {what} in “{table['title']}”"), what
+        if name == "press_button":
+            table = self._c.tables.get(args["tableId"]) if isinstance(args.get("tableId"), str) else None
+            if table is None:
+                raise CommandError("No such table; use list_tables.")
+            button = self._button(table, args.get("button"))
+            self._c.tables.get_row(table["id"], args.get("rowId"))
+            return f"Press “{button['config']['label']}” in “{table['title']}”", ""
         if name in ("run_routine", "pause_routine"):
             routine = self._c.get_routine(args.get("routineId")) if isinstance(args.get("routineId"), str) else None
             if routine is None:
@@ -1055,7 +1109,57 @@ class AiStore:
         if name == "pause_routine":
             routine = self._c.update_routine(args["routineId"], {"paused": args["paused"]})
             return {"routineId": routine["id"], "paused": routine["paused"]}
+        if name == "create_row":
+            table = self._c.tables.get(args["tableId"])
+            row = self._c.tables.create_row(table["id"], {"cells": self._agent_cells(table, args["cells"])}, actor=actor)
+            return {"rowId": row["id"]}
+        if name == "update_row":
+            table = self._c.tables.get(args["tableId"])
+            row = self._c.tables.update_row(table["id"], args["rowId"], {"cells": self._agent_cells(table, args["cells"])}, actor=actor)
+            return {"rowId": row["id"]}
+        if name == "press_button":
+            table = self._c.tables.get(args["tableId"])
+            button = self._button(table, args["button"])
+            pressed = self._c.buttons.press(table["id"], args["rowId"], button["id"], actor=actor)
+            return {"state": pressed["state"], "tasks": pressed["tasks"]}
         raise CommandError(f"There is no tool {name}.")
+
+    def _button(self, table: dict[str, Any], name: Any) -> dict[str, Any]:
+        button = next((p for p in table["properties"] if p["type"] == "button" and (p["id"] == name or str(name).lower() in
+                                                                                  (p["name"].lower(), p["config"]["label"].lower()))), None)
+        if button is None:
+            raise CommandError("That table has no such button; use list_tables.")
+        return button
+
+    def _agent_cells(self, table: dict[str, Any], cells: Any) -> dict[str, Any]:
+        """{Property name: value} from a model -> {property id: cell}. Choices by name, dates as YYYY-MM-DD. Personal
+        columns are the owner's to fill."""
+        from .tables import COMPUTED
+        if not isinstance(cells, dict) or not cells or len(cells) > 30:
+            raise CommandError("cells is {Property name: value}, 1..30 of them.")
+        by_name = {p["name"].lower(): p for p in table["properties"]}
+        out: dict[str, Any] = {}
+        for name, value in cells.items():
+            prop = by_name.get(str(name).lower())
+            if prop is None:
+                raise CommandError(f"“{table['title']}” has no property “{name}”; use list_tables.")
+            if prop["type"] in COMPUTED:
+                raise CommandError(f"{prop['name']} is filled in by Cyclone.")
+            if prop["config"].get("personal"):
+                raise CommandError(f"{prop['name']} is personal; the owner fills it.")
+            if isinstance(value, str):
+                _text_arg({"v": value}, "v", 2000, required=False)
+            if prop["type"] in ("select", "status") and isinstance(value, str):
+                value = next((o["id"] for o in prop["config"].get("options", []) if o["name"].lower() == value.lower()), value)
+            elif prop["type"] == "multi_select" and isinstance(value, list):
+                ids = {o["name"].lower(): o["id"] for o in prop["config"].get("options", [])}
+                value = [ids.get(str(v).lower(), v) for v in value]
+            elif prop["type"] == "date" and isinstance(value, str):
+                value = {"start": value}
+            elif prop["type"] == "relation" and isinstance(value, str):
+                value = [value]
+            out[prop["id"]] = value
+        return out
 
     # ------------------------------------------------------------------ proposals
 

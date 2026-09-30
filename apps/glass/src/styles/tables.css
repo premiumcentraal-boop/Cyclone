@@ -296,3 +296,31 @@
 .tb-list-row:hover { background: var(--ws-hover); }
 .tb-list-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tb-list-meta { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; color: var(--ws-muted); font-size: 13px; }
+
+/* Plan 43 (T3): action buttons in a row, and their latest run. */
+.tb-button-cell { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tb-button {
+  padding: 2px 10px; border: 1px solid transparent; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+  background: var(--tb-purple-bg); color: var(--tb-purple-fg);
+}
+.tb-button:disabled { opacity: 0.55; cursor: default; }
+.tb-button-default, .tb-button-gray { background: var(--tb-gray-bg); color: var(--tb-gray-fg); }
+.tb-button-brown { background: var(--tb-brown-bg); color: var(--tb-brown-fg); }
+.tb-button-orange { background: var(--tb-orange-bg); color: var(--tb-orange-fg); }
+.tb-button-yellow { background: var(--tb-yellow-bg); color: var(--tb-yellow-fg); }
+.tb-button-green { background: var(--tb-green-bg); color: var(--tb-green-fg); }
+.tb-button-blue { background: var(--tb-blue-bg); color: var(--tb-blue-fg); }
+.tb-button-pink { background: var(--tb-pink-bg); color: var(--tb-pink-fg); }
+.tb-button-red { background: var(--tb-red-bg); color: var(--tb-red-fg); }
+.tb-button:not(:disabled):hover { filter: brightness(0.95); }
+.tb-run { font-size: 11px; color: var(--text-muted, #6b6a66); }
+.tb-run-done, .tb-run-updated { color: var(--tb-green-fg); }
+.tb-run-failed, .tb-run-cancelled { color: var(--tb-red-fg); }
+.tb-run-needs_you { color: var(--tb-orange-fg); }
+.tb-button-editor { display: flex; flex-direction: column; gap: 6px; min-width: 300px; }
+.tb-button-actions { display: flex; flex-direction: column; gap: 6px; }
+.tb-button-action { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; padding: 6px; border: 1px solid var(--border, #e3e2de); border-radius: 6px; }
+.tb-button-action > .tb-select { grid-column: 1; }
+.tb-button-action > .tb-icon-btn { grid-column: 2; grid-row: 1; }
+.tb-button-fields { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+.tb-field { display: flex; flex-direction: column; gap: 2px; }

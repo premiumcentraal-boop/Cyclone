@@ -8,9 +8,9 @@ import type { GatewayClient } from "./gateway.js";
 
 export type PropType =
   | "title" | "text" | "number" | "currency" | "percent" | "date" | "select" | "multi_select" | "status" | "checkbox"
-  | "email" | "url" | "phone_number" | "created_time" | "edited_time" | "relation" | "rollup" | "formula";
+  | "email" | "url" | "phone_number" | "created_time" | "edited_time" | "relation" | "rollup" | "formula" | "button";
 export const PROP_TYPES: readonly PropType[] = ["title", "text", "number", "currency", "percent", "date", "select", "multi_select", "status",
-  "checkbox", "email", "url", "phone_number", "created_time", "edited_time", "relation", "rollup", "formula"];
+  "checkbox", "email", "url", "phone_number", "created_time", "edited_time", "relation", "rollup", "formula", "button"];
 export type OptionColor = "default" | "gray" | "brown" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink" | "red";
 export const COLORS: readonly OptionColor[] = ["default", "gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"];
 export type StatusGroup = "todo" | "doing" | "done";
@@ -36,6 +36,8 @@ export interface PropConfig {
   relation?: string; property?: string | null; fn?: RollupFn; resultType?: "number" | "date" | "text";
   /** Formulas. */
   expression?: string;
+  /** Plan 43 T3, buttons: the label, colour, what it does, where it runs, and what happens after. */
+  label?: string; color?: OptionColor; actions?: ButtonAction[]; runOn?: RunOn; then?: ButtonThen;
 }
 export interface TableProp { id: string; name: string; type: PropType; config: PropConfig; position: number }
 export interface Filter { property: string; op: string; value: unknown }
@@ -49,7 +51,23 @@ export interface TableView { id: string; name: string; layout: TableLayout; conf
 export interface TableMeta { id: string; title: string; icon: string; description: string; version: number; updatedAt: number; rows: number }
 export interface Table extends TableMeta { properties: TableProp[]; views: TableView[]; archivedAt: number | null }
 export type DateValue = { start: string; end?: string };
-export type Cell = string | number | boolean | string[] | DateValue | null;
+export type Cell = string | number | boolean | string[] | DateValue | ButtonCell | null;
+/** A button's actions (plan 43 T3). */
+export type ButtonAction =
+  | { do: "routine"; routineId: string }
+  | { do: "prompt"; prompt: string }
+  | { do: "skill"; skill: string; prompt: string }
+  | { do: "update"; cells: Record<string, unknown> }
+  | { do: "open"; url: string };
+export type RunOn = { kind: "any" } | { kind: "phone"; deviceId: string } | { kind: "row"; propId: string };
+export interface ButtonThen { success?: Record<string, unknown>; failure?: Record<string, unknown>; summary?: string }
+/** A button cell: its latest run for the row. */
+export interface ButtonCell { state: string; label: string; at: number; taskIds: string[]; summary: string }
+export const BUTTON_ACTIONS: ReadonlyArray<{ id: ButtonAction["do"]; label: string }> = [
+  { id: "prompt", label: "Ask a phone (prompt)" }, { id: "routine", label: "Run a routine" }, { id: "skill", label: "Run a saved skill" },
+  { id: "update", label: "Set a property" }, { id: "open", label: "Open a link" },
+];
+export interface PressResult { runId: string; state: string; tasks: string[]; open: string[] }
 export interface TableRow { id: string; cells: Record<string, Cell>; version: number; createdAt: number; updatedAt: number; hasPage: boolean }
 export interface Group { key: string | boolean | null; name: string; color: OptionColor; rowIds: string[] }
 /** What a relation cell points at, by id: its label and where it lives (a table id or sys:…). */
@@ -62,12 +80,14 @@ export const TYPE_LABEL: Record<PropType, string> = {
   title: "Title", text: "Text", number: "Number", currency: "Currency", percent: "Percent", date: "Date", select: "Select",
   multi_select: "Multi-select", status: "Status", checkbox: "Checkbox", email: "Email", url: "URL", phone_number: "Phone",
   created_time: "Created time", edited_time: "Edited time", relation: "Relation", rollup: "Rollup", formula: "Formula",
+  button: "Button",
 };
 export const TYPE_ICON: Record<PropType, string> = {
   title: "Aa", text: "≡", number: "#", currency: "€", percent: "%", date: "📅", select: "⌄", multi_select: "☰", status: "◐",
   checkbox: "☑", email: "@", url: "↗", phone_number: "☎", created_time: "🕓", edited_time: "🕓", relation: "↗", rollup: "Σ", formula: "ƒ",
+  button: "▶",
 };
-export const COMPUTED: readonly PropType[] = ["created_time", "edited_time", "rollup", "formula"];
+export const COMPUTED: readonly PropType[] = ["created_time", "edited_time", "rollup", "formula", "button"];
 const TEXT_OPS = ["contains", "not_contains", "is", "is_not", "starts_with", "empty", "not_empty"];
 const NUMBER_OPS = ["eq", "ne", "gt", "lt", "gte", "lte", "empty", "not_empty"];
 const DATE_OPS = ["is", "before", "after", "on_or_before", "on_or_after", "empty", "not_empty"];
@@ -79,6 +99,7 @@ export const OPS_FOR: Record<PropType, string[]> = {
   date: DATE_OPS, created_time: DATE_OPS, edited_time: DATE_OPS,
   relation: ["contains", "not_contains", "empty", "not_empty"], rollup: NUMBER_OPS,
   formula: ["contains", "is", "eq", "gt", "lt", "gte", "lte", "empty", "not_empty"],
+  button: [],
 };
 
 /** The type a filter treats a property as: a rollup by what it works out to. */
@@ -121,7 +142,31 @@ function parseProp(raw: unknown): TableProp {
   if (typeof c.property === "string") config.property = c.property;
   if (ROLLUP_FNS.includes(c.fn as RollupFn)) config.fn = c.fn as RollupFn;
   if (c.resultType === "number" || c.resultType === "date" || c.resultType === "text") config.resultType = c.resultType;
+  if (r.type === "button") {
+    config.label = str(c.label, "Run");
+    config.color = oneOf(c.color, COLORS, "purple");
+    config.actions = list(c.actions).map(parseAction).filter((a): a is ButtonAction => a !== null);
+    const on = obj(c.runOn);
+    config.runOn = on.kind === "phone" ? { kind: "phone", deviceId: str(on.deviceId) } : on.kind === "row" ? { kind: "row", propId: str(on.propId) } : { kind: "any" };
+    const then = obj(c.then);
+    config.then = {};
+    if (then.success && typeof then.success === "object") config.then.success = obj(then.success);
+    if (then.failure && typeof then.failure === "object") config.then.failure = obj(then.failure);
+    if (typeof then.summary === "string") config.then.summary = then.summary;
+  }
   return { id: str(r.id), name: str(r.name), type: oneOf(r.type, PROP_TYPES, "text"), config, position: num(r.position) };
+}
+
+function parseAction(raw: unknown): ButtonAction | null {
+  const r = obj(raw);
+  switch (r.do) {
+    case "routine": return { do: "routine", routineId: str(r.routineId) };
+    case "prompt": return { do: "prompt", prompt: str(r.prompt) };
+    case "skill": return { do: "skill", skill: str(r.skill), prompt: str(r.prompt) };
+    case "update": return { do: "update", cells: obj(r.cells) };
+    case "open": return { do: "open", url: str(r.url) };
+    default: return null;
+  }
 }
 
 function parseView(raw: unknown): TableView {
@@ -160,6 +205,9 @@ function parseCell(raw: unknown): Cell {
   if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === "string");
   const o = obj(raw);
   if (typeof o.start === "string") return typeof o.end === "string" ? { start: o.start, end: o.end } : { start: o.start };
+  if (typeof o.state === "string") {
+    return { state: o.state, label: str(o.label, o.state), at: num(o.at), taskIds: list(o.taskIds).map((t) => str(t)), summary: str(o.summary) };
+  }
   return null;
 }
 
@@ -246,6 +294,11 @@ export const tablesApi = {
       const o = obj(i);
       return { id: str(o.id), label: str(o.label, "Untitled"), tableId: str(o.tableId) };
     }),
+  /** Plan 43 T3: press a row's button. It only starts ordinary tasks; the phone still asks before anything serious. */
+  press: async (client: GatewayClient, id: string, row: string, prop: string): Promise<PressResult> => {
+    const r = obj(await client.post(`${base(id)}/rows/${enc(row)}/buttons/${enc(prop)}`));
+    return { runId: str(r.runId), state: str(r.state), tasks: list(r.tasks).map((t) => str(t)), open: list(r.open).map((u) => str(u)).filter((u) => /^https?:\/\//.test(u)) };
+  },
   exportUrl: (id: string, view: string | null) => `${base(id)}/export.csv${view ? `?view=${enc(view)}` : ""}`,
 };
 
@@ -301,6 +354,7 @@ export function cellText(prop: TableProp, value: Cell): string {
     case "number": case "currency": case "percent": return typeof value === "number" ? formatNumber(prop, value) : "";
     case "relation": return (Array.isArray(value) ? value : []).length ? `${(value as string[]).length} linked` : "";
     case "rollup": case "formula": return computedText(prop, value);
+    case "button": return typeof value === "object" && value && !Array.isArray(value) ? str((value as { label?: unknown }).label) : "";
     default: return String(value);
   }
 }
