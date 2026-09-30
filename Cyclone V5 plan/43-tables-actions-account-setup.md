@@ -528,3 +528,10 @@ pauses the row for a person and is never solved; no device spoofing or evasion; 
     device);
   - Profiles as rows under Phones in tables;
   - filtering work by profile.
+
+**Fix, sign-up mapping you can see and stop (alpha.85):**
+- **Glass** (`pages/accountsView.ts`, `services/signup.ts`): while a mapping runs, Accounts says what it is doing
+  (waiting its turn, waiting for the phone and why, working, or waiting for your answer in Inbox) and offers
+  **Cancel mapping** and **Open Inbox**; after a cancelled or failed try it shows the cause and **Map it again**.
+- **Phone** (`MindMissions.startAssigned`): a mapping or Account Setup run never starts behind another task on a
+  background screen; it takes the front or answers `ASK_BUSY`, and the PC waits and retries.
