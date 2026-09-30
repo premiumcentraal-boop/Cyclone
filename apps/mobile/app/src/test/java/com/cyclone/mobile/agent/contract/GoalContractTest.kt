@@ -279,9 +279,12 @@ class GoalContractTest {
         val contract = GoalContractCompiler.compile(goal)
         val alarm = contract.requirements.single { it.kind == GoalRequirementKind.ALARM_SET }
         assertFalse(contract.requirements.any { it.kind == GoalRequirementKind.GENERIC_SEMANTIC_EVIDENCE })
+        // The enabled alarm already on the list is an hour after the one asked for, so the test holds at any time of day.
+        val (h, m) = alarm.value!!.split(":").map { it.toInt() }
+        val other = "%02d:%02d".format((h + 1) % 24, m)
         val listed = page("com.google.android.deskclock", "Alarms", listOf(
             control("Alarm Monday to Friday 08:30 Alarm is currently disabled.", "button"),
-            control("Alarm Sunday 09:00 Alarm is currently enabled.", "button"),
+            control("Alarm Sunday $other Alarm is currently enabled.", "button"),
             control("Alarm Not scheduled 12:10 Alarm is currently disabled.", "button"),
             control("Alarms", "tab"),
         ))
