@@ -31,6 +31,7 @@ import { actionButton, card, chip, emptyState, errorState, loadingState, pageHea
 import { relativeTime } from "../ui/format.js";
 import type { GlassPage } from "./page.js";
 import { createVaultView, type VaultView } from "./vaultView.js";
+import { createAccountsView, type AccountsView } from "./accountsView.js";
 import { vaultApi } from "../services/vault.js";
 import { checkGoalRefs, createConnectionsView, createMakeEditor, type ConnectionsView } from "./connectionsView.js";
 import { TASK_GROUPS, renderRows, taskRow } from "../workspace/views.js";
@@ -61,7 +62,7 @@ const INFO: Record<CommandTab, [string, string, string | null]> = {
   tasks: ["Tasks", "Work a phone does once: now, at a time, or after connection steps.", "New task"],
   routines: ["Routines", "Tasks on a schedule. A missed time is skipped, never replayed.", "New routine"],
   results: ["Results", "Every run, what happened and why.", null],
-  accounts: ["Accounts", "The accounts your phones sign in to. Never their passwords.", "New account"],
+  accounts: ["Accounts", "Your phones, their apps and the accounts in each. Map an app's sign-up once; new accounts become table rows.", "New account"],
   vault: ["Vault", "Passwords sealed in your browser. This PC keeps only ciphertext.", null],
   connections: ["Connections", "MCP servers, APIs and programs Cyclone may call for your tasks.", null],
 };
@@ -190,6 +191,8 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
 
   let vaultView: VaultView | null = null;
   let connectionsView: ConnectionsView | null = null;
+  let accountsBrowser: AccountsView | null = null;
+  const accountsHost = el("div", "ac-all");
 
   function renderBody(): void {
     // The vault manages itself (its own loading, locking and forms); polling never re-renders it.
@@ -201,6 +204,18 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     if (tab === "connections") {
       connectionsView ??= createConnectionsView(ctx, say);
       if (body.firstChild !== connectionsView.element) setChildren(body, connectionsView.element);
+      return;
+    }
+    // Plan 43 (T5 + T6): phone → apps → accounts manages itself; the poll only redraws the list of all accounts.
+    if (tab === "accounts") {
+      accountsBrowser ??= createAccountsView(ctx, () => data.accounts, say);
+      if (body.firstChild !== accountsBrowser.element) setChildren(body, accountsBrowser.element, accountsHost);
+      if (!loaded) setChildren(accountsHost, loadingState("Loading accounts…"));
+      else if (error) setChildren(accountsHost, errorState("The Command Center is not reachable", error, () => void load()));
+      else {
+        setChildren(accountsHost, el("h2", "ac-all-title", "All accounts"), accountsView());
+        accountsBrowser.refresh();
+      }
       return;
     }
     if (!loaded) {
@@ -761,11 +776,13 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     destroy() {
       vaultView?.destroy();
       connectionsView?.destroy();
+      accountsBrowser?.destroy();
       destroyed = true;
       clearInterval(timer);
     },
     update(next) {
       devices = next.devices;
+      accountsBrowser?.update(next.devices);
     },
   };
 }

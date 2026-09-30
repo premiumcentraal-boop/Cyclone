@@ -291,6 +291,23 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
                             headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
     # Plan 43 (T1): tables. Typed cells only, no secrets, views computed here, every change kept, trash first.
+    # Plan 43 (T5 + T6): accounts by phone and app, and the sign-ups each phone mapped.
+    @router.get("/v1/cc/signup/maps", dependencies=[Depends(auth)])
+    def signup_maps(deviceId: str = Query(max_length=120)):
+        return call(lambda: cc().signup.maps(deviceId))
+
+    @router.post("/v1/cc/signup/map", dependencies=[Depends(auth)])
+    def signup_map(body: dict[str, Any]):
+        return call(lambda: cc().signup.map_signup(body_of(body)))
+
+    @router.post("/v1/cc/signup/forget", dependencies=[Depends(auth)])
+    def signup_forget(body: dict[str, Any]):
+        return call(lambda: cc().signup.forget(body_of(body)))
+
+    @router.post("/v1/cc/signup/table", dependencies=[Depends(auth)])
+    def signup_table(body: dict[str, Any]):
+        return call(lambda: cc().signup.make_table(body_of(body)))
+
     @router.get("/v1/cc/tables", dependencies=[Depends(auth)])
     def tables():
         return call(lambda: {"tables": cc().tables.list()})

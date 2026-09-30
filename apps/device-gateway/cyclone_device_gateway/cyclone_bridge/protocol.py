@@ -21,6 +21,8 @@ ALLOWED_OPS = {
     # Cyclone Lab: measured Mind missions (start, watch, answer as the owner, read back).
     "lab.start", "lab.status", "lab.answer", "lab.record",
     "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media",
+    # Plan 43 T6: the sign-up maps the phone learned (schemas only), and forgetting one.
+    "signup.maps", "signup.forget",
     # Cyclone Marketplace: the phone's store of recipes and connections.
     "market.catalog", "market.install", "market.remove", "market.run",
     # Learn: one press per run turns what it saw and did into app knowledge on the phone.

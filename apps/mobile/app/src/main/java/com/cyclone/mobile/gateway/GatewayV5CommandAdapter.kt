@@ -33,6 +33,7 @@ internal object GatewayV5CommandAdapter {
     const val MAX_GOAL = 2_000
     private val MISSION_ID = Regex("^m[a-z0-9]{6,40}$")
     private val REQUEST_ID = Regex("^[A-Za-z0-9._:-]{1,120}$")
+    private val SIGNUP_PACKAGE = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
     private val INLINE_SECRET = Regex("(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\\s*[:=]")
     val ANSWERS = setOf("approve", "decline", "reply", "fill", "stop")
 
@@ -45,6 +46,9 @@ internal object GatewayV5CommandAdapter {
     }
     internal var humanHasControl: () -> Boolean = { DeviceState.controller == DeviceState.Controller.HUMAN }
     internal var start: (String) -> String? = { goal -> MindMissions.startAssigned(app(), goal) }
+    /** Plan 43 T6: a task that maps [package]'s sign-up; the phone checks the app is installed. */
+    internal var startSignup: (String, String) -> String? = { goal, pkg -> MindMissions.startAssigned(app(), goal, signup = pkg) }
+    internal var installed: (String) -> Boolean = { pkg -> runCatching { app().packageManager.getPackageInfo(pkg, 0) }.isSuccess }
     /** The running mission [id], front or behind. */
     internal var running: (String) -> Mission? = { id -> MindMissions.find(id) }
     internal var load: (String) -> Mission? = { MindMissions.store(app()).load(it) }
@@ -88,7 +92,14 @@ internal object GatewayV5CommandAdapter {
     }
 
     fun start(args: JSONObject): JSONObject {
-        requireOnly(args, setOf("goal", "taskId", "sealed", "publish"))
+        requireOnly(args, setOf("goal", "taskId", "sealed", "publish", "signupMap"))
+        val signup = args.opt("signupMap")?.let { raw ->
+            val pkg = (raw as? String).orEmpty()
+            if (!SIGNUP_PACKAGE.matches(pkg)) throw invalid("signupMap is the package of the app whose sign-up to map.")
+            if (args.has("sealed") || args.has("publish")) throw invalid("A sign-up mapping task takes no sealed secrets or file to post.")
+            if (!installed(pkg)) throw GatewayProtocolException("APP_NOT_FOUND", "$pkg is not installed on this phone.")
+            pkg
+        }
         val publish = args.opt("publish")
         if (publish != null && publish != true) throw invalid("publish is true or left out.")
         val goal = (args.opt("goal") as? String)?.trim().orEmpty()
@@ -108,7 +119,7 @@ internal object GatewayV5CommandAdapter {
                 throw GatewayProtocolException("SEALED_REJECTED", "${rejected.code}:${rejected.leaseId}")
             }
         }
-        val id = start(goal) ?: run {
+        val id = (if (signup != null) startSignup(goal, signup) else start(goal)) ?: run {
             SealedDelivery.wipe(opened)
             throw GatewayProtocolException("ASK_BUSY", "The phone is already running a mission.")
         }
