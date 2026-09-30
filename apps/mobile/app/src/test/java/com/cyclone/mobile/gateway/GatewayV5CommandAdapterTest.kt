@@ -65,7 +65,7 @@ class GatewayV5CommandAdapterTest {
         assertEquals("m1abcdefgh", ack.getString("missionId"))
         assertEquals(listOf("Map the sign-up of Instagram" to "com.instagram.android"), mapped)
         assertTrue(started.isEmpty())
-        assertEquals("APP_NOT_FOUND", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupMap", "com.not.installed")) })
+        assertEquals("CAPABILITY_UNAVAILABLE", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupMap", "com.not.installed")) })
         assertEquals("INVALID_REQUEST", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupMap", "rm -rf /")) })
         assertEquals("INVALID_REQUEST", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupMap", "com.instagram.android").put("publish", true)) })
         assertEquals(1, mapped.size)

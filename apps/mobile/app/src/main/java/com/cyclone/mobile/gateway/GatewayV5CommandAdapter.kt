@@ -97,7 +97,7 @@ internal object GatewayV5CommandAdapter {
             val pkg = (raw as? String).orEmpty()
             if (!SIGNUP_PACKAGE.matches(pkg)) throw invalid("signupMap is the package of the app whose sign-up to map.")
             if (args.has("sealed") || args.has("publish")) throw invalid("A sign-up mapping task takes no sealed secrets or file to post.")
-            if (!installed(pkg)) throw GatewayProtocolException("APP_NOT_FOUND", "$pkg is not installed on this phone.")
+            if (!installed(pkg)) throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "$pkg is not installed on this phone.")
             pkg
         }
         val publish = args.opt("publish")
