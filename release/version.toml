@@ -1,20 +1,20 @@
-# Cyclone V5 alpha.86 dev1: Lab tools for agents on the PC - CycloneAgentMCP.exe now offers phone_lab_missions, phone_lab_start, phone_lab_report and phone_lab_stop (it served 27 tools without them), so Claude, Codex or any MCP client on the PC can run and read Cyclone Lab experiments. Glass 1.0.0-alpha.47; runtime 5.0.0-alpha.86.dev1.
+# Cyclone V5 alpha.87 dev1: Phone care - Glass updates Cyclone on the phone from the PC (this release's verified APK, adb install -r, Android's errors in plain words), a busy phone is PHONE_APP_BUSY instead of disconnected (lighter accessibility event handling, a main-thread watchdog, the phone answers busy), and Glass says why Cyclone stopped (Android's exit records and the freezes it caught); plus MRZ Studio discovery in Connections (PR 197). Glass 1.0.0-alpha.48; runtime 5.0.0-alpha.87.dev1.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.86.dev1"
+product_version = "5.0.0-alpha.87.dev1"
 channel = "development"
-android_version_code = 231
-python_version = "5.0.0-alpha.86.dev1"
+android_version_code = 232
+python_version = "5.0.0-alpha.87.dev1"
 
 [components]
-mobile = "5.0.0-alpha.86.dev1"
+mobile = "5.0.0-alpha.87.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.47"
-device_gateway = "5.0.0-alpha.86.dev1"
-mcp = "5.0.0-alpha.86.dev1"
+glass = "1.0.0-alpha.48"
+device_gateway = "5.0.0-alpha.87.dev1"
+mcp = "5.0.0-alpha.87.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha86-dev1-lab-mcp"
+candidate_generation = "cyclone-v5-alpha87-dev1-phone-care"
