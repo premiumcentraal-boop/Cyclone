@@ -55,6 +55,9 @@ def diagnose(
         if wired:
             return Diagnosis("usb", "USB_NOT_DETECTED", False, "Phone not detected",
                              "Windows doesn't see the phone. Plug it in with a cable that carries data, not a charge-only one.")
+        if source == "CLOUD":
+            return Diagnosis("cloud", "CLOUD_LINK_DOWN", False, "Cloud phone not reachable",
+                             "Cyclone is reopening its link to the cloud phone.", working=True)
         return Diagnosis("usb", "LINK_LOST", False, "Phone not reachable", "Cyclone reconnects when the phone is back on the network.", working=True)
     if discovery == DiscoveryState.OFFLINE:
         return Diagnosis("usb", "USB_OFFLINE", False, "Phone is offline", "Unlock the phone, then unplug it and plug it in again.")

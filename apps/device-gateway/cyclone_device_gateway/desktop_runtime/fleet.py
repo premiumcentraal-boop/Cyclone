@@ -118,7 +118,7 @@ class DeviceSession:
             "providerInstanceId": self.provider_instance_id,
             "transport": {
                 "kind": self.source,
-                "endpoint": "loopback" if self.source == "VIRTUAL" else ("lan" if self.source == "LAN" else "usb"),
+                "endpoint": "loopback" if self.source == "VIRTUAL" else {"LAN": "lan", "CLOUD": "cloud"}.get(self.source, "usb"),
             },
             "connectionLabel": connection_label,
             "inputOwner": self.input_owner,

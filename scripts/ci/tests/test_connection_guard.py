@@ -30,9 +30,11 @@ def test_trusted_sessions_are_bound_to_their_usb_session():
 def test_the_automatic_ask_is_bounded_and_never_allows_on_its_own():
     trust = text(RUNTIME / "trust_v33.py")
     ask = trust.split("def _maybe_auto_ask")[1].split("\n    def ")[0]
-    for rule in ('self._asked_usb.get(device_id) == usb', "AUTO_ASK_DECLINE_COOLDOWN_MS", '!= "USB"', "self.auto_ask"):
+    for rule in ('self._asked_usb.get(device_id) == usb', "AUTO_ASK_DECLINE_COOLDOWN_MS", 'not in {"USB", "CLOUD"}', "self.auto_ask"):
         assert rule in ask, rule
     assert 'os.getenv("CYCLONE_AUTO_CONNECT", "1")' in trust
+    # Plan 44: a stray LAN address is never asked; only USB and the cloud phones the owner added with a provider key.
+    assert '"LAN"' not in ask
     prompt = text(MOBILE / "java/com/cyclone/mobile/gateway/GatewayTrustPrompt.kt")
     # Opening the Allow card is all it does: the decision is still the owner's tap there.
     assert "completeTrust" not in prompt and "allow(" not in prompt.lower().replace("allowed", "")

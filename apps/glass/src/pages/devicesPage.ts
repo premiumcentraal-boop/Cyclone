@@ -21,6 +21,7 @@ import { el, setChildren } from "../ui/dom.js";
 import { icon } from "../ui/icons.js";
 import { deviceGate } from "./deviceGate.js";
 import { connectionLine } from "./connectionLine.js";
+import { createCloudPhonesView, type CloudViewDeps } from "./cloudPhonesView.js";
 import { createPhoneCareView, type PhoneCareDeps, type PhoneCareView } from "./phoneCareView.js";
 import type { GlassPage } from "./page.js";
 
@@ -38,6 +39,8 @@ export interface DevicesPageDeps {
   sleep(ms: number): Promise<void>;
   /** Phone care timing (tests pass a controlled clock). */
   care?: PhoneCareDeps;
+  /** Cloud phones timing (tests pass a controlled clock). */
+  cloud?: CloudViewDeps;
 }
 
 const defaultDeps: DevicesPageDeps = {
@@ -60,6 +63,9 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
     }
     return view.element;
   };
+  // Plan 44: the cloud accounts and the phones this PC keeps connected; a phone that connects shows up in the list.
+  const cloud = createCloudPhonesView(initial.client, { ...(deps.cloud ?? {}), later: deps.cloud?.later ?? laterUnref,
+                                                         onChange: () => void ctx.refreshDevices() });
   const element = el("div", "page page-devices");
   const header = el("div");
   const body = el("div", "devices-body");
@@ -183,7 +189,7 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
         }),
       );
     }
-    sections.push(howItWorks());
+    sections.push(cloud.element, howItWorks());
     setChildren(body, ...sections);
   }
 
@@ -328,8 +334,15 @@ export function createDevicesPage(initial: GlassContext, deps: DevicesPageDeps =
       flows.clear();
       for (const view of cares.values()) view.destroy();
       cares.clear();
+      cloud.destroy();
     },
   };
+}
+
+function laterUnref(fn: () => void, ms: number): () => void {
+  const id = setTimeout(fn, ms);
+  (id as unknown as { unref?: () => void }).unref?.();
+  return () => clearTimeout(id);
 }
 
 function section(title: string, cards: HTMLElement[]): HTMLElement {
@@ -377,6 +390,7 @@ function reachable(device: GlassDevice): boolean {
 function transportLabel(transport: string): string {
   if (transport === "LAN") return "Wi-Fi";
   if (transport === "VIRTUAL") return "Virtual phone";
+  if (transport === "CLOUD") return "Cloud phone";
   return "USB";
 }
 

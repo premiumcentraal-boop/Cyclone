@@ -177,12 +177,17 @@ class DesktopRuntime:
             self.virtual_registry,
             [AndroidEmulatorProvider(settings.runtime_dir)],
         )
-        self.fleet.set_source_resolver(self.virtual_registry.metadata_for_serial)
+        # Plan 44 run 1 (alpha 90): cloud phones (VMOS Cloud, DuoPlus, remote ADB) kept connected by this PC.
+        from ..cloud_fleet import CloudFleetService
+        self.cloud = CloudFleetService(settings.runtime_dir / "cloud", self.fleet)
+        self.fleet.set_source_resolver(
+            lambda serial: self.virtual_registry.metadata_for_serial(serial) or self.cloud.metadata_for_serial(serial))
         self.workspace = FleetWorkspaceStore(settings.runtime_dir / "fleet-workspace.json")
         self.live_diagnostics = FleetDiagnosticSupervisor(self.fleet)
         # Alpha 87: keep Cyclone on each phone current, and know why it stopped (health reports, freezes).
         from ..phone_care.service import PhoneCareService
         self.care = PhoneCareService(self.fleet, settings.runtime_dir / "phone-care", diagnostics=self.live_diagnostics)
+        self.cloud.care = self.care
         # Alpha 88: wakes a stopped Cyclone app on its own, and runs the owner's one-click connection fixes.
         from .connection_medic import ConnectionMedic
         self.medic = ConnectionMedic(self.fleet, self.live_diagnostics)
@@ -251,8 +256,10 @@ class DesktopRuntime:
         self.command.start()
         self.care.start()
         self.medic.start()
+        self.cloud.start()
 
     def stop(self) -> None:
+        self.cloud.stop()
         self.medic.stop()
         self.care.stop()
         self.command.stop()
@@ -821,6 +828,9 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     if getattr(desktop, "care", None) is not None:
         from ..phone_care.api import create_phone_care_router
         app.include_router(create_phone_care_router(desktop.care, settings.token))
+    if getattr(desktop, "cloud", None) is not None:
+        from ..cloud_fleet.api import create_cloud_fleet_router
+        app.include_router(create_cloud_fleet_router(desktop.cloud, settings.token))
     # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
     app.state.glass_codes = LaunchCodes()
     app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))

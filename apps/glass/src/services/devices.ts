@@ -127,7 +127,9 @@ export function liveViewProblem(device: GlassDevice): string {
     case "USB_OFFLINE":
       return "The phone is offline to USB debugging. Replug the cable, or turn USB debugging off and on in Developer options.";
     case "USB_ABSENT":
-      return device.transport === "LAN"
+      return device.transport === "CLOUD"
+        ? "This is a cloud phone. Cyclone is reopening its link; live view starts again once it is back."
+        : device.transport === "LAN"
         ? "The phone is connected over Wi‑Fi. Live view needs the USB cable: plug it in with a data cable and allow USB debugging."
         : "This PC does not see the phone over USB. Use a data cable (not charge-only), set USB mode to File transfer, and close Android Studio, scrcpy or other ADB tools that can hold the phone.";
     case "USB_AUTHORIZED":
