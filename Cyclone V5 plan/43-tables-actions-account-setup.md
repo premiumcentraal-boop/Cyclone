@@ -475,3 +475,30 @@ pauses the row for a person and is never solved; no device spoofing or evasion; 
   - branches in a map;
   - offering a re-map after drift (it is shown in Progress);
   - the Verification desk (T8).
+
+**T3, action buttons (alpha.83):**
+- **Gateway** (`command/buttons.py`):
+  - a `button` property (computed, can't change type): a label, a colour and up to 6 actions: `routine`, `prompt`
+    (a template: `{{Property}}`, `{{Relation.Property}}`), `skill` (a saved skill by name, optional inputs
+    template), `update` (cells, with `@today` / `@now` for dates) and `open` (an http(s) link);
+  - at most one phone action per button;
+  - `runOn`: any ready phone, one phone, or the row's relation to Phones;
+  - `then`: cells on success or failure, and the run's summary into a text property;
+  - checked against the table when saved (the properties, routine and template names exist; values fit);
+  - a press (`POST …/rows/{row}/buttons/{prop}`) runs the updates, starts one task or routine run, and records a
+    `button_run`; a running button can't be pressed again;
+  - every tick, `sync` follows the tasks and writes the result back;
+  - the cell is the latest run (`state`, `label`, `taskIds`, `summary`); the row peek has `buttonRuns`.
+- **Agents:** the Command Center AI gets `list_tables`, `query_table` (personal columns hidden), `create_row` and
+  `update_row` (workspace edits; personal columns are the owner's), and `press_button` (a proposal the owner applies).
+  The PC agent MCP servers still don't reach Command Center routes (existing guard).
+- **Glass:**
+  - `workspace/buttonEditor.ts`: label, colour, actions, where it runs, and after the run;
+  - the table cell is a coloured button with its latest run;
+  - `open` links open in a new tab (http(s) only).
+- **Guard** (`test_table_buttons_guard.py`): buttons never answer approvals, never touch the vault or sealed secrets,
+  and start work only through tasks and routines.
+- **Not yet:**
+  - page buttons outside tables;
+  - a "Create account" action;
+  - a separate "Test on this row" (pressing on one row is the test).

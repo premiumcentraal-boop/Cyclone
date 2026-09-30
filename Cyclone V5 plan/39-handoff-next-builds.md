@@ -39,6 +39,7 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.80:** plan 43 T2, cross-referencing (relations, rollups, formulas, timeline, calendar).
 - **alpha.81:** plan 43 T5 + T6, Accounts rebuilt with sign-up mapping (no profiles).
 - **alpha.82:** plan 43 T7, Create accounts (the owner asked for no pre-send checks, app block list or caps for now).
+- **alpha.83:** plan 43 T3, action buttons.
 - **alpha.79:** plan 43 T1, Cyclone Tables. The owner chose plan 43's tables and buttons (T1–T3) before B1, so B1
   comes after T3.
 - **Test counts at alpha.68:**
