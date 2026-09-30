@@ -893,6 +893,7 @@ class CommandCenter:
             ready = self._ready_devices()
             self._follow_runs()
             self._dispatch(ready)
+            self.signup.sync()
 
     def _fire_routines(self) -> None:
         now = self._clock()
@@ -1007,10 +1008,18 @@ class CommandCenter:
                 extra["sealed"] = sealed
             if publish:
                 extra["publish"] = True
-            from .signup import recipe_package
+            from .signup import RUN_RECIPE, recipe_package
             mapped = recipe_package(task["recipe"])
             if mapped and not extra:
                 extra["signup_map"] = mapped
+            if recipe_package(task["recipe"], RUN_RECIPE):
+                # Plan 43 T7: an Account Setup run; the phone gets the row's current values (never a password).
+                run_args = self.signup.run_args(task["id"])
+                if run_args is None:
+                    self._set_task(task["id"], "failed", "This account's row is gone from its sign-up table.")
+                    continue
+                extra["signup_run"] = run_args
+                extra.setdefault("task_id", task["id"])
             try:
                 ack = self._contract.cc_start(device, goal, **extra)
             except DesktopRuntimeError as exc:
@@ -1197,6 +1206,8 @@ class CommandCenter:
                 continue
             self._db.execute("UPDATE run SET turns = ?, working_ms = ?, cost_usd = ?, summary = ?, last_seen_at = ? WHERE id = ?",
                              (status["turns"], status["workingMs"], float(status["costUsd"]), status["summary"], now, run["id"]))
+            if status.get("setup"):
+                self.signup.progress(run["task_id"], status["setup"])
             if status.get("leases"):
                 self.delivery.report(run["id"], status["leases"])
             moment = status.get("moment")

@@ -158,3 +158,14 @@
   .ac-layout { grid-template-columns: minmax(0, 1fr); }
   .ac-list { max-height: 40vh; }
 }
+
+/* Plan 43 (T7): Create accounts. */
+.ca { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.ca-create { background: var(--accent); border-color: var(--accent); }
+.ca-sheet:empty { display: none; }
+.ca-sheet { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--surface); }
+.ca-title { margin: 0; font-size: var(--text-md); }
+.ca-rows { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 18px; }
+.ca-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: var(--text-sm); }
+.ca-row-error .muted { color: var(--danger); }
+.ca-status:empty { display: none; }

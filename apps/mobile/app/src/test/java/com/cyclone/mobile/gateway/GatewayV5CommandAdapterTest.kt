@@ -71,6 +71,26 @@ class GatewayV5CommandAdapterTest {
         assertEquals(1, mapped.size)
     }
 
+    @Test fun anAccountSetupRunStartsWithTheMapAndTheRowsValues() {
+        val recorder = com.cyclone.mobile.mind.signup.SignupRecorder("com.instagram.android", "Instagram", "350.0") { 1L }
+        recorder.page("Enter your email", listOf(mapOf("label" to "Email", "kind" to "email")), "Next", null)
+        val map = recorder.finish(false)
+        val plans = mutableListOf<com.cyclone.mobile.mind.signup.AccountSetupPlan>()
+        GatewayV5CommandAdapter.installed = { true }
+        GatewayV5CommandAdapter.signupMap = { pkg -> map.takeIf { pkg == "com.instagram.android" } }
+        GatewayV5CommandAdapter.startSetup = { _, plan -> plans += plan; "m2abcdefgh" }
+        val run = JSONObject().put("package", "com.instagram.android").put("values", JSONObject().put("email", "hello@brand.one"))
+        val ack = GatewayV5CommandAdapter.start(JSONObject().put("goal", "Create a new Instagram account").put("signupRun", run))
+        assertEquals("m2abcdefgh", ack.getString("missionId"))
+        assertEquals(mapOf("email" to "hello@brand.one"), plans.single().values)
+        val other = JSONObject().put("package", "com.other.app").put("values", JSONObject())
+        assertEquals("CAPABILITY_UNAVAILABLE", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupRun", other)) })
+        val bad = JSONObject().put("package", "com.instagram.android").put("values", JSONObject().put("Email", "x"))
+        assertEquals("INVALID_REQUEST", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupRun", bad)) })
+        com.cyclone.mobile.mind.signup.AccountSetupProgress.set("m2abcdefgh", com.cyclone.mobile.mind.signup.AccountSetupProgress(page = 1, pages = 1))
+        assertEquals(1, plans.size)
+    }
+
     @Test fun statusCarriesTheExactSendAndTheSummaryWhenDone() {
         live = mission
         moment = approval()

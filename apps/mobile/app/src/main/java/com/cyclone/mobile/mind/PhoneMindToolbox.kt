@@ -63,6 +63,9 @@ class PhoneMindToolbox(
      */
     private val signup: com.cyclone.mobile.mind.signup.SignupRecorder? = null,
     private val saveSignup: ((com.cyclone.mobile.mind.signup.SignupMap) -> Unit)? = null,
+    /** Plan 43 (T7): an Account Setup run, and where its progress goes (the PC's row shows it). */
+    private val setup: com.cyclone.mobile.mind.signup.AccountSetupPlan? = null,
+    private val setupProgress: ((com.cyclone.mobile.mind.signup.AccountSetupProgress) -> Unit)? = null,
 ) : MindToolbox {
     /** The phone the Mind acts on; swapped by [rebind] when the mission changes plane. */
     @Volatile private var env: CycloneAgentEnvironmentApi = env
@@ -87,6 +90,7 @@ class PhoneMindToolbox(
             "go_to" -> maps != null || manual != null
             "pilot" -> fast != null
             in SIGNUP_TOOLS -> signup != null
+            in SETUP_TOOLS -> setup != null
             in MANUAL_TOOLS -> manual != null
             else -> true
         }
@@ -219,6 +223,8 @@ class PhoneMindToolbox(
         "signup_page" -> signupPage(arguments)
         "signup_final" -> signupFinal(arguments)
         "signup_done" -> signupDone(arguments)
+        "setup_page" -> setupPage(arguments)
+        "setup_done" -> setupDone(arguments)
         "screen_read" -> read()
         "screen_look" -> look()
         "screen_find" -> find(arguments.optString("query"))
@@ -555,6 +561,49 @@ class PhoneMindToolbox(
         } catch (refused: com.cyclone.mobile.mind.signup.SignupRecorder.Refused) {
             MindToolResult.error(refused.message ?: "Not saved.")
         }
+    }
+
+    // ---- plan 43 T7: Account Setup ----------------------------------------------------------------------------------
+
+    @Volatile private var setupState = com.cyclone.mobile.mind.signup.AccountSetupProgress()
+
+    private fun reportSetup(next: com.cyclone.mobile.mind.signup.AccountSetupProgress) {
+        setupState = next
+        setupProgress?.invoke(next)
+    }
+
+    private fun setupPage(arguments: JSONObject): MindToolResult {
+        val plan = setup ?: return MindToolResult.error("This mission is not an Account Setup run.")
+        val pages = plan.map.pages.size
+        val page = arguments.optInt("page", 0)
+        if (page !in 1..pages) return MindToolResult.error("page is 1..$pages, the page of the sign-up map you are on.")
+        val changed = arguments.optBoolean("changed")
+        val check = arguments.optString("check").takeIf { it.isNotBlank() }?.let {
+            com.cyclone.mobile.mind.signup.SignupCheck.of(it) ?: return MindToolResult.error(
+                "check is one of: ${com.cyclone.mobile.mind.signup.SignupCheck.entries.joinToString { c -> c.wire }}.")
+        }
+        reportSetup(setupState.copy(
+            state = if (check != null) com.cyclone.mobile.mind.signup.AccountSetupProgress.VERIFICATION else com.cyclone.mobile.mind.signup.AccountSetupProgress.FILLING,
+            page = page, pages = pages, drift = if (changed) page else setupState.drift, note = check?.label.orEmpty()))
+        val expected = plan.map.pages[page - 1]
+        return MindToolResult(buildString {
+            append("Page $page of $pages noted.")
+            if (changed) append(" It differs from the map: work this page out from the screen, using the row's values; the owner will be offered a new map.")
+            if (check != null) append(" ${check.label.replaceFirstChar { it.uppercase() }} is a person's step: ask the owner (owner_ask) or hand over, and wait. Never try to solve it.")
+            else append(" Then press \"${expected.continueLabel}\".")
+        }, "setup page $page/$pages")
+    }
+
+    private fun setupDone(arguments: JSONObject): MindToolResult {
+        setup ?: return MindToolResult.error("This mission is not an Account Setup run.")
+        val created = arguments.optBoolean("created")
+        val handle = arguments.optString("handle").trim().take(100).takeIf { it.isNotBlank() }
+        val why = arguments.optString("why").replace(Regex("\\s+"), " ").trim().take(200)
+        reportSetup(setupState.copy(
+            state = if (created) com.cyclone.mobile.mind.signup.AccountSetupProgress.CREATED else com.cyclone.mobile.mind.signup.AccountSetupProgress.FAILED,
+            handle = if (created) handle else null, note = if (created) "Created${handle?.let { " as $it" }.orEmpty()}." else why.ifBlank { "Not created." }))
+        return MindToolResult(if (created) "Recorded: the account exists${handle?.let { " as $it" }.orEmpty()}. Finish the mission now."
+            else "Recorded: the account was not created. Finish the mission now and say why.", "setup done")
     }
 
     // ---- plan 41: Fast mode, the Pilot ------------------------------------------------------------------------------
@@ -1552,6 +1601,8 @@ class PhoneMindToolbox(
         private val MANUAL_TOOLS = setOf("abilities_find", "how_to_find")
         /** Plan 43 T6: offered only in a sign-up mapping mission. */
         private val SIGNUP_TOOLS = setOf("signup_page", "signup_final", "signup_done")
+        /** Plan 43 T7: offered only in an Account Setup run. */
+        private val SETUP_TOOLS = setOf("setup_page", "setup_done")
         const val SIGNUP_YES = "Create the account"
         const val SIGNUP_NO = "Not now"
         private val TAP_TOOLS = setOf("phone.click", "phone.tap", "phone.tap_point")
@@ -1618,6 +1669,17 @@ class PhoneMindToolbox(
                 objectSchema("control" to string("The control's label, e.g. Sign up."), required = listOf("control"))),
             MindToolSpec("signup_done", "Sign-up mapping: save the map. complete=true only when the account was created after the owner's approval.",
                 objectSchema("complete" to boolean("Whether the whole flow was walked to the account being created."), required = listOf("complete"))),
+            MindToolSpec("setup_page", "Account Setup: say which page of the sign-up map you are on, before you continue from it. " +
+                "changed=true when the page differs from the map; check=… when it is a step only a person can do.",
+                objectSchema("page" to integer("The page number in the sign-up map."),
+                    "changed" to boolean("True when the screen differs from the map's page."),
+                    "check" to string("Only for a person's step.", com.cyclone.mobile.mind.signup.SignupCheck.entries.map { it.wire }),
+                    required = listOf("page"))),
+            MindToolSpec("setup_done", "Account Setup: record the result. created=true only when the account exists; give its handle as shown.",
+                objectSchema("created" to boolean("Whether the account now exists."),
+                    "handle" to string("The account's handle or username as the app shows it."),
+                    "why" to string("When not created: why (the name is taken, a limit, the owner stopped it)."),
+                    required = listOf("created"))),
             MindToolSpec("go_to", "Walk to a screen of the current app using its learned map (shown as \"Map of …\" once you are in a learned app), " +
                 "or do an ability from the app's manual (handles like a3 from abilities_find or the manual lines). Cyclone taps the known way itself, " +
                 "checking the screen after every step, and stops if anything differs. It never chooses, types or confirms: that stays yours.",

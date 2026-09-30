@@ -308,6 +308,23 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def signup_table(body: dict[str, Any]):
         return call(lambda: cc().signup.make_table(body_of(body)))
 
+    # Plan 43 (T7): Create accounts from a sign-up table's Ready rows.
+    @router.post("/v1/cc/signup/prepare", dependencies=[Depends(auth)])
+    def signup_prepare(body: dict[str, Any]):
+        return call(lambda: cc().signup.prepare(body_of(body)))
+
+    @router.post("/v1/cc/signup/create", dependencies=[Depends(auth)])
+    def signup_create(body: dict[str, Any]):
+        return call(lambda: cc().signup.create(body_of(body)))
+
+    @router.post("/v1/cc/signup/pause", dependencies=[Depends(auth)])
+    def signup_pause(body: dict[str, Any]):
+        return call(lambda: cc().signup.stop(body_of(body), pause=True))
+
+    @router.post("/v1/cc/signup/cancel", dependencies=[Depends(auth)])
+    def signup_cancel(body: dict[str, Any]):
+        return call(lambda: cc().signup.stop(body_of(body), pause=False))
+
     @router.get("/v1/cc/tables", dependencies=[Depends(auth)])
     def tables():
         return call(lambda: {"tables": cc().tables.list()})

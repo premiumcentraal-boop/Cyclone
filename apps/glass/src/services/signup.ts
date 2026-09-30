@@ -96,11 +96,49 @@ export const signupApi = {
   map: (client: GatewayClient, body: { deviceId: string; package: string; app: string; ownerBasis: OwnerBasis }) =>
     client.post("/v1/cc/signup/map", body),
   forget: (client: GatewayClient, deviceId: string, packageName: string) => client.post("/v1/cc/signup/forget", { deviceId, package: packageName }),
+  /** T7 step 1: the Ready rows, each with its Cyclone account, so Glass can put a password for it in the vault. */
+  prepare: async (client: GatewayClient, tableId: string, rowIds?: string[]) =>
+    parsePrepared(await client.post("/v1/cc/signup/prepare", rowIds ? { tableId, rowIds } : { tableId })),
+  /** T7 step 2: one task per row; pressing Create accounts is the approval of each account's final create. */
+  create: async (client: GatewayClient, tableId: string, rows: Array<{ rowId: string; accountId: string; vaultItemId: string | null }>) => {
+    const r = obj(await client.post("/v1/cc/signup/create", { tableId, rows }));
+    return {
+      started: list(r.started).map((x) => ({ rowId: str(obj(x).rowId), taskId: str(obj(x).taskId) })),
+      errors: list(r.errors).map((x) => ({ rowId: str(obj(x).rowId), error: str(obj(x).error) })),
+    };
+  },
+  pause: (client: GatewayClient, tableId: string, rowIds?: string[]) => client.post("/v1/cc/signup/pause", rowIds ? { tableId, rowIds } : { tableId }),
+  cancel: (client: GatewayClient, tableId: string, rowIds?: string[]) => client.post("/v1/cc/signup/cancel", rowIds ? { tableId, rowIds } : { tableId }),
   table: async (client: GatewayClient, deviceId: string, packageName: string) => {
     const r = obj(await client.post("/v1/cc/signup/table", { deviceId, package: packageName }));
     return { id: str(r.id), title: str(r.title) };
   },
 };
+
+export interface PreparedRow {
+  rowId: string;
+  title: string;
+  accountId: string | null;
+  vaultItemId: string | null;
+  username: string;
+  deviceId: string;
+  error: string | null;
+}
+export interface Prepared { tableId: string; app: string; packageName: string; rows: PreparedRow[] }
+
+export function parsePrepared(raw: unknown): Prepared {
+  const r = obj(raw);
+  return {
+    tableId: str(r.tableId), app: str(r.app), packageName: str(r.package),
+    rows: list(r.rows).map((x): PreparedRow => {
+      const q = obj(x);
+      return {
+        rowId: str(q.rowId), title: str(q.title) || "Account", accountId: str(q.accountId) || null, vaultItemId: str(q.vaultItemId) || null,
+        username: str(q.username), deviceId: str(q.deviceId), error: typeof q.error === "string" && q.error ? q.error : null,
+      };
+    }),
+  };
+}
 
 /** "7 pages · 6 fields · Email code" for an app row. */
 export function mapSummary(map: SignupMap): string {

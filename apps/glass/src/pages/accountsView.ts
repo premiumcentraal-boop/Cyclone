@@ -15,6 +15,7 @@ import { el, setChildren } from "../ui/dom.js";
 import { actionButton, card, chip, emptyState, errorState, loadingState, searchInput } from "../ui/components.js";
 import { relativeTime } from "../ui/format.js";
 import { createTableBlock, type TableBlockView } from "../workspace/tableView.js";
+import { createAccountsPanel, type CreateAccountsPanel } from "./createAccounts.js";
 
 const POLL_MS = 10_000;
 
@@ -49,6 +50,8 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
   let seq = 0;
   let tableBlock: TableBlockView | null = null;
   let showTable = false;
+  /** One Create accounts panel per sign-up table, kept while its passwords are being sent. */
+  const panels = new Map<string, CreateAccountsPanel>();
 
   list.append(searchInput("Search apps", (value) => {
     query = value;
@@ -323,7 +326,12 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
   function tableHost(tableId: string): HTMLElement {
     const host = el("div", "ac-table");
     tableBlock ??= createTableBlock(ctx, { id: "b_signup", type: "table", tableId, viewId: null }, () => undefined);
-    host.append(tableBlock.element);
+    let panel = panels.get(tableId);
+    if (!panel) {
+      panel = createAccountsPanel(ctx, tableId, say);
+      panels.set(tableId, panel);
+    }
+    host.append(panel.element, tableBlock.element);
     return host;
   }
 
@@ -361,6 +369,7 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
       destroyed = true;
       clearInterval(timer);
       closeTable();
+      for (const panel of panels.values()) panel.destroy();
     },
   };
 }
