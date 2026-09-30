@@ -502,3 +502,29 @@ pauses the row for a person and is never solved; no device spoofing or evasion; 
   - page buttons outside tables;
   - a "Create account" action;
   - a separate "Test on this row" (pressing on one row is the test).
+
+**T4, profiles from the PC (alpha.84):**
+- **Phone** (`runtime/workspaces/ProfileApps.kt`, `gateway/GatewayV5ProfilesAdapter.kt`):
+  - `profiles.list`: Profile A plus Cyclone's profiles (label, emoji, colour, ready, in front, in trash);
+  - `profiles.apps`: a profile's third-party apps and, for a Cyclone profile, the ones Profile A could give it;
+  - `profiles.switch`: prepare Cyclone there, `am switch-user`, wait for Android to confirm. It refuses while a task
+    runs or a request waits for approval, and works whichever profile is in front;
+  - `profiles.app`: `install-existing` from Profile A, or `pm uninstall --user` for that profile only;
+  - two new fixed verbs: `LIST_PROFILE_APPS` and `UNINSTALL_FOR_PROFILE`;
+  - every call re-checks `ProfileRecovery.validOwned` against Android's user list and the registry;
+  - nothing creates or deletes a profile, and Profile A's apps stay the owner's on the phone;
+  - a switch from the PC doesn't carry memory; only the phone's own switch does (Cyclone Carry guard).
+- **PC:**
+  - the contract checks every result and request;
+  - routes `GET /v1/devices/{id}/profiles`, `GET …/profiles/{p}/apps`, `POST …/profiles/{p}/switch` and
+    `POST …/profiles/{p}/apps {package, action}`.
+- **Glass:**
+  - Accounts shows the phone's profiles, the one in front, **Switch the phone to …**, and an app manager for a
+    Cyclone profile;
+  - the app list follows the chosen profile.
+- **Guard:** `test_profile_apps_guard.py`.
+- **Not yet:**
+  - tasks and buttons that name a profile (a mission in profile B may need profile B's own Cyclone; to check on a
+    device);
+  - Profiles as rows under Phones in tables;
+  - filtering work by profile.
