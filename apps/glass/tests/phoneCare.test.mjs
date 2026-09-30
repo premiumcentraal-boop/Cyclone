@@ -128,3 +128,21 @@ test("a failed update explains itself with one next step; an offline phone or an
   assert.equal(old.element.hidden, true);
   old.destroy();
 });
+
+test("the phone's decision numbers show under Details: who decides, how fast, what the phone model earned", async () => {
+  const gw = fakeGateway({ [`GET ${PATH}`]: () => answer({ details: { ...answer().details, decisions: {
+    provider: "JEV (TypeSafe)", speed: "auto", phoneModel: "earned", lessons: 120, onPhoneShare: 0.42,
+    decisionsMs: { p50: 420, p95: 1100 }, instantVerified: 0.97, instantChecked: 60, shadowAgreement: 0.99, shadowChecked: 70,
+    earned: ["volume_up", "scroll_down", "Bad"] } } }) });
+  const view = createPhoneCareView(new GatewayClient({ token: "t", fetch: gw.fetch }), "d1", clock().deps);
+  await flush();
+  button(view.element, "Details").click();
+  const text = view.element.textContent;
+  assert.match(text, /Instant decisions/);
+  assert.match(text, /42% of 120 requests/);
+  assert.match(text, /420 ms median · 1\.1 s slowest 5%/);
+  assert.match(text, /99% of 70 checked with JEV/);
+  assert.match(text, /Volume up, Scroll down/);
+  assert.doesNotMatch(text, /Bad/);
+  view.destroy();
+});

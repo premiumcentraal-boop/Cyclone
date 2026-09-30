@@ -89,6 +89,45 @@ def clean_report(raw: Any) -> dict[str, Any]:
         },
         "exits": exits,
         "stalls": stalls,
+        "decisions": clean_decisions(report.get("decisions")),
+    }
+
+
+_INTENT = re.compile(r"^[a-z_]{1,40}$")
+
+
+def _share(value: Any) -> float | None:
+    return round(float(value), 3) if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1 else None
+
+
+def _ms(block: Any) -> dict[str, Any]:
+    block = block if isinstance(block, dict) else {}
+    return {"p50": _int(block.get("p50")) or None, "p95": _int(block.get("p95")) or None, "count": _int(block.get("count"))}
+
+
+def clean_decisions(raw: Any) -> dict[str, Any] | None:
+    """Alpha 89: how the phone decides requests. Counts, shares and times only; anything else is dropped."""
+    if not isinstance(raw, dict):
+        return None
+    by = raw.get("byDecider") if isinstance(raw.get("byDecider"), dict) else {}
+    actions = []
+    for item in raw.get("actions") or []:
+        if isinstance(item, dict) and isinstance(item.get("intent"), str) and _INTENT.match(item["intent"]):
+            actions.append({"intent": item["intent"], "samples": _int(item.get("samples")), "agreement": _share(item.get("agreement")),
+                            "phoneDecisions": _int(item.get("phoneDecisions")), "phoneFailures": _int(item.get("phoneFailures")),
+                            "earned": item.get("earned") is True})
+    text = lambda key: str(raw.get(key))[:40] if isinstance(raw.get(key), str) else None
+    return {
+        "provider": text("provider"), "phoneModel": text("phoneModel"), "speed": text("speed"),
+        "lessons": _int(raw.get("lessons")), "lastDay": _int(raw.get("lastDay")),
+        "byDecider": {k: _int(v) for k, v in by.items() if isinstance(k, str) and _INTENT.match(k)},
+        "onPhoneShare": _share(raw.get("onPhoneShare")),
+        "decisionsMs": _ms(raw.get("decisionsMs")), "phoneModelMs": _ms(raw.get("phoneModelMs")),
+        "instantVerified": _share(raw.get("instantVerified")), "instantChecked": _int(raw.get("instantChecked")),
+        "shadowAgreement": _share(raw.get("shadowAgreement")), "shadowChecked": _int(raw.get("shadowChecked")),
+        "teaching": _int(raw.get("teaching")),
+        "earned": [e for e in raw.get("earned") or [] if isinstance(e, str) and _INTENT.match(e)][:40],
+        "actions": actions[:40],
     }
 
 
@@ -100,6 +139,7 @@ def merge(history: dict[str, Any], report: dict[str, Any], collected_at_ms: int)
     stalls.update({s["startedAtMs"]: s for s in report["stalls"]})
     return {
         "app": report["app"],
+        "decisions": report.get("decisions") or history.get("decisions"),
         "collectedAtMs": collected_at_ms,
         "exits": sorted(exits.values(), key=lambda e: e["atMs"])[-MAX_EXITS:],
         "stalls": sorted(stalls.values(), key=lambda s: s["startedAtMs"])[-MAX_STALLS:],

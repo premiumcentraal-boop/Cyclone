@@ -43,5 +43,36 @@ class DecisionsGuard(unittest.TestCase):
         self.assertIn("hands.look(withImage = box?.sees == true)", run)
 
 
+    def test_the_phone_model_is_taught_by_the_provider_and_acts_only_on_what_it_earned(self):
+        """Alpha 89: the phone model learns from JEV's (later OpenAI Decisions') verified decisions, never from its own,
+        acts only on earned actions and when sure, keeps being audited, and its lessons never leave the phone."""
+        lessons = read("mind/decide/Lessons.kt")
+        start = lessons.index("fun teaches(")
+        teaches = lessons[start:lessons.index("companion object", start)]
+        self.assertNotIn("Decider.PHONE ->", teaches, "the phone model never learns from its own decisions")
+        self.assertIn("else -> false", teaches)
+        earning = read("mind/decide/PhoneModel.kt")
+        for rule in ("MIN_SAMPLES = 50", "MIN_AGREEMENT = 0.98", "SURE = 0.9", "AUDIT_EVERY = 10"):
+            self.assertIn(rule, earning)
+        router = read("mind/modes/ModeRouter.kt")
+        # Grammar and the risk rules come before the phone model; it acts only on earned, sure actions.
+        self.assertLess(router.index("forced(text, world)?.let"), router.index("phone?.model?.guess(text, candidates)"))
+        self.assertIn("shadow.intent in phone.earned", router)
+        self.assertIn("(box == null || phone?.audit != true)", router)
+        brain = read("mind/decide/PhoneBrain.kt")
+        self.assertIn("MindMemory.looksSecret(it)", brain)
+        # Only counts and times leave the phone: the health report carries stats, never lessons.
+        health = read("runtime/health/AppHealth.kt")
+        self.assertIn("PhoneBrain.stats(", health)
+        self.assertNotIn("Lessons.encode", health)
+        stats = read("mind/decide/DecisionStats.kt")
+        self.assertNotIn(".request", stats)
+
+    def test_routing_waits_for_the_decision_only_briefly(self):
+        decide = read("mind/decide/Decisions.kt")
+        self.assertIn("ROUTING_DEADLINE_MS = 2_500L", decide)
+        self.assertIn("ProviderDecisionBox(key, active(), ROUTING_DEADLINE_MS)", decide)
+
+
 if __name__ == "__main__":
     unittest.main()

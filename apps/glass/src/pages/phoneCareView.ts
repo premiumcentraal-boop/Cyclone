@@ -9,7 +9,7 @@ import { actionButton, keyValue } from "../ui/components.js";
 import { el, setChildren } from "../ui/dom.js";
 import { relativeTime } from "../ui/format.js";
 import type { GatewayClient } from "../services/gateway.js";
-import { exitKindLabel, phoneCareApi, type PhoneCare } from "../services/phoneCare.js";
+import { actionLabel, exitKindLabel, phoneCareApi, type CareDecisions, type PhoneCare } from "../services/phoneCare.js";
 
 export interface PhoneCareDeps {
   now(): number;
@@ -137,6 +137,10 @@ export function createPhoneCareView(client: GatewayClient, deviceId: string, dep
       rows.push(["Diagnostics", path]);
     }
     box.append(keyValue(rows));
+    if (d.decisions && d.decisions.lessons > 0) {
+      box.append(el("h4", "care-subtitle", "Instant decisions"));
+      box.append(keyValue(decisionRows(d.decisions)));
+    }
     if (d.update?.errorDetail) box.append(el("pre", "care-frames", d.update.errorDetail));
 
     if (d.exits.length) {
@@ -176,4 +180,19 @@ export function createPhoneCareView(client: GatewayClient, deviceId: string, dep
       cancel?.();
     },
   };
+}
+
+const pct = (value: number | null): string => (value == null ? "–" : `${Math.round(value * 100)}%`);
+const secs = (ms: number | null): string => (ms == null ? "–" : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
+
+/** How this phone decides requests, in a few rows for developers (alpha 89). */
+function decisionRows(d: CareDecisions): Array<[string, string]> {
+  const rows: Array<[string, string]> = [
+    ["Decided on the phone", `${pct(d.onPhoneShare)} of ${d.lessons} requests`],
+    [d.provider ? `${d.provider} answers` : "Decision answers", `${secs(d.decisionsP50)} median · ${secs(d.decisionsP95)} slowest 5%`],
+    ["Instant worked", `${pct(d.instantVerified)} of ${d.instantChecked}`],
+    ["Phone model agrees", d.shadowChecked ? `${pct(d.shadowAgreement)} of ${d.shadowChecked} checked with ${d.provider ?? "the decider"}` : "Still learning"],
+    ["Earned actions", d.earned.length ? d.earned.map(actionLabel).join(", ") : "None yet"],
+  ];
+  return rows;
 }

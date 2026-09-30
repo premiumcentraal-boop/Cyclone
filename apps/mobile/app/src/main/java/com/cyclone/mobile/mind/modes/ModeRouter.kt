@@ -1,5 +1,7 @@
 package com.cyclone.mobile.mind.modes
 
+import com.cyclone.mobile.mind.decide.Decider
+
 /** Cyclone's modes (plan 42): the lowest one that can do a request takes it. */
 enum class Mode { INSTANT, FLASH, MIND, ANSWER, IGNORE }
 
@@ -12,7 +14,8 @@ enum class Speed(val wire: String, val label: String) {
     /** Every request is a Mind mission, as before alpha.77. */
     MIND("mind", "Always Mind");
 
-    companion object { fun of(wire: String?) = entries.firstOrNull { it.wire == wire } ?: COMMANDS }
+    // Alpha 89: Auto is the default. JEV decides what the grammar doesn't settle; the phone model takes over what it earned.
+    companion object { fun of(wire: String?) = entries.firstOrNull { it.wire == wire } ?: AUTO }
 }
 
 /** Where a request goes, with what Instant needs or the short answer to say. */
@@ -23,6 +26,22 @@ data class Route(
     val answer: String? = null,
     /** Things a decision (or the owner) must choose between: two labels, two apps. */
     val candidates: List<String> = emptyList(),
+    /** Alpha 89: who settled it, the decision in its typed shape, how long deciding took, and the phone model's shadow guess. */
+    val by: Decider = Decider.RULES,
+    val decision: com.cyclone.mobile.mind.decide.Guess? = null,
+    val decideMs: Long = 0,
+    val shadow: com.cyclone.mobile.mind.decide.Guess? = null,
+)
+
+/**
+ * The phone model as the router uses it (alpha 89): its guess for every Auto request, and whether it may act on it.
+ * It acts only for [earned] actions, only when sure, and not when this request is one of the audits still asked of JEV.
+ */
+class PhoneDecider(
+    val model: com.cyclone.mobile.mind.decide.PhoneModel,
+    val earned: Set<String>,
+    val mayAct: Boolean,
+    val audit: Boolean,
 )
 
 /** Facts the phone knows without a model, for short answers. */
@@ -163,15 +182,70 @@ object ModeRouter {
     }
 
     /**
-     * The whole decision. [box] is used only in [Speed.AUTO], and only when Stage 0 and the rules can't settle it.
-     * [bar] is how sure a box answer must be.
+     * The whole decision (alpha 89):
+     * 1. Speed → Always Mind.
+     * 2. Stage 0: the grammar and the phone's own answers (no model, about 5 ms).
+     * 3. The rules: writing, money, deleting, accounts, several apps, a real question → the Mind; a second clause → Flash.
+     * 4. The phone model, for an action it has earned and is sure of (a few ms, works offline).
+     * 5. JEV (the decisions provider) for everything else, within its deadline.
+     * Unsure goes up, never down. The phone model's guess rides along on every Auto request as its shadow, so its
+     * agreement with JEV is measured all the time.
      */
-    fun route(text: String, world: GrammarWorld, facts: LocalFacts, speed: Speed, box: DecisionBox?, bar: Double): Route {
-        if (speed == Speed.MIND) return Route(Mode.MIND, "Speed is set to Always Mind")
-        stage0(text, world, facts)?.let { return it }
-        forced(text, world)?.let { return it }
-        if (speed == Speed.COMMANDS || box == null) return Route(Mode.MIND, "not a clear command")
-        if (SECOND_CLAUSE.containsMatchIn(text)) return Route(Mode.FLASH, "more than one step")
-        return fromBoard(box.ask(board0(text, world)), text, world, bar)
+    fun route(text: String, world: GrammarWorld, facts: LocalFacts, speed: Speed, box: DecisionBox?, bar: Double,
+              phone: PhoneDecider? = null): Route {
+        if (speed == Speed.MIND) return Route(Mode.MIND, "Speed is set to Always Mind", by = Decider.SETTING, decision = guessOf(Mode.MIND))
+        stage0(text, world, facts)?.let { r ->
+            return r.copy(by = if (r.mode == Mode.ANSWER) Decider.ANSWER else Decider.GRAMMAR, decision = guessOf(r.mode, r.command))
+        }
+        forced(text, world)?.let { return it.copy(by = Decider.RULES, decision = guessOf(it.mode)) }
+        if (speed == Speed.COMMANDS) return Route(Mode.MIND, "not a clear command", by = Decider.SETTING, decision = guessOf(Mode.MIND))
+        if (SECOND_CLAUSE.containsMatchIn(text)) return Route(Mode.FLASH, "more than one step", by = Decider.RULES, decision = guessOf(Mode.FLASH))
+        val candidates = world.labels + world.apps.map { it.first }
+        val started = System.nanoTime()
+        val shadow = phone?.model?.guess(text, candidates)
+        val phoneMs = (System.nanoTime() - started) / 1_000_000
+        val earnedGuess = if (phone != null && shadow != null && phone.mayAct && shadow.mode == "instant" && shadow.intent in phone.earned &&
+            shadow.confidence >= com.cyclone.mobile.mind.decide.Earning.SURE) shadow else null
+        // Offline (no box) the earned guess always acts; online, an audit request still goes to JEV to keep agreement measured.
+        if (earnedGuess != null && (box == null || phone?.audit != true)) {
+            fromGuess(earnedGuess, text, world)?.let { return it.copy(by = Decider.PHONE, decision = earnedGuess, decideMs = phoneMs) }
+        }
+        if (box == null) return Route(Mode.MIND, "no decision provider is reachable", by = Decider.FALLBACK, decision = guessOf(Mode.MIND), shadow = shadow)
+        val reply = box.ask(board0(text, world))
+        val route = fromBoard(reply, text, world, bar)
+        return route.copy(by = Decider.DECISIONS, decision = reply?.let { decisionOf(it) } ?: guessOf(route.mode), decideMs = reply?.ms ?: 0, shadow = shadow)
+    }
+
+    /** The typed answers of a decision box as one decision. */
+    fun decisionOf(reply: BoxReply): com.cyclone.mobile.mind.decide.Guess {
+        val mode = reply.choice("route") ?: "flash"
+        val intent = if (mode == "instant") reply.choice("intent") ?: "none" else "none"
+        val target = if (mode == "instant") reply.choice("target")?.takeIf { it != "none" } else null
+        val confidence = if (mode == "instant") minOf(reply.confidence("route"), reply.confidence("intent")) else reply.confidence("route")
+        return com.cyclone.mobile.mind.decide.Guess(mode, intent, target, confidence)
+    }
+
+    /** A route (and its command) in the decision shape, for the lessons. */
+    fun guessOf(mode: Mode, command: InstantCommand? = null): com.cyclone.mobile.mind.decide.Guess =
+        com.cyclone.mobile.mind.decide.Guess(mode.name.lowercase(), command?.let { keyOf(it) } ?: "none", command?.targetLabel, 1.0)
+
+    /** The action key of a command ("swipe_up", "open_app"), or its intent's name for actions only the grammar reads. */
+    fun keyOf(command: InstantCommand): String =
+        INTENTS.entries.firstOrNull { (_, v) -> v?.first == command.intent && v.second == command.direction }?.key
+            ?: INTENTS.entries.firstOrNull { (_, v) -> v?.first == command.intent && v.second == null }?.key
+            ?: command.intent.name.lowercase()
+
+    /** The phone model's guess as a route, when its target is really on this phone. */
+    fun fromGuess(g: com.cyclone.mobile.mind.decide.Guess, text: String, world: GrammarWorld): Route? {
+        val (intent, direction) = INTENTS[g.intent] ?: return null
+        return when (intent) {
+            InstantIntent.TAP -> g.target?.takeIf { it in world.labels }?.let {
+                Route(Mode.INSTANT, "the phone model knows this one", InstantCommand(intent, text, target = it, targetLabel = it))
+            }
+            InstantIntent.OPEN_APP -> world.apps.firstOrNull { it.first == g.target }?.let {
+                Route(Mode.INSTANT, "the phone model knows this one", InstantCommand(intent, text, target = it.second, targetLabel = it.first))
+            }
+            else -> Route(Mode.INSTANT, "the phone model knows this one", InstantCommand(intent, text, direction = direction))
+        }
     }
 }
