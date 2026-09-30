@@ -181,6 +181,9 @@ class CommandCenter:
         # Plan 33 (C5): pages, the workspace's Notion-like documents with live references.
         from .pages import PageStore
         self.pages = PageStore(self)
+        # Plan 43 (T1): tables, the owner's own databases with typed properties and saved views.
+        from .tables import TableStore
+        self.tables = TableStore(self)
         # Plan 33 §7 (C4, moved forward): the AI project manager, on the owner's OpenRouter key.
         from .ai import AiStore
         self.ai = AiStore(self, **(ai or {}))

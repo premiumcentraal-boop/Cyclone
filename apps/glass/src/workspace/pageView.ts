@@ -221,7 +221,8 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
     head.append(iconButton, iconChoices, title, el("p", "ws-meta", `Edited ${relativeTime(p.updatedAt)}`));
     editor = createEditor(ctx, p.id, p.blocks, (blocks) => {
       if (page) page = { ...page, blocks };
-      schedule({ blocks });
+      // A table still being made (no id yet) is saved once the gateway has made it.
+      schedule({ blocks: blocks.filter((b) => b.type !== "table" || b.tableId !== "") });
     }, { askAi: () => void flush().then(() => workspaceBus.askAi(p.id)) });
     const extras = el("div", "ws-extras");
     if (p.children.length) {

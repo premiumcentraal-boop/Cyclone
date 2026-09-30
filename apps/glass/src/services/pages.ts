@@ -44,7 +44,9 @@ export type Block =
   | { id: string; type: "divider" }
   | { id: string; type: "ref"; ref: Ref }
   | { id: string; type: "view"; source: ViewSource; layout: ViewLayout; title: string; filter: { status?: "open" | "done" | "all"; deviceId?: string; routineId?: string; accountId?: string } }
-  | { id: string; type: "board"; title: string; layout: PlanLayout; items: PlanItem[] };
+  | { id: string; type: "board"; title: string; layout: PlanLayout; items: PlanItem[] }
+  /** Plan 43 (T1): one of the owner's tables through one of its saved views. An empty tableId is a table being made. */
+  | { id: string; type: "table"; tableId: string; viewId: string | null };
 
 export interface PageMeta {
   id: string;
@@ -128,6 +130,9 @@ export function parseBlock(raw: unknown): Block | null {
     for (const k of ["deviceId", "routineId", "accountId"] as const) if (typeof f[k] === "string") filter[k] = f[k] as string;
     return { id, type: "view", source: oneOf(r.source, ["tasks", "routines", "approvals", "phones", "pages", "results", "accounts", "connections"] as const, "tasks"),
       layout: oneOf(r.layout, ["list", "table", "board", "calendar", "gallery"] as const, "list"), title: str(r.title), filter };
+  }
+  if (r.type === "table") {
+    return { id, type: "table", tableId: str(r.tableId), viewId: typeof r.viewId === "string" ? r.viewId : null };
   }
   if (r.type === "board") {
     return { id, type: "board", title: str(r.title), layout: oneOf(r.layout, ["board", "table", "calendar"] as const, "board"), items: list(r.items).map(parseItem) };
@@ -302,7 +307,7 @@ export interface SlashItem {
   label: string;
   hint: string;
   keywords: string;
-  group: "AI" | "Basic" | "Live" | "Plan";
+  group: "AI" | "Basic" | "Table" | "Live" | "Plan";
   /** An action instead of a block: "ai" opens the AI about the page. */
   action?: "ai";
   make(): Block;
@@ -321,6 +326,8 @@ export const SLASH_ITEMS: SlashItem[] = [
   { id: "quote", label: "Quote", hint: "Set a passage apart", keywords: "quote blockquote", group: "Basic", make: () => textBlock("quote") },
   { id: "callout", label: "Callout", hint: "A note that stands out", keywords: "callout note tip info", group: "Basic", make: () => textBlock("callout") },
   { id: "divider", label: "Divider", hint: "A line between sections", keywords: "divider line hr separator", group: "Basic", make: () => ({ id: newId("b"), type: "divider" }) },
+  { id: "table", label: "Table", hint: "Your own database: properties, rows, and table or board views", keywords: "table database notion rows columns sheet spreadsheet crm ledger",
+    group: "Table", make: () => ({ id: newId("b"), type: "table", tableId: "", viewId: null }) },
   { id: "board", label: "Plan board", hint: "Cards in To do, Doing and Done, as a board, table or calendar", keywords: "plan board kanban project tasks cards calendar table database", group: "Plan",
     make: () => ({ id: newId("b"), type: "board", title: "Plan", layout: "board", items: [] }) },
   { id: "calendar", label: "Plan calendar", hint: "Cards on a month calendar", keywords: "calendar schedule dates plan", group: "Plan",

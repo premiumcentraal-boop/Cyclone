@@ -47,7 +47,10 @@ REF_IDS: dict[str, re.Pattern[str]] = {
     "task": re.compile(r"^tsk_[A-Za-z0-9_-]{6,40}$"),
     "account": re.compile(r"^acc_[A-Za-z0-9_-]{6,40}$"),
     "connection": re.compile(r"^con_[A-Za-z0-9_-]{6,40}$"),
+    # Plan 43 (T1): a table, mentioned or shown on a page.
+    "table": re.compile(r"^tb_[A-Za-z0-9_-]{8,40}$"),
 }
+VIEW_REF = re.compile(r"^vw_[A-Za-z0-9_-]{6,40}$")
 TEXT_BLOCKS = ("p", "h1", "h2", "h3", "todo", "bullet", "number", "quote", "callout")
 VIEW_SOURCES = ("tasks", "routines", "approvals", "phones", "pages", "results", "accounts", "connections")
 LAYOUTS = ("list", "table", "board", "calendar", "gallery")
@@ -129,7 +132,7 @@ def _ref(value: Any) -> dict[str, Any]:
     _only(value, {"kind", "id", "label", "deviceId"}, "reference")
     kind, ident = value.get("kind"), value.get("id")
     if kind not in REF_IDS or not isinstance(ident, str) or not REF_IDS[kind].match(ident):
-        raise CommandError("A reference names a page, phone, skill, routine, task, account or connection by its id.")
+        raise CommandError("A reference names a page, phone, skill, routine, task, account, connection or table by its id.")
     out = {"kind": kind, "id": ident, "label": _text(value.get("label", ""), "A reference's label", 120).strip()}
     if kind == "skill" and value.get("deviceId") is not None:
         if not isinstance(value["deviceId"], str) or not REF_IDS["device"].match(value["deviceId"]):
@@ -220,6 +223,16 @@ def _block(value: Any, ids: set[str]) -> dict[str, Any]:
                 flt[key] = raw[key]
         out["filter"] = flt
         return out
+    if kind == "table":
+        # Plan 43 (T1): one of the owner's tables, shown through one of its saved views. The rows live in the table.
+        _only(value, {"id", "type", "tableId", "viewId"}, "block")
+        table_id, view_id = value.get("tableId"), value.get("viewId")
+        if not isinstance(table_id, str) or not REF_IDS["table"].match(table_id):
+            raise CommandError("A table block names a table by its id.")
+        if view_id is not None and (not isinstance(view_id, str) or not VIEW_REF.match(view_id)):
+            raise CommandError("A table block's view id is malformed.")
+        out.update(tableId=table_id, viewId=view_id)
+        return out
     if kind == "board":
         _only(value, {"id", "type", "title", "layout", "items"}, "block")
         if value.get("layout", "board") not in BOARD_LAYOUTS:
@@ -276,6 +289,8 @@ def references(blocks: list[dict[str, Any]]) -> set[tuple[str, str]]:
                 refs.add((span["ref"]["kind"], span["ref"]["id"]))
         if block["type"] == "ref":
             refs.add((block["ref"]["kind"], block["ref"]["id"]))
+        if block["type"] == "table":
+            refs.add(("table", block["tableId"]))
         for item in block.get("items") or []:
             refs.update((r["kind"], r["id"]) for r in item["refs"])
             if item.get("taskId"):
