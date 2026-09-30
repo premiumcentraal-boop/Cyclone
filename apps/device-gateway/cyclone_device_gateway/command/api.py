@@ -202,9 +202,21 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
         return call(lambda: cc().delivery.revoke(lease_id))
 
     # Plan 33 (C3): connections (MCP servers), their calls and the files they make.
+    @router.get("/v1/cc/integrations/mrz", dependencies=[Depends(auth)])
+    def mrz_status():
+        return call(lambda: cc().connections.mrz.snapshot())
+
+    @router.post("/v1/cc/integrations/mrz/check", dependencies=[Depends(auth)])
+    def mrz_check():
+        return call(lambda: cc().connections.mrz.scan())
+
+    @router.post("/v1/cc/integrations/mrz/connect", dependencies=[Depends(auth)])
+    def mrz_connect():
+        return call(lambda: cc().connections.mrz.connect())
+
     @router.get("/v1/cc/connections", dependencies=[Depends(auth)])
     def connections():
-        return call(lambda: {"connections": cc().connections.list(), "higgsfield": "https://mcp.higgsfield.ai/mcp"})
+        return call(lambda: {"connections": cc().connections.list(), "higgsfield": "https://mcp.higgsfield.ai/mcp", "mrz": cc().connections.mrz.snapshot()})
 
     @router.post("/v1/cc/connections", dependencies=[Depends(auth)])
     def connection_add(body: dict[str, Any]):

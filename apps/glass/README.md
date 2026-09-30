@@ -50,6 +50,10 @@ Keyboard: `g` then `h` `d` `a` `r` `k` `p` `s` jumps to a page; `/` focuses sear
 
 ## Layout
 
+Command Center → **Connections** includes a dedicated **MRZ Studio · Employee ID** entry. The runtime keeps discovering
+Studio on this PC, offers one-click setup or the saved Glass JSON paste path, and preserves approved connections across
+updates. See [MRZ Studio setup, boundaries and acceptance](../../docs/GLASS_MRZ_STUDIO.md).
+
 | Path | What |
 |---|---|
 | `src/app.ts` | Shell: sidebar, phone picker, one mounted page |
