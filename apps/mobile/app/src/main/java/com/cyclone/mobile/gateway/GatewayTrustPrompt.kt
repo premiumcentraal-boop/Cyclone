@@ -13,6 +13,10 @@ import android.content.Intent
  *
  * The decision itself stays in [GatewaySettingsActivity] (visible, unlocked phone). The notification carries no
  * credential and never allows anything on its own.
+ *
+ * Alpha 88: when the phone is unlocked and in use, and Cyclone may draw over other apps (which also lets it open a
+ * screen from the background), the Allow card opens by itself, so connecting is one tap: Allow. Otherwise the
+ * notification is the way in, as before.
  */
 internal object GatewayTrustPrompt {
     private const val CHANNEL = "cyclone_pc_connect"
@@ -46,8 +50,17 @@ internal object GatewayTrustPrompt {
                     .setContentIntent(open)
                     .build(),
             )
+            if (canOpenDirectly(app)) {
+                app.startActivity(Intent(app, GatewaySettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
         }
     }
+
+    private fun canOpenDirectly(context: Context): Boolean = runCatching {
+        val keyguard = context.getSystemService(android.app.KeyguardManager::class.java)
+        val power = context.getSystemService(android.os.PowerManager::class.java)
+        android.provider.Settings.canDrawOverlays(context) && keyguard?.isDeviceLocked != true && power?.isInteractive == true
+    }.getOrDefault(false)
 
     fun clear(context: Context) {
         runCatching { context.applicationContext.getSystemService(NotificationManager::class.java)?.cancel(ID) }

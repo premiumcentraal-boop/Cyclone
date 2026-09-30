@@ -236,3 +236,21 @@
   color: var(--text-muted);
   white-space: pre;
 }
+
+/* Connection line (alpha 88): the first broken link and its one action. */
+.conn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
+  font-size: var(--text-sm);
+}
+
+.conn-working { background: var(--surface-muted); }
+.conn-dot { width: 8px; height: 8px; flex: none; border-radius: var(--radius-pill); background: var(--warning); }
+.conn-working .conn-dot { background: transparent; width: 14px; height: 14px; }
+.conn-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.conn-title { font-weight: 600; color: var(--text); }
+.conn-message { color: var(--text-muted); }

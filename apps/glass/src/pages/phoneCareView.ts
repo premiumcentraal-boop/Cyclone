@@ -34,6 +34,8 @@ export const IDLE_POLL_MS = 60_000;
 export interface PhoneCareView {
   element: HTMLElement;
   refresh(): Promise<void>;
+  /** Starts the phone update (the connection line's "Install Cyclone" uses it too). */
+  update(): Promise<void>;
   destroy(): void;
 }
 
@@ -168,6 +170,7 @@ export function createPhoneCareView(client: GatewayClient, deviceId: string, dep
   return {
     element,
     refresh,
+    update,
     destroy() {
       destroyed = true;
       cancel?.();

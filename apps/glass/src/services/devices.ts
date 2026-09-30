@@ -24,6 +24,47 @@ export interface GlassDevice {
   problem: string | null;
   /** USB/ADB state for live view (the gateway's usbAuthorization plane); null when not reported. */
   usb: "USB_AUTHORIZED" | "USB_UNAUTHORIZED" | "USB_OFFLINE" | "USB_ABSENT" | null;
+  /** The gateway's one answer for this phone's connection (alpha 88); null from older runtimes. */
+  connection: ConnectionVerdict | null;
+}
+
+export type ConnectionActionKind = "connect" | "install" | "start_app" | "open_accessibility" | "open_cyclone";
+
+/** The first broken link of the connection, in plain words, with at most one action. */
+export interface ConnectionVerdict {
+  layer: string;
+  code: string;
+  ok: boolean;
+  title: string;
+  message: string;
+  action: { kind: ConnectionActionKind; label: string } | null;
+  /** Cyclone is already fixing it (reconnecting, restarting the app). */
+  working: boolean;
+}
+
+const ACTION_KINDS: ConnectionActionKind[] = ["connect", "install", "start_app", "open_accessibility", "open_cyclone"];
+
+export function parseConnection(raw: unknown): ConnectionVerdict | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const title = text(r.title);
+  if (!title) return null;
+  const action = (r.action && typeof r.action === "object" ? r.action : null) as Record<string, unknown> | null;
+  const kind = action ? text(action.kind) as ConnectionActionKind : null;
+  return {
+    layer: text(r.layer) || "unknown",
+    code: text(r.code),
+    ok: r.ok === true,
+    title,
+    message: text(r.message),
+    action: kind && ACTION_KINDS.includes(kind) && text(action?.label) ? { kind, label: text(action?.label) } : null,
+    working: r.working === true,
+  };
+}
+
+/** Runs one of the gateway's fixed connection repairs (start Cyclone, open Accessibility settings, open Cyclone). */
+export async function fixConnection(client: GatewayClient, deviceId: string, action: "start_app" | "open_accessibility" | "open_cyclone"): Promise<void> {
+  await client.post(`/v1/devices/${encodeURIComponent(deviceId)}/connection/fix`, { action });
 }
 
 /** Glass features that read the Atlas need Cyclone Mobile 5.x. Unknown version fails closed. */
@@ -63,6 +104,7 @@ export function parseDevice(raw: unknown): GlassDevice | null {
     pcLabel: text(trust.pcLabel).slice(0, 80) || null,
     problem: gatewayProblem(record, trust),
     usb: usbState(record),
+    connection: parseConnection(record.connection),
   };
 }
 
@@ -110,6 +152,18 @@ function gatewayProblem(record: Record<string, unknown>, trust: Record<string, u
 }
 
 export function deviceReadiness(device: GlassDevice): DeviceReadiness {
+  const base = baseReadiness(device);
+  const verdict = device.connection;
+  if (!verdict || verdict.ok) return base;
+  // The gateway's own verdict names the broken link more precisely than any guess from fields (alpha 88).
+  const message = verdict.message ? `${verdict.title}. ${verdict.message}` : verdict.title;
+  if (!base.ready) return { ...base, message };
+  // A remembered phone whose link is broken (still resuming, app stopped, gateway off) is not usable yet. Accessibility
+  // alone doesn't block Glass: it reads what the phone knows without it.
+  return verdict.layer === "accessibility" ? base : { ready: false, reason: "connecting", message };
+}
+
+function baseReadiness(device: GlassDevice): DeviceReadiness {
   if (device.state === "DISCONNECTED" || device.state === "UNAUTHORIZED") {
     return { ready: false, reason: "disconnected", message: "The phone is not connected to this PC. Check the USB cable or wireless debugging." };
   }

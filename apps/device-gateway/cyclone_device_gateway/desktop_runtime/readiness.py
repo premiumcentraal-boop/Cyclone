@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import AITrustState, BridgeState, DiscoveryState, MediaState
+from .connection_doctor import diagnose_session
+from .models import AITrustState, BridgeState, DeviceFleetState, DiscoveryState, MediaState
 
 HEALTH_READY = "READY"
 HEALTH_DEGRADED = "DEGRADED"
@@ -21,6 +22,9 @@ def _video_diagnostics(session: Any) -> dict[str, Any]:
 
 
 def discovery_state(session: Any) -> DiscoveryState:
+    # A phone the fleet already saw leave is absent, whatever adb last said about it (alpha 88).
+    if getattr(session, "state", None) == DeviceFleetState.DISCONNECTED:
+        return DiscoveryState.ABSENT
     state = str(getattr(getattr(session, "adb_device", None), "state", "") or "").lower()
     if state == "device":
         return DiscoveryState.ADB_READY
@@ -182,6 +186,7 @@ def health_planes(
     media: MediaState,
     bridge: BridgeState,
     trust: AITrustState,
+    session_ready: bool | None = None,
 ) -> dict[str, dict[str, str | bool | None]]:
     """Independent health evidence. These codes are public API, so keep them stable."""
     if discovery == DiscoveryState.ADB_READY:
@@ -216,7 +221,8 @@ def health_planes(
     else:
         accessibility_card = _health_card(HEALTH_DEGRADED, "ACCESSIBILITY_UNKNOWN", "Accessibility status has not been confirmed yet.", "RETRY_GATEWAY")
 
-    if trust == AITrustState.TRUSTED and bridge == BridgeState.CONNECTED:
+    # Matched only when this USB session's own trusted session is open (session_ready), not one carried over.
+    if trust == AITrustState.TRUSTED and bridge == BridgeState.CONNECTED and session_ready is not False:
         token = _health_card(HEALTH_READY, "TOKEN_SESSION_MATCHED", "The trusted phone session matches this device.")
     elif trust in {AITrustState.UNPAIRED, AITrustState.CONFIRMATION_REQUIRED}:
         token = _health_card(HEALTH_UNAVAILABLE, "TOKEN_SESSION_UNPAIRED", "Allow this PC on the phone before AI control.", "ALLOW_THIS_PC")
@@ -299,10 +305,14 @@ def enrich_device_public(session: Any, trust_status: dict[str, Any] | None = Non
         "pcLabel": str(status.get("pcLabel"))[:80] if isinstance(status.get("pcLabel"), str) and status.get("pcLabel") else None,
     }
     public["readiness"] = readiness_cards(discovery, media, bridge, trust)
+    session_ready = bool(status.get("sessionReady")) if trust_status is not None else None
     public["health"] = {
         "version": "cyclone.device-health.v1",
-        "planes": health_planes(session, discovery, media, bridge, trust),
+        "planes": health_planes(session, discovery, media, bridge, trust, session_ready),
     }
+    # Alpha 88: the one answer every surface shows — the first broken link, in plain words, with one action.
+    public["connection"] = diagnose_session(session, discovery, bridge, trust, trust_status).to_dict()
+    public["control"] = control_summary(session)
     public["videoDiagnostics"] = {
         "subscriberCount": int(diagnostics.get("subscriberCount") or 0),
         "activeProfiles": list(diagnostics.get("activeProfiles") or []),
@@ -310,3 +320,17 @@ def enrich_device_public(session: Any, trust_status: dict[str, Any] | None = Non
         "lastFrameAvailable": bool(diagnostics.get("lastFrameAvailable")),
     }
     return public
+
+
+def control_summary(session: Any) -> dict[str, Any]:
+    """Who is in control, from one owner: the phone. The owner taking over on the phone wins; otherwise AI works only
+    after the PC user hands it control (request_ai_control / Give AI control)."""
+    phone = getattr(session, "phone_controller", None)
+    pc = getattr(session, "input_owner", "HUMAN")
+    if phone == "HUMAN":
+        effective, message = "OWNER_ON_PHONE", "You have the phone. AI waits until you hand it back on the phone."
+    elif pc == "AI":
+        effective, message = "AI", "AI can act on the phone."
+    else:
+        effective, message = "PC_USER", "AI asks for control before it acts."
+    return {"effective": effective, "phone": phone, "pc": pc, "message": message}
