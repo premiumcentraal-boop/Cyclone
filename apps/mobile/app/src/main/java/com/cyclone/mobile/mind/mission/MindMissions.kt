@@ -84,6 +84,8 @@ object MindMissions {
         /** Plan 42: the baton from a lower mode, and whether this is a Flash run. */
         @Volatile var handover: String? = null
         @Volatile var flash = false
+        /** Plan 43 T6: the app whose sign-up this mission maps. */
+        @Volatile var signup: String? = null
         val cancellation = ProviderCancellation()
         val ownerMessages = ConcurrentLinkedQueue<String>()
         /** Plan 38: the owner's steers; each becomes a new goal version at the next step. */
@@ -257,6 +259,15 @@ object MindMissions {
         WorkspaceTasks.update(front.taskId, change)
     }
 
+    private fun appLabel(context: Context, pkg: String): String = runCatching {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString().take(80)
+    }.getOrDefault(pkg.take(80))
+
+    private fun appVersion(context: Context, pkg: String): String = runCatching {
+        context.packageManager.getPackageInfo(pkg, 0).versionName.orEmpty().take(64)
+    }.getOrDefault("")
+
     private fun newId(): String = "m" + System.currentTimeMillis().toString(36) + UUID.randomUUID().toString().take(8)
 
     /** Starts a new mission in front. Returns false when a mission is already in front. */
@@ -277,7 +288,7 @@ object MindMissions {
      * owner types. In front when nothing runs, behind the front one when the phone can (plan 26 §6); returns the
      * mission id so the PC can follow it, or null when the phone cannot take it now.
      */
-    fun startAssigned(context: Context, goal: String): String? {
+    fun startAssigned(context: Context, goal: String, signup: String? = null): String? {
         val app = context.applicationContext
         val now = System.currentTimeMillis()
         val clean = goal.trim().take(2_000)
@@ -287,7 +298,7 @@ object MindMissions {
             is Crew.Admit.Queue -> return null
         }
         val mission = Mission(newId(), clean, MissionStatus.RUNNING, now, now, "", "")
-        return mission.id.takeIf { launch(app, mission, resume = null, attachment = null, front = front) }
+        return mission.id.takeIf { launch(app, mission, resume = null, attachment = null, front = front, signup = signup) }
     }
 
     /**
@@ -486,7 +497,7 @@ object MindMissions {
     // ---- running missions -------------------------------------------------------------------------------------------
 
     private fun launch(context: Context, initial: Mission, resume: MissionJournal?, attachment: TaskAttachment?, resumeReason: String = "",
-                       front: Boolean, handover: String? = null, flash: Boolean = false): Boolean {
+                       front: Boolean, handover: String? = null, flash: Boolean = false, signup: String? = null): Boolean {
         synchronized(lock) {
             if (front && runs.values.any { it.front }) return false
             if (!front && runs.values.none { it.front }) return false
@@ -494,6 +505,7 @@ object MindMissions {
             val run = Run(initial, front)
             run.handover = handover?.trim()?.take(1_500)?.takeIf { it.isNotBlank() }
             run.flash = flash
+            run.signup = signup
             runs[run.id] = run
             if (front) {
                 liveState.value = initial
@@ -664,7 +676,9 @@ object MindMissions {
                 manual = if (useMap) com.cyclone.mobile.manual.ManualRuntime.mindPort(context) else null,
                 skill = if (useMap && run.mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, run.mission.goal) }.getOrNull()
                     ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null,
-                planes = planes, workspace = workspace, fast = fast)
+                planes = planes, workspace = workspace, fast = fast,
+                signup = run.signup?.let { pkg -> com.cyclone.mobile.mind.signup.SignupRecorder(pkg, appLabel(context, pkg), appVersion(context, pkg)) { System.currentTimeMillis() } },
+                saveSignup = { map -> com.cyclone.mobile.mind.signup.SignupMapStore.save(context, map) })
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
             // own owner question, answered on the same card as any other.
             planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }
@@ -672,6 +686,7 @@ object MindMissions {
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 (if (workspace != null) "\n\n" + MindPrompt.workspaceRules() else "") +
                 (if (fast != null) "\n\n" + MindPrompt.PILOT_RULES else "") +
+                (run.signup?.let { "\n\n" + MindPrompt.signupRules(appLabel(context, it)) }.orEmpty()) +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
             // A behind mission never reads the owner's screen, not even to begin.
             val situation = if (run.front) toolbox.situation() else Crew.BEHIND_SITUATION.format(device.now())

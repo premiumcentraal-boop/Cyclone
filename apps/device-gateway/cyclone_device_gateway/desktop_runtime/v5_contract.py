@@ -51,6 +51,8 @@ V5_OPS = frozenset({
     "dictionary.edit",
     "models.list",
     "manual.get",
+    "signup.maps",
+    "signup.forget",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -901,6 +903,9 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op == "manual.get":
         _validate_manual_response(value, args)
         return value
+    if op in SIGNUP_OPS:
+        _validate_signup_response(op, value, args)
+        return value
     if op == "atlas.here":
         if set(value) != {"placeId", "roomId", "appVersion", "observedAt"}:
             raise _bad_knowledge("atlas.here")
@@ -1326,6 +1331,78 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
         raise _bad_cc("moment fields")
 
 
+SIGNUP_OPS = frozenset({"signup.maps", "signup.forget"})
+SIGNUP_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
+SIGNUP_KINDS = frozenset({"text", "first_name", "last_name", "full_name", "email", "phone", "username", "password", "birthday", "date",
+                          "gender", "choice", "checkbox", "number", "photo"})
+SIGNUP_CHECKS = frozenset({"email_code", "sms_code", "captcha", "selfie", "id_document", "phone_call", "other"})
+SIGNUP_KEY = re.compile(r"^[a-z0-9_]{1,48}$")
+#: A map is a template: anything that looks like a typed value (an address, a long number, a secret) is refused.
+SIGNUP_VALUE_LIKE = re.compile(r"@[^\s]+\.[a-z]{2,}|\d{5,}|\+\d{6,}", re.I)
+
+
+def _bad_signup(message: str) -> DesktopRuntimeError:
+    return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android sign-up result is malformed: {message}.")
+
+
+def _signup_text(value: Any, limit: int, *, empty: bool = False) -> bool:
+    return (isinstance(value, str) and (empty or value.strip() != "") and len(value) <= limit and not SIGNUP_VALUE_LIKE.search(value)
+            and not INLINE_SECRET.search(value) and not any(ord(c) < 32 for c in value))
+
+
+def validate_signup_map(item: Any) -> None:
+    """Plan 43 T6: one sign-up map, a schema only: pages, field labels and kinds, format hints, choices and checks."""
+    keys = {"package", "app", "appVersion", "mappedAt", "finalLabel", "complete", "pages"}
+    if not isinstance(item, dict) or set(item) != keys:
+        raise _bad_signup("map keys")
+    if not SIGNUP_PACKAGE.match(str(item["package"])) or not _short_text(item["app"], 80) or not _short_text(item["appVersion"], 64):
+        raise _bad_signup("map identity")
+    if not _is_int(item["mappedAt"]) or not isinstance(item["complete"], bool):
+        raise _bad_signup("map facts")
+    if item["finalLabel"] is not None and not _signup_text(item["finalLabel"], 60):
+        raise _bad_signup("final control")
+    pages = item["pages"]
+    if not isinstance(pages, list) or not 1 <= len(pages) <= 15:
+        raise _bad_signup("pages")
+    seen: set[str] = set()
+    for index, page in enumerate(pages, start=1):
+        if not isinstance(page, dict) or set(page) != {"index", "title", "continue", "check", "fields"} or page["index"] != index:
+            raise _bad_signup("page")
+        if not _signup_text(page["title"], 80) or not _signup_text(page["continue"], 60):
+            raise _bad_signup("page text")
+        if page["check"] is not None and page["check"] not in SIGNUP_CHECKS:
+            raise _bad_signup("page check")
+        fields = page["fields"]
+        if not isinstance(fields, list) or len(fields) > 20:
+            raise _bad_signup("fields")
+        for field in fields:
+            if not isinstance(field, dict) or set(field) != {"key", "label", "kind", "required", "hint", "choices"}:
+                raise _bad_signup("field keys")
+            if not SIGNUP_KEY.match(str(field["key"])) or field["key"] in seen:
+                raise _bad_signup("field key")
+            seen.add(field["key"])
+            if field["kind"] not in SIGNUP_KINDS or not isinstance(field["required"], bool):
+                raise _bad_signup("field kind")
+            if not _signup_text(field["label"], 60) or not _signup_text(field["hint"], 120, empty=True):
+                raise _bad_signup("field text")
+            choices = field["choices"]
+            if not isinstance(choices, list) or len(choices) > 40 or not all(_signup_text(c, 60) for c in choices):
+                raise _bad_signup("field choices")
+
+
+def _validate_signup_response(op: str, value: dict[str, Any], args: dict[str, Any]) -> None:
+    if op == "signup.forget":
+        if set(value) != {"forgotten"} or not isinstance(value["forgotten"], bool):
+            raise _bad_signup("forget")
+        return
+    if set(value) != {"maps", "truncated"} or not isinstance(value["maps"], list) or not isinstance(value["truncated"], bool):
+        raise _bad_signup("maps")
+    if len(value["maps"]) > 200:
+        raise _bad_signup("too many maps")
+    for item in value["maps"]:
+        validate_signup_map(item)
+
+
 MARKET_OPS = frozenset({"market.catalog", "market.install", "market.remove", "market.run"})
 MARKET_LISTING_ID = re.compile(r"^[a-z0-9][a-z0-9.-]{2,63}$")
 MARKET_LISTING_KEYS = frozenset({
@@ -1604,6 +1681,15 @@ class V5ContractService:
         """The phone's models for the mapping start sheet's picker. The key stays on the phone."""
         return self._call(device_id, "models.list", {})
 
+    def signup_maps(self, device_id: str) -> dict[str, Any]:
+        """Plan 43 T6: the sign-up maps the phone learned. Schemas only; every string is checked for values."""
+        return self._call(device_id, "signup.maps", {})
+
+    def signup_forget(self, device_id: str, package: str) -> dict[str, Any]:
+        if not isinstance(package, str) or not SIGNUP_PACKAGE.match(package):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "package is an Android package name.")
+        return self._call(device_id, "signup.forget", {"package": package})
+
     def manual_get(self, device_id: str, place_id: str, query: str | None = None) -> dict[str, Any]:
         """An app's manual (plan 36 §8): abilities with their paths, the self-quiz, scores and the manual as Markdown."""
         if not isinstance(place_id, str) or not KNOWLEDGE_PLACE_ID.match(place_id):
@@ -1617,7 +1703,7 @@ class V5ContractService:
         return self._call(device_id, "manual.get", args)
 
     def cc_start(self, device_id: str, goal: str, *, task_id: str | None = None,
-                 sealed: list[dict[str, Any]] | None = None, publish: bool = False) -> dict[str, Any]:
+                 sealed: list[dict[str, Any]] | None = None, publish: bool = False, signup_map: str | None = None) -> dict[str, Any]:
         """Plan 33 (C0): start an assigned task as an ordinary Mind mission. Goal text only, never a secret.
 
         C2: [sealed] envelopes (HPKE to the phone's device key, made in the owner's browser) ride along as opaque bytes.
@@ -1626,6 +1712,11 @@ class V5ContractService:
         if not isinstance(goal, str) or not goal.strip() or len(goal) > MAX_GOAL or INLINE_SECRET.search(goal):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A task goal is 1..2000 characters without secrets.")
         args: dict[str, Any] = {"goal": goal.strip()}
+        if signup_map is not None:
+            # Plan 43 T6: this task maps the app's sign-up. Nothing else rides along.
+            if not isinstance(signup_map, str) or not SIGNUP_PACKAGE.match(signup_map) or sealed or publish:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A sign-up mapping task names one app's package, and nothing else.")
+            return self._call(device_id, "cc.start", {**args, "signupMap": signup_map})
         if publish:
             # C3: this task posts a file; the phone gates its final Share/Post as a send, for this mission.
             if not isinstance(task_id, str) or not CC_TASK_ID.match(task_id):
@@ -1745,6 +1836,14 @@ class V5ContractService:
             if args:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "models.list takes no arguments.")
             return self.models_list(device_id)
+        if op == "signup.maps":
+            if args:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "signup.maps takes no arguments.")
+            return self.signup_maps(device_id)
+        if op == "signup.forget":
+            if set(args) != {"package"}:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "signup.forget takes package only.")
+            return self.signup_forget(device_id, args["package"])
         if op == "manual.get":
             if not {"placeId"} <= set(args) <= {"placeId", "query"}:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "manual.get takes placeId and query only.")

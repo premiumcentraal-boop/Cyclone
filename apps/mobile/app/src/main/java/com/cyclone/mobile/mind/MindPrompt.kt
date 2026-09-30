@@ -13,6 +13,20 @@ object MindPrompt {
         "with lo.06, type the message (text), tap Send (irreversible). Keep choices, judgement and the finish for yourself; when the " +
         "plan comes back to you, read the screen and decide."
 
+    /**
+     * Plan 43 T6: a sign-up mapping mission. The Mind walks an app's sign-up once, with the owner's values for this first
+     * account, and records every page as a template for Account Setup.
+     */
+    fun signupRules(app: String): String = "This mission maps the sign-up of $app for Cyclone's Account Setup. Open $app and start " +
+        "creating a new account. Walk the flow page by page with the owner's values for this first account: ask for them with " +
+        "owner_ask (or the values card) when you need them, never invent them, and use vault_fill for the password. On every page, " +
+        "before you continue from it, call signup_page with each field's label as shown, its kind, whether it is required, the " +
+        "app's format hint and a picker's options: never a value. When a page is a step only a person can do (a code by email or " +
+        "SMS, a CAPTCHA, a selfie or ID check, a call), record it with check=… and ask the owner to do it; never try to solve it. " +
+        "Before the control that creates the account, call signup_final and press it only if the owner approved. Then call " +
+        "signup_done and finish. If the app refuses (the account exists, a limit), record what you have with signup_done " +
+        "complete=false and say why."
+
     /** Plan 42: a Flash run, a few routine steps the router sent here. */
     const val FLASH = "This is a quick run: a few routine steps. Act at once, keep turns short, and finish as soon as it is done."
     const val FLASH_WITH_PILOT = "This is a quick run: a few routine steps. Write the whole run as a plan and give it to pilot " +

@@ -57,6 +57,12 @@ class PhoneMindToolbox(
      * hands over, deciding itself when to hand one back. Null (Fast mode off) keeps the toolbox exactly as before.
      */
     private val fast: com.cyclone.mobile.mind.pilot.PilotSetup? = null,
+    /**
+     * Plan 43 (T6): a sign-up mapping mission. With it the Mind records each sign-up page (labels and kinds, never
+     * values) and asks the owner before the control that creates the account. [saveSignup] keeps the finished map.
+     */
+    private val signup: com.cyclone.mobile.mind.signup.SignupRecorder? = null,
+    private val saveSignup: ((com.cyclone.mobile.mind.signup.SignupMap) -> Unit)? = null,
 ) : MindToolbox {
     /** The phone the Mind acts on; swapped by [rebind] when the mission changes plane. */
     @Volatile private var env: CycloneAgentEnvironmentApi = env
@@ -80,6 +86,7 @@ class PhoneMindToolbox(
         when (spec.name) {
             "go_to" -> maps != null || manual != null
             "pilot" -> fast != null
+            in SIGNUP_TOOLS -> signup != null
             in MANUAL_TOOLS -> manual != null
             else -> true
         }
@@ -202,7 +209,16 @@ class PhoneMindToolbox(
             ownerWaitMs = result.ownerWaitMs + waited)
     }
 
-    private fun dispatch(call: MindToolCall, arguments: JSONObject): MindToolResult = when (call.name) {
+    private fun dispatch(call: MindToolCall, arguments: JSONObject): MindToolResult {
+        // A sign-up map never holds what was typed: the recorder learns every value the Mind types or is given.
+        if (call.name == "type_text") signup?.typed(arguments.optString("text"))
+        return dispatchTool(call, arguments)
+    }
+
+    private fun dispatchTool(call: MindToolCall, arguments: JSONObject): MindToolResult = when (call.name) {
+        "signup_page" -> signupPage(arguments)
+        "signup_final" -> signupFinal(arguments)
+        "signup_done" -> signupDone(arguments)
         "screen_read" -> read()
         "screen_look" -> look()
         "screen_find" -> find(arguments.optString("query"))
@@ -480,6 +496,65 @@ class PhoneMindToolbox(
         return if (result.imageDataUrl != null) result.copy(text = result.text + if (size == null) "" else
             "\n\nThe screenshot is ${size.first}×${size.second} pixels; boxes labelled e1, e2… are the refs above. Prefer refs; for something with no ref, tap_point takes x,y in these pixels.")
         else result.copy(text = "A screenshot could not be taken; here is the text description.\n\n${result.text}")
+    }
+
+    // ---- plan 43 T6: sign-up mapping ---------------------------------------------------------------------------------
+
+    private fun signupPage(arguments: JSONObject): MindToolResult {
+        val recorder = signup ?: return MindToolResult.error("This mission doesn't map a sign-up.")
+        val raw = arguments.optJSONArray("fields") ?: org.json.JSONArray()
+        val fields = (0 until raw.length()).mapNotNull { raw.optJSONObject(it) }.map { f ->
+            f.keys().asSequence().associateWith { key ->
+                when (val v = f.opt(key)) {
+                    is org.json.JSONArray -> (0 until v.length()).map { v.optString(it) }
+                    org.json.JSONObject.NULL -> null
+                    else -> v
+                }
+            }
+        }
+        return try {
+            val page = recorder.page(arguments.optString("title"), fields, arguments.optString("continue"),
+                arguments.optString("check").takeIf { it.isNotBlank() })
+            val check = page.check?.let { " It has ${it.label}: a person does that step (ask the owner with owner_ask or hand over); never try to solve it." }.orEmpty()
+            MindToolResult("Recorded page ${page.index}: ${page.fields.size} ${if (page.fields.size == 1) "field" else "fields"}.$check",
+                "sign-up page ${page.index} recorded")
+        } catch (refused: com.cyclone.mobile.mind.signup.SignupRecorder.Refused) {
+            MindToolResult.error(refused.message ?: "Not recorded.")
+        }
+    }
+
+    /** The control that creates the account: code asks the owner first, whatever the model thinks. */
+    private fun signupFinal(arguments: JSONObject): MindToolResult {
+        val recorder = signup ?: return MindToolResult.error("This mission doesn't map a sign-up.")
+        val control = arguments.optString("control").trim()
+        try {
+            recorder.final(control)
+        } catch (refused: com.cyclone.mobile.mind.signup.SignupRecorder.Refused) {
+            return MindToolResult.error(refused.message ?: "Not recorded.")
+        }
+        val reply = owner.ask("Create this account now? Cyclone will press \"$control\" to finish the sign-up it just mapped.",
+            listOf(SIGNUP_YES, SIGNUP_NO), ownerTimeoutMs)
+        return if (reply.answered && reply.text.trim().equals(SIGNUP_YES, ignoreCase = true)) {
+            MindToolResult("The owner approved. Press \"$control\" now, check the result, then call signup_done with complete=true.",
+                "sign-up: owner approved", ownerWaitMs = reply.waitedMs)
+        } else {
+            MindToolResult("The owner did not approve creating the account. Do not press \"$control\". Call signup_done with complete=false " +
+                "(the map is kept up to the last page) and finish.", "sign-up: not approved", ok = false, ownerWaitMs = reply.waitedMs)
+        }
+    }
+
+    private fun signupDone(arguments: JSONObject): MindToolResult {
+        val recorder = signup ?: return MindToolResult.error("This mission doesn't map a sign-up.")
+        return try {
+            val map = recorder.finish(arguments.optBoolean("complete"))
+            saveSignup?.invoke(map)
+            MindToolResult("Saved the sign-up map of ${map.appLabel}: ${map.pages.size} pages, ${map.fields.size} fields" +
+                (if (map.checks.isEmpty()) "" else ", checks: ${map.checks.joinToString { it.label }}") +
+                (if (map.complete) ", up to the account being created." else ", stopped before the account was created.") +
+                " It shows in Cyclone Glass under Accounts. Now finish the mission.", "sign-up map saved")
+        } catch (refused: com.cyclone.mobile.mind.signup.SignupRecorder.Refused) {
+            MindToolResult.error(refused.message ?: "Not saved.")
+        }
     }
 
     // ---- plan 41: Fast mode, the Pilot ------------------------------------------------------------------------------
@@ -1197,6 +1272,7 @@ class PhoneMindToolbox(
         if (fields.size > MAX_VALUE_FIELDS) return MindToolResult.error("Ask for at most $MAX_VALUE_FIELDS values at once.")
         owner.status("Waiting for your details")
         val reply = owner.fill(reason.take(300), fields, ownerTimeoutMs)
+        reply.values.values.forEach { signup?.typed(it) }
         return when (reply.outcome) {
             MindValuesOutcome.FILLED -> fillValues(fields, reply)
             MindValuesOutcome.TOOK_OVER -> {
@@ -1474,6 +1550,10 @@ class PhoneMindToolbox(
             "set_alarm", "vault_fill", "open_notification", "go_to", "pilot")
         /** Read-only manual tools: offered only when the mission has the App Manual. */
         private val MANUAL_TOOLS = setOf("abilities_find", "how_to_find")
+        /** Plan 43 T6: offered only in a sign-up mapping mission. */
+        private val SIGNUP_TOOLS = setOf("signup_page", "signup_final", "signup_done")
+        const val SIGNUP_YES = "Create the account"
+        const val SIGNUP_NO = "Not now"
         private val TAP_TOOLS = setOf("phone.click", "phone.tap", "phone.tap_point")
         private val REVALIDATION = Regex("Target revalidation: ([A-Z_]+)")
         private val NAVIGATION = setOf("phone.open_app", "phone.launch_intent", "phone.open_settings", "phone.set_timer", "phone.set_alarm", "phone.back", "phone.home")
@@ -1519,6 +1599,25 @@ class PhoneMindToolbox(
                     "link" to string("Only for a step that opens a link: the https:// or market:// link."),
                     "risk" to string("irreversible for a send, payment, delete or post; leave out otherwise.", listOf("irreversible")),
                     required = listOf("do"))), required = listOf("steps"))),
+            MindToolSpec("signup_page", "Sign-up mapping: record the sign-up page on screen before you continue from it. List every field " +
+                "the page asks for: its label as shown, its kind, whether it is required, the format hint the app shows, and a picker's " +
+                "options. Never the value you type or were given: the map is a template for the next accounts.",
+                objectSchema("title" to string("The page's heading, e.g. \"What's your birthday?\"."),
+                    "fields" to array("The page's fields, in order.", objectSchema(
+                        "label" to string("The field's label or placeholder as the app shows it."),
+                        "kind" to string("What the field is.", com.cyclone.mobile.mind.signup.SignupFieldKind.entries.map { it.wire }),
+                        "required" to boolean("False only when the app marks it optional."),
+                        "hint" to string("The app's own format hint, e.g. \"At least 6 characters\". Never an example value."),
+                        "choices" to array("A picker's options as shown (e.g. Female, Male, Custom).", string("One option.")),
+                        required = listOf("label", "kind"))),
+                    "continue" to string("The control that goes to the next page, e.g. Next."),
+                    "check" to string("Only when this page is a step a person must do.", com.cyclone.mobile.mind.signup.SignupCheck.entries.map { it.wire }),
+                    required = listOf("title", "fields", "continue"))),
+            MindToolSpec("signup_final", "Sign-up mapping: before the control that creates the account, name it here. Cyclone asks the owner; " +
+                "press it only when this tool says the owner approved.",
+                objectSchema("control" to string("The control's label, e.g. Sign up."), required = listOf("control"))),
+            MindToolSpec("signup_done", "Sign-up mapping: save the map. complete=true only when the account was created after the owner's approval.",
+                objectSchema("complete" to boolean("Whether the whole flow was walked to the account being created."), required = listOf("complete"))),
             MindToolSpec("go_to", "Walk to a screen of the current app using its learned map (shown as \"Map of …\" once you are in a learned app), " +
                 "or do an ability from the app's manual (handles like a3 from abilities_find or the manual lines). Cyclone taps the known way itself, " +
                 "checking the screen after every step, and stops if anything differs. It never chooses, types or confirms: that stays yours.",

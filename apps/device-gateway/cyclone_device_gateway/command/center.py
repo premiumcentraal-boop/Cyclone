@@ -184,6 +184,9 @@ class CommandCenter:
         # Plan 43 (T1): tables, the owner's own databases with typed properties and saved views.
         from .tables import TableStore
         self.tables = TableStore(self)
+        # Plan 43 (T5 + T6): accounts by phone and app, and the sign-ups the phone mapped.
+        from .signup import SignupStore
+        self.signup = SignupStore(self)
         # Plan 33 §7 (C4, moved forward): the AI project manager, on the owner's OpenRouter key.
         from .ai import AiStore
         self.ai = AiStore(self, **(ai or {}))
@@ -1004,6 +1007,10 @@ class CommandCenter:
                 extra["sealed"] = sealed
             if publish:
                 extra["publish"] = True
+            from .signup import recipe_package
+            mapped = recipe_package(task["recipe"])
+            if mapped and not extra:
+                extra["signup_map"] = mapped
             try:
                 ack = self._contract.cc_start(device, goal, **extra)
             except DesktopRuntimeError as exc:

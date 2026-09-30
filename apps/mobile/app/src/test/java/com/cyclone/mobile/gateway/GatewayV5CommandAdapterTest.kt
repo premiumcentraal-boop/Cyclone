@@ -57,6 +57,20 @@ class GatewayV5CommandAdapterTest {
         assertEquals(1, started.size)
     }
 
+    @Test fun aSignupMappingTaskStartsWithItsAppAndNothingElse() {
+        val mapped = mutableListOf<Pair<String, String>>()
+        GatewayV5CommandAdapter.startSignup = { goal, pkg -> mapped += goal to pkg; "m1abcdefgh" }
+        GatewayV5CommandAdapter.installed = { pkg -> pkg == "com.instagram.android" }
+        val ack = GatewayV5CommandAdapter.start(JSONObject().put("goal", "Map the sign-up of Instagram").put("signupMap", "com.instagram.android"))
+        assertEquals("m1abcdefgh", ack.getString("missionId"))
+        assertEquals(listOf("Map the sign-up of Instagram" to "com.instagram.android"), mapped)
+        assertTrue(started.isEmpty())
+        assertEquals("APP_NOT_FOUND", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupMap", "com.not.installed")) })
+        assertEquals("INVALID_REQUEST", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupMap", "rm -rf /")) })
+        assertEquals("INVALID_REQUEST", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("signupMap", "com.instagram.android").put("publish", true)) })
+        assertEquals(1, mapped.size)
+    }
+
     @Test fun statusCarriesTheExactSendAndTheSummaryWhenDone() {
         live = mission
         moment = approval()
