@@ -83,7 +83,8 @@ object ProfileFailureClassifier {
         if (timedOut) return when (operation) {
             ProfileSetupOperation.START_PROFILE, ProfileSetupOperation.PROFILE_STATE ->
                 failure(ProfileSetupFailureKind.PROFILE_START_FAILED, "Android did not finish starting Profile B in time.")
-            ProfileSetupOperation.INSTALL_EXISTING_PACKAGE, ProfileSetupOperation.LIST_PROFILE_PACKAGE ->
+            ProfileSetupOperation.INSTALL_EXISTING_PACKAGE, ProfileSetupOperation.LIST_PROFILE_PACKAGE,
+            ProfileSetupOperation.LIST_PROFILE_APPS, ProfileSetupOperation.UNINSTALL_FOR_PROFILE ->
                 failure(ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED, "Android did not finish adding the app in time.")
             else -> failure(ProfileSetupFailureKind.ROOT_COMMAND_FAILED, "The privileged Android operation timed out.")
         }
@@ -137,7 +138,8 @@ object ProfileFailureClassifier {
         return when (operation) {
             ProfileSetupOperation.START_PROFILE, ProfileSetupOperation.SWITCH_USER -> failure(ProfileSetupFailureKind.PROFILE_START_FAILED, platform)
             ProfileSetupOperation.PROFILE_STATE -> failure(ProfileSetupFailureKind.PROFILE_NOT_UNLOCKED, platform)
-            ProfileSetupOperation.INSTALL_EXISTING_PACKAGE, ProfileSetupOperation.LIST_PROFILE_PACKAGE ->
+            ProfileSetupOperation.INSTALL_EXISTING_PACKAGE, ProfileSetupOperation.LIST_PROFILE_PACKAGE,
+            ProfileSetupOperation.LIST_PROFILE_APPS, ProfileSetupOperation.UNINSTALL_FOR_PROFILE ->
                 failure(ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED, platform)
             ProfileSetupOperation.MARK_SETUP_COMPLETE, ProfileSetupOperation.READ_SETUP_COMPLETE,
             ProfileSetupOperation.LIST_USERS, ProfileSetupOperation.CURRENT_USER ->
