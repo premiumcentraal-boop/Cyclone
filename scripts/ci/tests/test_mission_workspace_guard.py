@@ -18,8 +18,9 @@ def test_the_workspace_adds_no_tools_only_optional_arguments():
     toolbox = read(MIND / "PhoneMindToolbox.kt")
     specs = toolbox[toolbox.index("val SPECS: List<MindToolSpec> = listOf("):]
     # 39 tools, plus plan 41's pilot, which is offered only when Fast mode is on (see test_pilot_guard.py), and plan 43's
-    # signup_page / signup_final / signup_done, offered only in a sign-up mapping mission.
-    assert len(re.findall(r'MindToolSpec\("[a-z_]+"', specs)) == 43
+    # signup_page / signup_final / signup_done, offered only in a sign-up mapping mission, and T7's setup_page /
+    # setup_done, offered only in an Account Setup run.
+    assert len(re.findall(r'MindToolSpec\("[a-z_]+"', specs)) == 45
     extend = read(WORKSPACE / "WorkspaceSpecs.kt")
     assert 'MindToolSpec("' not in extend, "the workspace must not define tools of its own"
     assert "MindToolSpec(spec.name, spec.description, parameters)" in extend

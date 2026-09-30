@@ -648,6 +648,13 @@ class TableStore:
             out["groups"] = _groups(group, rows)
         return out
 
+    def all_rows(self, table_id: str) -> list[dict[str, Any]]:
+        """Every live row, whatever the views filter (for engines such as Create accounts)."""
+        with self._c._lock:
+            self._live_table(table_id)
+            return self._publics(table_id, self._props(table_id), self._c._db.execute(
+                "SELECT * FROM cc_row WHERE table_id = ? AND archived_at IS NULL ORDER BY position, created_at", (table_id,)).fetchall())
+
     def get_row(self, table_id: str, row_id: str) -> dict[str, Any]:
         with self._c._lock:
             self._live_table(table_id)

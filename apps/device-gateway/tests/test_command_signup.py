@@ -148,3 +148,133 @@ def test_a_map_becomes_a_table_without_passwords_or_codes(setup):
     again = center.signup.make_table({"deviceId": "pixel8-abc", "package": "com.instagram.android"})
     assert again["id"] == table["id"] and len(center.tables.list()) == 1
     assert center.signup.maps("pixel8-abc")["maps"][0]["tableId"] == table["id"]
+
+
+# ---------------------------------------------------------------------------------------------------- T7: Create accounts
+
+class RunContract(Contract):
+    def __init__(self) -> None:
+        super().__init__()
+        self.status: dict[str, dict[str, Any]] = {}
+        self.stopped: list[str] = []
+
+    def cc_start(self, device_id: str, goal: str, **extra: Any) -> dict[str, Any]:
+        ack = super().cc_start(device_id, goal, **extra)
+        self.status[ack["missionId"]] = {"missionId": ack["missionId"], "status": "running", "live": True, "turns": 1, "workingMs": 1,
+                                         "costUsd": 0.0, "summary": "", "moment": None, "leases": []}
+        return ack
+
+    def cc_status(self, device_id: str, mission_id: str) -> dict[str, Any]:
+        return dict(self.status[mission_id])
+
+    def cc_answer(self, device_id: str, mission_id: str, action: str, **kw: Any) -> dict[str, Any]:
+        self.stopped.append(mission_id)
+        return {"handled": True, "detail": "ok"}
+
+
+@pytest.fixture()
+def running(tmp_path: Path):
+    contract = RunContract()
+    devices = [{"deviceId": "pixel8-abc", "name": "Pixel 8", "paired": True, "state": "ready"}]
+    center = CommandCenter(tmp_path / "cc.db", contract, lambda: devices, clock=Clock(),
+                           connections={"spawn": lambda fn: fn(), "sleep": lambda s: None})
+    center.signup.maps("pixel8-abc")
+    table = center.signup.make_table({"deviceId": "pixel8-abc", "package": "com.instagram.android"})
+    yield center, contract, table
+    center.stop()
+
+
+def cells_of(table: dict[str, Any], **values: Any) -> dict[str, Any]:
+    by = {p["name"]: p for p in table["properties"]}
+    out = {}
+    for name, value in values.items():
+        prop = by[name]
+        if prop["type"] in ("select", "status"):
+            value = next(o["id"] for o in prop["config"]["options"] if o["name"] == value)
+        out[prop["id"]] = value
+    return out
+
+
+def row_status(center: CommandCenter, table: dict[str, Any], row_id: str) -> tuple[str, str]:
+    by = {p["name"]: p for p in table["properties"]}
+    status = next(p for p in table["properties"] if p["type"] == "status")
+    cells = center.tables.get_row(table["id"], row_id)["cells"]
+    name = next(o["name"] for o in status["config"]["options"] if o["id"] == cells.get(status["id"]))
+    return name, cells.get(by["Progress"]["id"], "")
+
+
+def test_create_accounts_runs_ready_rows_with_their_values(running):
+    center, contract, table = running
+    ready = center.tables.create_row(table["id"], {"cells": cells_of(table, Account="Brand One", Email="hello@brand.one",
+                                                                     Birthday={"start": "1990-04-02"}, Username="brandone", Gender="Custom",
+                                                                     **{"Full name": "Brand One", "Whose account": "Company", "Status": "Ready"})})
+    center.tables.create_row(table["id"], {"cells": cells_of(table, Account="Draft row", Status="Draft")})
+    prepared = center.signup.prepare({"tableId": table["id"]})
+    assert [r["title"] for r in prepared["rows"]] == ["Brand One"]
+    first = prepared["rows"][0]
+    assert first["username"] == "brandone" and first["vaultItemId"] is None
+    account = center.get_account(first["accountId"])
+    assert account["ownerBasis"] == "company" and account["allowedDevices"] == ["pixel8-abc"]
+    out = center.signup.create({"tableId": table["id"], "rows": [{"rowId": first["rowId"], "accountId": first["accountId"], "vaultItemId": None}]})
+    assert len(out["started"]) == 1 and not out["errors"]
+    assert row_status(center, table, ready["id"])[0] == "Queued"
+    center.tick()
+    device, goal, extra = contract.started[-1]
+    assert device == "pixel8-abc" and "already approved" in goal
+    run = extra["signup_run"]
+    assert run["package"] == "com.instagram.android"
+    assert run["values"] == {"email": "hello@brand.one", "full_name": "Brand One", "birthday": "1990-04-02", "username": "brandone",
+                             "gender": "Custom"}
+    mission = next(iter(contract.status))
+    contract.status[mission]["setup"] = {"state": "filling", "page": 3, "pages": 7, "drift": None, "handle": None, "note": ""}
+    center.tick()
+    assert row_status(center, table, ready["id"]) == ("Creating", "Page 3 of 7")
+    contract.status[mission]["setup"] = {"state": "verification", "page": 2, "pages": 7, "drift": 4, "handle": None, "note": "email code"}
+    center.tick()
+    status, progress = row_status(center, table, ready["id"])
+    assert status == "Needs verification" and "page 4 changed" in progress and "email code" in progress
+    contract.status[mission].update(live=False, status="completed", summary="Created.",
+                                    setup={"state": "created", "page": 7, "pages": 7, "drift": None, "handle": "brandone.official", "note": "Created."})
+    center.tick()
+    assert row_status(center, table, ready["id"])[0] == "Created"
+    assert center.get_account(first["accountId"])["handle"] == "brandone.official"
+    link = next(p for p in table["properties"] if p["name"] == "Cyclone account")
+    assert center.tables.get_row(table["id"], ready["id"])["cells"][link["id"]] == [first["accountId"]]
+    # Nothing is Ready any more.
+    assert center.signup.prepare({"tableId": table["id"]})["rows"] == []
+
+
+def test_pause_and_cancel_stop_the_run_and_ready_starts_again(running):
+    center, contract, table = running
+    row = center.tables.create_row(table["id"], {"cells": cells_of(table, Account="Brand Two", Status="Ready")})
+    first = center.signup.prepare({"tableId": table["id"]})["rows"][0]
+    center.signup.create({"tableId": table["id"], "rows": [{"rowId": row["id"], "accountId": first["accountId"], "vaultItemId": None}]})
+    center.tick()
+    assert center.signup.prepare({"tableId": table["id"]})["rows"] == []  # already running
+    assert center.signup.stop({"tableId": table["id"]}, pause=True) == {"stopped": [row["id"]]}
+    assert contract.stopped and row_status(center, table, row["id"])[0] == "Paused"
+    center.tick()
+    assert row_status(center, table, row["id"])[0] == "Paused"
+    center.tables.update_row(table["id"], row["id"], {"cells": cells_of(table, Status="Ready")})
+    again = center.signup.prepare({"tableId": table["id"]})["rows"][0]
+    assert again["accountId"] == first["accountId"]  # the same Cyclone account, not a second one
+    center.signup.create({"tableId": table["id"], "rows": [{"rowId": row["id"], "accountId": again["accountId"], "vaultItemId": None}]})
+    assert center.signup.stop({"tableId": table["id"], "rowIds": [row["id"]]}, pause=False) == {"stopped": [row["id"]]}
+    assert row_status(center, table, row["id"]) == ("Failed", "Cancelled.")
+
+
+def test_create_accounts_only_takes_sign_up_tables(running):
+    center, _, _ = running
+    plain = center.tables.create({"title": "Orders"})
+    with pytest.raises(CommandError, match="not a sign-up table"):
+        center.signup.prepare({"tableId": plain["id"]})
+
+
+def test_the_setup_progress_the_phone_reports_is_checked():
+    from cyclone_device_gateway.desktop_runtime.v5_contract import _validate_setup
+    _validate_setup({"state": "filling", "page": 2, "pages": 7, "drift": None, "handle": None, "note": ""})
+    for bad in ({"state": "solving", "page": 1, "pages": 7, "drift": None, "handle": None, "note": ""},
+                {"state": "filling", "page": 0, "pages": 7, "drift": None, "handle": None, "note": ""},
+                {"state": "filling", "page": 1, "pages": 7, "drift": None, "handle": None, "note": "", "password": "x"}):
+        with pytest.raises(DesktopRuntimeError):
+            _validate_setup(bad)

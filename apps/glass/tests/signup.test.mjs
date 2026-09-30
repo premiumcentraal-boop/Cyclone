@@ -107,6 +107,7 @@ test("Accounts: phone → apps → an app's accounts and its mapped sign-up", as
   await flush();
   assert.deepEqual(made, [{ deviceId: "phone-a", package: "com.instagram.android" }]);
   assert.match(view.element.textContent, /Made “Instagram sign-ups”/);
+  assert.ok(button(view, "Create accounts"), "the sign-up table has Create accounts");
 });
 
 test("Accounts: mapping a sign-up says whose account it is", async () => {

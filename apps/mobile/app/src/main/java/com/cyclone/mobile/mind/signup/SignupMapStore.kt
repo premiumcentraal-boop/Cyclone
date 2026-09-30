@@ -25,6 +25,10 @@ object SignupMapStore {
         }
     }
 
+    fun load(context: Context, packageName: String): SignupMap? =
+        if (!PACKAGE.matches(packageName)) null
+        else File(dir(context), "$packageName.json").takeIf { it.isFile }?.let { runCatching { SignupMap.fromJson(JSONObject(it.readText())) }.getOrNull() }
+
     fun all(context: Context): List<SignupMap> = dir(context).listFiles { f -> f.name.endsWith(".json") }.orEmpty()
         .mapNotNull { runCatching { SignupMap.fromJson(JSONObject(it.readText())) }.getOrNull() }
         .sortedBy { it.appLabel.lowercase() }

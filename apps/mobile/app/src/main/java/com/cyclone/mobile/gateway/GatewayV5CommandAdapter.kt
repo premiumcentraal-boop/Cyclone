@@ -48,6 +48,10 @@ internal object GatewayV5CommandAdapter {
     internal var start: (String) -> String? = { goal -> MindMissions.startAssigned(app(), goal) }
     /** Plan 43 T6: a task that maps [package]'s sign-up; the phone checks the app is installed. */
     internal var startSignup: (String, String) -> String? = { goal, pkg -> MindMissions.startAssigned(app(), goal, signup = pkg) }
+    /** Plan 43 T7: an Account Setup run (one account from a sign-up table row), and the phone's sign-up maps. */
+    internal var startSetup: (String, com.cyclone.mobile.mind.signup.AccountSetupPlan) -> String? =
+        { goal, plan -> MindMissions.startAssigned(app(), goal, setup = plan) }
+    internal var signupMap: (String) -> com.cyclone.mobile.mind.signup.SignupMap? = { pkg -> com.cyclone.mobile.mind.signup.SignupMapStore.load(app(), pkg) }
     internal var installed: (String) -> Boolean = { pkg -> runCatching { app().packageManager.getPackageInfo(pkg, 0) }.isSuccess }
     /** The running mission [id], front or behind. */
     internal var running: (String) -> Mission? = { id -> MindMissions.find(id) }
@@ -92,13 +96,25 @@ internal object GatewayV5CommandAdapter {
     }
 
     fun start(args: JSONObject): JSONObject {
-        requireOnly(args, setOf("goal", "taskId", "sealed", "publish", "signupMap"))
+        requireOnly(args, setOf("goal", "taskId", "sealed", "publish", "signupMap", "signupRun"))
         val signup = args.opt("signupMap")?.let { raw ->
             val pkg = (raw as? String).orEmpty()
             if (!SIGNUP_PACKAGE.matches(pkg)) throw invalid("signupMap is the package of the app whose sign-up to map.")
             if (args.has("sealed") || args.has("publish")) throw invalid("A sign-up mapping task takes no sealed secrets or file to post.")
             if (!installed(pkg)) throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "$pkg is not installed on this phone.")
             pkg
+        }
+        val setup = args.opt("signupRun")?.let { raw ->
+            val run = raw as? JSONObject ?: throw invalid("signupRun is {package, values}.")
+            if (run.keys().asSequence().toSet() != setOf("package", "values")) throw invalid("signupRun is {package, values}.")
+            val pkg = run.optString("package")
+            if (!SIGNUP_PACKAGE.matches(pkg)) throw invalid("signupRun.package is an Android package name.")
+            if (signup != null || args.has("publish")) throw invalid("An Account Setup run is not a mapping task or a post.")
+            val values = com.cyclone.mobile.mind.signup.AccountSetupPlan.values(run.optJSONObject("values"))
+                ?: throw invalid("signupRun.values is field key -> text.")
+            if (!installed(pkg)) throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "$pkg is not installed on this phone.")
+            val map = signupMap(pkg) ?: throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "This phone has no sign-up map for $pkg. Map the sign-up first.")
+            com.cyclone.mobile.mind.signup.AccountSetupPlan(map, values)
         }
         val publish = args.opt("publish")
         if (publish != null && publish != true) throw invalid("publish is true or left out.")
@@ -119,7 +135,7 @@ internal object GatewayV5CommandAdapter {
                 throw GatewayProtocolException("SEALED_REJECTED", "${rejected.code}:${rejected.leaseId}")
             }
         }
-        val id = (if (signup != null) startSignup(goal, signup) else start(goal)) ?: run {
+        val id = (if (setup != null) startSetup(goal, setup) else if (signup != null) startSignup(goal, signup) else start(goal)) ?: run {
             SealedDelivery.wipe(opened)
             throw GatewayProtocolException("ASK_BUSY", "The phone is already running a mission.")
         }
@@ -147,6 +163,7 @@ internal object GatewayV5CommandAdapter {
             .put("summary", MindRedaction.scrubText(mission.summary).take(600))
             .put("moment", open?.let(::momentJson) ?: JSONObject.NULL)
             .put("leases", leasesJson(id, finished = running == null))
+            .also { out -> com.cyclone.mobile.mind.signup.AccountSetupProgress.of(id)?.let { out.put("setup", it.toJson()) } }
     }
 
     /** Each delivered lease's outcome (delivered, used, failed, expired, unused). A finished mission forgets its values. */

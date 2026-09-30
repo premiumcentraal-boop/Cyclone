@@ -1295,8 +1295,10 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
         if set(value) != {"handled", "detail"} or not isinstance(value["handled"], bool) or not _short_text(value["detail"], 200):
             raise _bad_cc("answer")
         return
-    if set(value) != CC_STATUS_KEYS or value["missionId"] != args.get("missionId") or value["status"] not in LAB_STATUSES:
+    if set(value) - {"setup"} != CC_STATUS_KEYS or value["missionId"] != args.get("missionId") or value["status"] not in LAB_STATUSES:
         raise _bad_cc("status")
+    if "setup" in value:
+        _validate_setup(value["setup"])
     if not isinstance(value["live"], bool) or not _is_int(value["turns"]) or not _is_int(value["workingMs"]):
         raise _bad_cc("status counters")
     if not isinstance(value["costUsd"], (int, float)) or isinstance(value["costUsd"], bool) or not _short_text(value["summary"], 600):
@@ -1329,6 +1331,35 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
         isinstance(f, dict) and set(f) == {"label", "kind"} and _short_text(f["label"], 60) and _short_text(f["kind"], 20) for f in fields
     ):
         raise _bad_cc("moment fields")
+
+
+SETUP_STATES = frozenset({"filling", "verification", "created", "failed"})
+
+
+def _validate_setup(setup: Any) -> None:
+    """Plan 43 T7: where an Account Setup run is: its page of the map, a page that changed, and the handle once made."""
+    if not isinstance(setup, dict) or set(setup) != {"state", "page", "pages", "drift", "handle", "note"} or setup["state"] not in SETUP_STATES:
+        raise _bad_cc("setup")
+    if not _is_int(setup["pages"]) or not 0 <= setup["pages"] <= 15:
+        raise _bad_cc("setup pages")
+    for key in ("page", "drift"):
+        if setup[key] is not None and (not _is_int(setup[key]) or not 1 <= setup[key] <= 15):
+            raise _bad_cc("setup page")
+    if not _short_text(setup["handle"], 100, nullable=True) or not _short_text(setup["note"], 200):
+        raise _bad_cc("setup text")
+
+
+def _setup_values(values: Any) -> dict[str, str]:
+    """A row's values for an Account Setup run: field key -> text, as the owner filled them. Never a password."""
+    if not isinstance(values, dict) or len(values) > 40:
+        raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "An Account Setup run takes at most 40 values.")
+    out: dict[str, str] = {}
+    for key, value in values.items():
+        if not isinstance(key, str) or not SIGNUP_KEY.match(key) or not isinstance(value, str) or len(value) > 300 \
+                or any(ord(c) < 32 for c in value):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "An Account Setup value is field key -> text of at most 300 characters.")
+        out[key] = value
+    return out
 
 
 SIGNUP_OPS = frozenset({"signup.maps", "signup.forget"})
@@ -1703,7 +1734,8 @@ class V5ContractService:
         return self._call(device_id, "manual.get", args)
 
     def cc_start(self, device_id: str, goal: str, *, task_id: str | None = None,
-                 sealed: list[dict[str, Any]] | None = None, publish: bool = False, signup_map: str | None = None) -> dict[str, Any]:
+                 sealed: list[dict[str, Any]] | None = None, publish: bool = False, signup_map: str | None = None,
+                 signup_run: dict[str, Any] | None = None) -> dict[str, Any]:
         """Plan 33 (C0): start an assigned task as an ordinary Mind mission. Goal text only, never a secret.
 
         C2: [sealed] envelopes (HPKE to the phone's device key, made in the owner's browser) ride along as opaque bytes.
@@ -1717,6 +1749,13 @@ class V5ContractService:
             if not isinstance(signup_map, str) or not SIGNUP_PACKAGE.match(signup_map) or sealed or publish:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A sign-up mapping task names one app's package, and nothing else.")
             return self._call(device_id, "cc.start", {**args, "signupMap": signup_map})
+        if signup_run is not None:
+            # Plan 43 T7: create one account with the app's sign-up map as the plan and the row's values; the password
+            # rides along sealed (the vault), never as a value.
+            if publish or not isinstance(signup_run, dict) or set(signup_run) != {"package", "values"} \
+                    or not isinstance(signup_run["package"], str) or not SIGNUP_PACKAGE.match(signup_run["package"]):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "An Account Setup run names one app's package and its values.")
+            args["signupRun"] = {"package": signup_run["package"], "values": _setup_values(signup_run["values"])}
         if publish:
             # C3: this task posts a file; the phone gates its final Share/Post as a send, for this mission.
             if not isinstance(task_id, str) or not CC_TASK_ID.match(task_id):
