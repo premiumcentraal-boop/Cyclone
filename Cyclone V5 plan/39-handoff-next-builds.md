@@ -34,8 +34,10 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.75 (the other agent):** plan 40 P1 and P2: profile removal with a 7-day Recently deleted, deletion only
   after an automatic backup, and Cyclone Carry (memory, skills and settings follow you on every switch).
 - **alpha.76 (the other agent):** plan 41's parallel Pilot, Fast mode in Settings (off by default).
-- **alpha.77 (the other agent):** plan 42's Cyclone Live: the modes router, Instant and Live voice. B1 is alpha.78, and
-  so on.
+- **alpha.77 (the other agent):** plan 42's Cyclone Live: the modes router, Instant and Live voice.
+- **alpha.78:** the voice-mode fixes and decisions via JEV.
+- **alpha.79:** plan 43 T1, Cyclone Tables. The owner chose plan 43's tables and buttons (T1–T3) before B1, so B1
+  comes after T3.
 - **Test counts at alpha.68:**
   - phone: 2096 tests, 0 failures;
   - gateway suite: passes;
