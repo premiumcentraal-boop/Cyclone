@@ -10,7 +10,7 @@ import org.json.JSONObject
  * apps, contacts), with a confidence. It never writes free text, so it can't invent an app, a contact or a button.
  *
  * Pure: requests, the two wire formats (a fast model with a strict schema; a decision endpoint) and tolerant readers.
- * The call itself is `OpenRouterDecisionBox` on the phone.
+ * The call itself is `mind/decide/Decisions` on the phone (JEV now; OpenAI Decisions when it is live).
  */
 data class BoxQuestion(val id: String, val instructions: String, val choices: List<String>) {
     init {
@@ -41,6 +41,9 @@ data class BoxReply(val answers: Map<String, BoxAnswer>, val ms: Long = 0) {
 /** One decision-box call. Null means no usable answer (the caller then routes one mode up). */
 fun interface DecisionBox {
     fun ask(request: BoxRequest): BoxReply?
+
+    /** Can the box read a screenshot? False for JEV (alpha.78): callers then don't take one. */
+    val sees: Boolean get() = false
 }
 
 object BoxWire {

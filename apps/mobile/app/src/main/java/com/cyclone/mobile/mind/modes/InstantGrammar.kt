@@ -62,7 +62,12 @@ object InstantGrammar {
         .replace(Regex("\\s+"), " ")
         .trim()
 
+    /**
+     * The command's words, without filler. A word said twice in a row ("open open Telegram", a stutter speech-to-text
+     * keeps) counts once (alpha.78).
+     */
     private fun words(text: String): List<String> = normalize(text).split(' ').filter { it.isNotBlank() && it !in FILLER }
+        .fold(mutableListOf<String>()) { out, w -> if (out.lastOrNull() != w) out += w; out }
 
     fun parse(text: String, world: GrammarWorld = GrammarWorld()): GrammarResult {
         val tokens = words(text)
@@ -108,6 +113,12 @@ object InstantGrammar {
         val t = tokens.joinToString(" ")
         return complete(text) || OPEN.matches(t) || TAP.matches(t)
     }
+
+    /**
+     * True when the command names something on the screen ("tap Pokémon GO", "click Settings"): only then does Instant
+     * read the screen before routing. Gestures, apps, the camera and calls read it once, right before the move.
+     */
+    fun needsScreen(text: String): Boolean = TAP.matches(words(text).joinToString(" "))
 
     /** While the owner is still talking: what the command is becoming, so the phone can get ready (plan 42 §5.2). */
     fun prefix(text: String): InstantIntent? {

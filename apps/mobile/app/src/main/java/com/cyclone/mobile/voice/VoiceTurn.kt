@@ -140,8 +140,11 @@ data class VoiceTurn(
 ) {
     data class Step(val turn: VoiceTurn, val effects: List<VoiceEffect>)
 
-    /** AI mode is up (the panel shows) in these phases; otherwise only the button, with a ring while working. */
-    val panelOpen: Boolean get() = phase in setOf(VoicePhase.LISTENING, VoicePhase.TRANSCRIBING, VoicePhase.UNDERSTANDING,
+    /**
+     * AI mode is up (the panel shows) in these phases, and while a quick command runs (alpha.78: voice mode keeps the
+     * screen, with its big Stop in reach); otherwise only the button, with a ring while working.
+     */
+    val panelOpen: Boolean get() = quickLive || phase in setOf(VoicePhase.LISTENING, VoicePhase.TRANSCRIBING, VoicePhase.UNDERSTANDING,
         VoicePhase.ACKING, VoicePhase.ASKING, VoicePhase.READBACK, VoicePhase.DONE)
 
     /** The screen dims only while a request is live (plan 32). */

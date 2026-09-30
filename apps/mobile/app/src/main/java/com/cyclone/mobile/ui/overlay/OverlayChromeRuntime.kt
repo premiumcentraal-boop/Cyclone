@@ -113,11 +113,24 @@ object OverlayChromeRuntime {
     }
 
     /** Shows the mission as the working foreground task and hands input to Cyclone. */
+    /**
+     * Alpha.78: the running work was asked for by voice. Voice mode keeps the screen: the Ask panel never opens for it,
+     * and a mission it started shows as the minimized island, not the full working panel. Cleared when that work ends or
+     * the owner types a request.
+     */
+    @Volatile private var voiceOwnedAt = 0L
+    /** A voice request in the last few seconds: the mission it starts shows minimized. Expires, so nothing lingers. */
+    private val voiceOwned: Boolean get() = android.os.SystemClock.elapsedRealtime() - voiceOwnedAt < VOICE_OWNS_MS
+
     fun missionWorking(sessionId: String, status: String? = null) {
         foregroundTaskId = sessionId
         mutate { machine ->
             when (machine.state()) {
-                OverlayChromeState.IDLE, OverlayChromeState.DONE -> { machine.startAnalysis(sessionId); machine.enterWorking(sessionId) }
+                OverlayChromeState.IDLE, OverlayChromeState.DONE -> {
+                    machine.startAnalysis(sessionId)
+                    machine.enterWorking(sessionId)
+                    if (voiceOwned) machine.dispatch(OverlayUserAction.MINIMIZE)
+                }
                 OverlayChromeState.ANALYSIS, OverlayChromeState.LIVE -> machine.enterWorking(sessionId)
                 else -> Unit
             }
@@ -140,6 +153,7 @@ object OverlayChromeRuntime {
     }
 
     fun missionFinished(sessionId: String, ok: Boolean, message: String) {
+        voiceOwnedAt = 0L
         synchronized(lock) {
             pendingGateChallenge = null
             approvedGateChallenge = null
@@ -401,6 +415,7 @@ object OverlayChromeRuntime {
         val handedOn = { onModes?.invoke(com.cyclone.mobile.mind.modes.ModeResult(com.cyclone.mobile.mind.modes.Mode.MIND, null, true, promoted = true)); Unit }
         val request = text.trim().take(2_000)
         if (request.isBlank()) return handedOn()
+        voiceOwnedAt = if (driving) android.os.SystemClock.elapsedRealtime() else 0L
         if (driving) synchronized(lock) { service }?.let { DriveScreen.begin(it) }
         if (missionHooks?.ownerText(request) == true) {
             updateComposer("")
@@ -442,6 +457,12 @@ object OverlayChromeRuntime {
             }
             return handedOn()
         }
+        // Alpha.78: a spoken request stays in voice mode. The Ask panel (analysis, the composer) is for typed requests;
+        // voice shows its own panel and speaks the result, so the request goes straight to the modes router.
+        if (driving) {
+            synchronized(lock) { pendingGateChallenge = null; approvedGateChallenge = null }
+            return runAiRequest(request, null, onModes)
+        }
         val accepted = synchronized(lock) {
             pendingGateChallenge = null
             approvedGateChallenge = null
@@ -464,6 +485,13 @@ object OverlayChromeRuntime {
             }?.activityInfo?.packageName
             runAiRequest(request, launch, onModes)
         } else handedOn()
+    }
+
+    private const val VOICE_OWNS_MS = 10_000L
+
+    /** Voice's Stop (alpha.78): stops a quick action that voice started, at once. Missions stop through Task Kit. */
+    fun stopVoiceRequest() {
+        com.cyclone.mobile.mind.modes.CycloneModes.cancel()
     }
 
     fun updateVoice(listening: Boolean, transcript: String? = null, message: String? = null) {

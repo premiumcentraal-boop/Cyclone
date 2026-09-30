@@ -1,20 +1,20 @@
-# Cyclone V5 alpha.77 dev1: Cyclone Live (plan 42) - every request goes to the lowest mode that can do it: Instant (clear commands with no model: gestures, open and tap by name, camera, selfie, calls with a 2 s cancel window, timers, torch, volume, media), Flash or the Mind, with a baton when it moves up; Drive sends quick commands straight to the router, confirms with a sound and keeps listening 8 s. Settings -> Speed.
+# Cyclone V5 alpha.79 dev1: Cyclone Tables (plan 43 T1) - the owner builds Notion-like tables in the Command Center: typed properties with coloured options, rows that are pages, and saved table and board views whose filters, sorts and groups are computed on the PC; history with undo; no secrets in a table. Glass 1.0.0-alpha.41; runtime 5.0.0-alpha.79.dev1.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.77.dev1"
+product_version = "5.0.0-alpha.79.dev1"
 channel = "development"
-android_version_code = 222
-python_version = "5.0.0-alpha.68.dev1"
+android_version_code = 224
+python_version = "5.0.0-alpha.79.dev1"
 
 [components]
-mobile = "5.0.0-alpha.77.dev1"
+mobile = "5.0.0-alpha.79.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.40"
-device_gateway = "5.0.0-alpha.68.dev1"
-mcp = "5.0.0-alpha.68.dev1"
+glass = "1.0.0-alpha.41"
+device_gateway = "5.0.0-alpha.79.dev1"
+mcp = "5.0.0-alpha.79.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha77-dev1-cyclone-live"
+candidate_generation = "cyclone-v5-alpha79-dev1-tables"

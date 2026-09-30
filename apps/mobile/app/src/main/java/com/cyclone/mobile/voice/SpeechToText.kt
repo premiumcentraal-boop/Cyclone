@@ -34,8 +34,14 @@ class OnDeviceStt(private val context: Context) {
     sealed interface Result {
         data class Text(val text: String) : Result
         data object NothingHeard : Result
-        data class Failed(val failure: VoiceFailure) : Result
+        /** [codes] are Android's recognizer error numbers, for the voice run log (alpha.78). */
+        data class Failed(val failure: VoiceFailure, val codes: String = "") : Result
     }
+
+    @Volatile private var active: SpeechRecognizer? = null
+
+    /** The owner tapped while listening: the recognizer stops and delivers what it heard (alpha.78). */
+    fun finish() { runCatching { active?.stopListening() } }
 
     /**
      * Listens with Android's recognizer until the owner stops; [onLevel] follows the voice. The on-device recognizer
@@ -43,12 +49,17 @@ class OnDeviceStt(private val context: Context) {
      * recognizer takes over in the same turn (alpha.72).
      */
     suspend fun listen(language: String, onLevel: (Float) -> Unit): Result = withContext<Result>(Dispatchers.Main) {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) return@withContext Result.Failed(VoiceFailure.NOT_HEARD)
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) return@withContext Result.Failed(VoiceFailure.NOT_HEARD, "no recognizer on this phone")
+        var onDeviceCode = ""
         if (SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
             val first = attempt(SpeechRecognizer.createOnDeviceSpeechRecognizer(context), language, onLevel)
             if (!first.tryStandard) return@withContext first.result
+            onDeviceCode = "on-device ${(first.result as? Result.Failed)?.codes.orEmpty()}; "
         }
-        attempt(SpeechRecognizer.createSpeechRecognizer(context), language, onLevel).result
+        when (val second = attempt(SpeechRecognizer.createSpeechRecognizer(context), language, onLevel).result) {
+            is Result.Failed -> second.copy(codes = onDeviceCode + "standard ${second.codes}")
+            else -> second
+        }
     }
 
     private class Attempt(val result: Result, val tryStandard: Boolean = false)
@@ -64,11 +75,11 @@ class OnDeviceStt(private val context: Context) {
                 override fun onEndOfSpeech() = onLevel(0f)
                 override fun onError(error: Int) = finish(when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> Attempt(Result.NothingHeard)
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> Attempt(Result.Failed(VoiceFailure.NO_MIC))
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_AUDIO -> Attempt(Result.Failed(VoiceFailure.MIC_BUSY))
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> Attempt(Result.Failed(VoiceFailure.NO_MIC, "error $error"))
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_AUDIO -> Attempt(Result.Failed(VoiceFailure.MIC_BUSY, "error $error"))
                     // The recognizer itself could not serve this request: the standard one may.
-                    in STANDARD_CAN_SERVE -> Attempt(Result.Failed(VoiceFailure.NOT_HEARD), tryStandard = true)
-                    else -> Attempt(Result.Failed(VoiceFailure.NOT_HEARD))
+                    in STANDARD_CAN_SERVE -> Attempt(Result.Failed(VoiceFailure.NOT_HEARD, "error $error"), tryStandard = true)
+                    else -> Attempt(Result.Failed(VoiceFailure.NOT_HEARD, "error $error"))
                 })
                 override fun onResults(results: Bundle?) {
                     val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
@@ -83,9 +94,11 @@ class OnDeviceStt(private val context: Context) {
                 .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             OpenRouterVoice.languageCode(language)?.let { intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) }
             continuation.invokeOnCancellation { runCatching { recognizer.cancel() } }
+            active = recognizer
             recognizer.startListening(intent)
         }
     } finally {
+        if (active === recognizer) active = null
         runCatching { recognizer.destroy() }
         onLevel(0f)
     }

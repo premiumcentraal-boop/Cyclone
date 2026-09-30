@@ -48,7 +48,7 @@ internal class AndroidInstantHands(
     }
 
     override fun gesture(intent: InstantIntent, direction: String?): InstantMove {
-        val card = fresh() ?: return InstantMove(false, false, "the screen couldn't be read")
+        val card = current() ?: return InstantMove(false, false, "the screen couldn't be read")
         return when (intent) {
             InstantIntent.BACK -> move(env.act("phone.back", JSONObject(), "Instant: Back"))
             InstantIntent.HOME -> move(env.act("phone.home", JSONObject(), "Instant: Home"))
@@ -84,12 +84,12 @@ internal class AndroidInstantHands(
     }
 
     override fun openApp(packageName: String): InstantMove {
-        if (fresh() == null) return InstantMove(false, false, "the screen couldn't be read")
+        if (current() == null) return InstantMove(false, false, "the screen couldn't be read")
         return move(env.act("phone.open_app", JSONObject().put("package", packageName), "Instant: open $packageName"))
     }
 
     override fun camera(front: Boolean): InstantMove {
-        if (fresh() == null) return InstantMove(false, false, "the screen couldn't be read")
+        if (current() == null) return InstantMove(false, false, "the screen couldn't be read")
         return move(env.act("phone.launch_intent", JSONObject().put("action", "camera").put("front", front), "Instant: open the camera"))
     }
 
@@ -118,7 +118,7 @@ internal class AndroidInstantHands(
     override fun dial(number: String): InstantMove {
         val clean = number.filter { it.isDigit() || it == '+' }
         if (clean.length < 3) return InstantMove(false, false, "no usable number")
-        if (fresh() == null) return InstantMove(false, false, "the screen couldn't be read")
+        if (current() == null) return InstantMove(false, false, "the screen couldn't be read")
         return move(env.act("phone.launch_intent", JSONObject().put("uri", "tel:$clean"), "Instant: open the dialer"))
     }
 
@@ -135,6 +135,12 @@ internal class AndroidInstantHands(
         val result = device.direct(tool, params)
         return InstantMove(result.ok, result.ok, result.error ?: "done")
     }
+
+    /**
+     * The screen as read for this move (alpha.78): the reading Instant already made when nothing has moved since, else a
+     * new one. One read per move instead of two; any move clears it, so the next one reads again.
+     */
+    private fun current(): AgentPageCard? = page ?: fresh()
 
     private fun fresh(): AgentPageCard? {
         val card = runCatching { env.observe(goal).page }.getOrNull() ?: return null

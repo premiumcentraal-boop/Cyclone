@@ -378,3 +378,32 @@ That makes three alphas after B1, or B1 moves again if you want this first.
    allowlist you keep?
 5. **The verification link:** Glass only at first, and MCP (§7.4) once the scoped session is proven (recommended), or
    both at once?
+
+## 10. As built
+
+**T1, Tables core (alpha.79)** (alpha.78 went to the other agent's voice fixes):
+
+- **Gateway (`command/tables.py`):**
+  - tables, properties, rows, views and row history in the Command Center's SQLite, under its lock and audit chain;
+  - every T1 property type, with typed cell checks;
+  - no property may be a password, and `INLINE_SECRET` text is refused;
+  - views computed on the PC: filters with and/or, up to 5 sorts, board groups for status, select, multi-select and
+    checkbox, and search;
+  - undo reverts the last cell change;
+  - type changes convert cells;
+  - removing an option or a property cleans the rows and views that used it;
+  - trash first;
+  - CSV export without personal columns, and safe against formulas;
+  - pages hold a `table` block (`tableId`, `viewId`) that is indexed for backlinks.
+- **Routes:** `/v1/cc/tables…` behind the bearer; a stale save returns 409 `ROW_CHANGED`.
+- **Glass:**
+  - `services/tables.ts`: types, parsers, the API and pure helpers;
+  - `workspace/tableView.ts`: the chooser, view tabs, the toolbar, the grid with inline editors, the board with
+    drag-and-drop, property and option menus, and the row peek with its page and history;
+  - `styles/tables.css`: Notion's option colours, in light and dark.
+
+**Not built yet:**
+- personal columns encrypted at rest (today they are marked and left out of exports);
+- column resizing by dragging (widths are stored, but there is no handle yet);
+- everything from T2 on.
+

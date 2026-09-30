@@ -28,6 +28,8 @@ data class ModeResult(
     val ok: Boolean,
     /** The run went on as a Flash or Mind mission. */
     val promoted: Boolean = false,
+    /** Alpha.78: what the run did, stage by stage with its time ("route instant swipe 2 ms", "swipe 640 ms ok"). */
+    val steps: List<String> = emptyList(),
 )
 
 /**
@@ -90,60 +92,76 @@ object CycloneModes {
         Thread({ run(app, request, settings, voice, done) }, "cyclone-modes").start()
     }
 
-    private fun run(context: Context, request: String, settings: ModeSettings, voice: Boolean, done: (ModeResult) -> Unit) {
+    private fun run(context: Context, request: String, settings: ModeSettings, voice: Boolean, reply: (ModeResult) -> Unit) {
         val running = Running("instant-${UUID.randomUUID()}")
         current = running
         OverlayChromeRuntime.attachMission(running)
+        // Alpha.78: every run is timed and logged to the run history, stage by stage.
+        val trace = ModesTrace(context, request, voice)
+        val done: (ModeResult) -> Unit = { result -> trace.finish(result); reply(result.copy(steps = trace.steps)) }
+        // Voice keeps the screen (alpha.78): its own panel shows the work and speaks the result, so the Ask chrome stays out.
+        val chrome = !voice
         val device = com.cyclone.mobile.mind.mission.AndroidMindDevice(context)
         var confirmWindow: (String, Long) -> Boolean = { _, _ -> false }
         val hands = AndroidInstantHands(context, request, device, { text, ms -> confirmWindow(text, ms) }, { running.stopped })
         var handedOver = false
         try {
             val fast = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
-            val box = if (settings.speed == Speed.AUTO) OpenRouterDecisionBox.of(context, fast) else null
-            val screen = if (device.blocker() == null) hands.look() else null
+            // Alpha.78: decisions go to the one decision provider (JEV, text only, until OpenAI Decisions is live).
+            val box = if (settings.speed == Speed.AUTO) com.cyclone.mobile.mind.decide.Decisions.box(context) else null
+            val blocker = device.blocker()
+            // The screen is read only when the command needs its labels ("tap Pokémon GO") or Auto may ask a box; a
+            // gesture or an app to open reads it once, right before the move.
+            val screen = if (blocker == null && (box != null || InstantGrammar.needsScreen(request))) trace.time("read the screen") { hands.look() } else null
             val world = GrammarWorld(screen?.labels.orEmpty(), device.apps().map { it.label to it.packageName })
-            val route = ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar)
+            val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar) }
+            trace.step("routed to ${route.mode.name.lowercase()}" + (route.command?.let { " (${it.intent.name.lowercase()}${it.direction?.let { d -> " $d" }.orEmpty()})" }.orEmpty()) + ": ${route.why}")
             when (route.mode) {
                 Mode.IGNORE -> done(ModeResult(Mode.IGNORE, null, true))
                 Mode.ANSWER -> {
-                    OverlayChromeRuntime.missionWorking(running.id, route.answer)
-                    OverlayChromeRuntime.missionFinished(running.id, true, route.answer.orEmpty())
+                    if (chrome) {
+                        OverlayChromeRuntime.missionWorking(running.id, route.answer)
+                        OverlayChromeRuntime.missionFinished(running.id, true, route.answer.orEmpty())
+                    }
                     done(ModeResult(Mode.ANSWER, route.answer, true))
                 }
                 Mode.FLASH, Mode.MIND -> { handedOver = true; mission(context, request, null, route.mode, null, done) }
                 Mode.INSTANT -> {
                     val command = route.command ?: return mission(context, request, null, Mode.FLASH, null, done).also { handedOver = true }
-                    device.blocker()?.let { why ->
+                    blocker?.let { why ->
                         handedOver = true
+                        trace.step("handed to the Mind: $why")
                         return mission(context, request, null, Mode.MIND, RunBaton(request, listOf(Mode.INSTANT), emptyList(), why), done)
                     }
-                    OverlayChromeRuntime.missionWorking(running.id, InstantCopy.working(command))
-                    confirmWindow = { text, ms -> window(running, text, ms) }
-                    val outcome = InstantRun.run(command, hands, box, fast.sureness.bar)
+                    if (chrome) OverlayChromeRuntime.missionWorking(running.id, InstantCopy.working(command))
+                    confirmWindow = { text, ms -> window(running, text, ms, chrome) }
+                    val outcome = trace.time(InstantCopy.working(command)) { InstantRun.run(command, hands, box, fast.sureness.bar) }
                     val promotion = outcome.promotion
                     when {
                         // Stopped by the owner (Stop, "no", or a newer request): nothing more happens.
                         running.stopped && !outcome.cancelled -> {
-                            OverlayChromeRuntime.missionFinished(running.id, false, "Stopped")
+                            trace.step("stopped by the owner")
+                            if (chrome) OverlayChromeRuntime.missionFinished(running.id, false, "Stopped")
                             done(ModeResult(Mode.INSTANT, null, true))
                         }
                         promotion != null -> {
                             handedOver = true
+                            trace.step("handed up to ${promotion.to.name.lowercase()}: ${promotion.reason}")
                             mission(context, request, null, promotion.to, outcome.baton(request), done)
                         }
                         outcome.cancelled -> {
-                            OverlayChromeRuntime.missionFinished(running.id, true, "Cancelled")
+                            if (chrome) OverlayChromeRuntime.missionFinished(running.id, true, "Cancelled")
                             done(ModeResult(Mode.INSTANT, "Cancelled.", true))
                         }
                         else -> {
-                            OverlayChromeRuntime.missionFinished(running.id, true, InstantCopy.done(outcome))
+                            if (chrome) OverlayChromeRuntime.missionFinished(running.id, true, InstantCopy.done(outcome))
                             done(ModeResult(Mode.INSTANT, if (voice && settings.silentSuccess) null else InstantCopy.done(outcome), true))
                         }
                     }
                 }
             }
         } catch (error: Exception) {
+            trace.step("error: ${error.javaClass.simpleName}")
             // Never lose a request: anything unexpected goes to the Mind.
             if (!handedOver) {
                 handedOver = true
@@ -164,8 +182,8 @@ object CycloneModes {
     }
 
     /** "Calling Mam in 2 s": the owner can stop it (the Stop button or "no"); silence lets it go ahead. */
-    private fun window(running: Running, text: String, ms: Long): Boolean {
-        OverlayChromeRuntime.missionWorking(running.id, "$text in ${ms / 1000} s. Tap Stop to cancel.")
+    private fun window(running: Running, text: String, ms: Long, chrome: Boolean): Boolean {
+        if (chrome) OverlayChromeRuntime.missionWorking(running.id, "$text in ${ms / 1000} s. Tap Stop to cancel.")
         val end = System.currentTimeMillis() + ms
         while (System.currentTimeMillis() < end) {
             if (running.stopped) return false

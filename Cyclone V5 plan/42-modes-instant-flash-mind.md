@@ -396,3 +396,22 @@ Each milestone is a code-only push checked by CI; there is one release at the en
 **Not built yet:** streaming partials, early commit, prewarm, the haptic, undo on "no", `FlashRun` with its own
 planner, the mode chip and timeline, search keywords, routing for Command Center and Glass, and M9 (the Lab).
 
+## 15. As built (alpha.78): voice keeps the screen
+
+The owner's first Live test found four problems. Their causes and fixes:
+- **A spoken request opened the Ask panel.** `OverlayChromeRuntime.submitRequest(driving = true)` now goes straight to
+  the modes router: no analysis state, no composer. A mission voice started shows as the minimized island.
+- **Slow quick actions:**
+  - One screen read per move (`AndroidInstantHands.current()`); only "tap …" reads the screen before routing
+    (`InstantGrammar.needsScreen`).
+  - Drive's voice windows follow `OverlayGesturePassthrough`, so Cyclone's own gestures never land on them.
+- **Stop:** voice's Stop cancels a quick action at once (`OverlayChromeRuntime.stopVoiceRequest` →
+  `CycloneModes.cancel`). The voice panel with Stop stays up while it runs.
+- **"I didn't catch that" loop:** `voice/VoiceEars` replaces the one-way switch to Android's recognizer. An ear that
+  fails hands over in the same turn, and a broken recognizer hands back to the recording.
+- **Logs:**
+  - `voice/VoiceRunLog`, written through `VoiceRunSink` by `ui/overlay/VoiceTraceSink`, puts every voice turn in the
+    run history with its stage timings.
+  - `mind/modes/ModesTrace` does the same for every Instant run.
+- **Decisions:** the decision box moved to `mind/decide` (JEV, text only; OpenAI Decisions frozen; plan 41 §15).
+

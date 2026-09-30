@@ -108,4 +108,15 @@ class VoiceLiveTest {
         assertEquals("en dan", VoiceQuick.continuation("en dan"))
         assertEquals("swipe up", VoiceQuick.continuation("swipe up"))
     }
+
+    @Test fun `voice mode keeps its panel and Stop up while a quick command runs`() {
+        val r = Run()
+        r.said("swipe down")
+        assertTrue(r.turn.panelOpen)
+        assertTrue(VoiceFace.of(r.turn).stop)
+        assertFalse(VoiceFace.of(r.turn).dim)
+        r.on(VoiceEvent.Stop)
+        assertFalse(r.turn.quickLive)
+        assertFalse(r.turn.panelOpen)
+    }
 }
