@@ -7,7 +7,7 @@ import re
 from typing import Any, Callable
 
 from ..auth import AuditLog, redact_params
-from ..cyclone_bridge.client import BridgeOperationError, BridgeProtocolError
+from ..cyclone_bridge.client import BridgeBusyError, BridgeOperationError, BridgeProtocolError
 from ..retrieval.service import RetrievalService
 from ..state.store import StateStore
 from ..execution_scope import attach_execution_identity, parse_execution_identity
@@ -372,6 +372,11 @@ class ActionRouter:
             result = {"error": {"code": error_code}}
             success = False
             error_class = error_code
+        except BridgeBusyError:
+            # The phone is there but its app didn't answer in time: busy, not a lost phone.
+            result = {"error": {"code": "PHONE_APP_BUSY"}}
+            success = False
+            error_class = "PHONE_APP_BUSY"
         except Exception:
             result = {"error": {"code": "DEVICE_DISCONNECTED"}}
             success = False

@@ -109,11 +109,13 @@ test("disconnect asks first, then revokes and refreshes", async () => {
   const buttons = () => [...page.element.querySelectorAll('[data-device-id="d1"] .btn')];
   buttons().find((b) => /Disconnect/.test(b.textContent)).click();
   assert.match(page.element.textContent, /Disconnect Pixel 8\?/);
-  assert.equal(calls.length, 0, "nothing sent before the second click");
+  // Phone care reads its status on its own (alpha 87); only commands count here.
+  const commands = () => calls.filter((call) => !call.endsWith("/care"));
+  assert.equal(commands().length, 0, "nothing sent before the second click");
   buttons().find((b) => b.classList.contains("btn-danger")).click();
-  for (let i = 0; i < 10 && !calls.length; i++) await settle();
+  for (let i = 0; i < 10 && !commands().length; i++) await settle();
   await settle();
-  assert.deepEqual(calls, ["POST /v1/devices/d1/trust/revoke"]);
+  assert.deepEqual(commands(), ["POST /v1/devices/d1/trust/revoke"]);
   assert.ok(state.refreshed >= 1);
 });
 

@@ -78,6 +78,7 @@ internal object GatewayProtocol {
         "signup.maps",
         "profiles.list",
         "profiles.apps",
+        "health.report",
     )
 
     val operations = linkedSetOf(
@@ -176,6 +177,8 @@ internal object GatewayProtocol {
         "profiles.apps",
         "profiles.switch",
         "profiles.app",
+        // Alpha 87: why Cyclone stopped last time and the freezes it caught (read only).
+        "health.report",
     )
 
     fun parse(line: String): GatewayRequest {

@@ -25,6 +25,8 @@ ALLOWED_OPS = {
     "signup.maps", "signup.forget",
     # Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
     "profiles.list", "profiles.apps", "profiles.switch", "profiles.app",
+    # Alpha 87: why Cyclone stopped last time, and the freezes it caught (read only).
+    "health.report",
     # Cyclone Marketplace: the phone's store of recipes and connections.
     "market.catalog", "market.install", "market.remove", "market.run",
     # Learn: one press per run turns what it saw and did into app knowledge on the phone.

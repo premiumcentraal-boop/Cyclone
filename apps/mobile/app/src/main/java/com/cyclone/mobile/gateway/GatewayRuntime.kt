@@ -271,6 +271,7 @@ object GatewayRuntime {
 
 internal object GatewayDispatcher {
     private val trustSessionBootstrap = setOf("trust.session.begin", "trust.session.complete")
+    private val load = GatewayLoad(GatewaySocketServer.MAX_CLIENT_WORKERS, GatewayLoad.STUCK_MS)
 
     fun handle(context: Context, line: String): String {
         var id = ""
@@ -308,8 +309,20 @@ internal object GatewayDispatcher {
                 }
                 else -> {
                     if (auth != null) GatewayRuntime.PcSessionTracker.noteAuthenticated()
-                    val result = GatewaySessionExecutionContext.withAuth(auth) {
-                        dispatch(context, request)
+                    val (ticket, busy) = load.enter(request.op, System.currentTimeMillis())
+                    if (ticket == null) throw GatewayProtocolException(
+                        "PHONE_APP_BUSY",
+                        "Cyclone on the phone is still busy. Try again in a moment.",
+                        request.id,
+                        JSONObject().put("retryAfterMs", GatewayLoad.RETRY_AFTER_MS)
+                            .put("busyOp", busy?.op ?: JSONObject.NULL).put("busyForMs", busy?.forMs ?: 0),
+                    )
+                    val result = try {
+                        GatewaySessionExecutionContext.withAuth(auth) {
+                            dispatch(context, request)
+                        }
+                    } finally {
+                        load.exit(ticket)
                     }
                     GatewayRuntime.clearSafeError()
                     GatewayProtocol.success(id, result).toString()
@@ -430,6 +443,7 @@ internal object GatewayDispatcher {
             GatewayV5CommandAdapter.install(context)
             GatewayV5CommandAdapter.dispatch(request.op, request.args)
         }
+        "health.report" -> com.cyclone.mobile.runtime.health.AppHealth.report(context)
         "profiles.list", "profiles.apps", "profiles.switch", "profiles.app" -> {
             GatewayV5ProfilesAdapter.install(context)
             GatewayV5ProfilesAdapter.dispatch(request.op, request.args)
