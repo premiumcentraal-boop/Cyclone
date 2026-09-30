@@ -268,8 +268,8 @@ class ConnectionStore:
             center._db.execute("UPDATE tool_call SET state = 'failed', summary = 'Cyclone restarted while this ran.', finished_at = ?"
                                " WHERE state = 'running'", (center._clock(),))
 
-        from .mrz import MrzDiscovery
-        self.mrz = MrzDiscovery(self, settings=mrz_settings, send=mrz_send or mcp.http)
+        from .mrz import MrzDiscovery, local_http
+        self.mrz = MrzDiscovery(self, settings=mrz_settings, send=mrz_send or local_http)
 
     # ------------------------------------------------------------------ connections
 
@@ -1296,10 +1296,15 @@ class ConnectionStore:
         loopback = urllib.parse.urlsplit(row["url"]).hostname in mcp.LOOPBACK
         # A local stdio MRZ server returns Studio job URLs. Permit only that linked
         # origin's output routes; generic local servers still cannot fetch localhost.
-        loopback = loopback or self.mrz.artifact_allowed(row["id"], url)
+        mrz_output = self.mrz.is_linked(row["id"])
+        policy = (lambda target: self.mrz.artifact_allowed(row["id"], target)) if mrz_output else None
+        if policy and not policy(url):
+            raise mcp.McpError("MRZ files must come from the linked Studio's job-output routes.")
+        loopback = loopback or mrz_output
         temporary = self.artifacts_dir / f"download-{secrets.token_hex(8)}.part"
         try:
-            mime, size, digest = self._fetch(url, temporary, limit=MAX_FILE, allow_loopback=loopback)
+            options = {"url_policy": policy} if policy else {}
+            mime, size, digest = self._fetch(url, temporary, limit=MAX_FILE, allow_loopback=loopback, **options)
             if not mime.startswith(MEDIA):
                 guessed = mimetypes.guess_type(urllib.parse.urlsplit(url).path)[0] or ""
                 if not (mime in ("application/octet-stream", "binary/octet-stream") and guessed.startswith(MEDIA)):

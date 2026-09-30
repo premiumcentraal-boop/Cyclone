@@ -12,6 +12,8 @@ import os
 import threading
 import time
 import urllib.parse
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,6 +23,18 @@ from .center import CommandError
 DEFAULT_API = "http://127.0.0.1:8787"
 INTERVAL = 30.0
 MAX_SETTINGS = 64 * 1024
+
+
+def local_http(method: str, url: str, *, headers: dict[str, str], timeout: float) -> mcp.Response:
+    """A bounded probe. No system proxy, redirects, downloads, or access off this PC."""
+    p = urllib.parse.urlsplit(url)
+    local_base(urllib.parse.urlunsplit((p.scheme, p.netloc, "", p.query, p.fragment)))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), mcp._NoRedirect())
+    try:
+        with opener.open(urllib.request.Request(url, method=method, headers=headers), timeout=timeout) as response:
+            return mcp.Response(response.status, dict(response.headers), response.read(MAX_SETTINGS + 1))
+    except (OSError, urllib.error.URLError) as exc:
+        raise mcp.McpError("Studio could not be reached.") from exc
 
 
 def local_base(value: Any) -> str:
@@ -78,7 +92,7 @@ def fingerprint(api: str, spec: dict[str, Any]) -> str:
 
 class MrzDiscovery:
     def __init__(self, store: Any, *, settings: Path | None = None,
-                 send: Callable[..., mcp.Response] = mcp.http) -> None:
+                 send: Callable[..., mcp.Response] = local_http) -> None:
         self.store = store
         self.settings = settings or Path(os.environ.get("CYCLONE_MRZ_SETTINGS") or Path.home() / "MRZ-Studio-Local" / "control" / "mcp-connections.json")
         self.send = send
@@ -237,6 +251,11 @@ class MrzDiscovery:
         if state["state"] == "found" and not state["settingsChanged"]:
             self.store.refresh(connection_id)
 
+    def is_linked(self, connection_id: str) -> bool:
+        with self.store._c._lock:
+            link = self._link()
+        return bool(link and link["connection_id"] == connection_id)
+
     def artifact_allowed(self, connection_id: str, url: str) -> bool:
         """Only job-output routes on the explicitly linked Studio origin, never arbitrary localhost files."""
         import re
@@ -249,4 +268,4 @@ class MrzDiscovery:
             origin = local_base(urllib.parse.urlunsplit((p.scheme, p.netloc, "", p.query, p.fragment)))
         except ValueError:
             return False
-        return origin == link["api_base"] and bool(re.fullmatch(r"/api/jobs/[A-Za-z0-9_-]{1,100}/files/[A-Za-z0-9_.-]{1,100}", p.path))
+        return origin == link["api_base"] and bool(re.fullmatch(r"/api/jobs/[A-Za-z0-9_-]{1,100}/files/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", p.path))

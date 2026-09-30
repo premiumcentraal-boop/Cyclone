@@ -188,3 +188,66 @@ def test_local_http_recipe_is_supported_but_never_remote_discovery(world):
     c["http_url"] = "https://example.com/mcp"
     with pytest.raises(ValueError):
         recipe(world.data)
+
+
+def test_output_redirect_cannot_escape_linked_route(world, tmp_path):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from cyclone_device_gateway.command.mcp import fetch_file
+    seen = []
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_GET(self):
+            seen.append(self.path)
+            self.send_response(302)
+            self.send_header("Location", "/private.json")
+            self.end_headers()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    world.data["studio"]["api_base"] = base
+    world.file.write_text(json.dumps(world.data))
+    cid = world.mrz.connect()["id"]
+    try:
+        with pytest.raises(McpError, match="approved output routes"):
+            fetch_file(base + "/api/jobs/job1/files/result.png", tmp_path / "result", limit=1000, allow_loopback=True,
+                       url_policy=lambda url: world.mrz.artifact_allowed(cid, url))
+        assert seen == ["/api/jobs/job1/files/result.png"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_local_probe_refuses_redirect_and_bounds_body(tmp_path):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from cyclone_device_gateway.command.mrz import local_http, MAX_SETTINGS
+    seen = []
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_GET(self):
+            seen.append(self.path)
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", "/other")
+                self.end_headers()
+            else:
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"x" * (MAX_SETTINGS + 10))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with pytest.raises(McpError):
+            local_http("GET", base + "/redirect", headers={}, timeout=2)
+        assert seen == ["/redirect"]
+        result = local_http("GET", base + "/large", headers={}, timeout=2)
+        assert len(result.body) == MAX_SETTINGS + 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

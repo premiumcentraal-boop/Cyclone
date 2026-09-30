@@ -408,11 +408,14 @@ def token_request(server: OAuthServer, form: dict[str, str], client: dict[str, A
     return value
 
 
-def fetch_file(url: str, dest: "Any", *, limit: int, allow_loopback: bool, timeout: float = 120.0) -> tuple[str, int, str]:
+def fetch_file(url: str, dest: "Any", *, limit: int, allow_loopback: bool, timeout: float = 120.0,
+               url_policy: Callable[[str], bool] | None = None) -> tuple[str, int, str]:
     """Download a generated file into [dest] (a Path): https to a public host, up to three redirects, each re-checked,
     at most [limit] bytes. Returns (content type, size, sha256)."""
     for _ in range(4):
         url = check_url(url, what="file address")
+        if url_policy is not None and not url_policy(url):
+            raise McpError("The file is outside this connection's approved output routes.")
         if not public_host(url, allow_loopback=allow_loopback):
             raise McpError("The file is on a private network address; Cyclone does not fetch from there.")
         request = urllib.request.Request(url, method="GET", headers={"Accept": "video/*, image/*, audio/*"})
