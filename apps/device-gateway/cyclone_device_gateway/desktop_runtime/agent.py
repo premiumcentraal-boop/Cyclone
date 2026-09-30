@@ -179,7 +179,7 @@ class DesktopAgentService:
     def _check_live_phone(session, payload, identity):
         if (payload or {}).get("livePhone") is not True:
             return
-        if getattr(session, "source", None) not in {"USB", "LAN"} or identity != {"sessionId": "default-foreground", "displayId": 0}:
+        if getattr(session, "source", None) not in {"USB", "LAN", "CLOUD"} or identity != {"sessionId": "default-foreground", "displayId": 0}:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Live Phone requires a physical foreground phone.")
 
     def observe(

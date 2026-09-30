@@ -254,3 +254,29 @@
 .conn-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .conn-title { font-weight: 600; color: var(--text); }
 .conn-message { color: var(--text-muted); }
+
+/* Cloud phones (plan 44): the accounts and the phones this PC keeps connected. */
+.cloud-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.cloud-form { display: flex; flex-direction: column; gap: var(--space-4); max-width: 560px; }
+.cloud-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); }
+.cloud-field { display: flex; flex-direction: column; gap: var(--space-1); }
+.cloud-field-label { font-size: var(--text-xs); color: var(--text-muted); }
+.cloud-input {
+  font: inherit; font-size: var(--text-sm); color: var(--text); background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3);
+  box-sizing: border-box; min-width: 0;
+}
+.cloud-input:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--accent); }
+.cloud-check { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text); }
+.cloud-warn { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--warning-soft); font-size: var(--text-sm); color: var(--text); }
+.cloud-phones { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.cloud-phone { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-md); background: var(--surface-muted); }
+.cloud-phone-top { display: flex; align-items: center; gap: var(--space-3); }
+.cloud-phone-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; font-size: var(--text-sm); }
+.cloud-phone-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-phone-message { color: var(--text-muted); }
+.cloud-address { display: flex; gap: var(--space-2); }
+.cloud-address .cloud-input { flex: 1 1 200px; }
+@media (max-width: 520px) {
+  .cloud-phone-top { flex-wrap: wrap; }
+}

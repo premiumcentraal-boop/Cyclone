@@ -801,7 +801,8 @@ class PCTrustCoordinator:
             return
         if str(getattr(session.adb_device, "state", "") or "") != "device" or str(getattr(session, "state", "")) != "UNPAIRED":
             return
-        if getattr(session, "source", "USB") != "USB":
+        # USB, and the cloud phones the owner added with their provider key (plan 44). Never a stray LAN address.
+        if getattr(session, "source", "USB") not in {"USB", "CLOUD"}:
             return
         with self._lock:
             if self._asked_usb.get(device_id) == usb:
