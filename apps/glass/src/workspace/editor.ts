@@ -19,6 +19,7 @@ import { el, setChildren } from "../ui/dom.js";
 import { loadDirectory, routeOfRef } from "./directory.js";
 import { createPlanView } from "./plan.js";
 import { createLiveView } from "./views.js";
+import { createTableBlock } from "./tableView.js";
 
 export interface Editor {
   element: HTMLElement;
@@ -321,6 +322,11 @@ export function createEditor(ctx: GlassContext, pageId: string, initial: Block[]
       cardNode.addEventListener("click", () => ctx.navigate(routeOfRef(block.ref)));
       content.append(cardNode);
       return { element, editable: null, destroy() {} };
+    }
+    if (block.type === "table") {
+      const tableBlock = createTableBlock(ctx, block, replace);
+      content.append(tableBlock.element);
+      return { element, editable: null, destroy: () => tableBlock.destroy() };
     }
     if (block.type === "view") {
       const view = createLiveView(ctx, block, pageId, replace);
@@ -775,7 +781,7 @@ export function createEditor(ctx: GlassContext, pageId: string, initial: Block[]
 
 const SLASH_ICON: Record<string, string> = {
   p: "¶", h1: "H1", h2: "H2", h3: "H3", todo: "☑", bullet: "•", number: "1.", quote: "❝", callout: "💡", divider: "—",
-  board: "▦", calendar: "🗓️", "view-tasks": "▶️", "view-tasks-board": "▦", "view-routines": "🔁", "view-approvals": "✋",
+  table: "▤", board: "▦", calendar: "🗓️", "view-tasks": "▶️", "view-tasks-board": "▦", "view-routines": "🔁", "view-approvals": "✋",
   "view-phones": "📱", "view-results": "✅", "view-pages": "📄", ai: "✨",
 };
 

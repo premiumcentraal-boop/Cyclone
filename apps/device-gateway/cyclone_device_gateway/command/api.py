@@ -34,10 +34,13 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def call(fn):
         from .ai import AiError
         from .pages import PageConflict
+        from .tables import TableConflict
         try:
             return fn()
         except PageConflict as exc:
             raise HTTPException(status_code=409, detail={"code": "PAGE_CHANGED", "message": str(exc)}) from exc
+        except TableConflict as exc:
+            raise HTTPException(status_code=409, detail={"code": "ROW_CHANGED", "message": str(exc)}) from exc
         except AiError as exc:
             raise HTTPException(status_code=409, detail={"code": "AI_UNAVAILABLE", "message": str(exc)}) from exc
         except CommandError as exc:
@@ -286,6 +289,105 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
         meta, path = call(lambda: cc().connections.artifact(artifact_id))
         return FileResponse(path, media_type=meta["mime"], filename=meta["name"],
                             headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+    # Plan 43 (T1): tables. Typed cells only, no secrets, views computed here, every change kept, trash first.
+    @router.get("/v1/cc/tables", dependencies=[Depends(auth)])
+    def tables():
+        return call(lambda: {"tables": cc().tables.list()})
+
+    @router.post("/v1/cc/tables", dependencies=[Depends(auth)])
+    def create_table(body: dict[str, Any]):
+        return call(lambda: cc().tables.create(body_of(body)))
+
+    @router.get("/v1/cc/tables-trash", dependencies=[Depends(auth)])
+    def tables_trash():
+        return call(lambda: cc().tables.trash())
+
+    @router.get("/v1/cc/tables/{table_id}", dependencies=[Depends(auth)])
+    def get_table(table_id: str):
+        return call(lambda: cc().tables.get(table_id))
+
+    @router.post("/v1/cc/tables/{table_id}", dependencies=[Depends(auth)])
+    def update_table(table_id: str, body: dict[str, Any]):
+        return call(lambda: cc().tables.update(table_id, body_of(body)))
+
+    @router.post("/v1/cc/tables/{table_id}/archive", dependencies=[Depends(auth)])
+    def archive_table(table_id: str):
+        return call(lambda: cc().tables.archive(table_id))
+
+    @router.post("/v1/cc/tables/{table_id}/restore", dependencies=[Depends(auth)])
+    def restore_table(table_id: str):
+        return call(lambda: cc().tables.restore(table_id))
+
+    @router.post("/v1/cc/tables/{table_id}/delete", dependencies=[Depends(auth)])
+    def delete_table(table_id: str):
+        return call(lambda: cc().tables.delete(table_id))
+
+    @router.post("/v1/cc/tables/{table_id}/properties", dependencies=[Depends(auth)])
+    def add_property(table_id: str, body: dict[str, Any]):
+        return call(lambda: cc().tables.add_property(table_id, body_of(body)))
+
+    @router.post("/v1/cc/tables/{table_id}/properties/{prop_id}", dependencies=[Depends(auth)])
+    def update_property(table_id: str, prop_id: str, body: dict[str, Any]):
+        return call(lambda: cc().tables.update_property(table_id, prop_id, body_of(body)))
+
+    @router.post("/v1/cc/tables/{table_id}/properties/{prop_id}/delete", dependencies=[Depends(auth)])
+    def delete_property(table_id: str, prop_id: str):
+        return call(lambda: cc().tables.delete_property(table_id, prop_id))
+
+    @router.post("/v1/cc/tables/{table_id}/views", dependencies=[Depends(auth)])
+    def add_view(table_id: str, body: dict[str, Any]):
+        return call(lambda: cc().tables.add_view(table_id, body_of(body)))
+
+    @router.post("/v1/cc/tables/{table_id}/views/{view_id}", dependencies=[Depends(auth)])
+    def update_view(table_id: str, view_id: str, body: dict[str, Any]):
+        return call(lambda: cc().tables.update_view(table_id, view_id, body_of(body)))
+
+    @router.post("/v1/cc/tables/{table_id}/views/{view_id}/delete", dependencies=[Depends(auth)])
+    def delete_view(table_id: str, view_id: str):
+        return call(lambda: cc().tables.delete_view(table_id, view_id))
+
+    @router.get("/v1/cc/tables/{table_id}/rows", dependencies=[Depends(auth)])
+    def table_rows(table_id: str, view: str | None = Query(default=None, max_length=60), q: str | None = Query(default=None, max_length=100)):
+        return call(lambda: cc().tables.rows(table_id, view, q))
+
+    @router.get("/v1/cc/tables/{table_id}/export.csv", dependencies=[Depends(auth)])
+    def table_csv(table_id: str, view: str | None = Query(default=None, max_length=60)):
+        from fastapi.responses import Response
+        text = call(lambda: cc().tables.export_csv(table_id, view))
+        return Response(text, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="table.csv"'})
+
+    @router.post("/v1/cc/tables/{table_id}/rows", dependencies=[Depends(auth)])
+    def create_row(table_id: str, body: dict[str, Any]):
+        return call(lambda: cc().tables.create_row(table_id, body_of(body)))
+
+    @router.get("/v1/cc/tables/{table_id}/rows/{row_id}", dependencies=[Depends(auth)])
+    def get_row(table_id: str, row_id: str):
+        return call(lambda: cc().tables.get_row(table_id, row_id))
+
+    @router.post("/v1/cc/tables/{table_id}/rows/{row_id}", dependencies=[Depends(auth)])
+    def update_row(table_id: str, row_id: str, body: dict[str, Any]):
+        return call(lambda: cc().tables.update_row(table_id, row_id, body_of(body)))
+
+    @router.post("/v1/cc/tables/{table_id}/rows/{row_id}/page", dependencies=[Depends(auth)])
+    def save_row_page(table_id: str, row_id: str, body: dict[str, Any]):
+        return call(lambda: cc().tables.save_row_page(table_id, row_id, body_of(body)))
+
+    @router.post("/v1/cc/tables/{table_id}/rows/{row_id}/undo", dependencies=[Depends(auth)])
+    def undo_row(table_id: str, row_id: str):
+        return call(lambda: cc().tables.undo(table_id, row_id))
+
+    @router.post("/v1/cc/tables/{table_id}/rows/{row_id}/archive", dependencies=[Depends(auth)])
+    def archive_row(table_id: str, row_id: str):
+        return call(lambda: cc().tables.archive_row(table_id, row_id))
+
+    @router.post("/v1/cc/tables/{table_id}/rows/{row_id}/restore", dependencies=[Depends(auth)])
+    def restore_row(table_id: str, row_id: str):
+        return call(lambda: cc().tables.restore_row(table_id, row_id))
+
+    @router.post("/v1/cc/tables/{table_id}/rows/{row_id}/delete", dependencies=[Depends(auth)])
+    def delete_row(table_id: str, row_id: str):
+        return call(lambda: cc().tables.delete_row(table_id, row_id))
 
     # Plan 33 (C5): pages. Typed blocks only, no secrets, versioned saves, trash first.
     @router.get("/v1/cc/pages", dependencies=[Depends(auth)])
