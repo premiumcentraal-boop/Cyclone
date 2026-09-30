@@ -76,6 +76,8 @@ internal object GatewayProtocol {
         "models.list",
         "manual.get",
         "signup.maps",
+        "profiles.list",
+        "profiles.apps",
     )
 
     val operations = linkedSetOf(
@@ -169,6 +171,11 @@ internal object GatewayProtocol {
         // Plan 43 T6: the sign-up maps this phone learned (schemas only), and forgetting one.
         "signup.maps",
         "signup.forget",
+        // Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
+        "profiles.list",
+        "profiles.apps",
+        "profiles.switch",
+        "profiles.app",
     )
 
     fun parse(line: String): GatewayRequest {

@@ -21,6 +21,9 @@ enum class ProfileSetupOperation {
     BACKUP_APP_DATA,
     OWN_BACKUP,
     LABEL_BACKUP,
+    // Plan 43 T4: the profile app manager (ProfileApps only, after its ownership guards).
+    LIST_PROFILE_APPS,
+    UNINSTALL_FOR_PROFILE,
 }
 
 /**
@@ -115,6 +118,18 @@ object ProfileSetupPlan {
             ProfileSetupOperation.INSTALL_EXISTING_PACKAGE,
             "/system/bin/cmd", "package", "install-existing", "--user", userId.toString(), packageName,
         )
+    }
+
+    /** Plan 43 T4: the apps a profile has (third-party packages, for that Android user only). */
+    fun listProfileApps(userId: Int): ProfileSetupCommand {
+        require(userId >= 0)
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.LIST_PROFILE_APPS, "/system/bin/pm", "list", "packages", "-3", "--user", userId.toString())
+    }
+
+    /** Plan 43 T4: removes an app from one Cyclone profile only; the app stays in every other profile. */
+    fun uninstallForProfile(userId: Int, packageName: String): ProfileSetupCommand {
+        require(userId > 0 && validPackageName(packageName) && packageName != "com.cyclone.mobile")
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.UNINSTALL_FOR_PROFILE, "/system/bin/pm", "uninstall", "--user", userId.toString(), packageName)
     }
 
     fun listProfilePackage(userId: Int, packageName: String): ProfileSetupCommand {
