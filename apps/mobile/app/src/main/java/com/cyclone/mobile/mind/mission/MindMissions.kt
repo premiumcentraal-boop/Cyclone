@@ -297,7 +297,9 @@ object MindMissions {
         val clean = goal.trim().take(2_000)
         val front = when (admission(app, clean)) {
             Crew.Admit.Front -> true
-            Crew.Admit.Behind -> false
+            // Mapping a sign-up or creating an account works on the owner's screen (their details, verification, the
+            // final approval): never on a hidden background screen. The PC waits and tries again when the front is free.
+            Crew.Admit.Behind -> if (signup != null || setup != null) return null else false
             is Crew.Admit.Queue -> return null
         }
         val mission = Mission(newId(), clean, MissionStatus.RUNNING, now, now, "", "")

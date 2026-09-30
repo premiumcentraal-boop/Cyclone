@@ -163,6 +163,24 @@ export function mappingTask(tasks: CcTask[], deviceId: string, packageName: stri
     && ["scheduled", "waiting_device", "running", "needs_you"].includes(t.status)) ?? null;
 }
 
+/** The latest finished mapping task for this app on this phone (shown when there is still no map), if any. */
+export function lastMappingTry(tasks: CcTask[], deviceId: string, packageName: string): CcTask | null {
+  return tasks.filter((t) => t.recipe === RECIPE + packageName && (t.deviceId === deviceId || t.run?.deviceId === deviceId)
+    && (t.status === "failed" || t.status === "cancelled" || t.status === "succeeded")).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+}
+
+/** Why a mapping task is where it is, in the owner's words. */
+export function mappingDetail(task: CcTask): string {
+  const run = task.run?.summary || "";
+  switch (task.status) {
+    case "scheduled": return "Waiting to start on the phone.";
+    case "waiting_device": return task.cause || "Waiting for the phone to be ready.";
+    case "running": return run ? `The phone is on it: ${run}` : "The phone is walking the sign-up now.";
+    case "needs_you": return "The phone is waiting for you: answer in Inbox or on the phone.";
+    default: return task.cause || run || "";
+  }
+}
+
 export function signupState(map: SignupMap | undefined, task: CcTask | null): SignupState {
   if (task) return "mapping";
   if (!map) return "none";

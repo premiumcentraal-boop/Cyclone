@@ -137,7 +137,9 @@ internal object GatewayV5CommandAdapter {
         }
         val id = (if (setup != null) startSetup(goal, setup) else if (signup != null) startSignup(goal, signup) else start(goal)) ?: run {
             SealedDelivery.wipe(opened)
-            throw GatewayProtocolException("ASK_BUSY", "The phone is already running a mission.")
+            throw GatewayProtocolException("ASK_BUSY", if (signup != null || setup != null)
+                "Another task has the phone's screen. The sign-up starts when it ends (or stop it on the phone)."
+            else "The phone is already running a mission.")
         }
         // C3: a task that posts a file gates its final Share/Post as a send, for this mission only.
         PublishGate.mark(id, publish == true)
