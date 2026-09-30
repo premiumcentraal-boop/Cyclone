@@ -535,3 +535,6 @@ pauses the row for a person and is never solved; no device spoofing or evasion; 
   **Cancel mapping** and **Open Inbox**; after a cancelled or failed try it shows the cause and **Map it again**.
 - **Phone** (`MindMissions.startAssigned`): a mapping or Account Setup run never starts behind another task on a
   background screen; it takes the front or answers `ASK_BUSY`, and the PC waits and retries.
+
+**Fix, Lab tools on the packaged MCP (alpha.86):** `CycloneAgentMCP.exe` serves `tools/codex-phone-mcp`
+(`cyclone_phone_mcp.mcp_server`); the Lab tools now live there too (`tests/test_lab_tools.py`).
