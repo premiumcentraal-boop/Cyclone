@@ -44,6 +44,7 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.85:** fix, sign-up mapping you can see and stop (cause, Cancel mapping, last try; sign-up runs only in front).
 - **alpha.86:** fix, the Lab tools on the MCP server the Windows package runs (`cyclone_phone_mcp`).
 - **alpha.87:** reliability builds 1, 2 and 6 (phone care: update the phone from Glass, busy is not disconnected, why Cyclone stopped), plus MRZ Studio discovery (PR 197).
+- **alpha.88:** reliability builds 3, 4 and 5 (one truth for connection health, the broken link named with one action, one-tap trust and silent resume); all six builds now shipped.
 - **alpha.79:** plan 43 T1, Cyclone Tables. The owner chose plan 43's tables and buttons (T1–T3) before B1, so B1
   comes after T3.
 - **Test counts at alpha.68:**
