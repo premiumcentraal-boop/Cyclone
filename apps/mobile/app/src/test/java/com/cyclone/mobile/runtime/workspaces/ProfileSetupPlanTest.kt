@@ -275,4 +275,12 @@ class ProfileSetupPlanTest {
         assertEquals(ProfileSetupFailureKind.PROFILE_ALREADY_EXISTS, failure.kind)
         assertTrue(failure.retryUseful)
     }
+
+    @Test fun theProfileAppManagerHasTwoFixedVerbsOnly() {
+        assertEquals("/system/bin/pm list packages -3 --user 11", ProfileSetupPlan.shell(ProfileSetupPlan.listProfileApps(11)))
+        assertEquals("/system/bin/pm uninstall --user 11 com.whatsapp", ProfileSetupPlan.shell(ProfileSetupPlan.uninstallForProfile(11, "com.whatsapp")))
+        assertTrue(runCatching { ProfileSetupPlan.uninstallForProfile(0, "com.whatsapp") }.isFailure)
+        assertTrue(runCatching { ProfileSetupPlan.uninstallForProfile(11, "com.cyclone.mobile") }.isFailure)
+        assertTrue(runCatching { ProfileSetupPlan.uninstallForProfile(11, "com.x;rm -rf /") }.isFailure)
+    }
 }

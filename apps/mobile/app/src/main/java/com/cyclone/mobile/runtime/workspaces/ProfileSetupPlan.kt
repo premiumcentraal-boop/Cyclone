@@ -223,6 +223,10 @@ object ProfileSetupPlan {
         ProfileSetupOperation.INSTALL_EXISTING_PACKAGE -> tokens.size == 6 && tokens[0] == "/system/bin/cmd" &&
             tokens[1] == "package" && tokens[2] == "install-existing" && tokens[3] == "--user" &&
             tokens[4].toIntOrNull()?.let { it > 0 } == true && validPackageName(tokens[5])
+        ProfileSetupOperation.LIST_PROFILE_APPS -> tokens.size == 6 && tokens.take(4) == listOf("/system/bin/pm", "list", "packages", "-3") &&
+            tokens[4] == "--user" && tokens[5].toIntOrNull()?.let { it >= 0 } == true
+        ProfileSetupOperation.UNINSTALL_FOR_PROFILE -> tokens.size == 5 && tokens.take(3) == listOf("/system/bin/pm", "uninstall", "--user") &&
+            tokens[3].toIntOrNull()?.let { it > 0 } == true && validPackageName(tokens[4]) && tokens[4] != "com.cyclone.mobile"
         ProfileSetupOperation.LIST_PROFILE_PACKAGE -> tokens.size == 6 && tokens[0] == "/system/bin/pm" &&
             tokens[1] == "list" && tokens[2] == "packages" && tokens[3] == "--user" &&
             tokens[4].toIntOrNull()?.let { it > 0 } == true && validPackageName(tokens[5])
