@@ -31,7 +31,7 @@ internal fun CycloneIntelligenceTheme(content: @Composable () -> Unit) {
     CycloneTheme(content = content)
 }
 
-/** Exact mark geometry from the supplied Cyclone Asset Pack v1. */
+/** The Cyclone mark in colour: seven petals spiralling into the void (brand/logo-wormhole). */
 @Composable
 internal fun CycloneOrbitMark(modifier: Modifier = Modifier) {
     androidx.compose.foundation.Image(

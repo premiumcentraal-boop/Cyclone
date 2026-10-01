@@ -34,7 +34,7 @@ fun CycloneAppIcon(packageName: String?, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val drawable = remember(packageName) {
         runCatching { context.packageManager.getApplicationIcon(packageName.orEmpty()) }.getOrNull()
-            ?: context.getDrawable(com.cyclone.mobile.R.drawable.ic_cyclone_status)
+            ?: context.getDrawable(com.cyclone.mobile.R.drawable.ic_cyclone_mark_42)
     }
     AndroidView(factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.FIT_CENTER } },
         update = { it.setImageDrawable(drawable) }, modifier = modifier.size(38.dp))

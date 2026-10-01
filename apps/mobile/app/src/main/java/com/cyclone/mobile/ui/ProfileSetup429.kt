@@ -717,7 +717,7 @@ private fun ReadyProfileStep(
 private fun ProfileAppIcon429(context: Context, packageName: String, modifier: Modifier = Modifier) {
     val drawable = remember(packageName) {
         runCatching { context.packageManager.getApplicationIcon(packageName) }.getOrNull()
-            ?: context.getDrawable(com.cyclone.mobile.R.drawable.ic_cyclone_status)
+            ?: context.getDrawable(com.cyclone.mobile.R.drawable.ic_cyclone_mark_42)
     }
     AndroidView(
         factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.FIT_CENTER } },
