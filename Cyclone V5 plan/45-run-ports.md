@@ -50,6 +50,9 @@ Phone run ◀─port.await── Port Hub (gateway) ◀── plugin (deliver)
 | `file.in` | in | a file for the phone (image, PDF), saved to the run's folder | personal | PC image picker |
 | `value.in` | in | text or JSON the run asked for (a caption, an address) | personal | any |
 | `code.in` | in | a verification code (SMS or email) | **secret** | SMS plugin, mail plugin |
+| `secret.out` | out | a password the run generated, or an API key shown once on a page, sealed on the phone | **secret** | the PC vault (default), a password manager |
+| `secret.in` | in | a vault item released to the phone for one run (sealed delivery lease) | **secret** | the PC vault, unlocked by you in Glass |
+| `link.in` | in | a confirmation link from the owner's own inbox, opened in the run | personal | mail plugin |
 
 **Out** ports are fire-and-forget with delivery receipts. **In** ports are always awaited with a timeout.
 
@@ -117,6 +120,47 @@ steps:
   - emit: run.event { stage: created }
 ```
 
+## 5b. Share secret: passwords and API keys into the PC vault
+
+The Command Center vault (plan 33) is zero-knowledge: Glass encrypts in the browser and the PC holds only ciphertext.
+Plan 33 §4.4 already has the phone seal a new password to the vault's public enrolment key. Run Ports make that a
+port, and extend it to API keys and any one-time secret a run meets.
+
+- **`secret.out` (phone → vault):**
+  - **Sources:** a password the phone generates in the vault layer, or a value on screen (an API key shown once)
+    that the Mind points at by ref.
+  - **Sealing:** Cyclone reads the value itself and seals it on the phone to the vault's public key
+    (ECDH P-256 + AES-256-GCM, with run, app and slot as associated data).
+  - **What the Mind gets back:** "sealed to your vault", never the value.
+- **The hub** checks the envelope, never the value. It writes a `vault_item` (kind `password`, `api_key`, `totp`,
+  `token`) with `created_by: run`, linked to the account and the run.
+- **Opening it:**
+  - only Glass with the passphrase can open the item;
+  - viewing needs a passkey step-up and shows the value for 30 seconds, audited.
+- **`secret.in` (vault → phone):** releasing an item for a run is the existing sealed delivery. The owner unlocks it
+  in Glass, it's sealed to the phone's Keystore, used once, and filled with `vault_fill`.
+- **Secret sinks:** a plugin may act as a password manager (Bitwarden, 1Password CLI) only with an explicit tick.
+  The phone then seals to that plugin's pinned public key. Without the tick, secrets go only to the vault.
+- **Plugins can store, not read.** A plugin that receives a new key from a service's API seals it to the vault's
+  public key. Reading a secret back always goes through the owner in Glass.
+
+## 5c. Other connections worth adding (ranked)
+
+Build first:
+1. **The owner's email inbox** (IMAP, Gmail, Outlook): `code.in` and `link.in` for email verification.
+2. **Authenticator (TOTP) in the vault:** seeds in the vault produce the 2FA code on the PC, sealed to the phone at
+   login (`code.in`).
+3. **A password manager** (Bitwarden, 1Password): `secret.in` / `secret.out` through their CLIs.
+4. **Sheets and databases** (Google Sheets, Airtable, Notion): rows in, handles and status out.
+5. **Notifications** (Telegram, Discord, Slack, ntfy): "needs you" and "created" pings with a link to the approval.
+
+Next:
+6. **Automation hubs** (n8n, Make, Zapier, Home Assistant): start runs from a webhook (under task rules), events back.
+7. **Files** (a PC folder, OneDrive, Drive): `file.in` / `file.out`.
+8. **Image and text generators** (Higgsfield, a local model): profile picture, banner, bio. Shown to the owner
+   before use.
+9. **Clipboard bridge:** text only, cleared after use, never secrets.
+
 ## 6. Boundaries (code, not a model)
 
 - **The owner adds every plugin** and grants each port per plugin. Remote plugins get no `personal` port without an
@@ -125,7 +169,8 @@ steps:
   - `code.in` codes are sealed to the phone (plan 33 sealed delivery), single-use, expire after 5 minutes and are
     bound to the run, port and app;
   - they are never stored, never written to the run history or diagnostics, and never shown to a model;
-  - passwords never go out on any port.
+  - passwords and API keys travel only on `secret.out` / `secret.in`, sealed end to end; the PC stores ciphertext it
+    cannot open.
 - **Codes only from the owner's own numbers or inboxes.** An SMS source is a phone or number the owner registers and
   confirms (plan 43 §6.3).
 - **Plugins can't approve.** Final submits, payments, sends, deletes and permissions stay with the owner. A plugin's
@@ -145,4 +190,5 @@ steps:
 | P1 | Port Hub in the gateway: envelope, catalog, `port.*` ops, out ports `run.event` / `screen.shot` / `log.line`, the local HTTP plugin contract, manifest pinning, the Glass Plugins page, a sample "logger" plugin |
 | P2 | In ports: `file.in` (saved to the run folder, MediaStore) and `value.in`; Mind tools `port_send` / `port_wait`; timeline view |
 | P3 | `code.in` with sealed delivery; SMS source registration; Account Setup verification points bound to ports; sample SMS plugin (Android SMS forwarder on the owner's other phone → PC) |
-| P4 | Recipes (YAML + Glass editor), MCP `cyclone_port_wait`, remote plugins with HMAC, connector cards for plugins |
+| P4 | Share secret: `secret.out` sealed to the vault's public key (plan 33 §4.4 as a port), `secret.in` on sealed delivery, capture by ref for API keys, secret-sink plugins with pinned keys |
+| P5 | Recipes (YAML + Glass editor), MCP `cyclone_port_wait`, remote plugins with HMAC, connector cards for plugins |
