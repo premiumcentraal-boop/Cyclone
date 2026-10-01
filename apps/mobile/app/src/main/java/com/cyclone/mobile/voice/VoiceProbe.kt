@@ -13,6 +13,9 @@ object VoiceProbe {
 
     data class SttRun(val model: String, val ms: Long?, val transcript: String, val error: String? = null)
 
+    /** Alpha 93: another listed voice saying the same sample; [ms] is the time to its first sound. */
+    data class TtsRun(val model: String, val ms: Long?, val error: String? = null)
+
     data class Result(
         val firstSoundMs: Long? = null,
         val transcribeMs: Long? = null,
@@ -23,6 +26,8 @@ object VoiceProbe {
         val error: String? = null,
         /** The same clip through the other listed speech-to-text models (alpha.52): model, time, what it heard. */
         val sttCompared: List<SttRun> = emptyList(),
+        /** The same sample through up to two more listed voices (alpha.93: Grok against Gemini), first sound only. */
+        val ttsCompared: List<TtsRun> = emptyList(),
     ) {
         /** What the owner would wait between stopping and hearing the confirmation start. */
         val confirmMs: Long? get() = if (transcribeMs != null && understandMs != null && firstSoundMs != null) transcribeMs + understandMs + firstSoundMs else null
@@ -43,7 +48,7 @@ object VoiceProbe {
                 if (first < 0) first = SystemClock.elapsedRealtime() - started
                 pcm.write(bytes, 0, n)
             })
-            var result = Result(firstSoundMs = first.takeIf { it >= 0 })
+            var result = Result(firstSoundMs = first.takeIf { it >= 0 }, ttsCompared = compareVoices(api, tts))
             val stt = choice.stt ?: return result.copy(error = "Recognition is on the phone: only speech is measured.")
             val clip = Wav.resample(Wav.samples(pcm.toByteArray()), rate, VoiceActivity.SAMPLE_RATE)
             val t0 = SystemClock.elapsedRealtime()
@@ -71,4 +76,32 @@ object VoiceProbe {
             Result(error = error.message)
         }
     }
+
+    /** Up to two other preferred voices from the live list, each timed to its first sound and then cut off. */
+    private fun compareVoices(api: OpenRouterVoice, chosen: String): List<TtsRun> {
+        val ids = VoiceCatalog.lists.value.tts.map { it.id }
+        val others = VoiceModels.PREFERRED_TTS_BEST.mapNotNull { want -> ids.firstOrNull { it == want || it.startsWith("$want-") } }
+            .filter { it != chosen }.distinct().take(2)
+        return others.map { other ->
+            val voice = VoiceModels.voice(VoiceCatalog.lists.value.tts.firstOrNull { it.id == other }, null)
+            val started = SystemClock.elapsedRealtime()
+            var first = -1L
+            try {
+                api.speak(other, voice, SAMPLE, onStart = {}, onPcm = { _, _ ->
+                    if (first < 0) {
+                        first = SystemClock.elapsedRealtime() - started
+                        throw FirstSound()
+                    }
+                })
+                TtsRun(other, first.takeIf { it >= 0 })
+            } catch (stop: FirstSound) {
+                TtsRun(other, first)
+            } catch (error: VoiceCallException) {
+                TtsRun(other, null, error.message)
+            }
+        }
+    }
+
+    /** Ends a compared voice's stream at its first sound: only the wait is measured, nothing is played. */
+    private class FirstSound : RuntimeException()
 }

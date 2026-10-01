@@ -73,6 +73,8 @@ class VoiceFaceTest {
         assertEquals("Puck", VoiceModels.voice(gemini, "Puck"))
         assertEquals("Kore", VoiceModels.voice(gemini, "not-a-voice"))
         assertNull(VoiceModels.voice(VoiceModel("unknown/tts", "?"), null))
+        assertEquals(listOf("eve", "ara", "rex", "sal", "leo"), VoiceModels.voices(VoiceModel("x-ai/grok-voice-tts-1.0", "Grok Voice")))
+        assertEquals("ara", VoiceModels.voice(VoiceModel("x-ai/grok-voice-tts-1.0", "Grok Voice"), "ara"))
     }
 
     @Test fun `on-device recognition needs no speech-to-text model`() {

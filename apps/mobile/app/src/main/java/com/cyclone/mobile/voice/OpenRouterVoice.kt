@@ -22,11 +22,7 @@ class OpenRouterVoice(private val key: String, private val http: OkHttpClient = 
 
     /** The recorded clip, as WAV bytes in memory, to text. */
     fun transcribe(model: String, wav: ByteArray, language: String = "auto", track: (Call) -> Unit = {}): String {
-        val body = JSONObject()
-            .put("model", model)
-            .put("input_audio", JSONObject().put("data", Base64.getEncoder().encodeToString(wav)).put("format", "wav"))
-        languageCode(language)?.let { body.put("language", it) }
-        val reply = post("audio/transcriptions", body, track)
+        val reply = post("audio/transcriptions", transcriptionBody(model, wav, language), track)
         val json = runCatching { JSONObject(reply) }.getOrNull() ?: throw VoiceCallException(VoiceFailure.NOT_HEARD, "transcription was not JSON")
         return (json.optString("text").ifBlank { json.optString("transcript") }).trim()
     }
@@ -171,6 +167,15 @@ class OpenRouterVoice(private val key: String, private val http: OkHttpClient = 
     }
 
     companion object {
+        /** `POST audio/transcriptions`: the clip inline as base64 WAV (Grok STT and the others take the same shape). */
+        fun transcriptionBody(model: String, wav: ByteArray, language: String = "auto"): JSONObject {
+            val body = JSONObject()
+                .put("model", model)
+                .put("input_audio", JSONObject().put("data", Base64.getEncoder().encodeToString(wav)).put("format", "wav"))
+            languageCode(language)?.let { body.put("language", it) }
+            return body
+        }
+
         private const val BASE = "https://openrouter.ai/api/v1"
         private const val DECISIONS = "https://openrouter.ai/api/alpha/decisions"
         private val JSON = "application/json".toMediaType()

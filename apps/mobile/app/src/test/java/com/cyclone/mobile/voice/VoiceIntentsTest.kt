@@ -52,4 +52,26 @@ class VoiceModelOrderTest {
         assertEquals("google/gemini-3.8-flash-lite-tts", VoiceModels.choose(emptyList(), live, emptyList(), DriverSettings()).tts)
         assertEquals("google/gemini-3.8-flash-tts", VoiceModels.choose(emptyList(), live, emptyList(), DriverSettings(bestVoice = true)).tts)
     }
+
+    @Test fun `grok voice and grok transcription come first when listed`() {
+        val grok = live + listOf(VoiceModel("x-ai/grok-stt-1.0", "Grok STT"), VoiceModel("x-ai/grok-voice-tts-1.0", "Grok Voice"))
+        val choice = VoiceModels.choose(grok, grok, emptyList(), DriverSettings())
+        assertEquals("x-ai/grok-stt-1.0", choice.stt)
+        assertEquals("x-ai/grok-voice-tts-1.0", choice.tts)
+        assertEquals("eve", choice.voice)
+        assertEquals("x-ai/grok-voice-tts-1.0", VoiceModels.choose(grok, grok, emptyList(), DriverSettings(bestVoice = true)).tts)
+        // The owner's own pick still wins while listed.
+        assertEquals("google/gemini-3.8-flash-tts",
+            VoiceModels.choose(grok, grok, emptyList(), DriverSettings(ttsModel = "google/gemini-3.8-flash-tts")).tts)
+        assertEquals(VoiceModels.PREFERRED_TTS_BEST.distinct(), VoiceModels.PREFERRED_TTS_BEST)
+    }
+
+    @Test fun `the transcription request carries the clip as base64 wav`() {
+        val body = OpenRouterVoice.transcriptionBody("x-ai/grok-stt-1.0", byteArrayOf(1, 2, 3), "dutch")
+        assertEquals("x-ai/grok-stt-1.0", body.getString("model"))
+        assertEquals("AQID", body.getJSONObject("input_audio").getString("data"))
+        assertEquals("wav", body.getJSONObject("input_audio").getString("format"))
+        assertEquals("nl", body.getString("language"))
+        assertEquals(false, OpenRouterVoice.transcriptionBody("m", byteArrayOf(), "auto").has("language"))
+    }
 }
