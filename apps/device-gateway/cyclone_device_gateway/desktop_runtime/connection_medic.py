@@ -130,6 +130,12 @@ class ConnectionMedic:
                     session.adb.shell(*OPEN_APP, timeout=8)
                 session.app_running = self._running(session)
             elif action == "open_accessibility":
+                # Alpha 93: Repair first puts Cyclone's Accessibility back itself; the list opens only when it can't.
+                repaired = self.keeper.repair_now(device_id, session) if self.keeper is not None else None
+                if repaired in {"restored", "already_on"}:
+                    session.accessibility_connected = None  # unknown until the phone reports again
+                    self._mark(device_id, "connection.fix.open_accessibility", 1)
+                    return {"deviceId": device_id, "action": action, "ok": True, "repaired": True}
                 session.adb.shell(*OPEN_ACCESSIBILITY, timeout=8)
             else:
                 session.adb.shell(*OPEN_APP, timeout=8)

@@ -102,3 +102,49 @@ def test_a_phone_without_accessibility_is_never_reported_ready():
     assert live.public()["state"] == "ATTENTION"
     live.accessibility_connected = True
     assert live.public()["state"] == "READY"
+
+
+def test_repair_puts_it_back_when_the_owner_presses_it_and_opens_the_list_when_it_cannot(tmp_path, monkeypatch):
+    # Alpha 93: the owner's Repair press is the owner's choice, so no "seen on before" is needed; the list is the fallback.
+    from cyclone_device_gateway.desktop_runtime.connection_medic import OPEN_ACCESSIBILITY
+    from cyclone_device_gateway.desktop_runtime.accessibility_keeper import MAX_OWNER_REPAIRS_PER_HOUR
+    clock = Clock()
+    adb = Adb(OTHERS)
+    session = SimpleNamespace(adb=adb, adb_device=SimpleNamespace(state="device"), state=DeviceFleetState.READY,
+                              bridge_last_error=None, bridge_ok=True, credential="tok", accessibility_connected=False,
+                              usb_session_id="u1", app_running=True)
+    fleet = SimpleNamespace(get=lambda _id: session, list_public=lambda: [{"deviceId": "dev1"}])
+    keeper = AccessibilityKeeper(tmp_path / "k.json", clock=clock)
+    medic = ConnectionMedic(fleet, keeper=keeper, sleep=lambda _s: None)
+    result = medic.fix("dev1", "open_accessibility")
+    assert result["repaired"] is True
+    assert adb.value == OTHERS + ":" + SERVICE
+    assert OPEN_ACCESSIBILITY not in adb.calls
+    assert keeper._seen == {"dev1": True}, "from now on the keeper restores it by itself"
+    assert medic.fix("dev1", "open_accessibility")["repaired"] is True  # already on: nothing to open
+    for _ in range(MAX_OWNER_REPAIRS_PER_HOUR - 1):
+        adb.value = OTHERS
+        assert medic.fix("dev1", "open_accessibility").get("repaired") is True
+    adb.value = OTHERS
+    assert "repaired" not in medic.fix("dev1", "open_accessibility"), "past the hourly limit the list opens instead"
+    assert OPEN_ACCESSIBILITY in adb.calls
+
+
+def test_repair_opens_the_list_when_the_setting_does_not_stick(tmp_path):
+    from cyclone_device_gateway.desktop_runtime.connection_medic import OPEN_ACCESSIBILITY
+
+    class Stuck(Adb):
+        def shell(self, *args, timeout=15):
+            if args[:4] == ("settings", "put", "secure", "enabled_accessibility_services"):
+                self.calls.append(args)
+                return ""
+            return super().shell(*args, timeout=timeout)
+
+    adb = Stuck(OTHERS)
+    session = SimpleNamespace(adb=adb, adb_device=SimpleNamespace(state="device"), state=DeviceFleetState.READY,
+                              bridge_last_error=None, bridge_ok=True, credential="tok", accessibility_connected=False,
+                              usb_session_id="u1", app_running=True)
+    fleet = SimpleNamespace(get=lambda _id: session, list_public=lambda: [{"deviceId": "dev1"}])
+    medic = ConnectionMedic(fleet, keeper=AccessibilityKeeper(tmp_path / "k.json", clock=Clock()), sleep=lambda _s: None)
+    assert "repaired" not in medic.fix("dev1", "open_accessibility")
+    assert OPEN_ACCESSIBILITY in adb.calls
