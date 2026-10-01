@@ -498,11 +498,13 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     private fun preferredForegroundRoot(listed: List<AccessibilityWindowInfo> = windowsOnAllDisplays.get(0).orEmpty()): AccessibilityNodeInfo? {
         val active = rootInActiveWindow
-        val selected = TaskSurfaceWindows.primary(listed.map { window ->
-            TaskSurfaceWindows.Window(window.id, window.type, window.root?.packageName?.toString().orEmpty(),
+        // Each window's root is read once: reading it again could come back null for a dialog (alpha 91).
+        val roots = listed.associate { it.id to it.root }
+        val ordered = TaskSurfaceWindows.ordered(listed.map { window ->
+            TaskSurfaceWindows.Window(window.id, window.type, roots[window.id]?.packageName?.toString().orEmpty(),
                 window.layer, window.isActive, window.isFocused)
         }, active?.windowId)
-        if (selected != null) return listed.firstOrNull { it.id == selected.id }?.root
+        ordered.firstNotNullOfOrNull { roots[it.id] }?.let { return it }
         // OEM fallback only when enumeration is unavailable. Never use Cyclone's untyped overlay root.
         return active?.takeIf { listed.isEmpty() && !it.packageName.isNullOrBlank() && it.packageName?.toString() !in setOf("com.cyclone.mobile", "com.android.systemui") }
     }

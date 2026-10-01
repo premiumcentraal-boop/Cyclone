@@ -349,7 +349,9 @@ async def _observe_request_body(http_request: Request) -> ObserveRequest:
 def create_app(settings: Settings | None = None, gateway: Gateway | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     gateway = gateway or Gateway(settings)
-    app = FastAPI(title="Cyclone Device Gateway", version="2.9.5")
+    # Alpha 91: the API reports the product release it belongs to (it said 2.9.5 for many releases).
+    from .terminal.release import installed_version
+    app = FastAPI(title="Cyclone Device Gateway", version=installed_version())
 
     def auth(authorization: str | None = Header(default=None)):
         verify_bearer(authorization, settings.token)

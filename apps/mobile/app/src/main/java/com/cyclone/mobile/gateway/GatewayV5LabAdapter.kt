@@ -147,7 +147,9 @@ internal object GatewayV5LabAdapter {
         .put("lab", mission.lab?.toJson() ?: JSONObject.NULL)
         .put("metrics", metrics)
         .put("events", JSONArray().also { out ->
-            mission.events.takeLast(20).forEach { out.put(JSONObject().put("at", it.atMs).put("text", MindRedaction.scrubText(it.text).take(200)).put("ok", it.ok)) }
+            // Alpha 91: the start and the end of a long run (the first 10 and the last 50), not only its last 20 events.
+            val events = mission.events
+            (if (events.size <= 60) events else events.take(10) + events.takeLast(50)).forEach { out.put(JSONObject().put("at", it.atMs).put("text", MindRedaction.scrubText(it.text).take(200)).put("ok", it.ok)) }
         })
         .put("app", JSONObject().put("versionName", version.first).put("versionCode", version.second))
 

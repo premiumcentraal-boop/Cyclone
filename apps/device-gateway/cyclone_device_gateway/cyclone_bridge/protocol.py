@@ -14,7 +14,7 @@ ALLOWED_OPS = {
     "atlas.places", "atlas.get", "atlas.diff",
     "mapping.start", "mapping.pause", "mapping.stop", "mapping.status",
     "secrets.slots", "secrets.request",
-    "ask.start", "ask.status",
+    "ask.start", "ask.status", "ask.cancel",
     "apps.list",
     "runs.list", "runs.get", "runs.mark",
     "atlas.versions", "scenarios.list", "knowledge.get", "atlas.here",

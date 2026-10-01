@@ -62,3 +62,19 @@ def test_every_surface_reads_the_same_verdict():
     assert 'public["connection"] = diagnose_session(' in readiness
     glass = text(ROOT / "apps/glass/src/services/devices.ts")
     assert "parseConnection(record.connection)" in glass
+
+
+def test_the_accessibility_keeper_only_puts_cyclone_back_where_the_owner_had_it():
+    """Alpha 91: after Android removes Cyclone's Accessibility (a force-stop), the PC restores that one setting, only
+    on a phone where it saw it on before, bounded, recorded, and with an off switch."""
+    keeper = text(RUNTIME / "accessibility_keeper.py")
+    shells = re.findall(r"\.shell\(([^)]*)\)", keeper)
+    assert shells == ['"settings", "get", "secure", KEY, timeout=5',
+                      '"settings", "put", "secure", KEY, f"\'{restored(value',
+                      '"settings", "put", "secure", "accessibility_enabled", "1", timeout=5'], shells
+    assert 'KEY = "enabled_accessibility_services"' in keeper
+    assert "if not enabled() or not self._seen.get(device_id)" in keeper
+    assert "MAX_PER_HOUR = 3" in keeper and 'CYCLONE_AUTO_REPAIR_ACCESSIBILITY", "1"' in keeper
+    assert "kept + [SERVICE]" in keeper  # only Cyclone's own service is ever added
+    for forbidden in ("pm grant", '"pm"', '"appops"', '"input"', "subprocess", "global"):
+        assert forbidden not in keeper, forbidden

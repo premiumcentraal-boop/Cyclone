@@ -80,6 +80,7 @@ object CycloneModes {
                voice: Boolean = false, done: (ModeResult) -> Unit = {}) {
         val app = context.applicationContext
         if (MindMissions.live.value != null) {
+            AskLedger.routed(request, "mind", "mission", "a mission is running: the request goes to it", 0)
             if (!MindMissions.start(app, request, attachment)) MindMissions.offer(app, request)
             done(ModeResult(Mode.MIND, null, true, promoted = true))
             return
@@ -88,6 +89,7 @@ object CycloneModes {
         val settings = settings(app)
         // An attachment is for reading, so it always goes to the Mind.
         if (attachment != null || settings.speed == Speed.MIND) {
+            AskLedger.routed(request, "mind", "setting", if (attachment != null) "an attachment is read by the Mind" else "Speed is set to Always Mind", 0)
             mission(app, request, attachment, Mode.MIND, null, done)
             return
         }
@@ -100,7 +102,13 @@ object CycloneModes {
         OverlayChromeRuntime.attachMission(running)
         // Alpha.78: every run is timed and logged to the run history, stage by stage.
         val trace = ModesTrace(context, request, voice)
-        val done: (ModeResult) -> Unit = { result -> trace.finish(result); reply(result.copy(steps = trace.steps)) }
+        val done: (ModeResult) -> Unit = { result ->
+            trace.finish(result)
+            // A request handed to Flash or the Mind keeps running as that mission; ask.status reads it from the task.
+            if (result.promoted) AskLedger.handed(request, result.mode.name.lowercase())
+            else AskLedger.finished(request, result.mode.name.lowercase(), result.ok, result.say)
+            reply(result.copy(steps = trace.steps))
+        }
         // Voice keeps the screen (alpha.78): its own panel shows the work and speaks the result, so the Ask chrome stays out.
         val chrome = !voice
         val device = com.cyclone.mobile.mind.mission.AndroidMindDevice(context)
@@ -109,8 +117,12 @@ object CycloneModes {
         var handedOver = false
         // Alpha 89: every routed request becomes a lesson with its outcome (the phone model learns from JEV's verified ones).
         var learn: (com.cyclone.mobile.mind.decide.Outcome) -> Unit = {}
+        // Alpha 91: until a route exists, a failure is still a lesson (decided by FALLBACK), so the numbers never miss one.
+        var routed: Route? = null
+        var learnBar = 0.8
         try {
             val fast = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
+            learnBar = fast.sureness.bar
             // Alpha.78: decisions go to the one decision provider (JEV, text only, until OpenAI Decisions is live).
             val box = if (settings.speed == Speed.AUTO) com.cyclone.mobile.mind.decide.Decisions.box(context) else null
             val blocker = device.blocker()
@@ -122,6 +134,11 @@ object CycloneModes {
                 com.cyclone.mobile.mind.decide.PhoneBrain.decider(context, settings.phoneModel, fast.sureness.bar)
             }.getOrNull() else null
             val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar, phone) }
+            routed = route
+            AskLedger.routed(request, route.mode.name.lowercase(), route.by.name.lowercase(), route.why, route.decideMs)
+            // Alpha 91: the phone decided at once; JEV answers the same question in the background now and then, so its
+            // agreement and its speed keep being measured without making the owner wait.
+            if (route.by == com.cyclone.mobile.mind.decide.Decider.PHONE && box != null && phone?.audit == true) audit(context, request, world, box, route, fast.sureness.bar)
             trace.step("decided by ${route.by.name.lowercase()}" + (if (route.decideMs > 0) " in ${route.decideMs} ms" else "") +
                 (route.shadow?.let { " · phone model: ${it.mode}${if (it.intent != "none") " ${it.intent}" else ""}" }.orEmpty()))
             learn = { outcome ->
@@ -188,6 +205,7 @@ object CycloneModes {
             }
         } catch (error: Exception) {
             trace.step("error: ${error.javaClass.simpleName}")
+            if (routed == null) learnFailure(context, request, learnBar)
             learn(com.cyclone.mobile.mind.decide.Outcome.FAILED)
             // Never lose a request: anything unexpected goes to the Mind.
             if (!handedOver) {
@@ -198,6 +216,29 @@ object CycloneModes {
             OverlayChromeRuntime.detachMission(running)
             if (current === running) current = null
         }
+    }
+
+    /** A request that broke before it was routed: kept as a fallback lesson so the numbers show it. */
+    private fun learnFailure(context: Context, request: String, bar: Double) = runCatching {
+        com.cyclone.mobile.mind.decide.PhoneBrain.record(context, com.cyclone.mobile.mind.decide.Lesson(
+            atMs = System.currentTimeMillis(), request = request, candidates = emptyList(),
+            decider = com.cyclone.mobile.mind.decide.Decider.FALLBACK, decision = ModeRouter.guessOf(Mode.MIND), decideMs = 0,
+            shadow = null, outcome = com.cyclone.mobile.mind.decide.Outcome.FAILED), bar)
+    }
+
+    /** JEV's answer to a request the phone model already did, recorded as a lesson of its own (never acted on). */
+    private fun audit(context: Context, request: String, world: GrammarWorld, box: DecisionBox, route: Route, bar: Double) {
+        Thread({
+            runCatching {
+                val reply = box.ask(ModeRouter.board0(request, world)) ?: return@runCatching
+                val jev = ModeRouter.decisionOf(reply)
+                com.cyclone.mobile.mind.decide.PhoneBrain.record(context, com.cyclone.mobile.mind.decide.Lesson(
+                    atMs = System.currentTimeMillis(), request = request, candidates = world.labels.take(25),
+                    decider = com.cyclone.mobile.mind.decide.Decider.DECISIONS, decision = jev, decideMs = reply.ms,
+                    shadow = route.decision, outcome = com.cyclone.mobile.mind.decide.Outcome.NONE,
+                    provider = com.cyclone.mobile.mind.decide.Decisions.active().name), bar)
+            }
+        }, "cyclone-jev-audit").start()
     }
 
     private fun mission(context: Context, request: String, attachment: com.cyclone.mobile.ui.overlay.TaskAttachment?, mode: Mode,

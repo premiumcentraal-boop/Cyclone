@@ -42,16 +42,20 @@ object AtlasRuntime {
             legacyImporter = AtlasLegacyImporter(store)
             initialized = true
         }
-        legacyStore?.let(::projectLegacy)
+        // Alpha 91: the legacy import runs off the caller's thread (it is called from MainActivity.onCreate, where it
+        // froze the app for 3.7 s), and writes once at the end instead of once per screen.
+        legacyStore?.let { legacy -> Thread({ runCatching { projectLegacy(legacy) } }, "cyclone-atlas-import").start() }
     }
 
-    @Synchronized
+    /** Not under this object's lock: the store has its own, and a long import must not block initialize() callers. */
     fun projectLegacy(legacyStore: AppKnowledgeStore) {
         if (!initialized) return
-        legacyStore.listApps().forEach { app ->
-            // Legacy graphs are package-scoped and cannot prove a Chrome website origin.
-            if (PlaceResolver.isChromePackage(app.packageName)) return@forEach
-            legacyStore.graph(app.packageName)?.let(legacyImporter::import)
+        store.batch {
+            legacyStore.listApps().forEach { app ->
+                // Legacy graphs are package-scoped and cannot prove a Chrome website origin.
+                if (PlaceResolver.isChromePackage(app.packageName)) return@forEach
+                legacyStore.graph(app.packageName)?.let(legacyImporter::import)
+            }
         }
     }
 }

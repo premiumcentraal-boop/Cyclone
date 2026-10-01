@@ -153,7 +153,7 @@ object Earning {
     const val MAX_FAILURES = 1
     const val RECENT = 50
     /** One in this many earned decisions is still asked of JEV, so agreement stays measured. */
-    const val AUDIT_EVERY = 10
+    const val AUDIT_EVERY = 5
 
     data class Record(val intent: String, val samples: Int, val agreed: Int, val phoneDecisions: Int, val phoneFailures: Int) {
         val agreement: Double get() = if (samples == 0) 0.0 else agreed.toDouble() / samples

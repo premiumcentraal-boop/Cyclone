@@ -42,4 +42,19 @@ class TaskSurfaceWindowsTest {
         assertFalse(TaskSurfaceWindows.eventBelongsToTask(null, "com.cyclone.mobile", "com.android.chrome"))
         assertFalse(TaskSurfaceWindows.includeSibling(2, "keyboard", chrome.packageName))
     }
+
+    @Test
+    fun aDialogAboveItsActivityComesFirstEvenWhileCyclonesOverlayHasFocus() {
+        // Settings › Screen timeout: the radio dialog (layer 22) over Display settings (layer 21); Cyclone's overlay
+        // (type 4) holds focus, so the active root is not an application window.
+        val windows = listOf(
+            TaskSurfaceWindows.Window(10, 1, "com.android.settings", 21),
+            TaskSurfaceWindows.Window(11, 1, "com.android.settings", 22),
+            TaskSurfaceWindows.Window(12, 4, "com.cyclone.mobile", 30, active = true, focused = true),
+            TaskSurfaceWindows.Window(13, 3, "com.android.systemui", 25),
+        )
+        assertEquals(listOf(11, 10), TaskSurfaceWindows.ordered(windows, activeRootId = 12).map { it.id })
+        // The caller tries them in order, so an unreadable dialog root falls back to the activity, never to "null".
+        assertEquals(11, TaskSurfaceWindows.primary(windows, activeRootId = 12)?.id)
+    }
 }

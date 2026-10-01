@@ -190,7 +190,9 @@ class DesktopRuntime:
         self.cloud.care = self.care
         # Alpha 88: wakes a stopped Cyclone app on its own, and runs the owner's one-click connection fixes.
         from .connection_medic import ConnectionMedic
-        self.medic = ConnectionMedic(self.fleet, self.live_diagnostics)
+        from .accessibility_keeper import AccessibilityKeeper
+        self.medic = ConnectionMedic(self.fleet, self.live_diagnostics,
+                                     keeper=AccessibilityKeeper(settings.runtime_dir / "accessibility-keeper.json", self.live_diagnostics))
         self.pairing = PairingCoordinator(self.fleet, self.live_diagnostics)
         self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)

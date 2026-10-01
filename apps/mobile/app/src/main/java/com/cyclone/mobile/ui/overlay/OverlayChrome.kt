@@ -458,11 +458,13 @@ private fun ComposerPanel(
                         taskKey = mindTask ?: snapshot.sessionId,
                         onOpen = { onAction(OverlayUserAction.ASK_CYCLONE) },
                         onPause = {
+                            // Alpha 91: a touch that is Cyclone's own injected gesture is never the owner's Pause.
+                            if (OverlayGesturePassthrough.injectedRecently()) return@WorkIsland
                             if (mindTask != null) com.cyclone.mobile.task.TaskCommands.send(context, mindTask,
                                 if (mindPaused) com.cyclone.mobile.task.TaskCommand.Unpause else com.cyclone.mobile.task.TaskCommand.Pause)
                             else onAction(OverlayUserAction.TAKE_CONTROL)
                         },
-                        onStop = { onAction(OverlayUserAction.STOP_TASK) },
+                        onStop = { if (!OverlayGesturePassthrough.injectedRecently()) onAction(OverlayUserAction.STOP_TASK) },
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -485,11 +487,13 @@ private fun ComposerPanel(
                         paused = if (mindTask != null) mindPaused else snapshot.userPaused,
                         taskKey = mindTask ?: snapshot.sessionId,
                         onPause = {
+                            // Alpha 91: a touch that is Cyclone's own injected gesture is never the owner's Pause.
+                            if (OverlayGesturePassthrough.injectedRecently()) return@OverlayAppleComposerBar
                             if (mindTask != null) com.cyclone.mobile.task.TaskCommands.send(context, mindTask,
                                 if (mindPaused) com.cyclone.mobile.task.TaskCommand.Unpause else com.cyclone.mobile.task.TaskCommand.Pause)
                             else onAction(OverlayUserAction.TAKE_CONTROL)
                         },
-                        onStop = { onAction(OverlayUserAction.STOP_TASK) },
+                        onStop = { if (!OverlayGesturePassthrough.injectedRecently()) onAction(OverlayUserAction.STOP_TASK) },
                         onSendWhileWorking = sendWhileWorking,
                         onMenu = {
                             focusManager.clearFocus()

@@ -380,6 +380,15 @@ class GatewayClient:
             "deviceId": device_id, "name": name, "missions": missions, "variants": variants, "repetitions": repetitions,
         })
 
+    def ask_start(self, device_id: str, goal: str) -> Any:
+        return self._bounded_route("POST", f"/v1/devices/{_quote(device_id)}/ask/start", {"goal": goal})
+
+    def ask_status(self, device_id: str, request_id: str | None = None) -> Any:
+        return self._bounded_route("POST", f"/v1/devices/{_quote(device_id)}/ask/status", {"requestId": request_id} if request_id else {})
+
+    def ask_cancel(self, device_id: str, request_id: str | None = None) -> Any:
+        return self._bounded_route("POST", f"/v1/devices/{_quote(device_id)}/ask/cancel", {"requestId": request_id} if request_id else {})
+
     def lab_experiments(self) -> Any:
         return self._bounded_route("GET", "/v1/lab/experiments")
 

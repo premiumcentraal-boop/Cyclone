@@ -487,7 +487,7 @@ def test_alpha4_ask_status_is_the_phone_snapshot():
 
 
 @pytest.mark.parametrize("body, code", [
-    ({"goal": "open clock", "displayId": 0}, "SESSION_REQUIRED"),
+    ({"goal": "open clock", "sessionId": "", "displayId": 0}, "SESSION_REQUIRED"),
     ({"goal": "open clock", "sessionId": "vd-mail", "displayId": 3}, "SESSION_DISPLAY_MISMATCH"),
     ({"goal": "", **FOREGROUND}, "INVALID_REQUEST"),
     ({"goal": "x" * 2001, **FOREGROUND}, "INVALID_REQUEST"),
@@ -508,6 +508,27 @@ def test_alpha4_secrets_never_travel_in_a_goal():
     with pytest.raises(DesktopRuntimeError):
         svc.forward("phone-1", "ask.start", {"goal": "open clock", "password": "hunter2", **FOREGROUND})
     assert bridge.calls == []
+
+
+REQUEST = {"requestId": "req-0123abcd-456", "state": "done", "lane": "instant", "decider": "phone",
+           "why": "the phone model knows this one", "decideMs": 3, "startedAtMs": 1, "routedAtMs": 5, "finishedAtMs": 900,
+           "say": "Volume up."}
+
+
+def test_alpha91_ask_defaults_to_the_main_screen_and_reads_one_request_back():
+    svc, bridge = _ask_service({**ASK_STATUS, "request": REQUEST})
+    svc.forward("phone-1", "ask.start", {"goal": "make it louder"})
+    assert bridge.calls[0][1] == {"goal": "make it louder", **FOREGROUND}
+    status = svc.forward("phone-1", "ask.status", {"requestId": "req-0123abcd-456"})
+    assert status["request"]["lane"] == "instant" and status["request"]["decider"] == "phone"
+    with pytest.raises(DesktopRuntimeError) as caught:
+        svc.forward("phone-1", "ask.status", {"requestId": "../etc"})
+    assert str(caught.value.code) == "INVALID_REQUEST"
+    for bad in ({**REQUEST, "lane": "teleport"}, {**REQUEST, "extra": 1}, {**REQUEST, "requestId": "x"}):
+        broken, _ = _ask_service({**ASK_STATUS, "request": bad})
+        with pytest.raises(DesktopRuntimeError) as caught:
+            broken.forward("phone-1", "ask.status", {})
+        assert str(caught.value.code) == "PROTOCOL_MISMATCH"
 
 
 def test_alpha4_malformed_phone_ask_status_is_rejected():

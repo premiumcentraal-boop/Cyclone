@@ -2,7 +2,11 @@ package com.cyclone.mobile.gateway
 
 import android.os.Handler
 import android.os.Looper
+import android.content.Context
 import com.cyclone.mobile.DeviceState
+import com.cyclone.mobile.mind.modes.AskLedger
+import com.cyclone.mobile.task.TaskCommand
+import com.cyclone.mobile.task.TaskCommands
 import com.cyclone.mobile.runtime.background.TaskPresentationProjector
 import com.cyclone.mobile.runtime.background.TaskPresentationSnapshot
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
@@ -33,6 +37,15 @@ internal object GatewayV5AskAdapter {
     internal var submit: (String) -> Unit = { goal ->
         Handler(Looper.getMainLooper()).post { OverlayChromeRuntime.submitRequest(goal) }
     }
+    @Volatile private var context: Context? = null
+
+    fun install(context: Context) { this.context = context.applicationContext }
+
+    /** Alpha 91: stopping what a request started goes through Task Kit for a task, and the voice/instant stop otherwise. */
+    internal var stopTask: (String) -> Boolean = { taskId ->
+        context?.let { TaskCommands.send(it, taskId, TaskCommand.Stop).handled } == true
+    }
+    internal var stopInstant: () -> Unit = { OverlayChromeRuntime.stopVoiceRequest() }
     internal var currentTask: () -> TaskPresentationSnapshot? = {
         WorkspaceTasks.state.value?.let { TaskPresentationProjector.project(it) }
     }
@@ -40,6 +53,7 @@ internal object GatewayV5AskAdapter {
     fun dispatch(op: String, args: JSONObject): JSONObject = when (op) {
         "ask.start" -> start(args)
         "ask.status" -> status(args)
+        "ask.cancel" -> cancel(args)
         else -> throw GatewayProtocolException("UNKNOWN_OPERATION", "Unsupported ask operation: $op")
     }
 
@@ -63,19 +77,67 @@ internal object GatewayV5AskAdapter {
         if (busy()) {
             throw GatewayProtocolException("ASK_BUSY", "The phone is already running a task.")
         }
+        // Alpha 91: every request gets an id; ask.status {requestId} says which lane took it and how it ended.
+        val requestId = AskLedger.begin(goal)
         submit(goal)
         return JSONObject()
             .put("accepted", true)
             .put("sessionId", ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID)
             .put("displayId", 0)
+            .put("requestId", requestId)
     }
 
     fun status(args: JSONObject): JSONObject {
-        requireOnly(args, setOf("sessionId", "displayId"))
+        requireOnly(args, setOf("sessionId", "displayId", "requestId"))
         requireForeground(args)
+        val entry = requestOf(args) ?: AskLedger.latest()
         val snapshot = currentTask()
-        return if (snapshot == null) idle() else snapshotJson(snapshot)
+        // A request Instant, Answer or Ignore took has no task: the previous task is not shown as if it were this one.
+        val own = entry == null || entry.lane == null || entry.lane in MISSION_LANES
+        val base = if (snapshot == null || !own) idle() else snapshotJson(snapshot)
+        return base.put("request", entry?.let(::entryJson) ?: JSONObject.NULL)
     }
+
+    /** Stops what [requestId] (or the latest request) started: its Instant run, or its Flash/Mind task through Task Kit. */
+    fun cancel(args: JSONObject): JSONObject {
+        requireOnly(args, setOf("sessionId", "displayId", "requestId"))
+        requireForeground(args)
+        val entry = requestOf(args) ?: AskLedger.latest() ?: return JSONObject().put("cancelled", false).put("detail", "No request to stop.")
+        if (entry.state in setOf("done", "failed", "cancelled")) {
+            return JSONObject().put("cancelled", false).put("detail", "That request already ended.").put("request", entryJson(entry))
+        }
+        val stopped = if (entry.lane in MISSION_LANES) {
+            currentTask()?.taskId?.let(stopTask) == true
+        } else {
+            stopInstant()
+            true
+        }
+        val after = if (stopped) AskLedger.cancel(entry.requestId) ?: entry else entry
+        return JSONObject().put("cancelled", stopped)
+            .put("detail", if (stopped) "Stopped." else "Nothing was running for that request.")
+            .put("request", entryJson(after))
+    }
+
+    private val MISSION_LANES = setOf("flash", "mind")
+    private val REQUEST_ID = Regex("^req-[0-9a-f-]{8,40}$")
+
+    private fun requestOf(args: JSONObject): AskLedger.Entry? {
+        val id = args.opt("requestId") ?: return null
+        if (id !is String || !REQUEST_ID.matches(id)) throw GatewayProtocolException("INVALID_REQUEST", "requestId is malformed.")
+        return AskLedger.get(id) ?: throw GatewayProtocolException("INVALID_REQUEST", "That request is not known on the phone (it keeps the last ${AskLedger.KEEP}).")
+    }
+
+    internal fun entryJson(entry: AskLedger.Entry): JSONObject = JSONObject()
+        .put("requestId", entry.requestId)
+        .put("state", entry.state)
+        .put("lane", entry.lane ?: JSONObject.NULL)
+        .put("decider", entry.decider ?: JSONObject.NULL)
+        .put("why", entry.why ?: JSONObject.NULL)
+        .put("decideMs", entry.decideMs)
+        .put("startedAtMs", entry.startedAtMs)
+        .put("routedAtMs", entry.routedAtMs ?: JSONObject.NULL)
+        .put("finishedAtMs", entry.finishedAtMs ?: JSONObject.NULL)
+        .put("say", entry.say ?: JSONObject.NULL)
 
     internal fun snapshotJson(snapshot: TaskPresentationSnapshot): JSONObject = JSONObject()
         .put("taskId", snapshot.taskId.take(120))
@@ -108,11 +170,12 @@ internal object GatewayV5AskAdapter {
         .put("displayId", 0)
 
     private fun requireForeground(args: JSONObject) {
-        val sessionId = args.opt("sessionId")
+        // Alpha 91: the phone's main screen is the default; a client only names it to be explicit.
+        val sessionId = args.opt("sessionId") ?: ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID
         if (sessionId !is String || sessionId.isBlank()) {
             throw GatewayProtocolException("SESSION_REQUIRED", "sessionId is required for ask.")
         }
-        val display = args.opt("displayId")
+        val display = args.opt("displayId") ?: 0
         if (sessionId != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID || display !is Number || display.toInt() != 0) {
             throw GatewayProtocolException(
                 "SESSION_DISPLAY_MISMATCH",

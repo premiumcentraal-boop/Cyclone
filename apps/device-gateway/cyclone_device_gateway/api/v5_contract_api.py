@@ -153,8 +153,14 @@ def create_v5_contract_router(runtime: Any, token: str) -> APIRouter:
         return _call(lambda: service.forward(device_id, "ask.start", body))
 
     @router.post("/v1/devices/{device_id}/ask/status", dependencies=[Depends(auth)])
-    def ask_status(device_id: str, body: dict[str, Any]):
-        return _call(lambda: service.forward(device_id, "ask.status", body))
+    def ask_status(device_id: str, body: dict[str, Any] | None = None):
+        # Alpha 91: {"requestId": ...} reads one request back (lane, who decided, times); without it, the latest.
+        return _call(lambda: service.forward(device_id, "ask.status", body or {}))
+
+    @router.post("/v1/devices/{device_id}/ask/cancel", dependencies=[Depends(auth)])
+    def ask_cancel(device_id: str, body: dict[str, Any] | None = None):
+        # Stops what a request started: its Instant run, or its Flash/Mind task through the phone's Task Kit.
+        return _call(lambda: service.forward(device_id, "ask.cancel", body or {}))
 
     @router.get("/v1/devices/{device_id}/secrets/slots", dependencies=[Depends(auth)])
     def secret_slots(
