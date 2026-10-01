@@ -218,3 +218,108 @@ def _app_without_ports() -> FastAPI:
     app = FastAPI()
     app.include_router(create_ports_router(type("R", (), {})(), TOKEN))
     return app
+
+
+# ---- run 2: bindings ----------------------------------------------------------------------------------------------------
+
+class _Ok:
+    def __init__(self, name):
+        self.name, self.ok, self.detail, self.required = name, True, "", True
+
+
+def _fake_hub(tmp_path, manifests):
+    """A hub over fake plugins: each endpoint answers its manifest and /health, and every check passes."""
+    def fetch(method, url, *args, **kwargs):
+        base = url.split("/cyclone-plugin.json")[0].split("/health")[0].split("/ports/")[0]
+        manifest = manifests[base]
+        if url.endswith("/health"):
+            return 200, {"ok": True}, 1
+        if url.endswith("/cyclone-plugin.json"):
+            return 200, manifest, 1
+        return 202, {"received": True}, 1
+    return PortHub(tmp_path / "ports", checker=lambda endpoint, key: [_Ok("manifest is valid")], fetch=fetch)
+
+
+def _manifest(name, serves):
+    return {"contract": "cyclone.ports/1", "name": name, "version": "1.0.0", "endpoint": f"http://127.0.0.1:{len(name) + 9000}",
+            "serves": [{"port": p, "way": w} for p, w in serves], "needs": {"personal": True}}
+
+
+def test_bindings_automatic_choices_scopes_and_conflicts(tmp_path):
+    mans = {
+        "http://127.0.0.1:9001": _manifest("logger", [("run.event", "out"), ("log.line", "out")]),
+        "http://127.0.0.1:9002": _manifest("slack", [("run.event", "out")]),
+        "http://127.0.0.1:9003": _manifest("sms-a", [("code.in", "in")]),
+        "http://127.0.0.1:9004": _manifest("sms-b", [("code.in", "in")]),
+    }
+    hub = _fake_hub(tmp_path, mans)
+    for endpoint, m in mans.items():
+        hub.add(endpoint, [s["port"] for s in m["serves"]])
+        assert hub.check(m["name"])["plugin"]["status"] == "active"
+    rows = {r["port"]: r for r in hub.bindings("default")["ports"]}
+
+    # automatic: out ports fan out, an in port with two live answerers is a conflict, unserved ports are empty
+    assert rows["run.event"]["state"] == "ok" and sorted(rows["run.event"]["effective"]) == ["logger", "slack"]
+    assert rows["code.in"]["state"] == "conflict" and rows["code.in"]["effective"] == []
+    assert rows["file.in"]["state"] == "empty"
+    assert rows["secret.in"]["state"] == "vault"
+    assert hub.overview()["conflicts"] == ["code.in"]
+
+    # the owner settles the conflict everywhere, and routes run events to the logger only for one routine
+    hub.set_binding("default", "code.in", ["sms-a"])
+    hub.set_binding("routine:rtn_abcdef12", "run.event", ["logger"])
+    with pytest.raises(PortsError, match="one plugin"):
+        hub.set_binding("default", "code.in", ["sms-a", "sms-b"])
+    with pytest.raises(PortsError, match="doesn't serve"):
+        hub.set_binding("default", "code.in", ["logger"])
+    with pytest.raises(PortsError):
+        hub.set_binding("everywhere-ish", "code.in", ["sms-a"])
+    with pytest.raises(PortsError, match="can't be bound"):
+        hub.set_binding("default", "secret.out", [])
+    assert hub.overview()["conflicts"] == []
+
+    routine = {r["port"]: r for r in hub.bindings("routine:rtn_abcdef12")["ports"]}
+    assert routine["run.event"]["override"] and routine["run.event"]["effective"] == ["logger"]
+    assert sorted(routine["run.event"]["inherits"]["effective"]) == ["logger", "slack"]
+    assert routine["code.in"]["override"] is False and routine["code.in"]["effective"] == ["sms-a"]
+
+    # a run resolves routine → app → everywhere
+    resolved = {r["port"]: r for r in hub.resolve(routine="rtn_abcdef12", app="com.example.app")["ports"]}
+    assert resolved["run.event"]["effective"] == ["logger"] and resolved["run.event"]["source"] == "routine:rtn_abcdef12"
+    assert resolved["code.in"]["source"] == "default"
+    hub.set_binding("app:com.example.app", "log.line", [])
+    resolved = {r["port"]: r for r in hub.resolve(routine="rtn_abcdef12", app="com.example.app")["ports"]}
+    assert resolved["log.line"]["state"] == "off"
+
+    # a chosen plugin that stops being live leaves its port unavailable, never quietly re-routed
+    hub.pause("sms-a", True)
+    rows = {r["port"]: r for r in hub.bindings("default")["ports"]}
+    assert rows["code.in"]["state"] == "unavailable" and rows["code.in"]["effective"] == []
+    assert hub.overview()["conflicts"] == ["code.in"]
+
+    # removing a plugin removes it from every choice; its lone choice goes back to automatic
+    hub.remove("sms-a")
+    rows = {r["port"]: r for r in hub.bindings("default")["ports"]}
+    assert rows["code.in"]["chosen"] is None and rows["code.in"]["effective"] == ["sms-b"]
+    hub.set_binding("routine:rtn_abcdef12", "run.event", None)            # back to inherited
+    assert not {r["port"]: r for r in hub.bindings("routine:rtn_abcdef12")["ports"]}["run.event"]["override"]
+    assert {s["scope"] for s in hub.bindings()["scopes"]} == {"app:com.example.app"}
+    hub.store.close()
+
+
+def test_binding_routes(tmp_path):
+    mans = {"http://127.0.0.1:9001": _manifest("logger", [("run.event", "out")])}
+    hub = _fake_hub(tmp_path, mans)
+    hub.add("http://127.0.0.1:9001", ["run.event"])
+    app = FastAPI()
+    app.include_router(create_ports_router(type("R", (), {"ports": hub})(), TOKEN))
+    client = TestClient(app)
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    assert client.get("/v1/ports/bindings?scope=nope", headers=auth).status_code == 400
+    answer = client.post("/v1/ports/bindings", json={"scope": "default", "port": "run.event", "plugins": []}, headers=auth)
+    assert answer.status_code == 200
+    assert {r["port"]: r for r in answer.json()["ports"]}["run.event"]["state"] == "off"
+    assert client.post("/v1/ports/bindings", json={"scope": "default", "port": "run.event"}, headers=auth).status_code == 422
+    resolved = client.get("/v1/ports/resolve?routine=rtn_abcdef12&app=com.example.app", headers=auth).json()
+    assert resolved["scopes"] == ["routine:rtn_abcdef12", "app:com.example.app", "default"]
+    hub.store.close()

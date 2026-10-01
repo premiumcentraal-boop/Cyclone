@@ -82,6 +82,41 @@ export interface Activity {
   detail: string;
 }
 
+export type BindingState = "ok" | "empty" | "conflict" | "off" | "unavailable" | "vault";
+
+export interface Candidate {
+  name: string;
+  title: string;
+  live: boolean;
+  status: PluginStatus;
+}
+
+/** One port on the Port map: who could serve it, who does for this scope, and where that came from. */
+export interface BindingRow {
+  port: string;
+  way: PortWay;
+  sensitivity: Sensitivity;
+  pluginServed: boolean;
+  extension: boolean;
+  candidates: Candidate[];
+  state: BindingState;
+  effective: string[];
+  /** null: automatic. [] : off. */
+  chosen: string[] | null;
+  /** "automatic", "default", "routine:<id>", "app:<package>" or "hub". */
+  source: string;
+  /** This scope itself made a choice for this port. */
+  override: boolean;
+  inherits: { state: BindingState; effective: string[]; source: string } | null;
+}
+
+export interface BindingsView {
+  scope: string;
+  scopes: Array<{ scope: string; choices: number }>;
+  ports: BindingRow[];
+  plugins: Array<{ name: string; title: string; status: PluginStatus }>;
+}
+
 export interface Overview {
   contract: string;
   keysPersistent: boolean;
@@ -90,6 +125,8 @@ export interface Overview {
   extensions: string[];
   activity: Activity[];
   today: { messages: number; failures: number };
+  /** Ports that need a choice everywhere (two answerers, or the chosen plugin isn't live). */
+  conflicts: string[];
 }
 
 export interface Preview {
@@ -188,6 +225,40 @@ export function parseOverview(raw: unknown): Overview {
     extensions: arr(o.extensions).map((p) => str(p)).filter(Boolean),
     activity: arr(o.activity).map(parseActivity),
     today: { messages: num(today.messages) ?? 0, failures: num(today.failures) ?? 0 },
+    conflicts: arr(o.conflicts).map((p) => str(p)).filter(Boolean),
+  };
+}
+
+const BINDING_STATES: BindingState[] = ["ok", "empty", "conflict", "off", "unavailable", "vault"];
+const bindingState = (v: unknown): BindingState => (BINDING_STATES.includes(v as BindingState) ? (v as BindingState) : "empty");
+const names = (v: unknown): string[] => arr(v).map((p) => str(p)).filter(Boolean);
+
+export function parseBindings(raw: unknown): BindingsView {
+  const o = obj(raw);
+  return {
+    scope: str(o.scope, "default"),
+    scopes: arr(o.scopes).map((s) => ({ scope: str(obj(s).scope), choices: num(obj(s).choices) ?? 0 })).filter((s) => s.scope),
+    ports: arr(o.ports).map((r) => {
+      const i = obj(r);
+      const inherits = i.inherits == null ? null : obj(i.inherits);
+      return {
+        port: str(i.port), way: way(i.way), sensitivity: sensitivity(i.sensitivity), pluginServed: i.pluginServed !== false,
+        extension: i.extension === true,
+        candidates: arr(i.candidates).map((c) => {
+          const x = obj(c);
+          return { name: str(x.name), title: str(x.title) || str(x.name), live: x.live === true,
+            status: STATUSES.includes(x.status as PluginStatus) ? (x.status as PluginStatus) : "waiting_key" };
+        }).filter((c) => c.name),
+        state: bindingState(i.state), effective: names(i.effective), chosen: i.chosen == null ? null : names(i.chosen),
+        source: str(i.source, "automatic"), override: i.override === true,
+        inherits: inherits && { state: bindingState(inherits.state), effective: names(inherits.effective), source: str(inherits.source) },
+      };
+    }).filter((r) => r.port),
+    plugins: arr(o.plugins).map((p) => {
+      const x = obj(p);
+      return { name: str(x.name), title: str(x.title) || str(x.name),
+        status: STATUSES.includes(x.status as PluginStatus) ? (x.status as PluginStatus) : "waiting_key" };
+    }).filter((p) => p.name),
   };
 }
 
@@ -251,6 +322,13 @@ export const ports = {
   },
   async remove(client: GatewayClient, name: string): Promise<void> {
     await client.post(path(name, "/delete"));
+  },
+  async bindings(client: GatewayClient, scope = "default"): Promise<BindingsView> {
+    return parseBindings(await client.get(`/v1/ports/bindings?scope=${encodeURIComponent(scope)}`));
+  },
+  /** plugins: null for automatic (or inherit, outside "everywhere"), [] for off. */
+  async setBinding(client: GatewayClient, scope: string, port: string, plugins: string[] | null): Promise<BindingsView> {
+    return parseBindings(await client.post("/v1/ports/bindings", { scope, port, plugins }));
   },
 };
 
@@ -374,8 +452,38 @@ export function activityText(a: Activity): string {
     case "version": return `Updated: ${a.detail}`;
     case "health": return a.ok ? "Answering again" : `Stopped answering: ${a.detail}`;
     case "emit": return (a.ok ? "Delivered" : "Not delivered") + port;
+    case "binding": return `${a.port ? portLabel(a.port) : "A port"}: ${a.detail}`;
     default: return a.detail || a.kind;
   }
+}
+
+/** What a binding state means, for the Port map. */
+export function bindingInfo(row: Pick<BindingRow, "state" | "way" | "effective" | "candidates">): { label: string; tone: Tone; explain: string } {
+  const n = row.effective.length;
+  switch (row.state) {
+    case "ok":
+      return row.way === "out"
+        ? { label: n === 1 ? "1 plugin" : `${n} plugins`, tone: "success", explain: n === 1 ? "Goes to one plugin." : `Goes to all ${n}.` }
+        : { label: "Answered", tone: "success", explain: "One plugin answers a waiting run." };
+    case "empty":
+      return { label: "No plugin", tone: "neutral", explain: row.candidates.length ? "Its plugins aren't live yet." : "No plugin serves it yet." };
+    case "conflict":
+      return { label: "Choose one", tone: "warning", explain: `${row.candidates.filter((c) => c.live).length} plugins could answer. A waiting run takes one answer, so choose which.` };
+    case "off":
+      return { label: "Off", tone: "neutral", explain: "Switched off here. Runs send nothing and wait on nothing." };
+    case "unavailable":
+      return { label: "Unavailable", tone: "danger", explain: "The chosen plugin isn't live, so nothing gets through. Bring it back or choose another." };
+    case "vault":
+      return { label: "Vault only", tone: "neutral", explain: "Handled by the hub and your vault, never a plugin." };
+  }
+}
+
+/** "Everywhere", "Routine: Daily post", "App: com.instagram.android". */
+export function scopeLabel(scope: string, routines: Map<string, string> = new Map()): string {
+  if (scope === "default") return "Everywhere";
+  if (scope.startsWith("routine:")) return `Routine: ${routines.get(scope.slice(8)) ?? scope.slice(8)}`;
+  if (scope.startsWith("app:")) return `App: ${scope.slice(4)}`;
+  return scope;
 }
 
 /** The kit's example plugins, offered when the owner has none yet. */

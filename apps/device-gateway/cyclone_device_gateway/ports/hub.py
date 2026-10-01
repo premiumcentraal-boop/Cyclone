@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from . import bindings as binding
 from . import kit
 from .store import PortStore, now_ms
 
@@ -236,8 +237,10 @@ class PortHub:
             for s in plugin["serves"]:
                 if s["allowed"]:
                     served.setdefault(s["port"], []).append(plugin["name"])
+        resolved = {r["port"]: r for r in binding.table(plugins, self.store.bindings("default"), ["default"])}
         catalog = [{"port": p.name, "way": p.way, "sensitivity": p.sensitivity, "summary": p.summary,
-                    "pluginServed": p.plugin_served, "servedBy": served.get(p.name, [])}
+                    "pluginServed": p.plugin_served, "servedBy": served.get(p.name, []),
+                    "state": resolved[p.name]["state"], "effective": resolved[p.name]["effective"]}
                    for p in kit.CATALOG.values()]
         return {
             "contract": kit.CONTRACT,
@@ -246,6 +249,7 @@ class PortHub:
             "catalog": catalog,
             "extensions": sorted({s["port"] for p in plugins for s in p["serves"] if s["extension"]}),
             "activity": self.store.activity(40),
+            "conflicts": [r["port"] for r in resolved.values() if r["state"] in ("conflict", "unavailable")],
             "today": self.store.counts_since(int(today.timestamp() * 1000)),
         }
 
@@ -354,6 +358,7 @@ class PortHub:
     def remove(self, name: str) -> dict[str, Any]:
         self._get(name)
         self.store.delete(name)
+        self.store.forget_plugin_bindings(name)
         self.store.log(name, "removed", ok=True)
         return {"removed": name}
 
@@ -427,6 +432,54 @@ class PortHub:
         if ok:
             self.store.update(name, seen_at=now_ms(), health="ok", failures=0, health_detail="")
         return {"ok": ok, "status": status, "latencyMs": latency, "port": port, **self.plugin(name)}
+
+    # ---- bindings (run 2) ---------------------------------------------------------------------------------------------
+
+    def _plugins(self) -> list[dict[str, Any]]:
+        return [self._public(p) for p in self.store.plugins()]
+
+    def bindings(self, scope: Any = "default") -> dict[str, Any]:
+        """The port map for one scope: every port, who could serve it, and who does (with inherited choices)."""
+        try:
+            scope = binding.check_scope(scope)
+        except binding.BindingError as exc:
+            raise PortsError(str(exc)) from exc
+        plugins = self._plugins()
+        scopes = [scope] if scope == "default" else [scope, "default"]
+        choices = self.store.bindings()
+        counts: dict[str, int] = {}
+        for (s, _port) in choices:
+            counts[s] = counts.get(s, 0) + 1
+        return {
+            "scope": scope,
+            "scopes": [{"scope": s, "choices": n} for s, n in sorted(counts.items()) if s != "default"],
+            "ports": binding.table(plugins, choices, scopes),
+            "plugins": [{"name": p["name"], "title": p["title"], "status": p["status"]} for p in plugins],
+        }
+
+    def set_binding(self, scope: Any, port: Any, plugins: Any) -> dict[str, Any]:
+        try:
+            scope = binding.check_scope(scope)
+            known = {row[0]: row for row in binding.catalog_ports(self._plugins())}
+            if port not in known or not known[port][3]:
+                raise binding.BindingError("That port can't be bound to a plugin.")
+            cands = binding.candidates(self._plugins(), port)
+            chosen = binding.validate_choice(port, known[port][1], plugins, cands)
+        except binding.BindingError as exc:
+            raise PortsError(str(exc)) from exc
+        self.store.set_binding(scope, port, chosen)
+        where = "everywhere" if scope == "default" else scope.replace(":", " ", 1)
+        what = "automatic" if chosen is None else ("off" if not chosen else ", ".join(chosen))
+        self.store.log("ports", "binding", ok=True, port=port, detail=f"{where}: {what}")
+        return self.bindings(scope)
+
+    def resolve(self, routine: str | None = None, app: str | None = None) -> dict[str, Any]:
+        """What a run with this routine and app would reach on each port (run 3 sends along this table)."""
+        try:
+            scopes = binding.chain(routine or None, app or None)
+        except binding.BindingError as exc:
+            raise PortsError(str(exc)) from exc
+        return {"scopes": scopes, "ports": binding.table(self._plugins(), self.store.bindings(), scopes)}
 
     # ---- signing and sending -----------------------------------------------------------------------------------------
 

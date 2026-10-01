@@ -15,12 +15,13 @@ import { relativeTime } from "../ui/format.js";
 import { STARTERS, portAbout, portLabel, ports, statusInfo, type CatalogPort, type Overview, type Plugin } from "../services/ports.js";
 import type { GlassPage } from "./page.js";
 import { openAddPlugin } from "./portsAdd.js";
+import { createPortMap } from "./portsMap.js";
 import { feedRow, openPluginSheet, type PluginSheet } from "./portsPlugin.js";
 import { primary, secondary, sensitivityChip, statusPill, tile, wayGlyph } from "./portsUi.js";
 
 const POLL_MS = 5_000;
 
-export function createPortsPage(ctx: GlassContext): GlassPage {
+export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" = "plugins"): GlassPage {
   const element = el("div", "page page-ports");
   const header = el("header", "pt-page-head");
   const titles = el("div", "pt-page-titles");
@@ -31,9 +32,27 @@ export function createPortsPage(ctx: GlassContext): GlassPage {
   const add = primary("Add plugin", "plus");
   add.addEventListener("click", () => openAdd());
   header.append(titles, add);
+  const tabs = el("nav", "pt-tabs");
+  tabs.setAttribute("aria-label", "Ports views");
+  for (const [id, label, glyph] of [["plugins", "Plugins", "plug"], ["map", "Port map", "port"]] as const) {
+    const tab = el("a", `pt-tab${id === view ? " active" : ""}`);
+    tab.href = id === "map" ? "#/command/ports/map" : "#/command/ports";
+    if (id === view) tab.setAttribute("aria-current", "page");
+    tab.append(icon(glyph), el("span", undefined, label));
+    tabs.append(tab);
+  }
+  const note = el("p", "pt-note pt-page-note");
+  note.setAttribute("role", "status");
+  note.setAttribute("aria-live", "polite");
   const body = el("div", "pt-page-body");
   body.append(loadingState("Loading Ports…"));
-  element.append(header, body);
+  element.append(header, tabs, note, body);
+  const say = (text: string, tone: "ok" | "error" = "ok") => {
+    note.textContent = text;
+    note.classList.toggle("pt-note-error", tone === "error");
+  };
+  const map = view === "map" ? createPortMap(ctx, say, () => openAdd()) : null;
+  if (map) setChildren(body, map.element);
 
   let data: Overview | null = null;
   let rendered = false;
@@ -41,10 +60,10 @@ export function createPortsPage(ctx: GlassContext): GlassPage {
   let drawer: PluginSheet | null = null;
   let lastStatus = new Map<string, string>();
 
-  const titleOf = (name: string) => data?.plugins.find((p) => p.name === name)?.title ?? name;
+  const titleOf = (name: string) => (name === "ports" ? "Port map" : data?.plugins.find((p) => p.name === name)?.title ?? name);
 
   function openAdd(endpoint?: string): void {
-    openAddPlugin(ctx, element, { endpoint, onChanged: () => void load() });
+    openAddPlugin(ctx, element, { endpoint, onChanged: () => void (map ? map.refresh() : load()) });
   }
 
   function openPlugin(name: string): void {
@@ -55,6 +74,7 @@ export function createPortsPage(ctx: GlassContext): GlassPage {
   }
 
   async function load(): Promise<void> {
+    if (map) return;
     try {
       const next = await ports.overview(ctx.client);
       if (destroyed) return;
@@ -78,7 +98,7 @@ export function createPortsPage(ctx: GlassContext): GlassPage {
       setChildren(body, welcome(), catalogSection(d), );
       return;
     }
-    setChildren(body, summary(d), attention(d.plugins), pluginsSection(d.plugins), catalogSection(d), activitySection(d));
+    setChildren(body, summary(d), attention(d.plugins, d.conflicts), pluginsSection(d.plugins), catalogSection(d), activitySection(d));
   }
 
   // ---------------------------------------------------------------------------------------------- summary
@@ -86,7 +106,7 @@ export function createPortsPage(ctx: GlassContext): GlassPage {
     const live = d.plugins.filter((p) => p.status === "active").length;
     const servable = d.catalog.filter((c) => c.pluginServed);
     const covered = servable.filter((c) => c.servedBy.length).length;
-    const waiting = d.plugins.filter((p) => p.status !== "active" && p.status !== "paused").length;
+    const waiting = d.plugins.filter((p) => p.status !== "active" && p.status !== "paused").length + d.conflicts.length;
     const strip = el("section", "pt-summary");
     strip.setAttribute("aria-label", "Ports at a glance");
     strip.append(
@@ -116,11 +136,23 @@ export function createPortsPage(ctx: GlassContext): GlassPage {
   }
 
   // ---------------------------------------------------------------------------------------------- needs you
-  function attention(plugins: Plugin[]): HTMLElement | null {
+  function attention(plugins: Plugin[], conflicts: string[]): HTMLElement | null {
     const needing = plugins.filter((p) => !["active", "paused"].includes(p.status));
-    if (!needing.length) return null;
+    if (!needing.length && !conflicts.length) return null;
     const box = el("section", "pt-attention");
     box.setAttribute("aria-label", "Needs you");
+    for (const port of conflicts) {
+      const row = el("div", "pt-attention-row pt-tone-warning");
+      const text = el("div", "pt-attention-text");
+      text.append(el("strong", undefined, `${portLabel(port)}: choose who serves it`),
+        el("span", undefined, "Two plugins could answer, or the chosen one isn't live. Runs get nothing on it until you choose."));
+      const glyph = el("span", "pt-way pt-way-in");
+      glyph.append(icon("port"));
+      const go = secondary("Open the port map");
+      go.addEventListener("click", () => ctx.navigate({ name: "command", tab: "ports", view: "map" }));
+      row.append(glyph, text, go);
+      box.append(row);
+    }
     for (const p of needing) {
       const info = statusInfo(p);
       const row = el("div", `pt-attention-row pt-tone-${info.tone}`);
@@ -293,6 +325,7 @@ export function createPortsPage(ctx: GlassContext): GlassPage {
     destroy() {
       destroyed = true;
       clearInterval(timer);
+      map?.destroy();
       drawer?.close();
     },
   };

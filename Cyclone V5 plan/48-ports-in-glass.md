@@ -1,7 +1,7 @@
 # Plan 48: Cyclone Ports in Glass, the Port Hub and its dashboard
 
-Date: 2026-10-01. **Run 1: built** (gateway Port Hub, Ports page, Add sheet, plugin drawer; tested end to end in a real
-browser against the kit's example plugins). Builds on plans 45 (Run Ports), 46 (Skill Studio) and 47 (review), and on the kit in
+Date: 2026-10-01. **Run 1: built, released in alpha.96.** **Run 2: built** (bindings per port everywhere / per routine / per
+app, conflicts, the Port map). Builds on plans 45 (Run Ports), 46 (Skill Studio) and 47 (review), and on the kit in
 `tools/cyclone-ports-sdk`. Goal: the real Port Hub in the gateway, and a Ports dashboard in Glass that an admin feels
 at home in, built in runs. Each run ships something whole and tested, with nothing half-done.
 
@@ -82,3 +82,35 @@ Endpoint rules:
 - `pages/portsPage.ts` (the page), `pages/portsAdd.ts` (the Add sheet), `pages/portsPlugin.ts` (the plugin sheet).
 - `styles/ports.css`, tokens only.
 - Router `command/ports`, a sidebar entry, and tests.
+
+## 5. Run 2 detail (built)
+
+**Rules** (`ports/bindings.py`):
+- **Out ports:**
+  - automatic means every live plugin allowed the port (fan-out);
+  - a choice names any number of plugins, and none means off.
+- **In ports:**
+  - one answer: with one live candidate it is automatic;
+  - two or more is a conflict until the owner picks, and nothing answers meanwhile;
+  - a choice names one plugin or none.
+- **Scopes:** `routine:<id>` → `app:<package>` → `default`, and the first scope with a choice wins.
+- **Unavailable:** a chosen plugin that isn't live leaves the port unavailable. It is never quietly re-routed.
+- **Removing a plugin** takes it out of every choice; a choice it alone made goes back to automatic.
+
+**Routes:**
+- `GET /v1/ports/bindings?scope=` (the map for one scope, with what it inherits);
+- `POST /v1/ports/bindings {scope, port, plugins|null}`;
+- `GET /v1/ports/resolve?routine=&app=` (what a run reaches; run 3 sends along it).
+
+**Glass** (`#/command/ports/map`): a switchboard of ports (left) and plugins (right).
+- **Lines:**
+  - solid: the routes runs use;
+  - dashed: could serve but doesn't here;
+  - amber: needs a choice.
+- **Scope pills:** Everywhere, each routine or app with choices, and "For a routine or app".
+- **Each port** opens a chooser:
+  - Automatic / Same as Everywhere;
+  - its plugins (checkboxes for out, radios for in);
+  - Off.
+- **The Plugins view** lists conflicts under "Needs you" with a link to the map.
+
