@@ -197,7 +197,8 @@ object OverlayChromeRuntime {
             OverlayGesturePassthrough.bind { next.syncHostGesturePassthrough() }
             next.show(machine.snapshot())
             // Driver mode (plan 32): the AI button and AI mode, in their own windows next to the chrome.
-            DriverOverlay.attach(service)
+            // Alpha 95: the accessibility service also attaches it on its own, so a chrome failure can't take the orb away.
+            runCatching { DriverOverlay.attach(service) }
             workspaceJob = aiScope.launch {
                 var previousTask: String? = null
                 com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collect { task ->
