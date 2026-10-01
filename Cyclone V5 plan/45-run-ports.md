@@ -3,6 +3,9 @@
 Status: research and design (2026-10-01). Nothing here is built yet. Visual explainer: the "Cyclone Run Ports"
 artifact.
 
+Plugin builders: the contract `cyclone.ports/1`, an SDK, a Dev Hub, a conformance checker and three example plugins
+are in `tools/cyclone-ports-sdk/`. Start at `HANDOFF-run-ports-plugins.md`.
+
 ## 0. The ask and what exists
 
 The owner wants multi-step automations inside a run, with plugins he writes himself (or that exist) on the PC or
