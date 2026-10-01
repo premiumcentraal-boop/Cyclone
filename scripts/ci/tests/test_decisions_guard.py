@@ -52,13 +52,19 @@ class DecisionsGuard(unittest.TestCase):
         self.assertNotIn("Decider.PHONE ->", teaches, "the phone model never learns from its own decisions")
         self.assertIn("else -> false", teaches)
         earning = read("mind/decide/PhoneModel.kt")
-        for rule in ("MIN_SAMPLES = 50", "MIN_AGREEMENT = 0.98", "SURE = 0.9", "AUDIT_EVERY = 10"):
+        for rule in ("MIN_SAMPLES = 50", "MIN_AGREEMENT = 0.98", "SURE = 0.9", "AUDIT_EVERY = 5"):
             self.assertIn(rule, earning)
         router = read("mind/modes/ModeRouter.kt")
         # Grammar and the risk rules come before the phone model; it acts only on earned, sure actions.
-        self.assertLess(router.index("forced(text, world)?.let"), router.index("phone?.model?.guess(text, candidates)"))
+        self.assertLess(router.index("forced(text, world)?.let"), router.index("m.guess(text, candidates)"))
         self.assertIn("shadow.intent in phone.earned", router)
         self.assertIn("(box == null || phone?.audit != true)", router)
+        # Alpha 91: unearned, the phone model may only do easy-to-undo actions about now, and never a tap.
+        reversible = router[router.index("val REVERSIBLE = setOf("):router.index(")", router.index("val REVERSIBLE = setOf("))]
+        for risky in ('"tap"', '"photo"', '"selfie"', '"call"'):
+            self.assertNotIn(risky, reversible)
+        self.assertIn("shadow.intent in REVERSIBLE", router)
+        self.assertIn("plainNow(text)", router)
         brain = read("mind/decide/PhoneBrain.kt")
         self.assertIn("MindMemory.looksSecret(it)", brain)
         # Only counts and times leave the phone: the health report carries stats, never lessons.

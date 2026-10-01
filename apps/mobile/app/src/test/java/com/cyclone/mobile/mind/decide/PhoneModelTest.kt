@@ -103,27 +103,35 @@ class PhoneModelTest {
     private val noCall = com.cyclone.mobile.mind.modes.DecisionBox { error("JEV must not be asked") }
 
     @Test
-    fun `an earned action is decided on the phone, offline too, and every tenth is still audited by JEV`() {
+    fun `an earned action is decided on the phone, offline too, and every fifth is still audited by JEV`() {
         val phone = ModeRouter.route("make it louder", world, facts, Speed.AUTO, noCall, 0.8, decider(setOf("volume_up")))
         assertEquals(Mode.INSTANT, phone.mode)
         assertEquals(Decider.PHONE, phone.by)
         assertEquals(InstantIntent.VOLUME, phone.command?.intent)
         val offline = ModeRouter.route("make it louder", world, facts, Speed.AUTO, null, 0.8, decider(setOf("volume_up"), audit = true))
         assertEquals(Decider.PHONE, offline.by)
-        val audited = ModeRouter.route("make it louder", world, facts, Speed.AUTO, jev, 0.8, decider(setOf("volume_up"), audit = true))
-        assertEquals(Decider.DECISIONS, audited.by)
-        assertNotNull(audited.shadow)
-        assertEquals(420L, audited.decideMs)
+        // An audit of an easy-to-undo action no longer makes the owner wait: the phone acts and JEV answers in the
+        // background (CycloneModes.audit). Learn only still asks JEV first.
+        assertEquals(Decider.PHONE, ModeRouter.route("make it louder", world, facts, Speed.AUTO, jev, 0.8, decider(setOf("volume_up"), audit = true)).by)
+        val learning = ModeRouter.route("make it louder", world, facts, Speed.AUTO, jev, 0.8, decider(setOf("volume_up"), mayAct = false))
+        assertEquals(Decider.DECISIONS, learning.by)
+        assertNotNull(learning.shadow)
+        assertEquals(420L, learning.decideMs)
     }
 
     @Test
     fun `an unearned action, Learn only, the rules and the grammar all come first or go to JEV`() {
-        assertEquals(Decider.DECISIONS, ModeRouter.route("make it louder", world, facts, Speed.AUTO, jev, 0.8, decider(emptySet())).by)
+        // Unearned: an easy-to-undo action the phone model is sure of is done at once (alpha 91)...
+        assertEquals(Decider.PHONE, ModeRouter.route("make it louder", world, facts, Speed.AUTO, noCall, 0.8, decider(emptySet())).by)
+        // ...but not one with a time or condition in it, which the phone model can't read.
+        assertEquals(Decider.DECISIONS, ModeRouter.route("make it louder in five minutes", world, facts, Speed.AUTO, jev, 0.8, decider(emptySet())).by)
         assertEquals(Decider.DECISIONS, ModeRouter.route("make it louder", world, facts, Speed.AUTO, jev, 0.8, decider(setOf("volume_up"), mayAct = false)).by)
         assertEquals(Decider.RULES, ModeRouter.route("text mom i'm late", world, facts, Speed.AUTO, noCall, 0.8, decider(setOf("volume_up"))).by)
         assertEquals(Decider.GRAMMAR, ModeRouter.route("volume up", world, facts, Speed.AUTO, noCall, 0.8, decider(emptySet())).by)
         assertEquals(Decider.SETTING, ModeRouter.route("make it louder", world, facts, Speed.COMMANDS, noCall, 0.8, decider(setOf("volume_up"))).by)
-        val offline = ModeRouter.route("make it louder", world, facts, Speed.AUTO, null, 0.8, decider(emptySet()))
+        // Offline, an easy-to-undo action is still done on the phone; anything else goes to the Mind as before.
+        assertEquals(Decider.PHONE, ModeRouter.route("make it louder", world, facts, Speed.AUTO, null, 0.8, decider(emptySet())).by)
+        val offline = ModeRouter.route("find a good pizza place nearby", world, facts, Speed.AUTO, null, 0.8, decider(emptySet()))
         assertEquals(Mode.MIND, offline.mode)
         assertEquals(Decider.FALLBACK, offline.by)
     }
@@ -132,5 +140,29 @@ class PhoneModelTest {
     fun `Auto is the default speed and the phone model uses what it earned`() {
         assertEquals(Speed.AUTO, Speed.of(null))
         assertEquals(PhoneModelUse.EARNED, PhoneModelUse.of(null))
+    }
+
+    @Test
+    fun `chatter is not a task, a missing app is said, and only easy-to-undo actions skip JEV`() {
+        val many = GrammarWorld(labels = emptyList(), apps = apps + listOf("Chrome" to "c", "Calculator" to "k", "YouTube" to "y", "Keep Notes" to "n"))
+        for (chatter in listOf("ok", "thanks", "yeah that's fine", "dank je wel", "Thank you!", "laat maar")) {
+            assertEquals(chatter, Mode.IGNORE, ModeRouter.route(chatter, many, facts, Speed.AUTO, noCall, 0.8, decider(emptySet())).mode)
+        }
+        val snapchat = ModeRouter.route("open snapchat", many, facts, Speed.AUTO, noCall, 0.8, decider(emptySet()))
+        assertEquals(Mode.ANSWER, snapchat.mode)
+        assertEquals("I don't see Snapchat on this phone.", snapchat.answer)
+        // Never claimed for things that aren't apps, for a near name, or when the app list is too short to trust.
+        assertNull(ModeRouter.missingApp("open wifi settings", many))
+        assertNull(ModeRouter.missingApp("open google keep", many))
+        assertNull(ModeRouter.missingApp("open snapchat", GrammarWorld(apps = apps.take(2))))
+        for (phrase in listOf("pull up telegram", "kill the flashlight", "turn the sound down a notch", "take me to the home screen")) {
+            val r = ModeRouter.route(phrase, many, facts, Speed.AUTO, noCall, 0.8, decider(emptySet()))
+            assertEquals(phrase, Decider.PHONE, r.by)
+            assertEquals(phrase, Mode.INSTANT, r.mode)
+        }
+        assertFalse("taps are never done unearned", "tap" in ModeRouter.REVERSIBLE)
+        assertFalse(ModeRouter.plainNow("turn the flashlight on at 9"))
+        assertEquals(Decider.DECISIONS, ModeRouter.route("make it louder", many, facts, Speed.AUTO, jev, 0.8,
+            decider(emptySet(), mayAct = false)).by)
     }
 }

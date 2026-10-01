@@ -56,6 +56,8 @@ def compose(*, reachable: bool, pc_version: str, phone: InstalledApp | None, pho
         answer = _answer("attention", "This PC needs an update",
                          f"The phone has a newer Cyclone ({phone.version_name}) than this PC ({pc_version}).",
                          hint="On this PC, type cyclone update.")
+    elif job_state == "done" and job_recent and (job or {}).get("alreadyCurrent"):
+        answer = _answer("good", "Already up to date", f"Cyclone {pc_version} was already on the phone. Nothing was installed.")
     elif job_state == "done" and job_recent:
         answer = _answer("good", "Updated", f"Cyclone {pc_version} is on the phone.")
     elif stop and stop["kind"] in WARN_KINDS and now_ms - stop["atMs"] <= RECENT_MS:

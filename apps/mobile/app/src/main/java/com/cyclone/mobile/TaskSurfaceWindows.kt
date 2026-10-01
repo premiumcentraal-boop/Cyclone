@@ -16,10 +16,19 @@ object TaskSurfaceWindows {
     data class Window(val id: Int, val type: Int, val packageName: String, val layer: Int,
         val active: Boolean = false, val focused: Boolean = false)
 
-    fun primary(windows: List<Window>, activeRootId: Int?): Window? {
+    fun primary(windows: List<Window>, activeRootId: Int?): Window? = ordered(windows, activeRootId).firstOrNull()
+
+    /**
+     * The application windows in the order to try them as the task's page: the active root's window, then the active or
+     * focused one, then the highest layer (a dialog or bottom sheet sits above its activity). Alpha 91: the caller takes
+     * the first one whose root it can actually read, so a dialog whose root is briefly unavailable no longer turns the
+     * whole page into "null".
+     */
+    fun ordered(windows: List<Window>, activeRootId: Int?): List<Window> {
         val applications = windows.filter { it.type == 1 && it.packageName.isNotBlank() && it.packageName != "com.android.systemui" }
-        return applications.firstOrNull { it.id == activeRootId }
-            ?: applications.sortedWith(compareByDescending<Window> { it.active || it.focused }.thenByDescending { it.layer }).firstOrNull()
+        val active = applications.filter { it.id == activeRootId }
+        return active + applications.filter { it.id != activeRootId }
+            .sortedWith(compareByDescending<Window> { it.active || it.focused }.thenByDescending { it.layer })
     }
 
     fun includeSibling(type: Int, packageName: String, hostPackage: String): Boolean =

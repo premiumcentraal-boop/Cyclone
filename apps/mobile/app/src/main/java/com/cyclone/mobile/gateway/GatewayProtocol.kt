@@ -133,6 +133,7 @@ internal object GatewayProtocol {
         "secrets.request",
         "ask.start",
         "ask.status",
+        "ask.cancel",
         "apps.list",
         "runs.list",
         "runs.get",

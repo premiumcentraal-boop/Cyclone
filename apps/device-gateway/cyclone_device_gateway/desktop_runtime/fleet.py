@@ -81,6 +81,9 @@ class DeviceSession:
         height = self.display_height or 2400
         paired = self.credential is not None
         state = self.state.value
+        # Alpha 91: a phone whose Cyclone Accessibility is off can't see or act; it is never reported as READY.
+        if self.state == DeviceFleetState.READY and self.accessibility_connected is False:
+            state = DeviceFleetState.ATTENTION.value
         reconnecting_label = "Reconnecting"
         if self.reconnect_attempts:
             reconnecting_label = f"Reconnecting · attempt {self.reconnect_attempts} of {MAX_RECONNECT_ATTEMPTS}"
@@ -92,7 +95,7 @@ class DeviceSession:
             DeviceFleetState.UNAUTHORIZED: "Authorize USB debugging",
             DeviceFleetState.ATTENTION: "Needs attention",
             DeviceFleetState.DISCONNECTED: reconnecting_label,
-        }.get(self.state, state.replace("_", " ").title())
+        }.get(DeviceFleetState(state), state.replace("_", " ").title())
         public = {
             "deviceId": self.device_id,
             "id": self.device_id,

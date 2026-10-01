@@ -783,7 +783,8 @@ class OverlayChromeController(
             latch.countDown()
             return
         }
-        latch.await(400, TimeUnit.MILLISECONDS)
+        // Alpha 91: a busy main thread (0.5 s stalls were measured) must not let a stroke land on Cyclone's own card.
+        latch.await(1_200, TimeUnit.MILLISECONDS)
     }
 
     private fun recordIdleTap() {

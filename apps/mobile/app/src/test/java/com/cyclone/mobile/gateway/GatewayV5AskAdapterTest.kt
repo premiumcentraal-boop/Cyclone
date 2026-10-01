@@ -26,6 +26,34 @@ class GatewayV5AskAdapterTest {
         GatewayV5AskAdapter.humanHasControl = { human }
         GatewayV5AskAdapter.submit = { submitted += it }
         GatewayV5AskAdapter.currentTask = { snapshot }
+        GatewayV5AskAdapter.stopTask = { stopped += it; true }
+        GatewayV5AskAdapter.stopInstant = { stopped += "instant" }
+        com.cyclone.mobile.mind.modes.AskLedger.clear()
+    }
+
+    private val stopped = mutableListOf<String>()
+
+    @Test
+    fun eachRequestHasAnIdItsLaneAndAStopThatGoesThroughTaskKit() {
+        val ledger = com.cyclone.mobile.mind.modes.AskLedger
+        val id = GatewayV5AskAdapter.start(JSONObject().put("goal", "make it louder")).getString("requestId")
+        assertTrue(id.startsWith("req-"))
+        assertEquals("waiting", GatewayV5AskAdapter.status(JSONObject().put("requestId", id)).getJSONObject("request").getString("state"))
+        ledger.routed("make it louder", "instant", "phone", "the phone model knows this one", 3)
+        val running = GatewayV5AskAdapter.status(JSONObject().put("requestId", id))
+        assertEquals("instant", running.getJSONObject("request").getString("lane"))
+        assertEquals("phone", running.getJSONObject("request").getString("decider"))
+        // An Instant request never shows the task before it as its own.
+        snapshot = null
+        assertEquals("idle", running.getString("state"))
+        val cancel = GatewayV5AskAdapter.cancel(JSONObject().put("requestId", id))
+        assertTrue(cancel.getBoolean("cancelled"))
+        assertEquals(listOf("instant"), stopped)
+        assertEquals("cancelled", cancel.getJSONObject("request").getString("state"))
+        assertFalse(GatewayV5AskAdapter.cancel(JSONObject().put("requestId", id)).getBoolean("cancelled"))
+        ledger.finished("thanks", "ignore", true, null)
+        assertEquals("INVALID_REQUEST", code { GatewayV5AskAdapter.status(JSONObject().put("requestId", "req-0000000000000")) })
+        assertEquals("INVALID_REQUEST", code { GatewayV5AskAdapter.status(JSONObject().put("requestId", "../x")) })
     }
 
     @After
@@ -47,8 +75,11 @@ class GatewayV5AskAdapterTest {
     }
 
     @Test
-    fun askIsForegroundOnlyAndNeedsASession() {
-        assertEquals("SESSION_REQUIRED", code { GatewayV5AskAdapter.start(JSONObject().put("goal", "open clock").put("displayId", 0)) })
+    fun askIsForegroundOnlyAndDefaultsToTheMainScreen() {
+        // Alpha 91: the main screen is the default; only another screen is refused.
+        assertTrue(GatewayV5AskAdapter.start(JSONObject().put("goal", "open clock")).getBoolean("accepted"))
+        submitted.clear()
+        assertEquals("SESSION_REQUIRED", code { GatewayV5AskAdapter.start(JSONObject().put("goal", "open clock").put("sessionId", "").put("displayId", 0)) })
         assertEquals(
             "SESSION_DISPLAY_MISMATCH",
             code { GatewayV5AskAdapter.start(JSONObject().put("goal", "open clock").put("sessionId", "vd-mail").put("displayId", 3)) },

@@ -9,7 +9,8 @@ On the owner's click (fixed commands only, never caller-chosen):
 - start_app: the same wake, then Cyclone's launcher if the process still isn't there (older phone builds);
 - open_accessibility: opens Android's Accessibility settings on the phone, for the owner to turn Cyclone on;
 - open_cyclone: opens Cyclone on the phone (PC Gateway lives in its settings).
-Nothing here grants a permission, changes a setting or touches trust.
+Nothing here grants a permission, changes a setting or touches trust. (Putting Cyclone's own Accessibility back after
+Android removed it is the separate, narrowly fixed accessibility_keeper, alpha 91.)
 """
 from __future__ import annotations
 
@@ -32,8 +33,9 @@ MAX_WAKES_PER_USB = 5
 
 class ConnectionMedic:
     def __init__(self, fleet: Any, diagnostics: Any = None, *, clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep, keeper: Any = None):
         self.fleet = fleet
+        self.keeper = keeper
         self.diagnostics = diagnostics
         self.clock = clock
         self.sleep = sleep
@@ -81,6 +83,12 @@ class ConnectionMedic:
             return
         if not self._usable(session):
             return
+        if self.keeper is not None:
+            accessibility = getattr(session, "accessibility_connected", None)
+            if accessibility is True:
+                self.keeper.seen_on(device_id)
+            elif accessibility is False and self.keeper.check(device_id, session) == "restored":
+                session.accessibility_connected = None  # the next status says whether it took
         # A phone answering its heartbeat is running; only look closer when it doesn't, or before trust.
         if session.bridge_ok is True and session.credential:
             session.app_running = True

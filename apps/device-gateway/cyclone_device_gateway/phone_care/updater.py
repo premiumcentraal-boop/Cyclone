@@ -69,7 +69,8 @@ class UpdateJobs:
         self._set(device_id, **{"from": before.version_name if before else None})
         state = compare(before.version_name if before else None, target)
         if state == "same":
-            self._set(device_id, state="done", finishedAtMs=self._now())
+            # Nothing to install: say so, rather than "Updating… / Updated" (alpha 91).
+            self._set(device_id, state="done", finishedAtMs=self._now(), alreadyCurrent=True)
             return self.on_finish(device_id, self.get(device_id) or {})
         if state == "newer":
             return self._fail(device_id, read_install_output("INSTALL_FAILED_VERSION_DOWNGRADE"))

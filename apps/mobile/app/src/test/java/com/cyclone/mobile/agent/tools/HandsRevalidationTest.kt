@@ -57,6 +57,33 @@ class HandsRevalidationTest {
         assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer").status)
     }
 
+    @Test fun aSettingsRowAndItsSwitchAreOneControlNotAmbiguous() {
+        // Alpha 91: Settings › Display › Auto-rotate screen: a clickable row with a Switch inside. Either one does the same.
+        fun row(obs: String) = element("semantic:$obs:row", "Auto-rotate screen", "button", "/0/7", "n70", box(0, 1800, 1080, 1960), clickable = true)
+        fun switch(obs: String) = element("semantic:$obs:switch", "Auto-rotate screen switch", "switch", "/0/7/2", "n72",
+            box(900, 1840, 1040, 1920), clickable = true).also { it.evidence.put("checkable", true) }
+        assertEquals(TargetDrift.MATCHED, CurrentTargetRevalidation.resolve(screen("a", row("a"), switch("a")),
+            screen("b", row("b"), switch("b")), "semantic:a:row").status)
+        assertEquals(TargetDrift.MATCHED, CurrentTargetRevalidation.resolve(screen("a", row("a"), switch("a")),
+            screen("b", row("b"), switch("b")), "semantic:a:switch").status)
+    }
+
+    @Test fun aNestedButtonUnderThePressPointStillFailsClosed() {
+        // A list item whose centre is covered by a different inner button ("Delete") stays ambiguous.
+        fun item(obs: String) = element("semantic:$obs:item", "Note 1", "button", "/0/3", "n30", box(0, 400, 1080, 560), clickable = true)
+        fun delete(obs: String) = element("semantic:$obs:delete", "Delete", "button", "/0/3/1", "n31", box(440, 420, 640, 540), clickable = true)
+        assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(screen("a", item("a"), delete("a")),
+            screen("b", item("b"), delete("b")), "semantic:a:item").status)
+    }
+
+    @Test fun cyclonesOwnChromeNeverCompetesWithTheAppsControl() {
+        val chrome = element("semantic:b:chrome", "Confirm", "button", "overlay/0/1", "c1", composerBox, clickable = true,
+            resource = "com.cyclone.mobile:id/overlay_chrome_1")
+        val after = screen("b", composer(label = "Reply to ChatGPT", obs = "b"), chrome)
+        assertEquals(TargetDrift.MATCHED, CurrentTargetRevalidation.resolve(screen("a", composer(label = "Reply to ChatGPT", obs = "a")),
+            after, "semantic:a:composer").status)
+    }
+
     @Test fun aButtonWhoseLabelChangedIsStillGone() {
         // Only text boxes match through a changed label; buttons keep the strict rule.
         val button = element("semantic:a:send", "Send", "button", "/0/5/2", "n43", box(1000, 2000, 1060, 2140), clickable = true)

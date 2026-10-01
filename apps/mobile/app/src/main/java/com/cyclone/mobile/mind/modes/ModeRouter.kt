@@ -89,14 +89,46 @@ object ModeRouter {
     private val DATE_Q = Regex("(?i)^(what day is it|what's the date|whats the date|what is the date|what day is it today|welke dag is het|wat is de datum|welke datum is het)\\??$")
     private val BATTERY_Q = Regex("(?i)^(how much battery( do i have| is left)?|what's my battery|whats my battery|battery( level| percentage)?|hoeveel batterij( heb ik)?|batterij)\\??$")
 
+    /**
+     * Alpha 91: chatter ("ok", "thanks", "yeah that's fine", "dank je") is not a task. A mission that is waiting for an
+     * answer gets it before the router runs, so this only catches words said to nobody in particular.
+     */
+    private val CHATTER = Regex("(?i)^(?:(?:ok(?:ay)?|oke|oké|k|yeah|yes|yep|ja|jep|sure|fine|alright|all right|cool|great|nice|perfect|" +
+        "top|prima|super|goed|mooi|thanks|thank you|thank u|thx|ty|cheers|bedankt|dank je(?: wel)?|dankjewel|dank u(?: wel)?|" +
+        "that'?s fine|that is fine|that'?s ok(?:ay)?|is goed|all good|got it|no worries|never ?mind|laat maar|geen probleem)[\\s,.!]*)+$")
+    /** "open Spotify" with no Spotify: say so instead of sending the Mind to look for it. */
+    private val OPEN_ONLY = Regex("(?i)^(?:please\\s+)?(?:open|launch|pull up|bring up|open up|fire up)\\s+(?:the\\s+|de\\s+|het\\s+|my\\s+|mijn\\s+)?(?:app\\s+)?" +
+        "([\\p{L}\\p{N}][\\p{L}\\p{N} .'&+-]{1,28}?)(?:\\s+app)?(?:\\s+(?:please|alsjeblieft|aub))?[.!]*$")
+    /** Things people open that are not apps (or are part of one): never answered as "not on this phone". */
+    private val NOT_AN_APP = Regex("(?i)\\b(settings|instellingen|wi-?fi|wlan|bluetooth|notifications?|meldingen|camera|gallery|galerij|photos?|" +
+        "foto'?s|browser|web|website|site|page|pagina|tab|link|url|home ?screen|beginscherm|recents?|recent apps|timer|alarm|stopwatch|" +
+        "clock|klok|keyboard|toetsenbord|quick settings|control center|flashlight|zaklamp|downloads?|files?|bestanden|folder|map|" +
+        "maps|kaart|chat|conversation|gesprek|inbox|mail|email|drawer|menu|store|play store|app store|search|zoek)\\b")
+
     /** Stage 0: a clear command or a local answer, or null. */
     fun stage0(text: String, world: GrammarWorld, facts: LocalFacts = LocalFacts()): Route? {
         localAnswer(text, facts)?.let { return Route(Mode.ANSWER, "the phone knows this", answer = it) }
+        if (CHATTER.matches(text.trim())) return Route(Mode.IGNORE, "just chatter, not a task")
         return when (val g = InstantGrammar.parse(text, world)) {
             is GrammarResult.Match -> Route(Mode.INSTANT, "a clear command", command = g.command)
             is GrammarResult.Ambiguous -> null // Board 0 or a higher mode decides between the candidates.
-            GrammarResult.None -> null
+            GrammarResult.None -> missingApp(text, world)
         }
+    }
+
+    /** "open X" where X is clearly an app name and nothing on this phone resembles it. */
+    fun missingApp(text: String, world: GrammarWorld): Route? {
+        if (world.apps.size < 5) return null // the app list wasn't read: never claim something is missing
+        val name = OPEN_ONLY.matchEntire(text.trim())?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (name.split(' ').size > 3 || NOT_AN_APP.containsMatchIn(name) || SECOND_CLAUSE.containsMatchIn(name)) return null
+        val wanted = InstantGrammar.normalize(name)
+        val closest = world.apps.maxOfOrNull { InstantGrammar.similarity(wanted, it.first) } ?: 0.0
+        if (closest >= 0.5) return null
+        // A word of the name in an app's label ("google keep" for "Keep Notes") means it may well be there.
+        val words = wanted.split(' ').filter { it.length >= 4 && it !in setOf("google", "app", "apps") }
+        if (world.apps.any { app -> InstantGrammar.normalize(app.first).split(' ').any { it in words } }) return null
+        val shown = name.replaceFirstChar { it.uppercase() }
+        return Route(Mode.ANSWER, "no app by that name on this phone", answer = "I don't see $shown on this phone.")
     }
 
     fun localAnswer(text: String, facts: LocalFacts): String? {
@@ -202,7 +234,8 @@ object ModeRouter {
         if (SECOND_CLAUSE.containsMatchIn(text)) return Route(Mode.FLASH, "more than one step", by = Decider.RULES, decision = guessOf(Mode.FLASH))
         val candidates = world.labels + world.apps.map { it.first }
         val started = System.nanoTime()
-        val shadow = phone?.model?.guess(text, candidates)
+        // The phone model never breaks routing: a failure is just no shadow.
+        val shadow = phone?.model?.let { m -> runCatching { m.guess(text, candidates) }.getOrNull() }
         val phoneMs = (System.nanoTime() - started) / 1_000_000
         val earnedGuess = if (phone != null && shadow != null && phone.mayAct && shadow.mode == "instant" && shadow.intent in phone.earned &&
             shadow.confidence >= com.cyclone.mobile.mind.decide.Earning.SURE) shadow else null
@@ -210,11 +243,28 @@ object ModeRouter {
         if (earnedGuess != null && (box == null || phone?.audit != true)) {
             fromGuess(earnedGuess, text, world)?.let { return it.copy(by = Decider.PHONE, decision = earnedGuess, decideMs = phoneMs) }
         }
+        // Alpha 91: an action that is easy to undo (volume, the flashlight, a scroll, Back, Home, media, opening an app the
+        // phone has) is done at once when the phone model is sure, earned or not: waiting for JEV made "make it louder"
+        // take 15-70 s through Flash. JEV still audits these in the background, so agreement keeps being measured.
+        if (phone != null && shadow != null && phone.mayAct && shadow.mode == "instant" && shadow.intent in REVERSIBLE &&
+            shadow.confidence >= com.cyclone.mobile.mind.decide.Earning.SURE && plainNow(text)) {
+            fromGuess(shadow, text, world)?.let { return it.copy(by = Decider.PHONE, decision = shadow, decideMs = phoneMs, shadow = shadow) }
+        }
         if (box == null) return Route(Mode.MIND, "no decision provider is reachable", by = Decider.FALLBACK, decision = guessOf(Mode.MIND), shadow = shadow)
-        val reply = box.ask(board0(text, world))
+        val reply = runCatching { box.ask(board0(text, world)) }.getOrNull()
         val route = fromBoard(reply, text, world, bar)
         return route.copy(by = Decider.DECISIONS, decision = reply?.let { decisionOf(it) } ?: guessOf(route.mode), decideMs = reply?.ms ?: 0, shadow = shadow)
     }
+
+    private val LATER = Regex("(?i)\\d|\\b(in|at|after|before|tomorrow|tonight|later|until|when|if|minutes?|hours?|seconds?|om|na|morgen|" +
+        "vanavond|straks|later|tot|als|wanneer|minuten|minuut|uur|seconden)\\b")
+
+    /** A short request about now: no time, condition or number that the phone model would ignore. */
+    fun plainNow(text: String): Boolean = InstantGrammar.normalize(text).split(' ').count { it.isNotBlank() } <= 7 && !LATER.containsMatchIn(text)
+
+    /** Actions that are easy to undo and touch nothing of the owner's: the phone model may do them when it is sure. */
+    val REVERSIBLE = setOf("swipe_up", "swipe_down", "swipe_left", "swipe_right", "scroll_up", "scroll_down", "back", "home",
+        "recents", "flashlight_on", "flashlight_off", "volume_up", "volume_down", "media_play_pause", "media_next", "open_app", "camera")
 
     /** The typed answers of a decision box as one decision. */
     fun decisionOf(reply: BoxReply): com.cyclone.mobile.mind.decide.Guess {

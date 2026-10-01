@@ -24,6 +24,7 @@ V5_OPS = frozenset({
     "secrets.request",
     "ask.start",
     "ask.status",
+    "ask.cancel",
     "apps.list",
     "runs.list",
     "runs.get",
@@ -65,6 +66,13 @@ ASK_STATUS_KEYS = frozenset({
     "taskId", "state", "title", "app", "currentMilestone", "milestones", "supportingCopy",
     "outcomeCopy", "sessionId", "displayId",
 })
+# Alpha 91: what became of one request (its id, the lane that took it, who decided, the times). Older phones omit it.
+ASK_REQUEST_KEYS = frozenset({
+    "requestId", "state", "lane", "decider", "why", "decideMs", "startedAtMs", "routedAtMs", "finishedAtMs", "say",
+})
+ASK_REQUEST_STATES = frozenset({"waiting", "running", "done", "failed", "cancelled"})
+ASK_LANES = frozenset({"instant", "answer", "ignore", "flash", "mind"})
+ASK_REQUEST_ID = re.compile(r"^req-[0-9a-f-]{8,40}$")
 MAX_GOAL = 2000
 PERSONAS = frozenset({"live", "mapping"})
 MAPPING_STATES = frozenset({
@@ -403,7 +411,10 @@ def _lab_mission(mission_id: Any) -> str:
 
 
 def _validate_ask_foreground(args: dict[str, Any]) -> None:
-    """Ask from Glass runs on the phone's main screen only; never a guessed named display."""
+    """Ask from Glass runs on the phone's main screen only; never a guessed named display. Alpha 91: the main screen
+    is the default, so a client may leave both out."""
+    args.setdefault("sessionId", "default-foreground")
+    args.setdefault("displayId", 0)
     session_id = args.get("sessionId")
     if not isinstance(session_id, str) or not session_id:
         raise DesktopRuntimeError(RuntimeErrorCode.SESSION_REQUIRED, "sessionId is required for ask.")
@@ -414,11 +425,35 @@ def _validate_ask_foreground(args: dict[str, Any]) -> None:
         )
 
 
+def _validate_ask_request(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) != ASK_REQUEST_KEYS or not ASK_REQUEST_ID.match(str(value.get("requestId"))) \
+            or value.get("state") not in ASK_REQUEST_STATES or (value.get("lane") is not None and value["lane"] not in ASK_LANES):
+        raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask request record is malformed.")
+    for key in ("why", "say", "decider"):
+        if value.get(key) is not None and (not isinstance(value[key], str) or len(value[key]) > 240):
+            raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask request record is malformed.")
+
+
 def _validate_ask_response(op: str, value: dict[str, Any]) -> None:
     if op == "ask.start":
-        if set(value) != {"accepted", "sessionId", "displayId"} or value.get("accepted") is not True:
+        keys = set(value)
+        if keys not in ({"accepted", "sessionId", "displayId"}, {"accepted", "sessionId", "displayId", "requestId"}) \
+                or value.get("accepted") is not True:
+            raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask.start acknowledgement is malformed.")
+        if "requestId" in value and not ASK_REQUEST_ID.match(str(value["requestId"])):
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask.start acknowledgement is malformed.")
         return
+    if op == "ask.cancel":
+        if set(value) - {"cancelled", "detail", "request"} or not isinstance(value.get("cancelled"), bool) \
+                or not isinstance(value.get("detail"), str):
+            raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask.cancel result is malformed.")
+        _validate_ask_request(value.get("request"))
+        return
+    if "request" in value:
+        _validate_ask_request(value.get("request"))
+        value = {k: v for k, v in value.items() if k != "request"}
     if set(value) != ASK_STATUS_KEYS or value.get("state") not in ASK_STATES:
         raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask.status result is malformed.")
     milestones = value.get("milestones")
@@ -852,7 +887,7 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op in {"mapping.start", "mapping.pause", "mapping.stop", "mapping.status"}:
         _validate_mapping_response(value, args)
         return value
-    if op in {"ask.start", "ask.status"}:
+    if op in {"ask.start", "ask.status", "ask.cancel"}:
         _validate_ask_response(op, value)
         return value
     if op == "apps.list":
@@ -998,7 +1033,7 @@ def _validate_lab_response(op: str, value: dict[str, Any], args: dict[str, Any])
     if value["lab"] is not None and (not isinstance(value["lab"], dict) or not isinstance(value["lab"].get("variant"), dict)):
         raise _bad_lab("lab tag")
     events = value["events"]
-    if not isinstance(events, list) or len(events) > 20 or not all(isinstance(e, dict) and _short_text(e.get("text"), 200) for e in events):
+    if not isinstance(events, list) or len(events) > 60 or not all(isinstance(e, dict) and _short_text(e.get("text"), 200) for e in events):
         raise _bad_lab("events")
 
 
@@ -2041,10 +2076,12 @@ class V5ContractService:
             if not isinstance(goal, str) or not goal.strip() or len(goal) > MAX_GOAL:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "goal must be 1..2000 characters of text.")
             return self._call(device_id, op, args)
-        if op == "ask.status":
-            if not set(args).issubset({"sessionId", "displayId"}):
-                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "ask.status takes plane identity only.")
+        if op in {"ask.status", "ask.cancel"}:
+            if not set(args).issubset({"sessionId", "displayId", "requestId"}):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, f"{op} takes plane identity and a requestId only.")
             _validate_ask_foreground(args)
+            if "requestId" in args and not ASK_REQUEST_ID.match(str(args["requestId"])):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "requestId is malformed.")
             return self._call(device_id, op, args)
 
         if op == "mapping.start":

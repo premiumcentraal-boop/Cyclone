@@ -1149,6 +1149,41 @@ class PhoneTools:
             })
         return redact({**{k: v for k, v in detail.items() if k != "trials"}, "failures": failures[:60]})
 
+    def phone_ask(self, args: dict[str, Any]) -> Any:
+        """Alpha 91: send one request exactly as the owner would type it, and (optionally) wait for its outcome: the lane
+        that took it (instant, answer, ignore, flash, mind), who decided, and the times. Approvals stay on the phone."""
+        _only_keys(args, {"device_id", "goal", "wait_s"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        goal = args.get("goal")
+        if not isinstance(goal, str) or not 0 < len(goal.strip()) <= 2000:
+            raise ValueError("goal is 1..2000 characters")
+        wait_s = args.get("wait_s", 20)
+        if not isinstance(wait_s, (int, float)) or not 0 <= wait_s <= 300:
+            raise ValueError("wait_s is 0..300 seconds")
+        started = time.monotonic()
+        ack = self.gateway.ask_start(device_id, goal)
+        request_id = ack.get("requestId") if isinstance(ack, dict) else None
+        status: Any = None
+        while wait_s and time.monotonic() - started < wait_s:
+            time.sleep(0.4)
+            status = self.gateway.ask_status(device_id, request_id)
+            request = status.get("request") if isinstance(status, dict) else None
+            if not isinstance(request, dict):
+                continue
+            if request.get("state") in {"done", "failed", "cancelled"}:
+                break
+            if request.get("lane") in {"flash", "mind"} and status.get("state") in {"done", "failed", "action-needed", "needs-secret"}:
+                break
+        return redact({"requestId": request_id, "waitedS": round(time.monotonic() - started, 2), "status": status or ack})
+
+    def phone_ask_cancel(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"device_id", "request_id"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        request_id = args.get("request_id")
+        if request_id is not None and (not isinstance(request_id, str) or not re.match(r"^req-[0-9a-f-]{8,40}$", request_id)):
+            raise ValueError("request_id is the id phone_ask returned")
+        return redact(self.gateway.ask_cancel(device_id, request_id))
+
     def phone_lab_stop(self, args: dict[str, Any]) -> Any:
         _only_keys(args, {"experiment_id"})
         return redact(self.gateway.lab_stop(_required_id(args, "experiment_id", LAB_EXPERIMENT_ID)))

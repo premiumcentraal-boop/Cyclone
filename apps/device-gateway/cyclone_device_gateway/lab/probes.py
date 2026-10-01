@@ -8,6 +8,8 @@ reversible phone settings plus one lab-owned file, and every setting the lab cha
 """
 from __future__ import annotations
 
+import time
+
 import re
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -42,6 +44,10 @@ WRITABLE_SETTINGS = frozenset({
 })
 #: Build properties the lab may read to check an answer.
 READABLE_PROPS = frozenset({"ro.build.version.release", "ro.product.model", "ro.product.manufacturer"})
+
+
+CLOCK_PACKAGES = ("com.google.android.deskclock", "com.sec.android.app.clockpackage", "com.android.deskclock",
+                  "com.oneplus.deskclock", "com.miui.clock")
 
 
 class ProbeError(RuntimeError):
@@ -97,8 +103,22 @@ class PhoneProbe:
         return match.group(1) if match else None
 
     def screen_text(self) -> ScreenText:
-        self.adb.shell("uiautomator", "dump", "/sdcard/cyclone_lab_uia.xml", timeout=25)
+        # Alpha 91: never read a stale or half-written dump. The old file is removed first, the dump must say it wrote
+        # the file, and one retry follows a failed dump (uiautomator gives up while an animation keeps the screen busy).
+        last = ""
+        for attempt in range(2):
+            self.adb.shell("rm", "-f", "/sdcard/cyclone_lab_uia.xml", timeout=10)
+            last = str(self.adb.shell("uiautomator", "dump", "/sdcard/cyclone_lab_uia.xml", timeout=25))
+            if "dumped" in last.lower():
+                break
+            if attempt == 0:
+                time.sleep(1.5)
+        else:
+            reason = "the screen never went idle (an animation keeps it busy)" if "idle" in last.lower() else "uiautomator wrote no dump"
+            raise ProbeError(f"screen unavailable: {reason}")
         xml = self.adb.exec_out("cat", "/sdcard/cyclone_lab_uia.xml", timeout=10).decode("utf-8", "replace")
+        if "<hierarchy" not in xml:
+            raise ProbeError("screen unavailable: the dump was empty")
         nodes = normalize_xml(xml)["nodes"]
         texts: list[str] = []
         packages: dict[str, int] = {}
@@ -133,6 +153,22 @@ class PhoneProbe:
     def google_accounts(self) -> list[str]:
         text = self.adb.shell("dumpsys", "account", timeout=15)
         return sorted(set(re.findall(r"Account \{name=([^,\s]{3,120}), type=com\.google\}", text)))
+
+    def timer_running(self) -> bool | None:
+        """Alpha 91: is a Clock timer counting down? Read from Clock's own notification, so a timer set by a tool (with
+        Clock never in front) is seen too. None when the notification list can't be read."""
+        text = str(self.adb.shell("dumpsys", "notification", "--noredact", timeout=15))
+        if "NotificationRecord" not in text:
+            return None
+        for block in text.split("NotificationRecord(")[1:]:
+            head = block[:4000]
+            if not any(package in head[:400] for package in CLOCK_PACKAGES):
+                continue
+            lower = head.lower()
+            if "timer" in lower and ("chronometer" in lower or "running" in lower or "countdown" in lower) \
+                    and "time's up" not in lower and "paused" not in lower:
+                return True
+        return False
 
     def night_mode(self) -> bool | None:
         text = self.adb.shell("cmd", "uimode", "night", timeout=10).lower()

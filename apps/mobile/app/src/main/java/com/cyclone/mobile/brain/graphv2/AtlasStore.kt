@@ -95,6 +95,18 @@ class AtlasStore(
         return ScopedGraph(key)
     }
 
+    /** Alpha 91: many changes, one write to disk (the legacy import wrote and fsynced once per screen). */
+    @Synchronized
+    fun <T> batch(block: () -> T): T {
+        batchDepth += 1
+        return try {
+            block()
+        } finally {
+            batchDepth -= 1
+            flushIfNeeded()
+        }
+    }
+
     @Synchronized
     fun <T> mutateGraph(key: AtlasPlaceKey, block: (TemporalGraphStore) -> T): T {
         require(records.containsKey(key)) { "Register Atlas place before mutating its graph" }

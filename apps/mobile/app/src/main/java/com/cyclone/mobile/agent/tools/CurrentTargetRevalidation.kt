@@ -53,9 +53,15 @@ internal object CurrentTargetRevalidation {
             if (other.id == target.id || !other.evidence.optBoolean("visibleToUser", true) ||
                 !other.evidence.optBoolean("enabled", true) || !other.evidence.optBoolean("clickable")) return@any false
             if (sameLogicalControl(target, other)) return@any false
+            // Alpha 91: Cyclone's own chrome is never a competing control for something in the app.
+            if (isCycloneChrome(other)) return@any false
             // A composer's text box sits inside a clickable input container (and may hold clickable spans): a node
             // nested with an editable target is the same logical control, not a competing one. Siblings stay closed.
             if (isEditable(target) && nestedWith(target, other)) return@any false
+            // Alpha 91: a settings row and the switch, checkbox or radio inside it do the same thing; and a nested node
+            // that doesn't even cover the point Cyclone would press can't take the press. Refusing these made every
+            // ordinary Settings toggle "ambiguous" and pushed the Mind onto coordinate taps.
+            if (nestedWith(target, other) && (isCheckable(target) || isCheckable(other) || !coversCenter(other, rect))) return@any false
             val b = other.evidence.optJSONObject("bounds") ?: return@any false
             b.optInt("left") < rect.optInt("right") && b.optInt("right") > rect.optInt("left") &&
                 b.optInt("top") < rect.optInt("bottom") && b.optInt("bottom") > rect.optInt("top")
@@ -103,6 +109,20 @@ internal object CurrentTargetRevalidation {
             return null
         }
         return preferredRepresentation(groups.single())
+    }
+
+    private fun isCheckable(element: GatewayElement): Boolean =
+        element.evidence.optBoolean("checkable") ||
+            element.role.lowercase() in setOf("switch", "checkbox", "check_box", "radio", "radio_button", "radiobutton", "toggle", "toggle_button")
+
+    private fun isCycloneChrome(element: GatewayElement): Boolean =
+        element.evidence.optString("resourceId").startsWith("com.cyclone.mobile:id/overlay_chrome") || rawPath(element).startsWith("overlay/")
+
+    private fun coversCenter(element: GatewayElement, target: org.json.JSONObject): Boolean {
+        val b = element.evidence.optJSONObject("bounds") ?: return true
+        val cx = (target.optInt("left") + target.optInt("right")) / 2
+        val cy = (target.optInt("top") + target.optInt("bottom")) / 2
+        return cx >= b.optInt("left") && cx < b.optInt("right") && cy >= b.optInt("top") && cy < b.optInt("bottom")
     }
 
     private fun isEditable(element: GatewayElement): Boolean =

@@ -436,13 +436,12 @@ object OverlayChromeRuntime {
             android.widget.Toast.makeText(context, "Open the requested profile in Profiles before continuing.", android.widget.Toast.LENGTH_LONG).show()
             return handedOn()
         }
-        val apps = context.packageManager.queryIntentActivities(
-            android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
-            .filter { it.activityInfo.packageName != context.packageName }.distinctBy { it.activityInfo.packageName }
-        val matches = apps.filter { app ->
-            val label = app.loadLabel(context.packageManager).toString()
+        // Alpha 91: the launcher apps and their labels are read once a minute, not on the main thread for every request
+        // (loading every label cost a 0.5 s freeze on each Ask).
+        val apps = launcherApps(context)
+        val matches = apps.filter { (_, label) ->
             label.length >= 3 && Regex("(?i)(?<![\\p{L}\\p{N}])" + Regex.escape(label) + "(?![\\p{L}\\p{N}])").containsMatchIn(request)
-        }
+        }.map { it.first }
         if (target == com.cyclone.mobile.runtime.background.ExecutionTarget.BackgroundWorkspace) {
             synchronized(lock) { adaptiveAgent?.cancelActiveTask(); aiJob?.cancel() }
             if (matches.size == 1) {
@@ -488,6 +487,21 @@ object OverlayChromeRuntime {
     }
 
     private const val VOICE_OWNS_MS = 10_000L
+    private const val APPS_TTL_MS = 60_000L
+    @Volatile private var appsCache: Pair<Long, List<Pair<android.content.pm.ResolveInfo, String>>>? = null
+
+    /** The launcher apps with their labels, kept for a minute. */
+    private fun launcherApps(context: android.content.Context): List<Pair<android.content.pm.ResolveInfo, String>> {
+        val now = android.os.SystemClock.elapsedRealtime()
+        appsCache?.let { (at, apps) -> if (now - at < APPS_TTL_MS) return apps }
+        val pm = context.packageManager
+        val apps = pm.queryIntentActivities(
+            android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
+            .filter { it.activityInfo.packageName != context.packageName }.distinctBy { it.activityInfo.packageName }
+            .map { it to it.loadLabel(pm).toString() }
+        appsCache = now to apps
+        return apps
+    }
 
     /** Voice's Stop (alpha.78): stops a quick action that voice started, at once. Missions stop through Task Kit. */
     fun stopVoiceRequest() {

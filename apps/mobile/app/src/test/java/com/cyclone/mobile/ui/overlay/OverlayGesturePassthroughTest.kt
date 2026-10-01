@@ -55,4 +55,16 @@ class OverlayGesturePassthroughTest {
         }
         assertFalse(OverlayGesturePassthrough.active())
     }
+
+    @Test
+    fun aTouchDuringOrJustAfterCyclonesOwnGestureIsNeverTheOwners() {
+        assertFalse("nothing injected yet", OverlayGesturePassthrough.injectedRecently())
+        OverlayGesturePassthrough.bind { }
+        OverlayGesturePassthrough.withHostPassthrough {
+            assertTrue(OverlayGesturePassthrough.injectedRecently())
+        }
+        val now = System.nanoTime() / 1_000_000
+        assertTrue("the echo of the gesture", OverlayGesturePassthrough.injectedRecently(nowMs = now))
+        assertFalse("the owner, a moment later", OverlayGesturePassthrough.injectedRecently(nowMs = now + OverlayGesturePassthrough.INJECTED_ECHO_MS + 50))
+    }
 }

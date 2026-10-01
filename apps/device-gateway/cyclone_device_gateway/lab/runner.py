@@ -290,6 +290,9 @@ class LabService:
             row["phase"] = "judging"
             self._current(experiment, trial, "checking the phone")
             record = self._record(device, mission_id)
+            if lab_stopped == "timeout" and "stopped by the owner" in str(record.get("summary", "")).lower():
+                # Alpha 91: the Lab stopped it for time; the phone only knows "the owner pressed Stop".
+                record = {**record, "summary": f"Ran out of Lab time after {record.get('turns', 0)} turns (stopped by the Lab)."}
             row["phone"] = record
             verdict = judge(mission, TrialFacts(record, row["owner"], lab_stopped), Measure(probe))
             row.update(verdict.public())

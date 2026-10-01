@@ -19,6 +19,18 @@ object OverlayGesturePassthrough {
     fun active(): Boolean = enabled
 
     /**
+     * Alpha 91: when Cyclone's own injected gesture last ended. A touch on Cyclone's buttons during a gesture or just
+     * after it is that gesture landing on Cyclone's glass (the panel could not step aside in time), never the owner:
+     * a Mind run paused itself that way and then sat idle until it timed out.
+     */
+    @Volatile private var lastEndedAtMs = 0L
+
+    fun injectedRecently(windowMs: Long = INJECTED_ECHO_MS, nowMs: Long = System.nanoTime() / 1_000_000): Boolean =
+        enabled || nowMs - lastEndedAtMs in 0..windowMs
+
+    const val INJECTED_ECHO_MS = 700L
+
+    /**
      * Alpha.78: Cyclone's other windows (Drive's voice panel and button) yield to an injected gesture too, so a swipe or
      * tap Cyclone makes lands on the app, never on its own glass. A follower returns once its windows let touches through.
      */
@@ -48,6 +60,7 @@ object OverlayGesturePassthrough {
             return block()
         } finally {
             if (depth.decrementAndGet() == 0) {
+                lastEndedAtMs = System.nanoTime() / 1_000_000
                 enabled = false
                 applyFlags?.invoke(false)
                 followers.forEach { runCatching { it(false) } }
@@ -56,6 +69,7 @@ object OverlayGesturePassthrough {
     }
 
     internal fun resetForTests() {
+        lastEndedAtMs = 0L
         depth.set(0)
         enabled = false
         applyFlags = null
