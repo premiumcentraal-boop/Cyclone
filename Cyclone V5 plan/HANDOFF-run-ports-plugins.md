@@ -2,6 +2,9 @@
 
 For: agents and developers who build tools that plug into Cyclone runs and Cyclone Glass. Date: 2026-10-01.
 
+**To hand one connector to one agent, send `HANDOFF-build-a-connector.md`.** It stands on its own. This file is the
+overview for several agents. The design review is plan 47.
+
 **Start here.** The design is plan 45 (Run Ports) and plan 46 (Skill Studio). The contract you build against is
 `tools/cyclone-ports-sdk/SPEC.md` (`cyclone.ports/1`). The gateway's Port Hub isn't built yet, so you test against
 the **Dev Hub** in the same kit. It speaks the same contract, so a plugin that passes there needs no changes later.

@@ -30,6 +30,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,8 +39,9 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
-from .catalog import CATALOG, CONTRACT, LIMITS
-from .sdk import CONTRACT_HEADER, SIGNATURE_HEADER, sign, validate_delivery, validate_envelope, validate_manifest
+from .catalog import CONTRACT, LIMITS, port_spec
+from .sdk import (CONTRACT_HEADER, SIGNATURE_HEADER, TRACE_HEADER, error_body, sign, validate_delivery,
+                  validate_envelope, validate_manifest)
 
 # A 1x1 transparent PNG, the screenshot when a scenario gives none.
 TINY_PNG = base64.b64decode(
@@ -59,6 +61,8 @@ class Await:
     token: str
     match: dict[str, Any]
     expires_at: float
+    way: str = "in"
+    delivery_id: str | None = None
     state: str = "waiting"  # waiting | delivered | timed_out | cancelled
     result: dict[str, Any] = field(default_factory=dict)
     done: threading.Event = field(default_factory=threading.Event)
@@ -80,7 +84,7 @@ class DevHub:
         self.sources = set(sources or [])
         self.run_dir = Path(run_dir) if run_dir else None
         self.log_path = Path(log_path) if log_path else None
-        self.bindings: dict[str, str] = {}      # port -> plugin endpoint
+        self.bindings: dict[str, tuple[str, str]] = {}  # port -> (plugin endpoint, way)
         self.audit: list[dict[str, Any]] = []   # metadata only, never values
         self.phone_fill: Callable[[str, str], None] = lambda run_id, code: None
         self._awaits: dict[str, Await] = {}
@@ -109,10 +113,11 @@ class DevHub:
 
     # ---- binding -----------------------------------------------------------------------------------------------------
 
-    def bind(self, port: str, endpoint: str) -> None:
-        if port not in CATALOG or not CATALOG[port].plugin_served:
+    def bind(self, port: str, endpoint: str, way: str | None = None) -> None:
+        spec = port_spec(port, way)
+        if spec is None or not spec.plugin_served:
             raise ValueError(f"{port} is not a port a plugin can serve")
-        self.bindings[port] = endpoint.rstrip("/")
+        self.bindings[port] = (endpoint.rstrip("/"), spec.way)
 
     def bind_plugin(self, endpoint: str) -> dict[str, Any]:
         """Reads a plugin's manifest and binds every port it serves (the owner's "Add plugin" in Glass)."""
@@ -123,34 +128,47 @@ class DevHub:
         if problems:
             raise ValueError(f"{endpoint}: " + "; ".join(problems))
         for served in manifest["serves"]:
-            self.bind(served["port"], endpoint)
+            self.bind(served["port"], endpoint, served["way"])
         self._log({"event": "plugin_added", "plugin": manifest["name"], "version": manifest["version"],
                    "ports": [s["port"] for s in manifest["serves"]]})
         return manifest
 
     # ---- hub -> plugin -----------------------------------------------------------------------------------------------
 
-    def _post_signed(self, url: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    def _post_signed(self, url: str, body: dict[str, Any], retries: int = 0,
+                     trace: str | None = None) -> tuple[int, dict[str, Any]]:
+        """Signs and POSTs. Each attempt gets a fresh request id (replay protection); the body, and so the envelope
+        id the plugin de-duplicates on, stays the same."""
         raw = json.dumps(body).encode()
-        request = urllib.request.Request(url, data=raw, method="POST", headers={
-            "Content-Type": "application/json", CONTRACT_HEADER: CONTRACT, SIGNATURE_HEADER: sign(self.secret, raw)})
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                return response.status, json.loads(response.read() or b"{}")
-        except urllib.error.HTTPError as error:
+        parsed = urllib.parse.urlparse(url)
+        path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        status, answer = 0, {}
+        for attempt in range(retries + 1):
+            headers = {"Content-Type": "application/json", CONTRACT_HEADER: CONTRACT,
+                       SIGNATURE_HEADER: sign(self.secret, "POST", path, raw),
+                       TRACE_HEADER: trace or f"00-{secrets.token_hex(16)}-{secrets.token_hex(8)}-01"}
+            request = urllib.request.Request(url, data=raw, method="POST", headers=headers)
             try:
-                return error.code, json.loads(error.read() or b"{}")
-            except ValueError:
-                return error.code, {}
-        except (urllib.error.URLError, OSError) as error:
-            return 0, {"error": "unreachable", "detail": str(error)}
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    return response.status, json.loads(response.read() or b"{}")
+            except urllib.error.HTTPError as error:
+                try:
+                    status, answer = error.code, json.loads(error.read() or b"{}")
+                except ValueError:
+                    status, answer = error.code, {}
+            except (urllib.error.URLError, OSError) as error:
+                status, answer = 0, error_body("unreachable", str(error), retryable=True)
+            if status not in (0, 429, 500, 502, 503, 504):
+                break
+            time.sleep(0.2 * (2 ** attempt))
+        return status, answer
 
     def envelope(self, run: dict[str, Any], port: str, data: dict[str, Any] | None = None, **extra: Any) -> dict[str, Any]:
-        spec = CATALOG[port]
+        spec = port_spec(port, self.bindings.get(port, (None, None))[1])
         with self._lock:
             self._seq[run["runId"]] = self._seq.get(run["runId"], 0) + 1
             seq = self._seq[run["runId"]]
-        env = {"v": 1, "runId": run["runId"], "taskId": run.get("taskId"), "rowId": run.get("rowId"),
+        env = {"v": 1, "id": "msg_" + secrets.token_hex(10), "runId": run["runId"], "taskId": run.get("taskId"), "rowId": run.get("rowId"),
                "port": port, "way": spec.way, "seq": seq, "sentAt": now_iso(), "app": run.get("app"),
                "pageKey": extra.pop("pageKey", None), "sensitivity": spec.sensitivity, "data": data or {}}
         env.update(extra)
@@ -166,12 +184,12 @@ class DevHub:
              file_bytes: bytes | None = None, mime: str = "image/png", page_key: str | None = None) -> int:
         """Sends an out-port envelope to the bound plugin. Returns the plugin's HTTP status (0 = unreachable,
         -1 = no plugin bound, which a real run treats as "skipped")."""
-        if CATALOG[port].way != "out":
-            raise ValueError(f"{port} is not an out port")
-        endpoint = self.bindings.get(port)
+        endpoint, way = self.bindings.get(port, (None, None))
         if endpoint is None:
             self._log({"event": "emit_skipped", "runId": run["runId"], "port": port, "reason": "unbound"})
             return -1
+        if way != "out":
+            raise ValueError(f"{port} is not an out port")
         extra: dict[str, Any] = {"pageKey": page_key}
         if port in ("screen.shot", "file.out"):
             blob = TINY_PNG if file_bytes is None else file_bytes
@@ -181,7 +199,7 @@ class DevHub:
         problems = validate_envelope(env)
         if problems:
             raise ValueError(f"{port}: " + "; ".join(problems))
-        status, _ = self._post_signed(f"{endpoint}/ports/{port}", env)
+        status, _ = self._post_signed(f"{endpoint}/ports/{port}", env, retries=2)
         entry = {"event": "emit", "runId": run["runId"], "port": port, "seq": env["seq"], "status": status}
         if port == "run.event":
             entry["stage"] = env["data"].get("stage")
@@ -194,23 +212,22 @@ class DevHub:
                timeout_s: float = 60) -> dict[str, Any]:
         """Asks the bound plugin for an in port and waits. Returns the run-side result:
         ``{"state": "delivered", ...}`` or ``{"state": "timed_out"}`` / ``{"state": "failed", ...}``."""
-        spec = CATALOG[port]
-        if spec.way != "in":
-            raise ValueError(f"{port} is not an in port")
-        endpoint = self.bindings.get(port)
+        endpoint, way = self.bindings.get(port, (None, None))
         if endpoint is None:
             self._log({"event": "await_failed", "runId": run["runId"], "port": port, "reason": "unbound"})
             return {"state": "failed", "reason": "unbound"}
+        if way != "in":
+            raise ValueError(f"{port} is not an in port")
         timeout_s = max(1, min(float(timeout_s), LIMITS["await_timeout_max_s"]))
         record = Await("aw_" + secrets.token_hex(6), run["runId"], port, secrets.token_urlsafe(24), match or {},
-                       time.time() + timeout_s)
+                       time.time() + timeout_s, way)
         with self._lock:
             self._awaits[record.await_id] = record
         request = {"v": 1, "runId": run["runId"], "taskId": run.get("taskId"), "rowId": run.get("rowId"),
                    "app": run.get("app"), "port": port, "awaitId": record.await_id, "match": record.match,
                    "timeoutS": timeout_s, "sentAt": now_iso(),
                    "deliverUrl": f"{self.url}/v1/ports/{run['runId']}/{port}/deliver", "token": record.token}
-        status, _ = self._post_signed(f"{endpoint}/ports/{port}/await", request)
+        status, _ = self._post_signed(f"{endpoint}/ports/{port}/await", request, retries=2)
         self._log({"event": "await", "runId": run["runId"], "port": port, "awaitId": record.await_id,
                    "timeoutS": timeout_s, "status": status})
         if status not in (200, 202):
@@ -238,21 +255,24 @@ class DevHub:
             record = next((a for a in self._awaits.values() if token and secrets.compare_digest(a.token, token)), None)
             any_for_port = any(a.run_id == run_id and a.port == port for a in self._awaits.values())
         if record is None:
-            return (401, {"error": "bad_token"}) if any_for_port else (404, {"error": "no_waiting_run"})
+            return (401, error_body("bad_token")) if any_for_port else (404, error_body("no_waiting_run"))
         if record.run_id != run_id or record.port != port:
-            return 401, {"error": "bad_token"}
+            return 401, error_body("bad_token")
+        delivery_id = body.get("deliveryId") if isinstance(body, dict) else None
         if record.state == "delivered":
-            return 409, {"error": "already_delivered"}
+            if delivery_id and delivery_id == record.delivery_id:  # a retry of the delivery we took: same answer
+                return 200, {"accepted": True, "awaitId": record.await_id, "duplicate": True}
+            return 409, error_body("already_delivered")
         if record.state != "waiting" or time.time() > record.expires_at:
-            return 410, {"error": "expired"}
-        problems = validate_delivery(port, body)
+            return 410, error_body("expired")
+        problems = validate_delivery(port, body, record.way)
         if problems:
-            return 422, {"error": "invalid", "problems": problems}
+            return 422, error_body("invalid", "; ".join(problems), problems=problems)
 
         if port == "code.in":
             if body["source"] not in self.sources:
                 self._log({"event": "delivery_refused", "runId": run_id, "port": port, "reason": "unregistered_source"})
-                return 403, {"error": "source_not_registered"}
+                return 403, error_body("source_not_registered")
             code = body["code"]
             result = {"filled": True, "codeLength": len(code), "source": body["source"]}
             self.phone_fill(run_id, code)  # the real hub seals the code to the phone here
@@ -262,9 +282,9 @@ class DevHub:
             try:
                 blob = base64.b64decode(body["base64"], validate=True)
             except ValueError:
-                return 422, {"error": "invalid", "problems": ["base64 is not valid"]}
+                return 422, error_body("invalid", "base64 is not valid")
             if hashlib.sha256(blob).hexdigest() != body["sha256"].lower():
-                return 422, {"error": "invalid", "problems": ["sha256 does not match the file"]}
+                return 422, error_body("invalid", "sha256 does not match the file")
             name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(body["name"]))[:120] or "file"
             result = {"name": name, "mime": body["mime"], "bytes": len(blob)}
             if self.run_dir:
@@ -282,8 +302,8 @@ class DevHub:
 
         with self._lock:
             if record.state != "waiting":
-                return 409, {"error": "already_delivered"}
-            record.state, record.result = "delivered", result
+                return 409, error_body("already_delivered")
+            record.state, record.result, record.delivery_id = "delivered", result, delivery_id
         record.done.set()
         logged = {k: v for k, v in result.items() if k in ("codeLength", "source", "name", "mime", "bytes")}
         self._log({"event": "delivered", "runId": run_id, "port": port, "awaitId": record.await_id, "note": note,
@@ -319,21 +339,21 @@ class DevHub:
                 parsed = urlparse(self.path)
                 m = re.match(r"^/v1/artifacts/(art_[0-9a-f]+)$", parsed.path)
                 if not m:
-                    return self._send(404, b'{"error":"not_found"}')
+                    return self._send(404, json.dumps(error_body("not_found")).encode())
                 status, data, mime = hub._artifact(m.group(1), (parse_qs(parsed.query).get("t") or [""])[0])
                 return self._send(status, data, mime)
 
             def do_POST(self):
-                m = re.match(r"^/v1/ports/([A-Za-z0-9_-]+)/([a-z.]+)/deliver$", self.path)
+                m = re.match(r"^/v1/ports/([A-Za-z0-9_-]+)/([a-z0-9.-]+)/deliver$", self.path)
                 if not m:
-                    return self._send(404, b'{"error":"not_found"}')
+                    return self._send(404, json.dumps(error_body("not_found")).encode())
                 length = int(self.headers.get("Content-Length") or 0)
                 if length > LIMITS["file_bytes"] * 4 // 3 + LIMITS["envelope_bytes"]:
-                    return self._send(413, b'{"error":"too_large"}')
+                    return self._send(413, json.dumps(error_body("too_large")).encode())
                 try:
                     body = json.loads(self.rfile.read(length) or b"{}")
                 except ValueError:
-                    return self._send(400, b'{"error":"bad_json"}')
+                    return self._send(400, json.dumps(error_body("bad_json")).encode())
                 status, answer = hub._deliver(m.group(1), m.group(2), self.headers.get("Authorization"), body)
                 return self._send(status, json.dumps(answer).encode())
 

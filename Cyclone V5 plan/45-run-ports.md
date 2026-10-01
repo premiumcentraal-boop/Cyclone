@@ -4,7 +4,8 @@ Status: research and design (2026-10-01). Nothing here is built yet. Visual expl
 artifact.
 
 Plugin builders: the contract `cyclone.ports/1`, an SDK, a Dev Hub, a conformance checker and three example plugins
-are in `tools/cyclone-ports-sdk/`. Start at `HANDOFF-run-ports-plugins.md`.
+are in `tools/cyclone-ports-sdk/`. Start at `HANDOFF-build-a-connector.md` (one connector) or
+`HANDOFF-run-ports-plugins.md` (several). The design review, with a confidence score, is plan 47.
 
 ## 0. The ask and what exists
 
