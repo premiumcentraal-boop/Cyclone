@@ -70,7 +70,7 @@ const PAGES: Record<Route["name"], PageFactory> = {
     if (r.tab === "page" && r.pageId) return createPageView(ctx, r.pageId);
     if (r.tab === "trash") return createTrashPage(ctx);
     if (r.tab === "ai") return createAiSettings(ctx);
-    if (r.tab === "ports") return createPortsPage(ctx);
+    if (r.tab === "ports") return createPortsPage(ctx, r.view === "map" ? "map" : "plugins");
     if (isCommandTab(r.tab)) return createCommandPage(ctx, r.tab, { workspace: true });
     return createWorkspaceHome(ctx);
   },
@@ -223,7 +223,7 @@ export class GlassApp {
   }
 
   private routeKey(): string {
-    return `${this.route.name}:${this.route.name === "app" ? `${this.route.placeId}/${this.route.tab}/${this.route.route?.join(",") ?? ""}` : this.route.name === "run" ? this.route.runId : this.route.name === "lab" ? this.route.experimentId ?? "" : this.route.name === "command" ? `${this.route.tab}/${this.route.pageId ?? ""}` : ""}`;
+    return `${this.route.name}:${this.route.name === "app" ? `${this.route.placeId}/${this.route.tab}/${this.route.route?.join(",") ?? ""}` : this.route.name === "run" ? this.route.runId : this.route.name === "lab" ? this.route.experimentId ?? "" : this.route.name === "command" ? `${this.route.tab}/${this.route.pageId ?? ""}/${this.route.view ?? ""}` : ""}`;
   }
 
   private deviceSignature(): string {

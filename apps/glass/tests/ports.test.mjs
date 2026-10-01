@@ -205,3 +205,87 @@ test("the plugin drawer: switch a port, pause, and remove after a confirm", asyn
   assert.equal(gw.calls.filter((c) => c.path.endsWith("/delete")).length, 1);
   page.destroy();
 });
+
+// ---- run 2: the Port map -------------------------------------------------------------------------------------------------
+
+const CANDS = [{ name: "sms-codes", title: "SMS codes", live: true, status: "active" }, { name: "mail-codes", title: "Mail codes", live: true, status: "active" }];
+function bindingsView(scope, codeChosen = null, extra = {}) {
+  const codeIn = codeChosen
+    ? { state: "ok", effective: codeChosen, chosen: codeChosen, source: scope, override: true }
+    : { state: "conflict", effective: [], chosen: null, source: "automatic", override: false };
+  return {
+    scope, scopes: scope === "default" ? [] : [{ scope, choices: 1 }],
+    plugins: [{ name: "run-logger", title: "Run logger", status: "active" }, ...CANDS.map(({ name, title, status }) => ({ name, title, status }))],
+    ports: [
+      { port: "run.event", way: "out", sensitivity: "public", pluginServed: true, extension: false,
+        candidates: [{ name: "run-logger", title: "Run logger", live: true, status: "active" }],
+        state: "ok", effective: ["run-logger"], chosen: null, source: "automatic", override: false, inherits: null },
+      { port: "code.in", way: "in", sensitivity: "secret", pluginServed: true, extension: false, candidates: CANDS,
+        inherits: scope === "default" ? null : { state: "conflict", effective: [], source: "automatic" }, ...codeIn, ...extra },
+      { port: "secret.in", way: "in", sensitivity: "secret", pluginServed: false, extension: false, candidates: [],
+        state: "vault", effective: [], chosen: null, source: "hub", override: false, inherits: null },
+    ],
+  };
+}
+
+test("words for bindings and scopes", async () => {
+  const { bindingInfo, scopeLabel, parseBindings } = await import("../.test-dist/services/ports.js");
+  assert.equal(bindingInfo({ state: "ok", way: "out", effective: ["a", "b"], candidates: [] }).label, "2 plugins");
+  assert.equal(bindingInfo({ state: "conflict", way: "in", effective: [], candidates: CANDS }).label, "Choose one");
+  assert.equal(scopeLabel("default"), "Everywhere");
+  assert.equal(scopeLabel("routine:rtn_abc123", new Map([["rtn_abc123", "Daily post"]])), "Routine: Daily post");
+  assert.equal(scopeLabel("app:com.instagram.android"), "App: com.instagram.android");
+  const parsed = parseBindings({ ports: [{ port: "code.in", state: "weird", chosen: null, candidates: [{ name: "x", status: "?" }] }] });
+  assert.equal(parsed.ports[0].state, "empty");
+  assert.equal(parsed.ports[0].chosen, null);
+  assert.equal(parsed.ports[0].candidates[0].status, "waiting_key");
+});
+
+test("Port map: a conflict is settled with one choice, and an app gets its own map", async () => {
+  installMiniDom();
+  assert.deepEqual(parseRoute("#/command/ports/map"), { name: "command", tab: "ports", view: "map" });
+  assert.equal(routeHref({ name: "command", tab: "ports", view: "map" }), "#/command/ports/map");
+  const gw = fakeGateway({
+    "GET /v1/ports/bindings": ({ query }) => bindingsView(query.scope),
+    "GET /v1/cc/routines": () => ({ routines: [] }),
+    "POST /v1/ports/bindings": ({ body }) => bindingsView(body.scope, body.plugins),
+  });
+  const page = createPortsPage(ctx(gw.fetch), "map");
+  await flush();
+  const map = page.element.querySelector(".pm");
+  assert.ok(map, "the map view renders");
+  assert.equal(page.element.querySelector(".pt-tab.active").textContent, "Port map");
+  const code = map.querySelector('.pm-port[data-port="code.in"]');
+  assert.match(code.textContent, /Choose one/);
+  assert.ok(map.querySelector(".pm-vault-note"), "vault-only ports are a note, not rows");
+  assert.equal(map.querySelectorAll(".pm-plugin").length, 3);
+
+  code.querySelector(".pm-port-head").click();
+  const radios = map.querySelectorAll('.pm-port[data-port="code.in"] .pm-option');
+  assert.deepEqual(radios.map((r) => r.getAttribute("role")), ["radio", "radio", "radio", "radio"], "an in port takes one answer");
+  radios.find((r) => r.textContent.includes("SMS codes")).click();
+  byLabel(map.querySelector('.pm-port[data-port="code.in"]'), "Save").click();
+  await flush();
+  assert.deepEqual(gw.calls.find((c) => c.method === "POST").body, { scope: "default", port: "code.in", plugins: ["sms-codes"] });
+  assert.match(map.querySelector('.pm-port[data-port="code.in"]').textContent, /Answered/);
+
+  byLabel(map, "For a routine or app").click();
+  map.querySelector(".pm-adder input").value = "com.instagram.android";
+  byLabel(map.querySelector(".pm-adder"), "Show its map").click();
+  await flush();
+  assert.equal(gw.calls.filter((c) => c.path === "/v1/ports/bindings" && c.method === "GET").at(-1).query.scope, "app:com.instagram.android");
+  assert.match(map.querySelector(".pm-scope.active").textContent, /com\.instagram\.android/);
+  map.querySelector('.pm-port[data-port="code.in"] .pm-port-head').click();
+  assert.match(map.querySelector('.pm-port[data-port="code.in"] .pm-option').textContent, /Same as Everywhere/);
+  page.destroy();
+});
+
+test("the Plugins view lists port conflicts under Needs you", async () => {
+  installMiniDom();
+  const gw = fakeGateway({ "GET /v1/ports/overview": () => ({ ...overview([LOGGER]), conflicts: ["code.in"] }) });
+  const page = createPortsPage(ctx(gw.fetch));
+  await flush();
+  assert.match(page.element.querySelector(".pt-attention").textContent, /Verification codes: choose who serves it/);
+  assert.ok(byLabel(page.element, "Open the port map"));
+  page.destroy();
+});

@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS activity (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, plugin TEXT NOT NULL, kind TEXT NOT NULL,
   port TEXT, run_id TEXT, status INTEGER, ok INTEGER NOT NULL, latency_ms INTEGER, detail TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS activity_plugin ON activity(plugin, at);
+CREATE TABLE IF NOT EXISTS binding (
+  scope TEXT NOT NULL, port TEXT NOT NULL, plugins TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(scope, port));
 """
 ACTIVITY_KEEP = 5_000
 JSON_FIELDS = ("manifest", "pending", "consent", "checks")
@@ -109,6 +111,32 @@ class PortStore:
 
     def _drop_key(self, name: str) -> None:
         self.keys.drop(name)
+
+    # ---- bindings (plan 48 run 2) -------------------------------------------------------------------------------------
+
+    def bindings(self, scope: str | None = None) -> dict[tuple[str, str], list[str]]:
+        """{(scope, port): [plugin names]}. A missing pair means automatic."""
+        query = "SELECT scope, port, plugins FROM binding" + (" WHERE scope = ?" if scope else "")
+        with self._lock:
+            rows = self._db.execute(query, (scope,) if scope else ()).fetchall()
+        return {(r["scope"], r["port"]): json.loads(r["plugins"]) for r in rows}
+
+    def set_binding(self, scope: str, port: str, plugins: list[str] | None) -> None:
+        with self._lock, self._db:
+            if plugins is None:
+                self._db.execute("DELETE FROM binding WHERE scope = ? AND port = ?", (scope, port))
+            else:
+                self._db.execute(
+                    "INSERT INTO binding (scope, port, plugins, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(scope, port) DO UPDATE SET plugins = excluded.plugins, updated_at = excluded.updated_at",
+                    (scope, port, json.dumps(plugins), now_ms()))
+
+    def forget_plugin_bindings(self, name: str) -> None:
+        """A removed plugin leaves every choice it was in. A choice it alone made goes back to automatic."""
+        for (scope, port), plugins in self.bindings().items():
+            if name in plugins:
+                rest = [p for p in plugins if p != name]
+                self.set_binding(scope, port, rest if rest else None)
 
     # ---- activity ----------------------------------------------------------------------------------------------------
 

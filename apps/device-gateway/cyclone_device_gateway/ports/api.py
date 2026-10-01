@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from ..auth import verify_bearer
 from .hub import PortHub, PortsError
@@ -86,5 +86,19 @@ def create_ports_router(runtime: Any, token: str) -> APIRouter:
     @router.post("/v1/ports/plugins/{name}/delete", dependencies=[Depends(auth)])
     def delete(name: str):
         return call(lambda: hub().remove(name))
+
+    # Run 2: which plugin serves each port, everywhere or for one routine or app.
+    @router.get("/v1/ports/bindings", dependencies=[Depends(auth)])
+    def bindings(scope: str = Query(default="default", max_length=120)):
+        return call(lambda: hub().bindings(scope))
+
+    @router.post("/v1/ports/bindings", dependencies=[Depends(auth)])
+    def set_binding(body: dict[str, Any]):
+        b = body_of(body, "scope", "port", "plugins")
+        return call(lambda: hub().set_binding(b["scope"], b["port"], b["plugins"]))
+
+    @router.get("/v1/ports/resolve", dependencies=[Depends(auth)])
+    def resolve(routine: str = Query(default="", max_length=60), app: str = Query(default="", max_length=120)):
+        return call(lambda: hub().resolve(routine, app))
 
     return router
