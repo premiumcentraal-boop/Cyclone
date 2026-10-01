@@ -45,6 +45,7 @@ Development with hot reload: `npm run dev` (Vite on `127.0.0.1:5178`, proxying `
 | **Knowledge** | Vault slots as set / not set, **Never pressed** (guarded doors per app, Show on the map), skills, automations, Atlas totals |
 | **Phone** | Live view, take control, tap / type / scroll, Ask (a finished Ask links to its run), You are here |
 | **Settings** | Connection, phones, Safety rules, keyboard shortcuts |
+| **Command Center → Ports** | Plugins plugged into Cyclone runs (plan 48): add one by its address, allow each port with a switch, give it its key (shown once), watch it pass the contract's checks; then health, a test message, pause, new key, remove; the port catalog and who serves each port; recent activity (metadata only) |
 
 Keyboard: `g` then `h` `d` `a` `r` `k` `p` `s` jumps to a page; `/` focuses search.
 

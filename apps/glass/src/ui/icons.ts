@@ -35,6 +35,16 @@ const PATHS = {
   clock: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 7v5l3 2"],
   bag: ["M5 8h14l-1 12H6z", "M9 8a3 3 0 0 1 6 0"],
   star: ["M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"],
+  // Plan 48 (Ports): a hub with four links, the two directions, keys, checks.
+  port: ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M12 3v6M12 15v6M3 12h6M15 12h6", "M12 3h.01M12 21h.01M3 12h.01M21 12h.01"],
+  out: ["M7 17L17 7", "M9 7h8v8"],
+  in: ["M17 7L7 17", "M15 17H7V9"],
+  key: ["M8 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M11.5 11H21M18 11v3M15 11v2"],
+  check: ["M5 12.5l4.5 4.5L19 7.5"],
+  copy: ["M9 9h11v11H9z", "M5 15H4V4h11v1"],
+  pulse: ["M3 12h4l2-6 4 12 2-6h6"],
+  trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13"],
+  plus: ["M12 5v14M5 12h14"],
 } as const;
 
 export type IconName = keyof typeof PATHS;

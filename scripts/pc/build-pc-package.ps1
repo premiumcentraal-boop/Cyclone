@@ -25,7 +25,7 @@ if (-not (Test-Path $Python)) { python -m venv $Venv }
 & $Python (Join-Path $Repo 'scripts\pc-companion\prepare-scrcpy-server.py') --repo $Repo
 & $Python (Join-Path $Repo 'scripts\pc-companion\prepare-android-platform-tools.py') --repo $Repo
 & $Python -m pip install --disable-pip-version-check "pyinstaller==$($Lock.pyinstaller)"
-& $Python -m pip install --disable-pip-version-check (Join-Path $Repo 'apps\device-gateway') (Join-Path $Repo 'tools\cyclone-agent-mcp') (Join-Path $Repo 'tools\codex-phone-mcp')
+& $Python -m pip install --disable-pip-version-check (Join-Path $Repo 'apps\device-gateway') (Join-Path $Repo 'tools\cyclone-agent-mcp') (Join-Path $Repo 'tools\codex-phone-mcp') (Join-Path $Repo 'tools\cyclone-ports-sdk')
 & $Python (Join-Path $Repo 'scripts\pc-companion\prepare-live-bridge.py')
 
 # Glass ships inside the runtime; the gateway serves it at /glass/.
@@ -130,7 +130,10 @@ try {
         $welcome = Invoke-RestMethod -Headers @{ Authorization = "Bearer $token" } 'http://127.0.0.1:8799/v1/pc/welcome'
         if ($welcome.seen -ne $false) { throw "The /v1/pc routes did not answer as expected: $($welcome | ConvertTo-Json -Compress)" }
         try { Invoke-RestMethod 'http://127.0.0.1:8799/v1/pc/tunnel'; throw 'The /v1/pc routes answered without the bearer.' } catch { if ($_.Exception.Message -like '*answered without*') { throw } }
-        Write-Host 'The installed runtime serves Glass and the authenticated /v1/pc routes.'
+        # Plan 48: the Port Hub ships with the kit it imports; a missing kit answers 503 and fails the build here.
+        $ports = Invoke-RestMethod -Headers @{ Authorization = "Bearer $token" } 'http://127.0.0.1:8799/v1/ports/overview'
+        if ($ports.contract -ne 'cyclone.ports/1' -or @($ports.catalog).Count -lt 12) { throw "The Port Hub did not answer as expected: $($ports | ConvertTo-Json -Compress -Depth 3)" }
+        Write-Host 'The installed runtime serves Glass, the authenticated /v1/pc routes and the Port Hub.'
     } finally {
         Stop-Process -Id $runtime.Id -Force -ErrorAction SilentlyContinue
         Get-Process adb -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Scratch*" } | Stop-Process -Force -ErrorAction SilentlyContinue

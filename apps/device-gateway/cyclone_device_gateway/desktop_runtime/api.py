@@ -213,6 +213,12 @@ class DesktopRuntime:
         # Plan 33 (C0): the Command Center's accounts, tasks, routines, results and approvals, in one local SQLite file.
         from ..command.center import CommandCenter
         self.command = CommandCenter(settings.runtime_dir / "command" / "command.db", share_contract, self.fleet.list_public)
+        # Plan 48: the Port Hub (Cyclone Ports). Absent only when the ports kit isn't installed.
+        from ..ports.hub import PortHub
+        try:
+            self.ports: PortHub | None = PortHub(settings.runtime_dir / "ports")
+        except RuntimeError:
+            self.ports = None
         self.lan_share = LanShareDirectory(
             status=share_contract.share_status,
             trust_record=self.trust.store.record,
@@ -256,6 +262,8 @@ class DesktopRuntime:
         self.live_diagnostics.start()
         self.trust.start()
         self.command.start()
+        if self.ports is not None:
+            self.ports.start()
         self.care.start()
         self.medic.start()
         self.cloud.start()
@@ -265,6 +273,8 @@ class DesktopRuntime:
         self.medic.stop()
         self.care.stop()
         self.command.stop()
+        if self.ports is not None:
+            self.ports.stop()
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
         self.trust.stop()
         self.live_diagnostics.stop()
@@ -826,6 +836,8 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     from ..command.api import create_command_router, create_oauth_callback_router
     app.include_router(create_command_router(desktop, settings.token))
     app.include_router(create_oauth_callback_router(desktop))
+    from ..ports.api import create_ports_router
+    app.include_router(create_ports_router(desktop, settings.token))
     # Alpha 87: phone care (update the phone's Cyclone, why it stopped). Test doubles without it skip the routes.
     if getattr(desktop, "care", None) is not None:
         from ..phone_care.api import create_phone_care_router

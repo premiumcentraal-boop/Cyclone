@@ -75,10 +75,11 @@ cd apps/mobile
 For PC gateway/MCP changes:
 
 ```bash
-python -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp
+python -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp -e tools/cyclone-ports-sdk
 python -m pytest apps/device-gateway/tests -q
 python -m unittest discover -s tools/codex-phone-mcp/tests -v
 python -m pytest scripts/ci/tests/test_pc_web_only.py -q
+python -m pytest tools/cyclone-ports-sdk/tests -q   # Cyclone Ports kit; the gateway's Port Hub imports it
 ```
 
 For Cyclone Glass changes:

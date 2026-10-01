@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -73,8 +74,10 @@ def _headers(secret: str, path: str, raw: bytes, t: int | None = None, request_i
 
 def _signed(endpoint: str, path: str, secret: str, body: dict[str, Any], t: int | None = None,
             sign_path: str | None = None) -> tuple[int, Any]:
+    """Signs the full request path, including any path prefix in the plugin's endpoint."""
     raw = json.dumps(body).encode()
-    return _request(endpoint + path, raw, _headers(secret, sign_path or path, raw, t))
+    prefix = urllib.parse.urlsplit(endpoint).path
+    return _request(endpoint + path, raw, _headers(secret, prefix + (sign_path or path), raw, t))
 
 
 def check_plugin(endpoint: str, secret: str) -> list[Check]:
@@ -96,6 +99,7 @@ def check_plugin(endpoint: str, secret: str) -> list[Check]:
     first, first_way = next(iter(served.items()))
     probe_path = f"/ports/{first}" + ("/await" if first_way == "in" else "")
     probe = json.dumps({"v": 1}).encode()
+    prefix = urllib.parse.urlsplit(endpoint).path
     status, body = _request(endpoint + probe_path, probe, {"Content-Type": "application/json"})
     checks.append(Check("refuses an unsigned request (401)", status == 401, f"HTTP {status}"))
     checks.append(Check("errors use {error: {code, message, retryable}}",
@@ -112,7 +116,7 @@ def check_plugin(endpoint: str, secret: str) -> list[Check]:
     status, _ = _signed(endpoint, f"/ports/{unserved}", secret, {"v": 1, "port": unserved})
     checks.append(Check("answers 404 for a port it does not serve", status == 404, f"{unserved}: HTTP {status}"))
 
-    hub = DevHub(secret).start()
+    hub = DevHub(secret, quiet=True).start()
     try:
         for port, way in served.items():
             spec = port_spec(port, way)
@@ -136,7 +140,7 @@ def check_plugin(endpoint: str, secret: str) -> list[Check]:
                 raw = json.dumps(hub.envelope(SAMPLE_RUN, port, {"stage": "started"} if port == "run.event" else {})
                                  | ({"artifactUrl": hub.artifact(b"x", "image/png")}
                                     if port in ("screen.shot", "file.out") else {})).encode()
-                headers = _headers(secret, f"/ports/{port}", raw)
+                headers = _headers(secret, f"{prefix}/ports/{port}", raw)
                 first_status, _ = _request(f"{endpoint}/ports/{port}", raw, headers)
                 status, _ = _request(f"{endpoint}/ports/{port}", raw, headers)
                 checks.append(Check(f"{port}: refuses a replayed request (401)", 200 <= first_status < 300
