@@ -12,6 +12,7 @@ Sensitivity decides what may reach a plugin:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 CONTRACT = "cyclone.ports/1"
@@ -55,6 +56,32 @@ LIMITS = {
     "await_timeout_max_s": 600,
     "signature_skew_s": 300,
 }
+
+
+# Extension ports: ``x.<plugin>.<name>``. They let a plugin add its own data point without a contract change. They
+# are always personal, carry value-shaped data only (an object out, a JSON value in), and never codes or secrets.
+EXTENSION = re.compile(r"^x\.[a-z][a-z0-9-]{1,40}\.[a-z][a-z0-9-]{0,40}$")
+
+# Manifest ``features`` the hub knows. Unknown features are ignored, so plugins can declare future ones safely.
+FEATURES = {
+    "idempotent-delivery": "the plugin sends deliveryId and retries (the SDK does this)",
+    "pull": "reserved: the plugin long-polls the hub instead of receiving pushes (plugins behind NAT), P5",
+    "upload": "reserved: file.in through an upload URL instead of base64, P5",
+    "mcp": "reserved: served as an MCP server with cyclone_port_wait, P5",
+}
+
+
+def is_extension(name: str) -> bool:
+    return isinstance(name, str) and bool(EXTENSION.match(name))
+
+
+def port_spec(name: str, way: str | None = None) -> Port | None:
+    """The catalog entry, or an extension port's spec (its way comes from the manifest), or None."""
+    if name in CATALOG:
+        return CATALOG[name]
+    if is_extension(name) and way in ("out", "in"):
+        return Port(name, way, "personal", True, "Extension port declared by a plugin.")
+    return None
 
 
 def plugin_ports() -> list[str]:

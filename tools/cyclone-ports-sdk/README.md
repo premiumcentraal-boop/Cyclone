@@ -78,6 +78,22 @@ Answer fast: `on_out` and `on_await` run on the request thread, so start a threa
 Test it: `python -m cyclone_ports.conformance http://127.0.0.1:8780`, then write a scenario like the ones in
 `scenarios/` and play it with the Dev Hub.
 
+## Built to keep working as Ports grows
+
+- **Secrets and rotation:** the hub shows the plugin secret as `k<N>.<secret>`. Put it in `CYCLONE_PLUGIN_SECRET`.
+  During a rotation, put the new key in `CYCLONE_PLUGIN_SECRET_NEXT`; `PluginServer` accepts both.
+- **Tolerant reading:** `PluginServer` checks structure only, so new stages, fields and match keys never break a
+  plugin. De-duplicate on the envelope `id`, and treat a repeated `awaitId` as the same wait.
+- **Safe retries:** `deliver()` adds a `deliveryId` and retries 429, 5xx and network errors. The hub answers a repeat
+  with `200 duplicate`.
+- **Your own data points:** extension ports `x.<plugin>.<name>` (SPEC §2.1). Optional capabilities go in `features`.
+- **Other languages:**
+  - `js/verify.mjs` checks signatures in Node;
+  - `schemas/signature-vectors.json` lets any language prove its signature check;
+  - `schemas/*.schema.json` describe every message.
+- Design review and confidence: `Cyclone V5 plan/47-run-ports-review.md`. To hand the work to an agent, send it
+  `Cyclone V5 plan/HANDOFF-build-a-connector.md`.
+
 ## Scenario format
 
 ```json
@@ -99,6 +115,8 @@ handing over to the owner.
 ```bash
 python -m pytest tools/cyclone-ports-sdk/tests -q
 ```
+
+CI (`pc-companion-ci.yml`) runs these tests on every pull request that touches the gateway or this kit.
 
 ## Status
 

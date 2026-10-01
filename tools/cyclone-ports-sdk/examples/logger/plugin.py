@@ -26,15 +26,26 @@ def build(secret: str, out_dir: str | os.PathLike, host: str = "127.0.0.1", port
     server = PluginServer(dict(MANIFEST), secret, host, port)
     server.manifest["endpoint"] = server.url
     lock = threading.Lock()
+    seen: dict[str, None] = {}  # envelope ids, newest last: the hub may retry a send
 
     def on_out(port_name: str, envelope: dict) -> None:
+        with lock:
+            if envelope["id"] in seen:
+                return
+            seen[envelope["id"]] = None
+            while len(seen) > 5000:
+                seen.pop(next(iter(seen)))
         record = dict(envelope)
         url = record.pop("artifactUrl", None)  # one-time links are useless once fetched; don't keep them
         if url:
-            ext = ".png" if envelope["data"].get("mime", "image/png") == "image/png" else ".bin"
-            path = out / "artifacts" / f"{envelope['runId']}-{envelope['seq']:04d}-{port_name}{ext}"
-            path.write_bytes(fetch_artifact(url))
-            record["savedAs"] = path.name
+            data = envelope.get("data") or {}
+            ext = ".png" if data.get("mime", "image/png") == "image/png" else ".bin"
+            path = out / "artifacts" / f"{envelope['runId']}-{int(envelope.get('seq', 0)):04d}-{port_name}{ext}"
+            try:
+                path.write_bytes(fetch_artifact(url))
+                record["savedAs"] = path.name
+            except OSError as error:  # expired or already used: keep the event, note the miss
+                record["artifactError"] = type(error).__name__
         with lock, (out / "runs.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
 

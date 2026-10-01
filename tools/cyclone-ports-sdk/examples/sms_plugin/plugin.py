@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cyclone_ports import PluginServer, deliver  # noqa: E402
+from cyclone_ports import PluginServer, deliver, error_body  # noqa: E402
 
 MANIFEST = json.loads((Path(__file__).parent / "cyclone-plugin.json").read_text(encoding="utf-8"))
 WINDOW_S = 180          # a text older than this is never used
@@ -100,17 +100,18 @@ def build(secret: str, source: str, forwarder_token: str, host: str = "127.0.0.1
     def on_sms(body: dict | None, headers: dict) -> tuple[int, dict]:
         given = headers.get("X-Forwarder-Token") or headers.get("x-forwarder-token") or ""
         if not forwarder_token or not hmac.compare_digest(given, forwarder_token):
-            return 401, {"error": "bad_token"}
+            return 401, error_body("bad_token")
         if not isinstance(body, dict) or not isinstance(body.get("text"), str):
-            return 400, {"error": "text is required"}
+            return 400, error_body("bad_request", "text is required")
         with lock:
             texts.append(Text(str(body.get("from", "")), body["text"][:1000], time.time()))
         threading.Thread(target=try_match, daemon=True).start()
         return 202, {"queued": True}
 
     def on_await(port_name: str, request: dict) -> None:
-        with lock:
-            waiting[request["awaitId"]] = Waiting(request, time.time())
+        with lock:  # the hub may send the same awaitId again: keep the first wait's start time
+            if request["awaitId"] not in waiting:
+                waiting[request["awaitId"]] = Waiting(request, time.time())
         threading.Thread(target=try_match, daemon=True).start()
 
     def on_cancel(port_name: str, request: dict) -> None:

@@ -38,6 +38,8 @@ def build(secret: str, folder: str | os.PathLike, host: str = "127.0.0.1", port:
     server = PluginServer(dict(MANIFEST), secret, host, port)
     server.manifest["endpoint"] = server.url
     cancelled: set[str] = set()
+    active: set[str] = set()
+    lock = threading.Lock()
 
     def send_when_ready(request: dict) -> None:
         deadline = time.time() + float(request.get("timeoutS", 60))
@@ -53,6 +55,10 @@ def build(secret: str, folder: str | os.PathLike, host: str = "127.0.0.1", port:
             time.sleep(POLL_S)
 
     def on_await(port_name: str, request: dict) -> None:
+        with lock:  # the hub may send the same awaitId again: one sender per wait
+            if request["awaitId"] in active:
+                return
+            active.add(request["awaitId"])
         threading.Thread(target=send_when_ready, args=(request,), daemon=True).start()
 
     server.on_await = on_await
