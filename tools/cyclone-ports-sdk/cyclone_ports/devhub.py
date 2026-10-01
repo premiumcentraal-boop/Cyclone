@@ -79,8 +79,10 @@ class Artifact:
 
 class DevHub:
     def __init__(self, secret: str, host: str = "127.0.0.1", port: int = 0, sources: list[str] | None = None,
-                 run_dir: str | os.PathLike | None = None, log_path: str | os.PathLike | None = None):
+                 run_dir: str | os.PathLike | None = None, log_path: str | os.PathLike | None = None,
+                 quiet: bool = False):
         self.secret = secret
+        self.quiet = quiet
         self.sources = set(sources or [])
         self.run_dir = Path(run_dir) if run_dir else None
         self.log_path = Path(log_path) if log_path else None
@@ -369,7 +371,8 @@ class DevHub:
                 self.log_path.parent.mkdir(parents=True, exist_ok=True)
                 with self.log_path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(entry) + "\n")
-        print("hub:", json.dumps(entry), file=sys.stderr, flush=True)
+        if not self.quiet:
+            print("hub:", json.dumps(entry), file=sys.stderr, flush=True)
 
     # ---- scenarios ---------------------------------------------------------------------------------------------------
 

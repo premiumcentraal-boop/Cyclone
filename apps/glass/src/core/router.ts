@@ -5,7 +5,7 @@ const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios",
 export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts" | "vault" | "connections";
 const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts", "vault", "connections"];
 /** Plan 33 (C5): the workspace's own screens: its home, one page, and the trash. */
-export type WorkspaceTab = "home" | "page" | "trash" | "ai";
+export type WorkspaceTab = "home" | "page" | "trash" | "ai" | "ports";
 const PAGE_ID = /^pg_[A-Za-z0-9_-]{8,40}$/;
 
 export type Route =
@@ -66,6 +66,7 @@ export function parseRoute(hash: string): Route {
     }
     if (parts[1] === "trash") return { name: "command", tab: "trash" };
     if (parts[1] === "ai") return { name: "command", tab: "ai" };
+    if (parts[1] === "ports") return { name: "command", tab: "ports" };
     const tab = COMMAND_TABS.includes(parts[1] as CommandTab) ? (parts[1] as CommandTab) : "home";
     return { name: "command", tab };
   }

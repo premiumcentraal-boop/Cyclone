@@ -14,7 +14,7 @@ if not (glass_dist / "index.html").is_file():
     raise SystemExit("Cyclone Glass is not built: run `npm ci && npm run build` in apps/glass (build-sidecars.ps1 does this).")
 a = Analysis(
     [str(entrypoints / "pc_runtime.py")],
-    pathex=[str(repo / "tools" / "codex-phone-mcp"), str(repo / "apps" / "device-gateway"), str(entrypoints)],
+    pathex=[str(repo / "tools" / "codex-phone-mcp"), str(repo / "apps" / "device-gateway"), str(repo / "tools" / "cyclone-ports-sdk"), str(entrypoints)],
     binaries=[],
     datas=[
         (str(scrcpy / "scrcpy-server-v4.0"), "third_party/scrcpy"),
@@ -38,6 +38,9 @@ a = Analysis(
                    # Plan 31: Remote MCP, ChatGPT Attach and share, served to Glass (imported inside build_serve_app).
                    "cyclone_device_gateway.pc.api", "cyclone_device_gateway.pc.common", "cyclone_device_gateway.pc.tunnel",
                    "cyclone_device_gateway.pc.attach", "cyclone_device_gateway.pc.share",
+                   # Plan 48: the Port Hub and the Cyclone Ports kit it imports (the checker is imported when it runs).
+                   "cyclone_device_gateway.ports.api", "cyclone_device_gateway.ports.hub", "cyclone_device_gateway.ports.store",
+                   "cyclone_ports", "cyclone_ports.catalog", "cyclone_ports.sdk", "cyclone_ports.devhub", "cyclone_ports.conformance",
                    # Plan 33: the Command Center (some modules are imported inside CommandCenter.__init__).
                    "cyclone_device_gateway.command.api", "cyclone_device_gateway.command.center", "cyclone_device_gateway.command.schedule",
                    "cyclone_device_gateway.command.vault", "cyclone_device_gateway.command.delivery",

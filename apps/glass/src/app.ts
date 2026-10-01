@@ -22,6 +22,7 @@ import { createMarketPage } from "./pages/marketPage.js";
 import { createRemotePage } from "./pages/remotePage.js";
 import { createAttachPage } from "./pages/attachPage.js";
 import { createCommandPage } from "./pages/commandPage.js";
+import { createPortsPage } from "./pages/portsPage.js";
 import { welcome } from "./services/pc.js";
 import { createWelcomeCard } from "./ui/welcomeCard.js";
 import { commandLogo, cycloneLogo } from "./ui/logos.js";
@@ -69,6 +70,7 @@ const PAGES: Record<Route["name"], PageFactory> = {
     if (r.tab === "page" && r.pageId) return createPageView(ctx, r.pageId);
     if (r.tab === "trash") return createTrashPage(ctx);
     if (r.tab === "ai") return createAiSettings(ctx);
+    if (r.tab === "ports") return createPortsPage(ctx);
     if (isCommandTab(r.tab)) return createCommandPage(ctx, r.tab, { workspace: true });
     return createWorkspaceHome(ctx);
   },

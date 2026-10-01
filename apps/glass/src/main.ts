@@ -16,6 +16,7 @@ import "./styles/command.css";
 import "./styles/workspace.css";
 import "./styles/tables.css";
 import "./styles/ai.css";
+import "./styles/ports.css";
 import { GlassApp } from "./app.js";
 import { establishSession, forgetSession } from "./core/session.js";
 import { GatewayClient } from "./services/gateway.js";
