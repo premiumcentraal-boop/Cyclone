@@ -722,7 +722,8 @@ object MindMissions {
                 onTurn = { turn -> save { it.copy(turns = turn) } }) { event -> save { it.withEvent(event) } }))
             val loop = MindLoop(primary, backup, toolbox, budget, listener, cancelled = { run.stopRequested },
                 ownerMessages = { drainOwnerMessages(run) }, nativeTools = native, workspace = workspace,
-                ownerSteers = { buildList { while (true) add(run.steers.poll() ?: break) } }, paused = { run.paused })
+                ownerSteers = { buildList { while (true) add(run.steers.poll() ?: break) } }, paused = { run.paused },
+                goalMet = PhoneSettingReader.checkFor(context, run.mission.goal))
             outcome = loop.run(conversation, resume?.checkpoint())
             val result = outcome
             save {

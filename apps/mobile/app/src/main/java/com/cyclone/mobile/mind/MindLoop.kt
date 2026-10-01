@@ -74,7 +74,13 @@ class MindLoop(
     private val ownerSteers: () -> List<String> = { emptyList() },
     /** Plan 38: the owner paused the mission; it holds before its next step, and the pause is not working time. */
     private val paused: () -> Boolean = { false },
+    /**
+     * Alpha 92: for a goal that is only phone settings, what the phone reads when they all hold (else null). Asked
+     * before each turn; the first time it holds, the model is told to finish.
+     */
+    private val goalMet: () -> String? = { null },
 ) {
+    private var goalNoted = false
     private var model: MindModel = primary
     private var usingBackup = false
     private var native = nativeTools
@@ -127,6 +133,11 @@ class MindLoop(
                 conversation.add(MindMessage.User(MindPrompt.steered(text, version.coerceAtLeast(2))))
                 listener.onNotice(turn, "Owner changed the task: ${text.take(160)}")
                 silentTurns = 0
+            }
+            if (!goalNoted) runCatching { goalMet() }.getOrNull()?.let { met ->
+                goalNoted = true
+                conversation.add(MindMessage.User(MindPrompt.goalMet(met), origin = MindMessage.User.Origin.HARNESS))
+                listener.onNotice(turn, "The phone shows the goal is met: ${met.take(160)}")
             }
             ownerMessages().filter(String::isNotBlank).forEach {
                 conversation.add(MindMessage.User(MindPrompt.ownerMessage(it)))
