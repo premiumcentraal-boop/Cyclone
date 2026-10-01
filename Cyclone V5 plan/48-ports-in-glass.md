@@ -1,7 +1,7 @@
 # Plan 48: Cyclone Ports in Glass, the Port Hub and its dashboard
 
-Date: 2026-10-01. **Run 1: built, released in alpha.96.** **Run 2: built** (bindings per port everywhere / per routine / per
-app, conflicts, the Port map). Builds on plans 45 (Run Ports), 46 (Skill Studio) and 47 (review), and on the kit in
+Date: 2026-10-01. **Run 1: built, released in alpha.96.** **Run 2: built, released in alpha.97.** **Run 3: built**
+(live traffic, waits that survive restarts, the Activity view and test runs). Builds on plans 45 (Run Ports), 46 (Skill Studio) and 47 (review), and on the kit in
 `tools/cyclone-ports-sdk`. Goal: the real Port Hub in the gateway, and a Ports dashboard in Glass that an admin feels
 at home in, built in runs. Each run ships something whole and tested, with nothing half-done.
 
@@ -113,4 +113,42 @@ Endpoint rules:
   - its plugins (checkboxes for out, radios for in);
   - Off.
 - **The Plugins view** lists conflicts under "Needs you" with a link to the map.
+
+## 6. Run 3 detail (built)
+
+**Gateway** (`ports/traffic.py`):
+- **Out ports:**
+  - a run's message follows the Port map for its routine and app;
+  - one envelope with a unique `id`, sent to each routed plugin;
+  - screenshots and files go as one-time artifact links (`GET /v1/ports/artifacts/{id}?t=`, 120 s);
+  - 3 attempts with backoff; a failure is logged and never blocks the run.
+- **In ports:**
+  - a wait goes to the one routed plugin. Empty, conflict, off and unavailable come back as reasons and never pick a
+    plugin;
+  - the request is saved, and its port token is sealed like the keys. A restart re-sends the same `awaitId` and token;
+    expired waits time out and the plugin gets `/cancel`;
+  - plugins answer at `POST /v1/ports/{runId}/{port}/deliver` with the run's port token, using the contract's status
+    codes. A repeat with the same `deliveryId` gets 200 again; another delivery to an answered wait gets 409;
+  - a delivered code, value or link stays in memory (5 minutes) until the run takes it. A code is taken once
+    (`take_code`, for run 4's sealed delivery) and never written anywhere. A file is saved in the run's folder.
+- **Run-side routes** (bearer): `/v1/ports/runs/{runId}/emit`, `/await`, `/v1/ports/waits/{id}` (long-poll),
+  `/cancel`. Run 4 connects the phone to them.
+- **Activity:** `/v1/ports/activity` (filters: plugin, port, outcome), `/v1/ports/runs`, `/v1/ports/runs/{id}`.
+- **Test runs:** `/v1/ports/test-runs` plays a fixed scenario through the real hub and plugins:
+  - run events;
+  - sign-up with a code;
+  - an image from the PC;
+  - a value.
+
+  Test details only. A code that arrives in a test run is dropped at once.
+
+**Glass** (`#/command/ports/activity`):
+- filters;
+- test-run cards with a live step track;
+- runs that open into their lane;
+- the full log;
+- a Test run sheet with scenario cards, an optional app's Port map choices, and live steps, with hints while
+  waiting.
+
+The per-run lane on the Run page waits for run 4, when phone runs use ports.
 

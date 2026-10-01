@@ -15,13 +15,14 @@ import { relativeTime } from "../ui/format.js";
 import { STARTERS, portAbout, portLabel, ports, statusInfo, type CatalogPort, type Overview, type Plugin } from "../services/ports.js";
 import type { GlassPage } from "./page.js";
 import { openAddPlugin } from "./portsAdd.js";
+import { createPortsActivity } from "./portsActivity.js";
 import { createPortMap } from "./portsMap.js";
 import { feedRow, openPluginSheet, type PluginSheet } from "./portsPlugin.js";
 import { primary, secondary, sensitivityChip, statusPill, tile, wayGlyph } from "./portsUi.js";
 
 const POLL_MS = 5_000;
 
-export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" = "plugins"): GlassPage {
+export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" | "activity" = "plugins"): GlassPage {
   const element = el("div", "page page-ports");
   const header = el("header", "pt-page-head");
   const titles = el("div", "pt-page-titles");
@@ -34,9 +35,9 @@ export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" = "pl
   header.append(titles, add);
   const tabs = el("nav", "pt-tabs");
   tabs.setAttribute("aria-label", "Ports views");
-  for (const [id, label, glyph] of [["plugins", "Plugins", "plug"], ["map", "Port map", "port"]] as const) {
+  for (const [id, label, glyph] of [["plugins", "Plugins", "plug"], ["map", "Port map", "port"], ["activity", "Activity", "pulse"]] as const) {
     const tab = el("a", `pt-tab${id === view ? " active" : ""}`);
-    tab.href = id === "map" ? "#/command/ports/map" : "#/command/ports";
+    tab.href = id === "plugins" ? "#/command/ports" : `#/command/ports/${id}`;
     if (id === view) tab.setAttribute("aria-current", "page");
     tab.append(icon(glyph), el("span", undefined, label));
     tabs.append(tab);
@@ -51,7 +52,8 @@ export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" = "pl
     note.textContent = text;
     note.classList.toggle("pt-note-error", tone === "error");
   };
-  const map = view === "map" ? createPortMap(ctx, say, () => openAdd()) : null;
+  const map = view === "map" ? createPortMap(ctx, say, () => openAdd())
+    : view === "activity" ? createPortsActivity(ctx, element, say) : null;
   if (map) setChildren(body, map.element);
 
   let data: Overview | null = null;

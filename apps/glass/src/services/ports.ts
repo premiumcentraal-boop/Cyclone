@@ -117,6 +117,47 @@ export interface BindingsView {
   plugins: Array<{ name: string; title: string; status: PluginStatus }>;
 }
 
+/** A run that used a port (run 3), from the activity log. */
+export interface PortRun {
+  runId: string;
+  firstAt: number;
+  lastAt: number;
+  messages: number;
+  failures: number;
+}
+
+export interface PortWait {
+  awaitId: string;
+  port: string;
+  plugin: string;
+  state: "waiting" | "delivered" | "timed_out" | "cancelled" | "failed";
+  timeoutAt: number;
+  createdAt: number;
+  result: Record<string, unknown> | null;
+}
+
+export type StepState = "next" | "now" | "ok" | "bad" | "skipped";
+
+/** A test run the owner started from Glass: a fixed scenario played through the real hub. */
+export interface TestRun {
+  runId: string;
+  scenario: string;
+  title: string;
+  state: "running" | "done" | "needs_you" | "stopped";
+  routine: string | null;
+  app: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+  steps: Array<{ kind: "emit" | "await"; port: string; state: StepState; detail: string; label: string }>;
+}
+
+export const TEST_SCENARIOS: Array<{ id: string; title: string; about: string; ports: string[] }> = [
+  { id: "events", title: "Run events", about: "A run starts, writes a note and finishes. Every plugin on those ports gets them.", ports: ["run.event", "log.line"] },
+  { id: "signup", title: "Sign-up with a code", about: "Test details and a screenshot go out, then the run waits for a verification code.", ports: ["run.event", "account.fields", "screen.shot", "log.line", "code.in"] },
+  { id: "image", title: "An image from the PC", about: "The run waits for an image, like a profile photo.", ports: ["run.event", "file.in", "log.line"] },
+  { id: "value", title: "A value from a plugin", about: "The run waits for a value, like a caption.", ports: ["run.event", "value.in"] },
+];
+
 export interface Overview {
   contract: string;
   keysPersistent: boolean;
@@ -262,6 +303,39 @@ export function parseBindings(raw: unknown): BindingsView {
   };
 }
 
+const WAIT_STATES = ["waiting", "delivered", "timed_out", "cancelled", "failed"] as const;
+const STEP_STATES: StepState[] = ["next", "now", "ok", "bad", "skipped"];
+const TEST_STATES = ["running", "done", "needs_you", "stopped"] as const;
+
+export function parseRun(raw: unknown): PortRun {
+  const o = obj(raw);
+  return { runId: str(o.runId), firstAt: num(o.firstAt) ?? 0, lastAt: num(o.lastAt) ?? 0, messages: num(o.messages) ?? 0, failures: num(o.failures) ?? 0 };
+}
+
+export function parseWait(raw: unknown): PortWait {
+  const o = obj(raw);
+  return {
+    awaitId: str(o.awaitId), port: str(o.port), plugin: str(o.plugin),
+    state: (WAIT_STATES as readonly string[]).includes(o.state as string) ? (o.state as PortWait["state"]) : "failed",
+    timeoutAt: num(o.timeoutAt) ?? 0, createdAt: num(o.createdAt) ?? 0, result: o.result == null ? null : obj(o.result),
+  };
+}
+
+export function parseTestRun(raw: unknown): TestRun {
+  const o = obj(raw);
+  return {
+    runId: str(o.runId), scenario: str(o.scenario), title: str(o.title) || str(o.scenario),
+    state: (TEST_STATES as readonly string[]).includes(o.state as string) ? (o.state as TestRun["state"]) : "running",
+    routine: str(o.routine) || null, app: str(o.app) || null, startedAt: num(o.startedAt) ?? 0, finishedAt: num(o.finishedAt),
+    steps: arr(o.steps).map((s) => {
+      const x = obj(s);
+      return { kind: x.kind === "await" ? "await" : "emit", port: str(x.port),
+        state: STEP_STATES.includes(x.state as StepState) ? (x.state as StepState) : "next", detail: str(x.detail),
+        label: str(x.label) };
+    }) as TestRun["steps"],
+  };
+}
+
 function parseKey(raw: unknown): KeyCard {
   const o = obj(raw);
   return { value: str(o.value), powershell: str(o.powershell), bash: str(o.bash), cmd: str(o.cmd) };
@@ -322,6 +396,29 @@ export const ports = {
   },
   async remove(client: GatewayClient, name: string): Promise<void> {
     await client.post(path(name, "/delete"));
+  },
+  async runs(client: GatewayClient): Promise<{ runs: PortRun[]; testRuns: TestRun[] }> {
+    const o = obj(await client.get("/v1/ports/runs"));
+    return { runs: arr(o.runs).map(parseRun).filter((r) => r.runId), testRuns: arr(o.testRuns).map(parseTestRun).filter((r) => r.runId) };
+  },
+  async run(client: GatewayClient, runId: string): Promise<{ activity: Activity[]; waits: PortWait[] }> {
+    const o = obj(await client.get(`/v1/ports/runs/${encodeURIComponent(runId)}`));
+    return { activity: arr(o.activity).map(parseActivity), waits: arr(o.waits).map(parseWait) };
+  },
+  async activity(client: GatewayClient, filter: { plugin?: string; port?: string; status?: "" | "ok" | "failed" } = {}): Promise<Activity[]> {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(filter)) if (v) query.set(k, v);
+    query.set("limit", "150");
+    return arr(obj(await client.get(`/v1/ports/activity?${query}`)).activity).map(parseActivity);
+  },
+  async startTestRun(client: GatewayClient, scenario: string, scope: { routine?: string; app?: string } = {}): Promise<TestRun> {
+    return parseTestRun(await client.post("/v1/ports/test-runs", { scenario, ...scope }));
+  },
+  async testRun(client: GatewayClient, runId: string): Promise<TestRun> {
+    return parseTestRun(await client.get(`/v1/ports/test-runs/${encodeURIComponent(runId)}`));
+  },
+  async stopTestRun(client: GatewayClient, runId: string): Promise<TestRun> {
+    return parseTestRun(await client.post(`/v1/ports/test-runs/${encodeURIComponent(runId)}/stop`));
   },
   async bindings(client: GatewayClient, scope = "default"): Promise<BindingsView> {
     return parseBindings(await client.get(`/v1/ports/bindings?scope=${encodeURIComponent(scope)}`));
@@ -451,8 +548,13 @@ export function activityText(a: Activity): string {
     case "approved": return "Change approved";
     case "version": return `Updated: ${a.detail}`;
     case "health": return a.ok ? "Answering again" : `Stopped answering: ${a.detail}`;
-    case "emit": return (a.ok ? "Delivered" : "Not delivered") + port;
+    case "emit": return a.plugin === "ports" ? `Not sent${port}: ${a.detail}` : (a.ok ? "Delivered" : "Not delivered") + port + (a.ok || !a.detail ? "" : `: ${a.detail}`);
     case "binding": return `${a.port ? portLabel(a.port) : "A port"}: ${a.detail}`;
+    case "await": return (a.ok ? "Asked" : "Couldn't ask") + port + (a.ok ? "" : `: ${a.detail}`);
+    case "deliver": return `Answered${port}: ${a.detail}`;
+    case "timeout": return `Nothing came${port}`;
+    case "cancel": return `Wait cancelled${port}`;
+    case "run": return a.detail.charAt(0).toUpperCase() + a.detail.slice(1);
     default: return a.detail || a.kind;
   }
 }

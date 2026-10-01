@@ -289,3 +289,62 @@ test("the Plugins view lists port conflicts under Needs you", async () => {
   assert.ok(byLabel(page.element, "Open the port map"));
   page.destroy();
 });
+
+// ---- run 3: Activity, run lanes and test runs ------------------------------------------------------------------------
+
+const TEST_RUN = (state, codeStep) => ({
+  runId: "run_test_ab12cd34", scenario: "signup", title: "Sign-up with a code", state, routine: null, app: null, startedAt: Date.now(),
+  steps: [
+    { kind: "emit", port: "run.event", state: "ok", detail: "to Run logger", label: "Send “started”" },
+    { kind: "await", port: "code.in", state: codeStep, detail: codeStep === "ok" ? "a 6-character code from my-phone; would be sealed to the phone" : "waiting on SMS codes", label: "Wait for a verification code" },
+  ],
+});
+
+test("Activity: filters, run lanes, and a test run watched to the end", async () => {
+  installMiniDom();
+  assert.deepEqual(parseRoute("#/command/ports/activity"), { name: "command", tab: "ports", view: "activity" });
+  let polls = 0;
+  const gw = fakeGateway({
+    "GET /v1/ports/overview": () => overview([LOGGER]),
+    "GET /v1/ports/runs": () => ({ runs: [{ runId: "run_test_ab12cd34", firstAt: Date.now(), lastAt: Date.now(), messages: 3, failures: 1 }], testRuns: [] }),
+    "GET /v1/ports/activity": ({ query }) => ({ activity: query.status === "failed" ? [] : [
+      { id: 2, at: Date.now(), plugin: "run-logger", kind: "emit", port: "run.event", runId: "run_test_ab12cd34", ok: true, latencyMs: 2, detail: "delivered" }] }),
+    "GET /v1/ports/runs/run_test_ab12cd34": () => ({ activity: [
+      { id: 1, at: Date.now(), plugin: "sms-codes", kind: "deliver", port: "code.in", runId: "run_test_ab12cd34", ok: true, latencyMs: null, detail: "code received (6 characters), held for the phone" }], waits: [] }),
+    "POST /v1/ports/test-runs": ({ body }) => ({ ...TEST_RUN("running", "now"), scenario: body.scenario }),
+    "GET /v1/ports/test-runs/run_test_ab12cd34": () => (++polls > 1 ? TEST_RUN("done", "ok") : TEST_RUN("running", "now")),
+  });
+  const page = createPortsPage(ctx(gw.fetch), "activity");
+  await flush();
+  const view = page.element.querySelector(".pa");
+  assert.ok(view);
+  assert.match(view.querySelector(".pt-feed").textContent, /Run logger.*Delivered · Run events/);
+
+  // filters ask the gateway, and an empty result says so
+  byLabel(view, "Failed").click();
+  await flush();
+  assert.equal(gw.calls.filter((c) => c.path === "/v1/ports/activity").at(-1).query.status, "failed");
+  assert.match(view.textContent, /Nothing matches these filters/);
+
+  // a run opens its lane
+  view.querySelector(".pa-run-head").click();
+  await flush();
+  assert.match(view.querySelector(".pa-lane").textContent, /Answered · Verification codes: code received/);
+
+  // a test run, live
+  byLabel(view, "Start a test run").click();
+  const sheet = page.element.querySelector(".pt-sheet");
+  view.ownerDocument;
+  sheet.querySelectorAll(".pa-scenario").find((c) => c.textContent.includes("Sign-up with a code")).click();
+  byLabel(sheet, "Start").click();
+  await flush();
+  assert.deepEqual(gw.calls.find((c) => c.path === "/v1/ports/test-runs").body, { scenario: "signup" });
+  assert.match(sheet.textContent, /Wait for a verification code.*Send the code to the phone or inbox your plugin watches/);
+  await new Promise((resolve) => setTimeout(resolve, 2300));
+  await flush();
+  assert.match(sheet.textContent, /Went through/);
+  assert.match(sheet.textContent, /would be sealed to the phone/);
+  assert.doesNotMatch(JSON.stringify(gw.calls), /482913/);
+  sheet.querySelector(".pt-close").click();
+  page.destroy();
+});
