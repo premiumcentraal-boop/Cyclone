@@ -783,6 +783,9 @@ class PhoneMindToolbox(
         val (ref, error) = target(arguments)
         if (ref == null) return error!!
         if (requireEditable && !ref.editable) return MindToolResult.error("${ref.ref} is not a text field.")
+        if (tool == "phone.click" || tool == "phone.long_press") {
+            HomeSafety.refusal(screen?.packageName, ref.label, ownerWords.toString())?.let { return MindToolResult.error("Not tapped: $it") }
+        }
         return act(tool, JSONObject().put("elementId", ref.elementId), "$verb ${ref.ref} \"${ref.label}\"", ref)
     }
 
