@@ -37,6 +37,9 @@ Unicode true
 
 Name "Cyclone"
 OutFile "${OUTFILE}"
+; The Cyclone mark (brand/logo-wormhole) for the setup and the uninstaller.
+Icon "cyclone.ico"
+UninstallIcon "cyclone.ico"
 RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\Cyclone One"
 ShowInstDetails show

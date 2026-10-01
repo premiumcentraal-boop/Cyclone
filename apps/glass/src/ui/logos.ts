@@ -1,7 +1,9 @@
 /**
- * The two marks in the top-left switcher: Cyclone (the phone app's three teal arcs) and the Command Center (a page
+ * The two marks in the top-left switcher: Cyclone (the phone app's seven-petal vortex) and the Command Center (a page
  * with a plan on it, in Glass's indigo). Built with DOM APIs, like every icon in Glass.
  */
+import { CYCLONE_PETALS } from "./cycloneMark.js";
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 let serial = 0;
 
@@ -17,16 +19,37 @@ function gradient(id: string, stops: Array<[string, string]>, x1 = "0", y1 = "0"
   return g;
 }
 
-/** Cyclone: three arcs turning around a centre (the same paths as the phone app's mark). */
+/**
+ * Cyclone: seven petals spiralling into a void (brand/logo-wormhole), on the dark teal tile of the phone's app icon.
+ * A lit funnel (radial gradient), a void shadow under the petals and a soft top-left sheen, as in the brand file.
+ */
 export function cycloneLogo(className = "logo logo-cyclone"): SVGSVGElement {
-  const id = `cy-arc-${(serial += 1)}`;
+  const n = (serial += 1);
   const svg = svgEl("svg", { viewBox: "0 0 128 128", class: className, "aria-hidden": "true" }) as SVGSVGElement;
   const defs = svgEl("defs", {});
-  defs.append(gradient(id, [["0", "#CCF6EF"], ["0.45", "#41D7CB"], ["1", "#1B6E70"]]));
-  svg.append(svgEl("rect", { x: "0", y: "0", width: "128", height: "128", rx: "30", class: "logo-tile" }), defs);
-  for (const d of ["M101 45A43 43 0 0 0 31 27", "M25 79a43 43 0 0 0 70 18", "M45 100a43 43 0 0 0 18-78"]) {
-    svg.append(svgEl("path", { d, fill: "none", stroke: `url(#${id})`, "stroke-width": "16", "stroke-linecap": "round" }));
+  const radial = (id: string, r: string, stops: Array<[string, string, string?]>) => {
+    const g = svgEl("radialGradient", { id, gradientUnits: "userSpaceOnUse", cx: "100", cy: "100", r });
+    for (const [offset, color, opacity] of stops) {
+      g.append(svgEl("stop", { offset, "stop-color": color, ...(opacity ? { "stop-opacity": opacity } : {}) }));
+    }
+    return g;
+  };
+  defs.append(
+    radial(`cy-petal-${n}`, "91", [["0", "#000405"], ["0.1", "#021316"], ["0.3", "#0B5458"], ["0.58", "#2EC2B9"], ["0.78", "#5BE3D6"], ["1", "#2AA9A3"]]),
+    radial(`cy-void-${n}`, "52", [["0", "#000405"], ["0.35", "#011012"], ["0.7", "#0A4D50", "0.9"], ["1", "#1C9E98", "0"]]),
+  );
+  const sheen = svgEl("linearGradient", { id: `cy-sheen-${n}`, gradientUnits: "userSpaceOnUse", x1: "25", y1: "18", x2: "175", y2: "182" });
+  for (const [offset, color, opacity] of [["0", "#FFFFFF", "0.28"], ["0.45", "#FFFFFF", "0"], ["0.62", "#000000", "0"], ["1", "#001214", "0.3"]]) {
+    sheen.append(svgEl("stop", { offset, "stop-color": color, "stop-opacity": opacity }));
   }
+  defs.append(sheen);
+  const mark = svgEl("g", { transform: "translate(64 64) scale(0.5) translate(-100 -100)" });
+  mark.append(
+    svgEl("circle", { cx: "100", cy: "100", r: "52", fill: `url(#cy-void-${n})` }),
+    svgEl("path", { d: CYCLONE_PETALS, "fill-rule": "evenodd", fill: `url(#cy-petal-${n})` }),
+    svgEl("path", { d: CYCLONE_PETALS, "fill-rule": "evenodd", fill: `url(#cy-sheen-${n})` }),
+  );
+  svg.append(svgEl("rect", { x: "0", y: "0", width: "128", height: "128", rx: "30", class: "logo-tile" }), defs, mark);
   return svg;
 }
 

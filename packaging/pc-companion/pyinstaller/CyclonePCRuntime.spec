@@ -69,4 +69,6 @@ exe = EXE(
     # A windowed one-file build cannot print: its Python child's parent is the console-less bootloader.
     console=True,
     hide_console="hide-early",
+    # The Cyclone mark (brand/logo-wormhole) on the app tile; Start menu and desktop shortcuts point at this exe.
+    icon=str(repo / "packaging" / "pc" / "cyclone.ico"),
 )
