@@ -94,9 +94,10 @@ def diagnose(
     if bridge != BridgeState.CONNECTED:
         return Diagnosis("gateway", "RECONNECTING", False, "Reconnecting", "The phone app is answering again in a moment.", working=True)
     if accessibility is False:
-        return Diagnosis("accessibility", "ACCESSIBILITY_OFF", False, "Turn on Cyclone Accessibility",
-                         "Cyclone needs it to see and use the screen. Turn on Cyclone in the list that opens.",
-                         "open_accessibility", "Open on the phone")
+        return Diagnosis("accessibility", "ACCESSIBILITY_OFF", False, "Cyclone Accessibility is off",
+                         "Android turns it off when Cyclone is stopped. Repair turns it back on over USB; "
+                         "if it can't, the Accessibility list opens on the phone.",
+                         "open_accessibility", "Repair")
     return Diagnosis("ready", "READY", True, "Connected", "")
 
 

@@ -10,6 +10,10 @@ trust, so it can restore exactly that one setting, under fixed limits:
 - off with ``CYCLONE_AUTO_REPAIR_ACCESSIBILITY=0``.
 
 It never turns Accessibility on for a phone where the owner never did, and it never touches another setting.
+
+Alpha 93: the owner's own **Repair** press (Glass, ``connection/fix open_accessibility``) is that choice made now, so
+:meth:`AccessibilityKeeper.repair_now` puts Cyclone back on that phone without the "seen on before" condition, at most
+``MAX_OWNER_REPAIRS_PER_HOUR`` times an hour; the medic opens the Accessibility list instead when it can't.
 """
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ SERVICE_FULL = f"{CYCLONE_PACKAGE}/{CYCLONE_PACKAGE}.CycloneAccessibilityService
 KEY = "enabled_accessibility_services"
 COMPONENT = re.compile(r"^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$")
 MAX_PER_HOUR = 3
+MAX_OWNER_REPAIRS_PER_HOUR = 6
 CHECK_EVERY_S = 10.0
 
 
@@ -55,6 +60,7 @@ class AccessibilityKeeper:
         self._seen: dict[str, bool] = self._load()
         self._repairs: dict[str, list[float]] = {}
         self._checked: dict[str, float] = {}
+        self._owner_repairs: dict[str, list[float]] = {}
 
     def _load(self) -> dict[str, bool]:
         try:
@@ -76,6 +82,37 @@ class AccessibilityKeeper:
             if not self._seen.get(device_id):
                 self._seen[device_id] = True
                 self._save()
+
+    def repair_now(self, device_id: str, session: Any) -> str | None:
+        """The owner pressed Repair: put Cyclone back now. "restored", "already_on", or None (not possible, or the hourly
+        limit), in which case the caller opens the Accessibility list for the owner."""
+        now = self.clock()
+        with self._lock:
+            recent = [t for t in self._owner_repairs.get(device_id, []) if now - t < 3600]
+            self._owner_repairs[device_id] = recent
+            if len(recent) >= MAX_OWNER_REPAIRS_PER_HOUR:
+                return None
+        try:
+            value = str(session.adb.shell("settings", "get", "secure", KEY, timeout=5)).strip()
+            if has_cyclone(value):
+                return "already_on"
+            session.adb.shell("settings", "put", "secure", KEY, f"'{restored(value)}'", timeout=5)
+            session.adb.shell("settings", "put", "secure", "accessibility_enabled", "1", timeout=5)
+            after = str(session.adb.shell("settings", "get", "secure", KEY, timeout=5)).strip()
+        except Exception:
+            return None
+        if not has_cyclone(after):
+            return None
+        with self._lock:
+            self._owner_repairs[device_id] = recent + [now]
+        self.seen_on(device_id)
+        if self.diagnostics is not None:
+            try:
+                self.diagnostics.mark(device_id, "connection.fix.accessibility_restored",
+                                      details={"attempt": len(recent) + 1, "code": "ACCESSIBILITY_RESTORED_BY_OWNER"})
+            except Exception:
+                pass
+        return "restored"
 
     def check(self, device_id: str, session: Any) -> str | None:
         """One look at a phone whose Accessibility is off. Returns "restored" when it put Cyclone back."""
