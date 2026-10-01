@@ -47,6 +47,7 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.88:** reliability builds 3, 4 and 5 (one truth for connection health, the broken link named with one action, one-tap trust and silent resume); all six builds now shipped.
 - **alpha.89:** instant decisions (JEV decides with a 2.5 s deadline and Auto as the default; the lesson store; phone model v1 that acts only on earned actions, audited 1 in 10; decision numbers in Glass Details).
 - **alpha.90:** plan 44 run 1, cloud phones (VMOS Cloud, DuoPlus, remote ADB) kept connected: 7-day VMOS ADB renewed, SSH tunnel kept, adb reconnected, Cyclone installed; Glass Devices → Cloud phones.
+- **alpha.91:** fixes from the alpha.90 stress test (self-pause, Accessibility repair, Instant for everyday phrases, chatter, dialogs, Settings toggles, ask ids/cancel + MCP phone_ask, Lab scoring, two main-thread stalls).
 - **alpha.79:** plan 43 T1, Cyclone Tables. The owner chose plan 43's tables and buttons (T1–T3) before B1, so B1
   comes after T3.
 - **Test counts at alpha.68:**
