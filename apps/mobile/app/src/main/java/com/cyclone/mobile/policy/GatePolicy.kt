@@ -54,7 +54,10 @@ object GateClassifier {
     private val grant = listOf(
         "grant", "allow access", "give permission", "authorize app", "trust this", "enable access",
     )
-    private val delete = listOf("delete", "remove", "erase", "factory reset", "wipe data", "move to bin", "move to trash", "send to bin", "send to trash", "throw away")
+    // Alpha 92: an app's Force stop, Clear storage/data and Uninstall end or erase the owner's state too (a Mind run
+    // force-stopped Files and confirmed Android's warning on its own).
+    private val delete = listOf("delete", "remove", "erase", "factory reset", "wipe data", "move to bin", "move to trash", "send to bin", "send to trash", "throw away",
+        "force stop", "clear storage", "clear data", "uninstall", "reset app preferences", "geforceerd stoppen", "opslag wissen", "verwijderen")
     private val send = listOf("send", "send message", "send email", "post", "publish")
     private val deleteMoveSendToBinOrTrash =
         Regex("""(?:move|send)(?:\s+\S+){0,6}\s+to\s+(?:bin|trash)""")

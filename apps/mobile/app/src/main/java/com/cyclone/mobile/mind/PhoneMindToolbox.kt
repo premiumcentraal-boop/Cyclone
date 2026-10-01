@@ -227,8 +227,9 @@ class PhoneMindToolbox(
         "setup_done" -> setupDone(arguments)
         "screen_read" -> read()
         "screen_look" -> look()
-        "screen_find" -> find(arguments.optString("query"))
+        "screen_find" -> find(arguments.optString("query"), scroll = arguments.optBoolean("scroll", true))
         "tap" -> onElement(arguments, "phone.click", "Tapped")
+        "tap_sequence" -> tapSequence(arguments)
         "long_press" -> onElement(arguments, "phone.long_press", "Long-pressed")
         "type_text" -> typeText(arguments)
         "press_enter" -> onElement(arguments, "phone.submit_text", "Pressed Enter in", requireEditable = true)
@@ -717,13 +718,40 @@ class PhoneMindToolbox(
             return MindToolResult.error("The point must be inside the ${size.first}×${size.second} screenshot.")
         }
         val params = JSONObject().put("x", (x * scale.first).toInt()).put("y", (y * scale.second).toInt())
+        val layoutBefore = screen?.legacyPage?.let { it.packageName to it.structuralKey }
         val result = act("phone.tap_point", params, "Tapped the point ($x, $y) of the screenshot")
-        shotSize = null // Points belong to the screenshot they were read from.
-        return result
+        // Points belong to the screenshot they were read from. Alpha 92: while the page's layout is the same (a keypad,
+        // a list that didn't move), the screenshot stays valid for the next tap_point instead of costing a new look.
+        val layoutAfter = screen?.legacyPage?.let { it.packageName to it.structuralKey }
+        if (layoutBefore == null || layoutBefore != layoutAfter || layoutAfter.second.isBlank()) {
+            shotSize = null
+            return result
+        }
+        return result.copy(text = result.text + "\nThe layout did not change, so tap_point can use the same screenshot again.")
     }
 
-    private fun find(query: String): MindToolResult {
+    private fun find(query: String, scroll: Boolean = false): MindToolResult {
         if (query.isBlank()) return MindToolResult.error("query is required.")
+        val first = findOnce(query)
+        if (!scroll || first.ok == false || !first.text.startsWith("Nothing matching")) return first
+        // Alpha 92: the row is often just below the fold (About phone › Android version). Look further down the page,
+        // a few screens at most, before telling the model it isn't there.
+        repeat(FIND_SCROLLS) { page ->
+            val moved = act("phone.scroll", JSONObject().put("direction", "forward"), "Scrolled down to look for \"$query\"")
+            if (!moved.ok || !moved.changedScreen) {
+                return MindToolResult("Nothing matching \"$query\" on this screen, even after scrolling to the end " +
+                    "(${page + 1} scroll${if (page == 0) "" else "s"}). Try other words, or screen_look.", "find \"$query\": nothing after scrolling")
+            }
+            val again = findOnce(query)
+            if (!again.text.startsWith("Nothing matching")) {
+                return again.copy(text = "Found after scrolling down ${page + 1} time${if (page == 0) "" else "s"}.\n" + again.text)
+            }
+        }
+        return MindToolResult("Nothing matching \"$query\" after scrolling down $FIND_SCROLLS times. Try other words, or screen_look.",
+            "find \"$query\": nothing after scrolling")
+    }
+
+    private fun findOnce(query: String): MindToolResult {
         val found = env.search(query, goal)
         found.failure?.let { return MindToolResult.error("Search failed: ${it.message}") }
         val page = found.page
@@ -837,6 +865,39 @@ class PhoneMindToolbox(
             "Typed ${text.length} characters into the focused text box", changesScreen = false)))
         if (!typed.ok || !arguments.optBoolean("press_enter")) return typed
         return MindToolResult(typed.text + "\n\nTo submit, tap the send button (or press_enter with the box's ref).", typed.brief, ok = true)
+    }
+
+    /**
+     * Alpha 92: several taps on one screen in one call (a keypad, a PIN-free code pad, a row of options). Each tap is an
+     * ordinary tap (same checks, same approvals); the run stops at the first one that doesn't go through. A calculator
+     * sum took 16-19 model turns, one per key.
+     */
+    private fun tapSequence(arguments: JSONObject): MindToolResult {
+        val list = arguments.optJSONArray("refs") ?: return MindToolResult.error("refs is required: a list like [\"e12\", \"e13\"].")
+        if (list.length() !in 1..MAX_SEQUENCE) return MindToolResult.error("refs holds 1 to $MAX_SEQUENCE refs.")
+        val wanted = (0 until list.length()).map { list.optString(it) }
+        if (wanted.any { it.isBlank() }) return MindToolResult.error("Every item in refs must be a ref like e12.")
+        var last: MindToolResult? = null
+        val done = mutableListOf<String>()
+        for ((index, raw) in wanted.withIndex()) {
+            val result = onElement(JSONObject().put("ref", raw), "phone.click", "Tapped")
+            last = result
+            if (!result.ok) {
+                val head = if (done.isEmpty()) "" else "Tapped ${done.joinToString(", ")}; then "
+                return result.copy(text = head + "stopped at ${index + 1} of ${wanted.size} ($raw):\n" + result.text,
+                    brief = "tap_sequence stopped at $raw")
+            }
+            done += raw
+            // One screen-changing tap per call: when the page itself changed, the remaining refs belong to the old one.
+            if (index < wanted.lastIndex && result.text.contains("The screen changed")) {
+                return result.copy(text = "Tapped ${done.joinToString(", ")}; the screen changed, so the rest " +
+                    "(${wanted.drop(index + 1).joinToString(", ")}) was not tapped. Read the screen again.\n" + result.text,
+                    brief = "tap_sequence stopped after $raw: screen changed", changedScreen = true)
+            }
+        }
+        val final = last ?: return MindToolResult.error("Nothing was tapped.")
+        return final.copy(text = "Tapped ${done.joinToString(", ")} in order.\n" + final.text, brief = "tap_sequence ${done.size} taps",
+            changedScreen = true)
     }
 
     private fun scroll(arguments: JSONObject): MindToolResult {
@@ -1039,6 +1100,13 @@ class PhoneMindToolbox(
         val before = screen?.legacyPage
         val result = actOnce(tool, params, done, ref, changesScreen)
         runCatching { trail?.step(tool, before, ref?.label, ref?.role, screen?.legacyPage, result.ok) }
+        // Alpha 92: a whole-screen comparison missed small changes (a digit in a calculator's display), so the model was
+        // told "did not visibly change" eleven times a run and doubted every key. The page's own text says otherwise.
+        val after = screen?.legacyPage
+        if (result.ok && before != null && after != null && before.packageName == after.packageName &&
+            before.contentKey != after.contentKey && result.text.contains(UNCHANGED)) {
+            return result.copy(text = result.text.replaceFirst(UNCHANGED, ". The text on the screen changed."))
+        }
         return result
     }
 
@@ -1152,7 +1220,7 @@ class PhoneMindToolbox(
             tool == "phone.type" && message.orEmpty().contains("TYPE_METHOD=paste") -> "$done (pasted)."
             tool == "phone.type" -> "$done."
             envelope.pageChanged -> "$done. The screen changed."
-            else -> "$done. The screen did not visibly change."
+            else -> "$done$UNCHANGED"
         }
     }
 
@@ -1594,7 +1662,7 @@ class PhoneMindToolbox(
         private const val MAX_VALUE_FIELDS = 8
         val VALUE_KINDS = linkedSetOf("text", "name", "email", "phone", "date", "number", "address", "choice")
         /** Tools that need a usable screen; memory, planning, questions and finishing work with the phone locked. */
-        private val PHONE_TOOLS = setOf("screen_read", "screen_look", "screen_find", "tap", "tap_point", "long_press", "type_text",
+        private val PHONE_TOOLS = setOf("screen_read", "screen_look", "screen_find", "tap", "tap_sequence", "tap_point", "long_press", "type_text",
             "press_enter", "scroll", "swipe", "back", "home", "wait", "open_app", "open_link", "open_settings", "set_timer",
             "set_alarm", "vault_fill", "open_notification", "go_to", "pilot")
         /** Read-only manual tools: offered only when the mission has the App Manual. */
@@ -1607,6 +1675,9 @@ class PhoneMindToolbox(
         const val SIGNUP_NO = "Not now"
         private val TAP_TOOLS = setOf("phone.click", "phone.tap", "phone.tap_point")
         private val REVALIDATION = Regex("Target revalidation: ([A-Z_]+)")
+        private const val UNCHANGED = ". The screen did not visibly change."
+        private const val FIND_SCROLLS = 4
+        private const val MAX_SEQUENCE = 24
         private val NAVIGATION = setOf("phone.open_app", "phone.launch_intent", "phone.open_settings", "phone.set_timer", "phone.set_alarm", "phone.back", "phone.home")
         private val SENSITIVE = Regex("(?i)password|passcode|wachtwoord|\\bpin\\b|one[- ]time|otp|verification code|verificatiecode|cvv|cvc|card number|kaartnummer|security code")
         fun sensitive(label: String): Boolean = SENSITIVE.containsMatchIn(label)
@@ -1633,9 +1704,16 @@ class PhoneMindToolbox(
         val SPECS: List<MindToolSpec> = listOf(
             MindToolSpec("screen_read", "Read the current screen: app, visible text and the controls with their refs."),
             MindToolSpec("screen_look", "Take a screenshot to see the screen as an image (icons, pictures, layouts the text misses), plus the text description."),
-            MindToolSpec("screen_find", "Find elements on the current screen matching a description, including ones not listed in the screen summary.",
-                objectSchema("query" to string("What to look for, e.g. \"install button\" or \"search\"."), required = listOf("query"))),
+            MindToolSpec("screen_find", "Find elements on the current screen matching a description, including ones not listed in the screen summary. " +
+                "When nothing matches, it scrolls down the page (up to $FIND_SCROLLS screens) and looks again, unless scroll is false.",
+                objectSchema("query" to string("What to look for, e.g. \"install button\" or \"search\"."),
+                    "scroll" to boolean("Scroll down to look further when nothing matches (default true)."),
+                    required = listOf("query"))),
             MindToolSpec("tap", "Tap an element.", objectSchema("ref" to REF, required = listOf("ref"))),
+            MindToolSpec("tap_sequence", "Tap several elements of the current screen in order, in one call: keys of a keypad or " +
+                "calculator, a row of options. Stops at the first tap that doesn't go through. Use refs from the latest screen.",
+                objectSchema("refs" to array("The refs to tap, in order (1 to $MAX_SEQUENCE), e.g. [\"e12\", \"e13\", \"e20\"].", string("A ref like e12.")),
+                    required = listOf("refs"))),
             MindToolSpec("pilot", "Fast mode: give Cyclone's rapid runner your whole plan for the run, every step you imagine, in order. " +
                 "A rapid model carries it out move by move in about a second each (taps, typing your exact text, Enter, scrolling, Back, " +
                 "opening the step's app or link, waiting) and does the low-risk moves itself. While it runs, you are asked short questions " +

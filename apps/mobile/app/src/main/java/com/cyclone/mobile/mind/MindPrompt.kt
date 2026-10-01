@@ -155,6 +155,10 @@ object MindPrompt {
         "The owner changed the task (goal v$version): \"${text.trim()}\"\nThis replaces whatever in the goal it contradicts. " +
             "Update your plan now with plan_update (divert from what you were doing), then carry on with the new goal."
 
+    /** Alpha 92: the phone itself reads that the goal's settings now hold. */
+    fun goalMet(what: String): String =
+        "Harness note: the phone reports the goal is met: $what. Do not change anything else; finish now with a short summary."
+
     const val PAUSED = "Harness note: the owner paused the mission and has now resumed it. The phone may have changed; look at the screen before acting."
 
     fun rememberAsked(asked: String): String =
