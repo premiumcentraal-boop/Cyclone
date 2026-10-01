@@ -216,7 +216,8 @@ class DesktopRuntime:
         # Plan 48: the Port Hub (Cyclone Ports). Absent only when the ports kit isn't installed.
         from ..ports.hub import PortHub
         try:
-            self.ports: PortHub | None = PortHub(settings.runtime_dir / "ports")
+            self.ports: PortHub | None = PortHub(settings.runtime_dir / "ports",
+                                                 base_url=f"http://127.0.0.1:{settings.port}")
         except RuntimeError:
             self.ports = None
         self.lan_share = LanShareDirectory(
