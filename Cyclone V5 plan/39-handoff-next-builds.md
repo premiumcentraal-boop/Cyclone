@@ -54,6 +54,7 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.95:** the Drive orb is always there while Driver mode is on (own attach, surviving settings watcher, OrbKeeper repairs every 2 s).
 - **alpha.96:** Cyclone Ports in Glass (plan 48 run 1): Port Hub in the gateway, Ports page, Add plugin sheet, plugin drawer; Glass 1.0.0-alpha.53.
 - **alpha.97:** the Port map (plan 48 run 2): bindings per port everywhere/routine/app, conflicts, unavailable; Glass 1.0.0-alpha.54.
+- **alpha.98:** Ports carry real traffic (plan 48 run 3): out/in traffic, deliver endpoint, waits across restarts, Activity and test runs; Glass 1.0.0-alpha.55.
 - **alpha.79:** plan 43 T1, Cyclone Tables. The owner chose plan 43's tables and buttons (T1–T3) before B1, so B1
   comes after T3.
 - **Test counts at alpha.68:**
