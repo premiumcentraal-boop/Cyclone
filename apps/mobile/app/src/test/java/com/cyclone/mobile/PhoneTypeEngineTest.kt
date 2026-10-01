@@ -239,6 +239,19 @@ class PhoneTypeEngineTest {
     }
 
     @Test
+    fun aFieldThatShowsTheTextAFrameLateIsReadAgainNotPastedOver() {
+        val screen = phoneTaskScreen(observationId = "obs-late", focused = true, rawNodeId = "raw-late")
+        val plan = (PhoneTypeEngine.decide(authorizedType(screen.taskElementId, taskValue), screen.catalog)
+            as PhoneTypeEngine.Decision.Execute).plan
+        val host = FakeLiveHost.from(screen, initialText = "", pasteWorks = true, lateSetText = true)
+        val result = PhoneTypeEngine.perform(plan, taskValue, host)
+        assertTrue(result.ok && result.textVerified)
+        assertEquals("set_text", result.method)
+        assertEquals(1, host.settles)
+        assertEquals(0, host.pastes)
+    }
+
+    @Test
     fun aFieldThatNeverShowsTheTextIsReportedUnverified() {
         val screen = phoneTaskScreen(observationId = "obs-none", focused = true, rawNodeId = "raw-none")
         val plan = (PhoneTypeEngine.decide(authorizedType(screen.taskElementId, taskValue), screen.catalog)
@@ -526,9 +539,18 @@ class PhoneTypeEngineTest {
         private val reportSetText: Boolean,
         private val maskSetText: Boolean,
         private val pasteWorks: Boolean = false,
+        private val lateSetText: Boolean = false,
     ) : PhoneTypeEngine.LiveHost {
         var pastes = 0
         var setTexts = 0
+        var settles = 0
+        private var pending: Pair<FakeNode, String>? = null
+
+        override fun settle() {
+            settles++
+            pending?.let { (node, text) -> node.text = text }
+            pending = null
+        }
 
         override fun readText(handle: Any): CharSequence? = (handle as? FakeNode)?.takeUnless { it.password }?.text
 
@@ -576,7 +598,9 @@ class PhoneTypeEngineTest {
             setTexts++
             val node = handle as FakeNode
             if (!reportSetText && !applySetText) return false
-            if (applySetText) {
+            if (applySetText && lateSetText) {
+                pending = node to value.toString()
+            } else if (applySetText) {
                 node.text = if (maskSetText && node.password) "•".repeat(value.length) else value.toString()
             }
             return reportSetText
@@ -602,6 +626,7 @@ class PhoneTypeEngineTest {
                 reportSetText: Boolean = true,
                 maskSetText: Boolean = false,
                 pasteWorks: Boolean = false,
+                lateSetText: Boolean = false,
             ): FakeLiveHost {
                 val nodes = screen.snapshot.nodes.associate { node ->
                     node.id to FakeNode(
@@ -622,6 +647,7 @@ class PhoneTypeEngineTest {
                     reportSetText = reportSetText,
                     maskSetText = maskSetText,
                     pasteWorks = pasteWorks,
+                    lateSetText = lateSetText,
                 )
             }
         }
