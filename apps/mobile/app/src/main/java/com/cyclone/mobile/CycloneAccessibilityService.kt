@@ -119,6 +119,9 @@ class CycloneAccessibilityService : AccessibilityService() {
 
         runCatching { OverlayChromeRuntime.attach(this) }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.overlay.attach", it) }
+        // Alpha 95: Driver mode's orb attaches on its own (it used to come only at the end of the chrome's attach).
+        runCatching { com.cyclone.mobile.ui.overlay.DriverOverlay.attach(this) }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.drive.attach", it) }
         // A Cyclone Mind mission cut off by a crash or process death minutes ago continues once the phone is reachable.
         val app = applicationContext
         Thread({ runCatching { Thread.sleep(3_000); com.cyclone.mobile.mind.mission.MindMissions.onServiceReady(app) } }, "cyclone-mind-recover").start()
@@ -241,6 +244,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         guidedOverlay = null
         runCatching { OverlayChromeRuntime.detach() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.overlay", it) }
+        runCatching { com.cyclone.mobile.ui.overlay.DriverOverlay.detach() }
         runCatching { com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime.detach() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.tracefield", it) }
         runCatching { RoutineTeachingOverlayRuntime.dismiss() }

@@ -94,7 +94,21 @@ object DriverOverlay {
     private var session: VoiceSession? = null
     private var windows: Windows? = null
 
+    /** Alpha 95: the keeper's state, see [heal]. */
+    private var failures = 0
+    private var lastRepairMs = 0L
+    private var buttonDp = 0
+    private var faceJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Attaches the Drive windows to [service]. Called by the accessibility service itself (alpha 95), so the orb no
+     * longer depends on the main chrome attaching first, and safe to call again: the same live service is kept.
+     */
     fun attach(service: CycloneAccessibilityService) {
+        if (this.service === service && scope != null) {
+            heal()
+            return
+        }
         detach()
         this.service = service
         DriverMode.load(service)
@@ -102,10 +116,22 @@ object DriverOverlay {
         scope = s
         s.launch {
             DriverMode.settings.map { it.enabled to it.buttonDp }.distinctUntilChanged().collect { (on, dp) ->
-                stop()
-                if (on) start(service, dp)
+                // Alpha 95: one failure here used to end this watcher, and with it every later toggle or size change.
+                guarded("drive.orb.settings") {
+                    stop()
+                    buttonDp = dp
+                    failures = 0
+                    if (on) start(service, dp)
+                }
                 // The idle bubble gives way to the AI button, or comes back.
-                OverlayChromeRuntime.refreshExternalSurface()
+                guarded("drive.orb.chrome") { OverlayChromeRuntime.refreshExternalSurface() }
+            }
+        }
+        // Alpha 95: while Driver mode is on, the orb is always there. Whatever took it away, the keeper brings it back.
+        s.launch {
+            while (true) {
+                kotlinx.coroutines.delay(com.cyclone.mobile.voice.OrbKeeper.CHECK_EVERY_MS)
+                guarded("drive.orb.keeper") { heal() }
             }
         }
     }
@@ -121,16 +147,72 @@ object DriverOverlay {
         // Alpha.78: every voice run is written to the run history (Glass → Runs, diagnostics).
         val next = VoiceSession(service, VoiceTraceSink(service))
         session = next
-        windows = runCatching { Windows(service, next, buttonDp) }.getOrNull()
+        windows = runCatching { Windows(service, next, buttonDp) }
+            .onFailure { record("drive.orb.windows", it) }
+            .getOrNull()
         val w = windows ?: return
-        scope?.launch { next.turn.collect { w.show(VoiceFace.of(it)) } }
+        faceJob = scope?.launch { next.turn.collect { turn -> guarded("drive.orb.face") { w.show(VoiceFace.of(turn)) } } }
     }
 
     private fun stop() {
-        windows?.remove()
+        faceJob?.cancel()
+        faceJob = null
+        windows?.let { w -> guarded("drive.orb.remove") { w.remove() } }
         windows = null
-        session?.close()
+        session?.let { s -> guarded("drive.orb.session") { s.close() } }
         session = null
+    }
+
+    /** One look at the orb: repairs whatever is missing while Driver mode is on ([com.cyclone.mobile.voice.OrbKeeper]). */
+    private fun heal() {
+        val svc = service ?: return
+        val settings = DriverMode.settings.value
+        val live = CycloneAccessibilityService.instance
+        val w = windows
+        val look = com.cyclone.mobile.voice.OrbKeeper.Look(
+            enabled = settings.enabled,
+            serviceCurrent = live == null || live === svc,
+            windowsPresent = w != null,
+            buttonAttached = w?.buttonAttached == true,
+            buttonVisible = w?.buttonVisible == true,
+            panelWanted = w?.panelWanted == true,
+            panelAttached = w?.panelAttached == true,
+            buttonOnScreen = w?.buttonOnScreen() != false,
+        )
+        val action = com.cyclone.mobile.voice.OrbKeeper.decide(look)
+        if (action == com.cyclone.mobile.voice.OrbKeeper.Action.NONE) {
+            if (settings.enabled && w != null) failures = 0
+            return
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!com.cyclone.mobile.voice.OrbKeeper.allowed(action, failures, lastRepairMs, now)) return
+        com.cyclone.mobile.DeviceState.addLog("Drive orb: ${action.name.lowercase()}")
+        when (action) {
+            com.cyclone.mobile.voice.OrbKeeper.Action.REATTACH -> {
+                lastRepairMs = now; failures++
+                // Not from inside this scope's own coroutine: attach() cancels it.
+                live?.let { next -> android.os.Handler(android.os.Looper.getMainLooper()).post { guarded("drive.orb.reattach") { attach(next) } } }
+            }
+            com.cyclone.mobile.voice.OrbKeeper.Action.REBUILD -> {
+                lastRepairMs = now
+                stop()
+                start(svc, if (buttonDp > 0) buttonDp else settings.buttonDp)
+                if (windows == null) failures++ else failures = 0
+                guarded("drive.orb.chrome") { OverlayChromeRuntime.refreshExternalSurface() }
+            }
+            com.cyclone.mobile.voice.OrbKeeper.Action.SHOW_BUTTON -> w?.showButton()
+            com.cyclone.mobile.voice.OrbKeeper.Action.PLACE -> w?.place()
+            com.cyclone.mobile.voice.OrbKeeper.Action.NONE -> Unit
+        }
+    }
+
+    private inline fun guarded(stage: String, block: () -> Unit) {
+        try { block() } catch (error: kotlinx.coroutines.CancellationException) { throw error } catch (error: Throwable) { record(stage, error) }
+    }
+
+    private fun record(stage: String, error: Throwable) {
+        val context = service ?: return
+        runCatching { com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.recordNonFatal(context, stage, error) }
     }
 
     /** The three windows and their Compose content. */
@@ -187,7 +269,26 @@ object DriverOverlay {
             if (posted) latch.await(300, java.util.concurrent.TimeUnit.MILLISECONDS)
         }
 
+        /** The last face shown: whether AI mode (the panel) is meant to be open. */
+        var panelWanted = false
+            private set
+        val buttonAttached: Boolean get() = button.isAttachedToWindow
+        val buttonVisible: Boolean get() = button.visibility == View.VISIBLE
+        val panelAttached: Boolean get() = panelShown && panel.isAttachedToWindow
+
+        fun buttonOnScreen(): Boolean {
+            val bounds = wm.currentWindowMetrics.bounds
+            return com.cyclone.mobile.voice.OrbKeeper.onScreen(buttonParams.x, buttonParams.y, buttonPx, bounds.width(), bounds.height())
+        }
+
+        /** The keeper found the button hidden while AI mode is closed. */
+        fun showButton() {
+            button.visibility = View.VISIBLE
+            applyTouch()
+        }
+
         fun show(face: VoiceFace) {
+            panelWanted = face.panel
             // The orb moves into AI mode while it is up; the button comes back when it collapses.
             val hidden = face.panel
             if ((button.visibility == View.GONE) != hidden) {
@@ -202,8 +303,9 @@ object DriverOverlay {
                 if (face.dim) runCatching { wm.addView(dim, dimParams) } else runCatching { wm.removeView(dim) }
             }
             if (face.panel != panelShown) {
-                panelShown = face.panel
-                if (face.panel) runCatching { wm.addView(panel, panelParams) } else runCatching { wm.removeView(panel) }
+                // Alpha 95: shown only when the window really went up, so a failed add is noticed and repaired.
+                panelShown = if (face.panel) runCatching { wm.addView(panel, panelParams) }.isSuccess
+                    else { runCatching { wm.removeView(panel) }; false }
             }
         }
 
