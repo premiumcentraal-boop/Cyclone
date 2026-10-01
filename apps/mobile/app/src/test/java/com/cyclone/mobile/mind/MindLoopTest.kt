@@ -326,6 +326,20 @@ class MindConversationTest {
         assertTrue((all.first { it is MindMessage.Tool } as MindMessage.Tool).compacted)
     }
 
+    @Test fun compactionShrinksWellBelowTheCeilingSoThePrefixStaysStable() {
+        val conversation = MindConversation(listOf(MindMessage.System("sys"), MindMessage.User("goal")))
+        repeat(20) { i ->
+            conversation.add(MindMessage.Assistant("step $i", listOf(MindToolCall("c$i", "tap", "{}"))))
+            conversation.add(MindMessage.Tool("c$i", "tap", "x".repeat(2_000), "tapped $i"))
+        }
+        assertTrue(conversation.compact(maxChars = 30_000, keepRecent = 4) > 0)
+        assertTrue(conversation.chars() <= 18_000)
+        // Under the ceiling again: nothing changes on the next turns.
+        conversation.add(MindMessage.Assistant("next", listOf(MindToolCall("n", "tap", "{}"))))
+        conversation.add(MindMessage.Tool("n", "tap", "x".repeat(2_000), "tapped n"))
+        assertEquals(0, conversation.compact(maxChars = 30_000, keepRecent = 4))
+    }
+
     @Test fun journalRoundTripDropsReasoningAndImages() {
         val conversation = MindConversation(listOf(
             MindMessage.System("sys"),
