@@ -255,6 +255,10 @@ internal fun VoiceSettings(context: Context) {
         )
         probe?.let { result ->
             TimingRow("First sound", result.firstSoundMs, VoiceTimings.TARGET_FIRST_SOUND_MS)
+            result.ttsCompared.forEach { run ->
+                TimingRow("Also: ${run.model.substringAfter('/')}", run.ms, VoiceTimings.TARGET_FIRST_SOUND_MS)
+                run.error?.let { DriveNote(it) }
+            }
             TimingRow("Transcription", result.transcribeMs, VoiceTimings.TARGET_TRANSCRIBE_MS)
             TimingRow("Understanding", result.understandMs, VoiceTimings.TARGET_UNDERSTAND_MS)
             TimingRow("Confirmation after you stop", result.confirmMs, VoiceTimings.TARGET_P50_MS)

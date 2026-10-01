@@ -28,17 +28,21 @@ object VoiceModels {
      *   stop), then Microsoft MAI-Transcribe, Google Gemini 3.5 Transcribe, then the older, cheaper Whisper line.
      * - Voice: Gemini 3.8 Flash-Lite TTS (fast); [PREFERRED_TTS_BEST] puts Gemini 3.8 Flash TTS first.
      * - Understanding: Gemini Flash-Lite.
+     * Alpha 93 (owner request): xAI's Grok STT and Grok Voice TTS come first when listed (P50 ≈0.35 s and ≈0.07 s to
+     * first audio on OpenRouter, against ≈3 s for Gemini 3.8 Flash TTS). The live list still decides; without them the
+     * old order holds. Test voice compares them on the phone.
      */
-    val PREFERRED_STT = listOf("meta/muse-voice-transcribe", "microsoft/mai-transcribe", "google/gemini-3.5-transcribe",
+    val PREFERRED_STT = listOf("x-ai/grok-stt", "meta/muse-voice-transcribe", "microsoft/mai-transcribe", "google/gemini-3.5-transcribe",
         "openai/gpt-4o-mini-transcribe", "openai/whisper-large-v3-turbo", "qwen/qwen3-asr-flash", "deepgram/nova-3", "openai/whisper-large-v3")
-    val PREFERRED_TTS = listOf("google/gemini-3.8-flash-lite-tts", "google/gemini-3.8-flash-tts", "openai/gpt-4o-mini-tts",
+    val PREFERRED_TTS = listOf("x-ai/grok-voice-tts", "google/gemini-3.8-flash-lite-tts", "google/gemini-3.8-flash-tts", "openai/gpt-4o-mini-tts",
         "hexgrad/kokoro-82m", "deepgram/aura-2", "mistralai/voxtral-mini-tts", "minimax/speech-2.8-turbo")
-    val PREFERRED_TTS_BEST = listOf("google/gemini-3.8-flash-tts") + PREFERRED_TTS
+    val PREFERRED_TTS_BEST = (listOf("x-ai/grok-voice-tts", "google/gemini-3.8-flash-tts") + PREFERRED_TTS).distinct()
     val PREFERRED_FAST = listOf("google/gemini-3.1-flash-lite", "google/gemini-3.5-flash-lite", "google/gemini-2.5-flash-lite",
         "google/gemini-3-flash", "openai/gpt-5-nano", "openai/gpt-4.1-nano", "mistralai/ministral-8b")
 
     /** Voices known to work per model family, used when the list names none. The first is the default. */
     private val FAMILY_VOICES = listOf(
+        "x-ai/" to listOf("eve", "ara", "rex", "sal", "leo"),
         "google/" to listOf("Kore", "Puck", "Zephyr", "Charon", "Aoede", "Fenrir", "Leda", "Orus"),
         "openai/" to listOf("coral", "alloy", "nova", "sage", "shimmer", "verse", "ash", "echo"),
         "hexgrad/" to listOf("af_heart", "af_bella", "am_michael", "bf_emma", "bm_george"),
