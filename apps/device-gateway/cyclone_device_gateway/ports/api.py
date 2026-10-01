@@ -6,12 +6,17 @@ The PC agent MCP servers do not call these routes: adding a plugin and allowing 
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from starlette.concurrency import run_in_threadpool
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, Response
 
 from ..auth import verify_bearer
 from .hub import PortHub, PortsError
+from .traffic import TrafficError
 
 
 def create_ports_router(runtime: Any, token: str) -> APIRouter:
@@ -30,7 +35,7 @@ def create_ports_router(runtime: Any, token: str) -> APIRouter:
     def call(fn):
         try:
             return fn()
-        except PortsError as exc:
+        except (PortsError, TrafficError) as exc:
             raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(exc)}) from exc
 
     def body_of(body: Any, *keys: str) -> dict[str, Any]:
@@ -101,4 +106,92 @@ def create_ports_router(runtime: Any, token: str) -> APIRouter:
     def resolve(routine: str = Query(default="", max_length=60), app: str = Query(default="", max_length=120)):
         return call(lambda: hub().resolve(routine, app))
 
+    # Run 3: live traffic. These carry a run's messages; run 4 connects the phone to them.
+    @router.get("/v1/ports/activity", dependencies=[Depends(auth)])
+    def activity(plugin: str = Query(default="", max_length=60), port: str = Query(default="", max_length=120),
+                 run: str = Query(default="", max_length=80), status: str = Query(default="", pattern=r"^(|ok|failed)$"),
+                 limit: int = Query(default=100, ge=1, le=500)):
+        ok = None if not status else status == "ok"
+        return call(lambda: {"activity": hub().store.activity(limit, plugin or None, port=port or None,
+                                                               run_id=run or None, ok=ok)})
+
+    @router.get("/v1/ports/runs", dependencies=[Depends(auth)])
+    def runs(limit: int = Query(default=30, ge=1, le=100)):
+        return call(lambda: {"runs": hub().store.runs(limit), "testRuns": hub().test_runs.list()})
+
+    @router.get("/v1/ports/runs/{run_id}", dependencies=[Depends(auth)])
+    def run(run_id: str):
+        h = hub()
+        return call(lambda: {"runId": run_id, "activity": list(reversed(h.store.activity(300, run_id=run_id))),
+                             "waits": [_public_wait(w) for w in h.store.waits(run_id=run_id)]})
+
+    @router.post("/v1/ports/runs/{run_id}/emit", dependencies=[Depends(auth)])
+    def emit(run_id: str, body: dict[str, Any]):
+        b = body_of(body, "port")
+        return call(lambda: hub().traffic.emit(run_id, b["port"], b.get("data"), b.get("meta") or {}, b.get("file"),
+                                               b.get("pageKey")))
+
+    @router.post("/v1/ports/runs/{run_id}/await", dependencies=[Depends(auth)])
+    def await_port(run_id: str, body: dict[str, Any]):
+        b = body_of(body, "port")
+        return call(lambda: hub().traffic.wait(run_id, b["port"], b.get("match"), b.get("timeoutS", 120), b.get("meta") or {}))
+
+    @router.get("/v1/ports/waits/{await_id}", dependencies=[Depends(auth)])
+    def wait_result(await_id: str, waitS: float = Query(default=0, ge=0, le=30)):
+        return call(lambda: hub().traffic.result(await_id, waitS))
+
+    @router.post("/v1/ports/waits/{await_id}/cancel", dependencies=[Depends(auth)])
+    def wait_cancel(await_id: str):
+        return call(lambda: hub().traffic.cancel(await_id, "cancelled by the owner"))
+
+    @router.post("/v1/ports/test-runs", dependencies=[Depends(auth)])
+    def start_test_run(body: dict[str, Any]):
+        b = body_of(body, "scenario")
+        return call(lambda: hub().test_runs.start(b["scenario"], b.get("routine"), b.get("app")))
+
+    @router.get("/v1/ports/test-runs/{run_id}", dependencies=[Depends(auth)])
+    def test_run(run_id: str):
+        return call(lambda: hub().test_runs.get(run_id))
+
+    @router.post("/v1/ports/test-runs/{run_id}/stop", dependencies=[Depends(auth)])
+    def stop_test_run(run_id: str):
+        return call(lambda: hub().test_runs.stop(run_id))
+
+    # Plugins call these two without the Glass bearer: the run's port token, or the one-time artifact token, is the key.
+    @router.get("/v1/ports/artifacts/{artifact_id}", include_in_schema=False)
+    def artifact(artifact_id: str, t: str = Query(default="", max_length=80)):
+        found = getattr(runtime, "ports", None)
+        if found is None:
+            return Response(status_code=404)
+        status, data, mime = found.traffic.artifact(artifact_id, t)
+        return Response(content=data, status_code=status, media_type=mime, headers={"Cache-Control": "no-store"})
+
+    @router.post("/v1/ports/{run_id}/{port}/deliver", include_in_schema=False)
+    async def deliver(run_id: str, port: str, request: Request):
+        found = getattr(runtime, "ports", None)
+        if found is None:
+            return JSONResponse({"error": {"code": "unavailable", "message": "Cyclone Ports isn't available.", "retryable": True}}, 503)
+        length = int(request.headers.get("content-length") or 0)
+        if length > MAX_DELIVERY:
+            return JSONResponse({"error": {"code": "too_large", "message": "too large", "retryable": False}}, 413)
+        raw = await request.body()
+        if len(raw) > MAX_DELIVERY:
+            return JSONResponse({"error": {"code": "too_large", "message": "too large", "retryable": False}}, 413)
+        try:
+            body = json.loads(raw or b"{}")
+        except ValueError:
+            return JSONResponse({"error": {"code": "bad_json", "message": "bad json", "retryable": False}}, 400)
+        status, answer = await run_in_threadpool(found.traffic.deliver, run_id, port, request.headers.get("authorization"), body)
+        return JSONResponse(answer, status)
+
     return router
+
+
+MAX_DELIVERY = 28 * 1024 * 1024  # a 20 MB file in base64 plus the envelope
+
+
+def _public_wait(wait: dict[str, Any]) -> dict[str, Any]:
+    request = wait["request"]
+    return {"awaitId": wait["awaitId"], "port": wait["port"], "plugin": wait["plugin"], "state": wait["state"],
+            "timeoutAt": wait["timeoutAt"], "createdAt": wait["createdAt"], "match": request.get("match") or {},
+            "result": wait["result"]}

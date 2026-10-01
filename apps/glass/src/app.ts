@@ -70,7 +70,7 @@ const PAGES: Record<Route["name"], PageFactory> = {
     if (r.tab === "page" && r.pageId) return createPageView(ctx, r.pageId);
     if (r.tab === "trash") return createTrashPage(ctx);
     if (r.tab === "ai") return createAiSettings(ctx);
-    if (r.tab === "ports") return createPortsPage(ctx, r.view === "map" ? "map" : "plugins");
+    if (r.tab === "ports") return createPortsPage(ctx, r.view ?? "plugins");
     if (isCommandTab(r.tab)) return createCommandPage(ctx, r.tab, { workspace: true });
     return createWorkspaceHome(ctx);
   },

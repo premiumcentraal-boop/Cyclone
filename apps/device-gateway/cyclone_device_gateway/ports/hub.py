@@ -156,7 +156,8 @@ def http_json(method: str, url: str, body: bytes | None = None, headers: dict[st
 class PortHub:
     def __init__(self, root: Path, *, store: PortStore | None = None,
                  checker: Callable[[str, str], list[Any]] | None = None,
-                 fetch: Callable[..., tuple[int, Any, int]] = http_json) -> None:
+                 fetch: Callable[..., tuple[int, Any, int]] = http_json,
+                 base_url: str = "http://127.0.0.1:8765") -> None:
         if kit is None:
             raise RuntimeError("The Cyclone Ports kit (tools/cyclone-ports-sdk) is not installed.")
         self.store = store or PortStore(root)
@@ -165,6 +166,11 @@ class PortHub:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._seq: dict[str, int] = {}
+        # Run 3: live traffic between runs and plugins, and test runs the owner starts from Glass.
+        from .traffic import TestRuns, Traffic
+        self.traffic = Traffic(self, root, base_url)
+        self.test_runs = TestRuns(self.traffic)
+        self._ticker: threading.Thread | None = None
 
     # ---- lifecycle ---------------------------------------------------------------------------------------------------
 
@@ -174,12 +180,23 @@ class PortHub:
         self._stop.clear()
         self._thread = threading.Thread(target=self._monitor_loop, name="cyclone-port-hub", daemon=True)
         self._thread.start()
+        self.traffic.resume()
+        self._ticker = threading.Thread(target=self._tick_loop, name="cyclone-port-waits", daemon=True)
+        self._ticker.start()
 
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2)
         self._thread = None
+        self.traffic.stop()
+
+    def _tick_loop(self) -> None:
+        while not self._stop.wait(1.0):
+            try:
+                self.traffic.tick()
+            except Exception:  # noqa: BLE001 - the clock never takes the gateway down
+                pass
 
     def _monitor_loop(self) -> None:
         while not self._stop.wait(MONITOR_EVERY_S):
