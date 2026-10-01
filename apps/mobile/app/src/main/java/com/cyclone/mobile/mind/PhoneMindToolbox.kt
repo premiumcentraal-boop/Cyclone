@@ -323,6 +323,8 @@ class PhoneMindToolbox(
         if (!image && weak) env.observeWithImage(goal).takeIf { it.page != null }?.let { observed = it }
         val page = observed.page ?: return MindToolResult(
             listOfNotNull(header, "The screen could not be read: ${observed.failure?.message ?: "unknown reason"}.").joinToString("\n"),
+            // Alpha 93: the brief names the failure, not the header ("Screenshot … attached." logged as failed misled).
+            brief = "The screen could not be read: ${observed.failure?.message ?: "unknown reason"}".take(200),
             ok = false,
         )
         val bound = bind(page)
@@ -502,7 +504,9 @@ class PhoneMindToolbox(
         val size = shotSize
         return if (result.imageDataUrl != null) result.copy(text = result.text + if (size == null) "" else
             "\n\nThe screenshot is ${size.first}×${size.second} pixels; boxes labelled e1, e2… are the refs above. Prefer refs; for something with no ref, tap_point takes x,y in these pixels.")
-        else result.copy(text = "A screenshot could not be taken; here is the text description.\n\n${result.text}")
+        else if (result.ok) result.copy(text = "A screenshot could not be taken; here is the text description.\n\n${result.text}",
+            brief = "No screenshot; text only — " + result.brief.substringAfter(" — ", result.brief))
+        else result.copy(text = "A screenshot could not be taken. ${result.brief}.")
     }
 
     // ---- plan 43 T6: sign-up mapping ---------------------------------------------------------------------------------
