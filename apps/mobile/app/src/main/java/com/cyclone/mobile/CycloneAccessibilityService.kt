@@ -101,6 +101,8 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val PASTE_SETTLE_MS = 150L
+        /** Alpha 93: the wait before a typed field is read back a second time. */
+        private const val TYPE_SETTLE_MS = 150L
         /** How long the foreground task's package is reused between structural events. */
         private const val HOST_TTL_MS = 1_000L
         @Volatile var instance: CycloneAccessibilityService? = null
@@ -672,6 +674,10 @@ class CycloneAccessibilityService : AccessibilityService() {
             val target = handle as? AccessibilityTypeHandle ?: return null
             val node = nodeAtTaskPath(target.path, displayId, targetPackage) ?: return null
             return if (node.isEditable) AccessibilityTypeHandle(target.path, node, target.rawNodeId) else null
+        }
+
+        override fun settle() {
+            Thread.sleep(TYPE_SETTLE_MS)
         }
 
         override fun readText(handle: Any): CharSequence? {

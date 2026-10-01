@@ -98,6 +98,8 @@ object PhoneTypeEngine {
         fun readText(handle: Any): CharSequence? = null
         /** Deliver [value] through the clipboard and ACTION_PASTE, replacing the field's text. False when not possible. */
         fun paste(handle: Any, value: CharSequence): Boolean = false
+        /** Alpha 93: a short wait for a field that shows its new text a frame late (Settings search). Off the main thread. */
+        fun settle() {}
     }
 
     data class LiveResult(
@@ -297,9 +299,17 @@ object PhoneTypeEngine {
             method = attempt
             afterHandle = host.refresh(afterHandle) ?: afterHandle
             after = host.view(afterHandle, redactObservedText)
-            strict = !redactObservedText && after != null &&
-                ((after.textDigest == plan.valueDigest && after.textLength == plan.valueLength) ||
-                    host.readText(afterHandle)?.let { normalized(it) == normalized(value) } == true)
+            fun holds(view: LiveView?, at: Any) = !redactObservedText && view != null &&
+                ((view.textDigest == plan.valueDigest && view.textLength == plan.valueLength) ||
+                    host.readText(at)?.let { normalized(it) == normalized(value) } == true)
+            strict = holds(after, afterHandle)
+            if (!strict && performed && !redactObservedText) {
+                // Alpha 93: read once more after a moment before calling the text missing (or pasting over it).
+                host.settle()
+                afterHandle = host.refresh(afterHandle) ?: afterHandle
+                after = host.view(afterHandle, redactObservedText) ?: after
+                strict = holds(after, afterHandle)
+            }
             if (strict) break
         }
         val stillEditableFocused = after != null && after.editable && after.focused
