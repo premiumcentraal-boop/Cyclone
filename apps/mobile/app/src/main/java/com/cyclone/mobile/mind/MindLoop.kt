@@ -7,7 +7,8 @@ data class MindBudget(
     val workingMs: Long = 30 * 60_000L,
     val maxTurns: Int = 400,
     val perCallMs: Long = 180_000L,
-    val maxContextChars: Int = 150_000,
+    /** Alpha 93: 150k → 100k; with compaction to 60% this keeps a long run near 15-25k tokens a turn. */
+    val maxContextChars: Int = 100_000,
     /** Plan 37: the ceiling for workspace runs, which fold per app stay long before this. */
     val workspaceChars: Int = 100_000,
     val warnBeforeEndMs: Long = 3 * 60_000L,

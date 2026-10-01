@@ -77,8 +77,12 @@ class MindConversation(initial: List<MindMessage> = emptyList()) {
      * newest screenshot stays attached. The system prompt, the owner's words and the model's own turns are never
      * dropped: the mind keeps its train of thought.
      */
-    /** Returns how many tool results were shortened by this call. */
-    fun compact(maxChars: Int, keepRecent: Int = 8): Int {
+    /**
+     * Returns how many tool results were shortened by this call. Alpha 93: once over [maxChars], it shrinks to [target]
+     * (60% by default) in one go, so the next turns re-send an unchanged prefix (provider prompt caching) instead of
+     * shortening one old result every turn at the ceiling.
+     */
+    fun compact(maxChars: Int, keepRecent: Int = 8, target: Int = maxChars * 6 / 10): Int {
         val latestImage = messages.indexOfLast { it is MindMessage.User && it.imageDataUrl != null }
         messages.indices.forEach { index ->
             val message = messages[index]
@@ -86,10 +90,11 @@ class MindConversation(initial: List<MindMessage> = emptyList()) {
                 messages[index] = message.copy(imageDataUrl = null, text = message.text + " [earlier screenshot removed]")
             }
         }
+        if (chars() <= maxChars) return 0
         val protectedFrom = (messages.size - keepRecent).coerceAtLeast(0)
         var index = 0
         var shortened = 0
-        while (chars() > maxChars && index < protectedFrom) {
+        while (chars() > target.coerceAtMost(maxChars) && index < protectedFrom) {
             val message = messages[index]
             if (message is MindMessage.Tool && !message.compacted) {
                 messages[index] = message.copy(compacted = true)
