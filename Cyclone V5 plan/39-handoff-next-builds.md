@@ -51,6 +51,7 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.92:** fewer turns for simple goals (settings success check, tap_sequence, find scrolls, reusable screenshot, small-change detection, approval for force stop / clear data).
 - **alpha.93:** Grok voice first, one-tap Accessibility Repair, home-screen safety zone, cache-friendly compaction (100k ceiling), typing read-back settle.
 - **alpha.94:** the new Cyclone logo everywhere (launcher icon + themed layer, in-app mark, notifications/tiles/overlay, Glass switcher + favicon, Windows exe/setup icon).
+- **alpha.95:** the Drive orb is always there while Driver mode is on (own attach, surviving settings watcher, OrbKeeper repairs every 2 s).
 - **alpha.79:** plan 43 T1, Cyclone Tables. The owner chose plan 43's tables and buttons (T1–T3) before B1, so B1
   comes after T3.
 - **Test counts at alpha.68:**
