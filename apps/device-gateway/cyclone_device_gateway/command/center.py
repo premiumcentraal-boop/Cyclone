@@ -641,7 +641,8 @@ class CommandCenter:
 
     def _next_run(self, schedule_json: str, after_ms: int | None = None) -> int:
         schedule = json.loads(schedule_json)
-        after = self._local_now() if after_ms is None else datetime.fromtimestamp(after_ms / 1000).astimezone()
+        local = self._local_now()
+        after = local if after_ms is None else datetime.fromtimestamp(after_ms / 1000, local.tzinfo)
         return int(schedules.next_after(schedule, after).timestamp() * 1000)
 
     def create_routine(self, body: dict[str, Any], *, actor: str = "owner") -> dict[str, Any]:
@@ -750,7 +751,7 @@ class CommandCenter:
         schedule = json.loads(routine["schedule"])
         while due is not None and len(times) < routine["preauth"]:
             times.append(due)
-            due = int(schedules.next_after(schedule, datetime.fromtimestamp(due / 1000).astimezone()).timestamp() * 1000)
+            due = int(schedules.next_after(schedule, datetime.fromtimestamp(due / 1000, self._local_now().tzinfo)).timestamp() * 1000)
         now = self._clock()
         for slot in self._db.execute("SELECT * FROM routine_slot WHERE routine_id = ?", (routine["id"],)).fetchall():
             if slot["due_at"] not in times or slot["device_id"] != devices[0]:

@@ -3,6 +3,7 @@ import type { GlassContext } from "../app.js";
 import type { GlassPage } from "./page.js";
 import { el, link } from "../ui/dom.js";
 import { actionButton, card, pageHeader } from "../ui/components.js";
+import { copyText } from "../ui/clipboard.js";
 import { idGenerator, studioFrame, type IdStarter, type IdUsage } from "../services/idGenerator.js";
 
 export function createIdGeneratorPage(ctx: GlassContext): GlassPage {
@@ -111,8 +112,12 @@ export function createIdGeneratorPage(ctx: GlassContext): GlassPage {
   copy.addEventListener("click", () => void action(async () => {
     if (!data) return;
     const c = data.config;
-    await navigator.clipboard.writeText(`# ID Generator\n\nWhen to use: ${c.whenToUse}\n\n${data.skill.workflow}\n\nDeveloper guidance: ${c.instructions}\nApps: ${c.apps.join(", ") || "all"}\nRoutines: ${c.routines.join(", ") || "all"}`);
-    if (!destroyed) say("Agent guide copied.");
+    const guide = `# ID Generator\n\nWhen to use: ${c.whenToUse}\n\n${data.skill.workflow}\n\nDeveloper guidance: ${c.instructions}\nApps: ${c.apps.join(", ") || "all"}\nRoutines: ${c.routines.join(", ") || "all"}`;
+    const copied = await copyText(guide);
+    if (!destroyed) {
+      if (!copied) { reference.textContent = guide; reference.hidden = false; }
+      say(copied ? "Agent guide copied." : "Clipboard unavailable. Select and copy the guide below.");
+    }
   }));
   schema.addEventListener("click", () => void action(async () => {
     const value = await idGenerator.schema(ctx.client);

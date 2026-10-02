@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -130,11 +131,19 @@ class IdGeneratorStarter:
         endpoint = self.endpoint()
         manifest = self._get(endpoint, "/cyclone-plugin.json")
         health = self._get(endpoint, "/api/health") if manifest else None
+        studio = (health or {}).get("studio")
+        studio = studio if isinstance(studio, dict) else {}
+        version = studio.get("version", "")
+        compatible = (studio.get("product") == "mrz-studio-local" and isinstance(version, str) and
+                      bool(re.fullmatch(r"\d+\.\d+\.\d+", version)) and tuple(map(int, version.split("."))) >= (7, 2, 1))
         valid = bool(manifest and manifest.get("name") == NAME and not kit.validate_manifest(manifest)
-                     and {(s.get("port"), s.get("way")) for s in manifest.get("serves", [])} == set(PORTS.items()))
+                     and compatible and {(s.get("port"), s.get("way")) for s in manifest.get("serves", [])} == set(PORTS.items()))
         ui = manifest.get("ui", {}) if valid else {}
+        ui = ui if isinstance(ui, dict) else {}
         panel, settings = self._ui_url(ui.get("panelUrl"), "/plugins/id-generator"), self._ui_url(ui.get("settingsUrl"), "/settings/id-generator")
-        worker = (health or {}).get("worker") or {}
+        worker = (health or {}).get("worker")
+        worker = worker if isinstance(worker, dict) else {}
+        photoshop, template = (health or {}).get("photoshop"), (health or {}).get("template")
         state = "found" if valid else ("incompatible" if manifest else "offline")
         answer = {"id": NAME, "title": "ID Generator", "state": state, "apiBase": endpoint,
                   "checkedAt": now_ms(), "config": self.config(), "plugin": self._registered(),
@@ -142,8 +151,8 @@ class IdGeneratorStarter:
                   "ports": list(PORTS), "skill": {"description": DEFAULT_WHEN, "workflow": WORKFLOW},
                   "health": {"api": bool(health and health.get("ok")), "worker": bool(worker.get("online")),
                              "busy": bool(worker.get("current_job_id")), "dryRun": bool((health or {}).get("dryRun")),
-                             "photoshopFound": bool(((health or {}).get("photoshop") or {}).get("found")),
-                             "templateFound": bool(((health or {}).get("template") or {}).get("present"))},
+                             "photoshopFound": bool(isinstance(photoshop, dict) and photoshop.get("found")),
+                             "templateFound": bool(isinstance(template, dict) and template.get("present"))},
                   "detail": "Studio found. Exports require an operable Photoshop host and the owner's templates." if valid else
                             "Start MRZ Studio Local 7.2.1 or later on this PC, or change its address."}
         with self._lock:

@@ -150,7 +150,7 @@ def test_an_update_installs_this_pcs_build_without_downgrade_or_uninstall():
     adb = FakeAdb([OLD, PC])
     job, finished = run_job(adb)
     assert job["state"] == "done" and job["from"] == OLD and job["target"] == PC
-    assert adb.commands == [["install", "-r", f"/cache/{PC}/Cyclone-{PC}.apk"]]
+    assert adb.commands == [["install", "-r", str(Path(f"/cache/{PC}/Cyclone-{PC}.apk"))]]
     assert finished and finished[-1]["state"] == "done"
 
 
@@ -340,7 +340,7 @@ def test_the_care_routes_need_the_bearer_and_start_only_this_pcs_update(tmp_path
     assert first["headline"] == "Update available" and first["action"]["label"] == "Update phone"
     done = client.post("/v1/devices/dev_a/care/update", headers=auth).json()
     assert done["headline"] == "Updated"
-    assert session.adb.commands == [["install", "-r", f"/cache/{PC}/Cyclone-{PC}.apk"]]
+    assert session.adb.commands == [["install", "-r", str(Path(f"/cache/{PC}/Cyclone-{PC}.apk"))]]
     assert client.get("/v1/devices/nope/care", headers=auth).status_code == 404
 
 

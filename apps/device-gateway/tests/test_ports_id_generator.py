@@ -24,7 +24,7 @@ def native(tmp_path):
         if url.endswith("/cyclone-plugin.json"):
             return 200, MANIFEST, 0
         if url.endswith("/health") or url.endswith("/api/health"):
-            return 200, {"ok": True}, 0
+            return 200, {"ok": True, "studio": {"product": "mrz-studio-local", "version": "7.2.1"}}, 0
         if url.endswith("/api/id-generator/pair"):
             paired.append(json.loads(body)["secret"])
             return 200, {"configured": True}, 0
