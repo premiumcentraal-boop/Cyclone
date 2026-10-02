@@ -92,6 +92,25 @@ def test_only_literal_loopback_addresses_and_bounded_usage_text(native):
     assert h.id_generator._ui_url("http://127.0.0.1:5173/plugins/id-generator?next=evil", "/plugins/id-generator") is None
 
 
+def test_revocation_blocks_pending_and_already_held_generator_answers(native):
+    h, _ = native
+    activate(h)
+    config = h.id_generator.config()
+    for delivered_first in (False, True):
+        h.id_generator.configure(dict(config, agentEnabled=True))
+        opened = h.traffic.wait("run_revoked", "value.in", {"requestId": "employee1"}, 30, {"plugin": "id-generator"})
+        h.traffic.flush()
+        token = h.store.wait_token(opened["awaitId"])
+        body = {"v": 1, "deliveryId": "dl_native_test", "value": {"status": "complete"}}
+        if delivered_first:
+            assert h.traffic.deliver("run_revoked", "value.in", "Port " + token, body)[0] == 200
+        h.id_generator.configure(dict(config, agentEnabled=False))
+        if not delivered_first:
+            assert h.traffic.deliver("run_revoked", "value.in", "Port " + token, body)[0] == 410
+        answer = h.traffic.result(opened["awaitId"])
+        assert answer["state"] == "cancelled" and "value" not in answer
+
+
 def test_native_api_requires_bearer_and_does_not_provision_during_get(native):
     h, paired = native
     app = FastAPI()

@@ -32,6 +32,7 @@ WORKFLOW = (
     "Then send x.id-generator.generate to the same plugin with data={requestId,photoId,employee,signature?,photo?}. "
     "The employee requires first_name, last_name and birth_date (YYYY-MM-DD); consult the schema for other fields. "
     "Empty doc_number/personal_number use Studio's country rules; supplied numbers are validated. "
+    "For phone delivery request employee.export_format=png; PDF and PSD exports remain available in Studio on the PC. "
     "Studio owns crop/background removal and the signature. Paul Signature is a font; default text is the employee's first name, not Paul. "
     "Wait on value.in with plugin=id-generator and match={requestId}; check value.status is complete. "
     "Then wait on file.in with the same plugin and match={requestId,output:front}, then output:back (or another available output). "

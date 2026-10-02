@@ -338,6 +338,13 @@ class Traffic:
             event = self._events.setdefault(await_id, threading.Event())
             event.wait(min(float(wait_s), 30.0))
             wait = self.store.wait(await_id) or wait
+        if wait["plugin"] == "id-generator" and wait["state"] in ("waiting", "delivered") and not self._generator_allowed(wait):
+            if wait["state"] == "waiting":
+                return self.cancel(await_id, "plugin permission or usage scope changed")
+            self.store.finish_wait(await_id, "cancelled", {"reason": "plugin permission or usage scope changed"}, only_if_waiting=False)
+            with self._lock:
+                self._held.pop(await_id, None)
+            wait = self.store.wait(await_id) or wait
         out = {"awaitId": await_id, "runId": wait["runId"], "port": wait["port"], "plugin": wait["plugin"],
                "state": wait["state"], "timeoutAt": wait["timeoutAt"], **(wait["result"] or {})}
         held = self._held.get(await_id)
@@ -347,6 +354,14 @@ class Traffic:
             if "url" in held:
                 out["url"] = held["url"]
         return out
+
+    def _generator_allowed(self, wait: dict[str, Any]) -> bool:
+        request = wait["request"]
+        try:
+            route = self._route({"app": request.get("app"), "routine": request.get("routine"), "plugin": wait["plugin"]}, wait["port"])
+            return wait["plugin"] in route["effective"]
+        except TrafficError:
+            return False
 
     def take_code(self, await_id: str) -> str | None:
         """Run 4's sealed delivery takes the code once; it is gone from memory afterwards."""
@@ -378,9 +393,7 @@ class Traffic:
             self._time_out(wait)
             return 410, kit.error_body("expired")
         if wait["plugin"] == "id-generator":
-            request = wait["request"]
-            route = self._route({"app": request.get("app"), "routine": request.get("routine"), "plugin": wait["plugin"]}, port)
-            if wait["plugin"] not in route["effective"]:
+            if not self._generator_allowed(wait):
                 self.cancel(wait["awaitId"], "plugin permission or usage scope changed")
                 return 410, kit.error_body("expired")
         problems = kit.validate_delivery(port, body, wait["way"])
