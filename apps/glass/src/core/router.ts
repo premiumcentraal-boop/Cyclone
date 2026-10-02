@@ -10,7 +10,7 @@ const PAGE_ID = /^pg_[A-Za-z0-9_-]{8,40}$/;
 
 export type Route =
   | { name: "home" }
-  | { name: "command"; tab: CommandTab | WorkspaceTab; pageId?: string; view?: "map" | "activity" }
+  | { name: "command"; tab: CommandTab | WorkspaceTab; pageId?: string; view?: "map" | "activity" | "id-generator" }
   | { name: "apps" }
   | { name: "app"; placeId: string; tab: AppTab; route?: string[]; runId?: string; skill?: string }
   | { name: "runs" }
@@ -66,7 +66,7 @@ export function parseRoute(hash: string): Route {
     }
     if (parts[1] === "trash") return { name: "command", tab: "trash" };
     if (parts[1] === "ai") return { name: "command", tab: "ai" };
-    if (parts[1] === "ports") return parts[2] === "map" || parts[2] === "activity" ? { name: "command", tab: "ports", view: parts[2] } : { name: "command", tab: "ports" };
+    if (parts[1] === "ports") return parts[2] === "map" || parts[2] === "activity" || parts[2] === "id-generator" ? { name: "command", tab: "ports", view: parts[2] } : { name: "command", tab: "ports" };
     const tab = COMMAND_TABS.includes(parts[1] as CommandTab) ? (parts[1] as CommandTab) : "home";
     return { name: "command", tab };
   }

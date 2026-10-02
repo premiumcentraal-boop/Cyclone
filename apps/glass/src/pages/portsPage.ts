@@ -19,10 +19,12 @@ import { createPortsActivity } from "./portsActivity.js";
 import { createPortMap } from "./portsMap.js";
 import { feedRow, openPluginSheet, type PluginSheet } from "./portsPlugin.js";
 import { primary, secondary, sensitivityChip, statusPill, tile, wayGlyph } from "./portsUi.js";
+import { createIdGeneratorPage } from "./idGeneratorPage.js";
 
 const POLL_MS = 5_000;
 
-export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" | "activity" = "plugins"): GlassPage {
+export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" | "activity" | "id-generator" = "plugins"): GlassPage {
+  if (view === "id-generator") return createIdGeneratorPage(ctx);
   const element = el("div", "page page-ports");
   const header = el("header", "pt-page-head");
   const titles = el("div", "pt-page-titles");
@@ -47,7 +49,12 @@ export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" | "ac
   note.setAttribute("aria-live", "polite");
   const body = el("div", "pt-page-body");
   body.append(loadingState("Loading Ports…"));
-  element.append(header, tabs, note, body);
+  const starter = el("a", "card idg-starter");
+  starter.href = "#/command/ports/id-generator";
+  starter.append(tile("id-generator", "ID Generator"), el("strong", undefined, "ID Generator"),
+    el("span", undefined, "Built-in starter · Local MRZ Studio · Company IDs, portraits, MRZ and signatures"),
+    el("span", "btn btn-secondary", "Set up & generate"));
+  element.append(header, tabs, starter, note, body);
   const say = (text: string, tone: "ok" | "error" = "ok") => {
     note.textContent = text;
     note.classList.toggle("pt-note-error", tone === "error");

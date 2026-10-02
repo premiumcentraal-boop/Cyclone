@@ -523,3 +523,15 @@ h4.pt-section-title { font-size: var(--text-md); }
 .pa-scenario-about { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.5; }
 @media (max-width: 720px) { .pa-scenarios { grid-template-columns: 1fr; } .pa-run-head { grid-template-columns: 10px 1fr auto; } .pa-run-meta, .pa-tag { display: none; } }
 @media (prefers-reduced-motion: reduce) { .pa-step-now .pa-step-dot { animation: none; } }
+/* Native Studio starter uses the same card and form tokens as the Ports workspace. */
+.idg-starter { display:flex; align-items:center; gap:16px; padding:20px; color:inherit; text-decoration:none; flex-wrap:wrap; }
+.idg-starter > span:last-child { margin-left:auto; }
+.idg-section { padding:24px; display:grid; gap:16px; margin-top:20px; }
+.idg-section h2 { margin:0; font-size:20px; }
+.idg-field { display:grid; gap:8px; min-width:0; }
+.idg-field input, .idg-field textarea { width:100%; box-sizing:border-box; padding:12px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:10px; font:inherit; }
+.idg-toggle { display:flex; gap:10px; align-items:center; }
+.idg-permissions { display:grid; gap:12px; border:1px solid var(--border); border-radius:12px; padding:16px; }
+.idg-actions { display:flex; flex-wrap:wrap; gap:10px; }
+.idg-frame { width:100%; min-height:850px; border:0; border-radius:12px; background:var(--surface); }
+.idg-reference { white-space:pre-wrap; overflow-wrap:anywhere; max-height:600px; overflow:auto; padding:16px; background:var(--surface); border-radius:12px; }

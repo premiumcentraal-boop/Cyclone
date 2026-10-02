@@ -40,6 +40,7 @@ a = Analysis(
                    "cyclone_device_gateway.pc.attach", "cyclone_device_gateway.pc.share",
                    # Plan 48: the Port Hub and the Cyclone Ports kit it imports (the checker is imported when it runs).
                    "cyclone_device_gateway.ports.api", "cyclone_device_gateway.ports.hub", "cyclone_device_gateway.ports.store",
+                   "cyclone_device_gateway.ports.id_generator",
                    "cyclone_ports", "cyclone_ports.catalog", "cyclone_ports.sdk", "cyclone_ports.devhub", "cyclone_ports.conformance",
                    # Plan 33: the Command Center (some modules are imported inside CommandCenter.__init__).
                    "cyclone_device_gateway.command.api", "cyclone_device_gateway.command.center", "cyclone_device_gateway.command.schedule",
