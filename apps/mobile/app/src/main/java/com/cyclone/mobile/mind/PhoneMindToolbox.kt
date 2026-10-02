@@ -71,6 +71,11 @@ class PhoneMindToolbox(
      * connected) keeps the toolbox exactly as before.
      */
     private val ports: MindPortsLink? = null,
+    /**
+     * Plan 49: codes sent by text to this phone's own number. With it, a code field fills itself when the run plainly
+     * uses this phone's number (`codes.AutoCodePolicy`); null (Lab missions) keeps the Secrets Card for every code.
+     */
+    private val codes: MindCodes? = null,
 ) : MindToolbox {
     /** The phone the Mind acts on; swapped by [rebind] when the mission changes plane. */
     @Volatile private var env: CycloneAgentEnvironmentApi = env
@@ -221,7 +226,10 @@ class PhoneMindToolbox(
 
     private fun dispatch(call: MindToolCall, arguments: JSONObject): MindToolResult {
         // A sign-up map never holds what was typed: the recorder learns every value the Mind types or is given.
-        if (call.name == "type_text") signup?.typed(arguments.optString("text"))
+        if (call.name == "type_text") {
+            signup?.typed(arguments.optString("text"))
+            noteTypedNumber(arguments.optString("text"))
+        }
         return dispatchTool(call, arguments)
     }
 
@@ -293,6 +301,9 @@ class PhoneMindToolbox(
         fieldValues = bound.filter { it.editable && !it.password }
             .mapNotNull { ref -> env.fieldValue(ref.elementId)?.let { ref.elementId to it } }.toMap()
         workspace?.let { ws -> runCatching { ws.observe(facts(page, bound)) } }
+        if (codes != null && bound.any { it.editable && !it.password && CODE_FIELD.containsMatchIn(it.label) }) {
+            codePageSince.putIfAbsent(page.packageName, System.currentTimeMillis())
+        }
         return bound
     }
 
@@ -599,7 +610,14 @@ class PhoneMindToolbox(
             state = if (check != null) com.cyclone.mobile.mind.signup.AccountSetupProgress.VERIFICATION else com.cyclone.mobile.mind.signup.AccountSetupProgress.FILLING,
             page = page, pages = pages, drift = if (changed) page else setupState.drift, note = check?.label.orEmpty()))
         val expected = plan.map.pages[page - 1]
+        if (check == com.cyclone.mobile.mind.signup.SignupCheck.SMS_CODE) {
+            setupCode()?.let { filled ->
+                return filled.copy(text = "Page $page of $pages noted. ${filled.text}\n\nIf the page didn't move on by itself, press \"${expected.continueLabel}\".")
+            }
+        }
+        val note = codeNote.also { codeNote = null }
         return MindToolResult(buildString {
+            note?.let { append(it).append(' ') }
             append("Page $page of $pages noted.")
             if (changed) append(" It differs from the map: work this page out from the screen, using the row's values; the owner will be offered a new map.")
             if (check != null) append(" ${check.label.replaceFirstChar { it.uppercase() }} is a person's step: ask the owner (owner_ask) or hand over, and wait. Never try to solve it.")
@@ -1540,6 +1558,9 @@ class PhoneMindToolbox(
             "what must be one of: ${SLOTS.keys.joinToString()}.")
         val page = screen ?: return MindToolResult.error("Read the screen first.")
         val reason = arguments.optString("reason").replace(Regex("[^A-Za-z0-9 ._/-]"), " ").trim().take(100).ifBlank { "Sign in" }
+        // Plan 49: a code sent by text to this phone's own number fills itself when the run plainly uses that number.
+        if (slot == "otp") autoCode(page, ref)?.let { return it }
+        val fallback = codeNote.also { codeNote = null }
         owner.status("Waiting for the Secrets Card")
         val reply = owner.fillSecret(page, ref, slot, reason, ownerTimeoutMs)
         val header = when (reply.outcome) {
@@ -1551,7 +1572,190 @@ class PhoneMindToolbox(
             MindSecretOutcome.FAILED -> "The Secrets Card could not fill the field: ${reply.detail.ifBlank { "unknown reason" }}."
         }
         invalidate()
-        return observeAndRender(header).copy(ok = reply.outcome == MindSecretOutcome.FILLED, ownerWaitMs = reply.waitedMs, changedScreen = true)
+        return observeAndRender(fallback?.let { "$it\n$header" } ?: header)
+            .copy(ok = reply.outcome == MindSecretOutcome.FILLED, ownerWaitMs = reply.waitedMs, changedScreen = true)
+    }
+
+    // ---- plan 49: codes from this phone's own texts ------------------------------------------------------------------
+
+    private val startedAt = System.currentTimeMillis()
+    /** Numbers the run typed into apps in this mission (only to decide whether a code goes to this phone). */
+    private val typedNumbers = mutableListOf<String>()
+    /** When each app first showed a code field in this mission; a code asked for just before still counts. */
+    private val codePageSince = HashMap<String, Long>()
+    /** Why a code didn't fill itself, told to the model with the Secrets Card's result. */
+    private var codeNote: String? = null
+
+    private enum class CodeFill { FILLED, REFUSED, FAILED }
+
+    private fun noteTypedNumber(text: String) {
+        val digits = com.cyclone.mobile.codes.AutoCodePolicy.digits(text)
+        if (digits.length in 6..15 && text.all { it.isDigit() || it in " +()-." }) typedNumbers += text.take(20)
+        if (typedNumbers.size > 8) typedNumbers.removeAt(0)
+    }
+
+    /** An Account Setup row's phone number, when the sign-up map has a phone field. */
+    private fun setupNumber(): String? = setup?.let { plan ->
+        plan.map.pages.flatMap { it.fields }.firstOrNull { it.kind == com.cyclone.mobile.mind.signup.SignupFieldKind.PHONE }?.let { plan.values[it.key] }
+    }
+
+    private fun codePolicy(page: AgentPageCard): com.cyclone.mobile.codes.AutoCodePolicy.Result? {
+        val link = codes ?: return null
+        val app = appLabel(page.packageName) ?: page.packageName
+        return com.cyclone.mobile.codes.AutoCodePolicy.decide(com.cyclone.mobile.codes.AutoCodePolicy.Facts(
+            enabled = runCatching { link.ready() }.getOrDefault(false),
+            phoneNumbers = runCatching { link.numbers() }.getOrDefault(emptyList()),
+            keptPrivate = com.cyclone.mobile.mind.pilot.Pilot.keepOff(page.packageName, app),
+            setupNumber = setupNumber(),
+            typedNumbers = typedNumbers.toList(),
+            screenText = MindScreen.textLines(page).joinToString("\n"),
+            goal = ownerWords.toString(),
+        ))
+    }
+
+    /**
+     * Fills a code sent by text to this phone, without asking, when [codePolicy] says AUTO. Null hands the field to the
+     * Secrets Card ([codeNote] says why). The code goes from the text to the field; the model never sees it.
+     */
+    private fun autoCode(page: AgentPageCard, target: MindRef): MindToolResult? {
+        val link = codes ?: return null
+        val policy = codePolicy(page) ?: return null
+        if (policy.decision != com.cyclone.mobile.codes.AutoCodePolicy.Decision.AUTO) {
+            codeNote = if (policy.decision == com.cyclone.mobile.codes.AutoCodePolicy.Decision.ASK && link.ready()) "Not filled from this phone's texts: ${policy.why}." else null
+            return null
+        }
+        val app = appLabel(page.packageName) ?: page.packageName
+        val names = (listOf(app) + page.packageName.split('.').filter { it.length >= 3 && it !in PACKAGE_WORDS }).distinct()
+        val started = System.currentTimeMillis()
+        var since = maxOf((codePageSince[page.packageName] ?: started) - com.cyclone.mobile.codes.CodeCatcher.MARGIN_MS, startedAt)
+        val refused = mutableSetOf<String>()
+        var resent = false
+        owner.status("Waiting for the code on this phone")
+        if (setup != null) reportSetup(setupState.copy(state = com.cyclone.mobile.mind.signup.AccountSetupProgress.CODE, note = "Waiting for the code on this phone"))
+        fun waited() = System.currentTimeMillis() - started
+        fun back(note: String): MindToolResult? {
+            codeNote = note
+            if (setup != null) reportSetup(setupState.copy(state = com.cyclone.mobile.mind.signup.AccountSetupProgress.VERIFICATION, note = note))
+            return null
+        }
+        while (true) {
+            appFilledCode(target, refused)?.let { return it.copy(ownerWaitMs = waited()) }
+            val ask = com.cyclone.mobile.codes.CodeCatcher.Ask(names, since, refused = refused, subscriptionId = link.subscriptionOf(policy.number))
+            when (val caught = link.catcher().await(ask, cancelled)) {
+                is com.cyclone.mobile.codes.CodeCatcher.Result.Missed -> {
+                    if (cancelled()) return MindToolResult("NOT RUN: the owner stopped the mission.", ok = false, ownerWaitMs = waited())
+                    appFilledCode(target, refused)?.let { return it.copy(ownerWaitMs = waited()) }
+                    if (!resent && resendCode()) {
+                        resent = true
+                        since = System.currentTimeMillis() - RESEND_MARGIN_MS
+                        continue
+                    }
+                    return back("No code reached this phone (${caught.reason}).")
+                }
+                is com.cyclone.mobile.codes.CodeCatcher.Result.Caught -> when (fillCode(target, caught.code)) {
+                    CodeFill.FILLED -> {
+                        if (setup != null) reportSetup(setupState.copy(state = com.cyclone.mobile.mind.signup.AccountSetupProgress.FILLING, note = "Code filled from this phone's texts"))
+                        owner.status("Code filled from this phone's texts")
+                        return observeAndRender("Cyclone read the code from a text on this phone and filled ${target.ref} \"${target.label}\". You never see it.")
+                            .copy(brief = "code from this phone's texts: filled", changedScreen = true, ownerWaitMs = waited())
+                    }
+                    CodeFill.REFUSED -> {
+                        refused += caught.code
+                        if (!resent && resendCode()) {
+                            resent = true
+                            since = System.currentTimeMillis() - RESEND_MARGIN_MS
+                            continue
+                        }
+                        return back("The app didn't accept the code from this phone's texts.")
+                    }
+                    CodeFill.FAILED -> return back("A code arrived, but the field didn't take it.")
+                }
+            }
+        }
+    }
+
+    /** Step 0: the app read its own code (or the page moved on), so Cyclone types nothing. */
+    private fun appFilledCode(target: MindRef, refused: Set<String>): MindToolResult? {
+        val page = env.observe(goal).page ?: return null
+        bind(page)
+        val now = refs.all().firstOrNull { it.identity == target.identity }
+        if (now == null) {
+            if (refs.all().any { it.editable && !it.password && CODE_FIELD.containsMatchIn(it.label) }) return null
+            return observeAndRender("The code page moved on: the app filled the code itself. Cyclone typed nothing.")
+                .copy(brief = "code: the app filled it itself", changedScreen = true)
+        }
+        val boxes = codeBoxes(now)
+        val value = if (boxes.size >= MIN_BOXES) boxes.joinToString("") { fieldValues[it.elementId]?.trim().orEmpty().take(1) }
+            .takeIf { it.length == boxes.size }
+        else fieldValues[now.elementId]?.trim()
+        // A code the app already refused, still in the field, is not the app's own fill.
+        val filled = value != null && value.matches(FILLED_CODE) && value !in refused
+        return if (filled) observeAndRender("The app filled the code itself. Cyclone typed nothing.").copy(brief = "code: the app filled it itself")
+        else null
+    }
+
+    /** Fills the code into one field or, for a row of single-character boxes, box by box; then checks the app took it. */
+    private fun fillCode(target: MindRef, code: String): CodeFill {
+        val link = codes ?: return CodeFill.FAILED
+        val page = env.observe(goal).page ?: return CodeFill.FAILED
+        bind(page)
+        val field = refs.all().firstOrNull { it.identity == target.identity }
+            ?: refs.all().firstOrNull { it.editable && !it.password && CODE_FIELD.containsMatchIn(it.label) } ?: return CodeFill.FAILED
+        val before = errorLines(page)
+        val boxes = codeBoxes(field)
+        val split = boxes.size >= MIN_BOXES && boxes.size == code.length
+        val ok = if (split) fillBoxes(boxes.map { it.identity }, code)
+        else link.fill(page, field, code) || (boxes.size == code.length && boxes.size >= MIN_BOXES && fillBoxes(boxes.map { it.identity }, code))
+        invalidate()
+        if (!ok) return CodeFill.FAILED
+        device.sleep(CODE_SETTLE_MS)
+        val after = env.observe(goal).page ?: return CodeFill.FILLED
+        bind(after)
+        return if ((errorLines(after) - before).isNotEmpty()) CodeFill.REFUSED else CodeFill.FILLED
+    }
+
+    private fun fillBoxes(identities: List<String>, code: String): Boolean {
+        val link = codes ?: return false
+        identities.forEachIndexed { index, identity ->
+            val page = env.observe(goal).page ?: return false
+            bind(page)
+            val box = refs.all().firstOrNull { it.identity == identity } ?: return false
+            if (!link.fill(page, box, code[index].toString())) return false
+        }
+        return true
+    }
+
+    /** A row of small editable boxes on the same line as [field] (a split code field), left to right; else just the field. */
+    private fun codeBoxes(field: MindRef): List<MindRef> {
+        val page = screen ?: return listOf(field)
+        val width = page.pageEvidence.optInt("captureWidth").takeIf { it > 0 } ?: 1080
+        fun box(ref: MindRef) = controlsById[ref.elementId]?.evidence?.optJSONObject("bounds")
+        val anchor = box(field) ?: return listOf(field)
+        return refs.all().filter { it.editable && !it.password }.mapNotNull { ref ->
+            val b = box(ref) ?: return@mapNotNull null
+            val w = b.optInt("right") - b.optInt("left")
+            if (w <= 0 || w > width / 5 || kotlin.math.abs(b.optInt("top") - anchor.optInt("top")) > 40) null else ref to b.optInt("left")
+        }.sortedBy { it.second }.map { it.first }.ifEmpty { listOf(field) }
+    }
+
+    private fun errorLines(page: AgentPageCard): Set<String> = MindScreen.textLines(page).filter { CODE_ERROR.containsMatchIn(it) }.toSet()
+
+    /** Taps the app's own "Resend code" once. */
+    private fun resendCode(): Boolean {
+        val page = env.observe(goal).page ?: return false
+        bind(page)
+        val control = refs.all().firstOrNull { !it.editable && RESEND.containsMatchIn(it.label) } ?: return false
+        owner.status("Asking the app for a new code")
+        return act("phone.click", JSONObject().put("elementId", control.elementId), "Tapped ${control.ref} \"${control.label}\" for a new code", control).ok
+    }
+
+    /** Account Setup: a code page whose code goes to this phone is not a person's step any more. */
+    private fun setupCode(): MindToolResult? {
+        if (codes == null) return null
+        val page = screen?.takeIf { fresh } ?: env.observe(goal).page?.also { bind(it) } ?: return null
+        val field = refs.all().firstOrNull { it.editable && !it.password && CODE_FIELD.containsMatchIn(it.label) }
+            ?: refs.all().filter { it.editable && !it.password }.singleOrNull() ?: return null
+        return autoCode(page, field)
     }
 
     // ---- plan 48 run 4: Cyclone Ports ----------------------------------------------------------------------------
@@ -1802,6 +2006,16 @@ class PhoneMindToolbox(
         private val SETUP_TOOLS = setOf("setup_page", "setup_done")
         /** Plan 48 run 4: offered only when a PC's Port Hub is connected to this phone. */
         private val PORT_TOOLS = setOf("port_send", "port_wait")
+        /** Plan 49: a code field, an error after a code, and the app's own "send a new code". */
+        private val CODE_FIELD = Regex("(?i)\\b(code|otp|one[- ]time|verification|verify|verificatie\\p{L}*|bevestigingscode|inlogcode|pin code|sms)\\b")
+        private val CODE_ERROR = Regex("(?i)(incorrect|wrong code|invalid|not valid|isn't valid|expired|doesn't match|didn't match|onjuist|ongeldig|verlopen|klopt niet|try again|probeer (het )?opnieuw)")
+        private val RESEND = Regex("(?i)(resend|send again|send (a )?new code|get a new code|request (a )?new code|didn'?t (get|receive)|opnieuw (ver)?sturen|stuur (opnieuw|een nieuwe)|nieuwe code)")
+        private val FILLED_CODE = Regex("[A-Za-z0-9]{4,8}")
+        private val PACKAGE_WORDS = setOf("com", "org", "net", "app", "apps", "android", "mobile", "www", "lite", "prod", "release")
+        private const val MIN_BOXES = 4
+        private const val CODE_SETTLE_MS = 1_500L
+        /** After a resend, only texts from just before it count, so the refused code can't come back. */
+        private const val RESEND_MARGIN_MS = 5_000L
         private const val DEFAULT_PORT_WAIT_S = 120
         private val PORT_WAITING = mapOf("code.in" to "Waiting for a code from your PC", "value.in" to "Waiting for a value from your PC",
             "link.in" to "Waiting for a link from your PC", "file.in" to "Waiting for a file from your PC")
@@ -1971,7 +2185,8 @@ class PhoneMindToolbox(
                         "choices" to array("For kind choice: the options.", string("An option.")),
                         required = listOf("label"))),
                     required = listOf("reason", "fields"))),
-            MindToolSpec("vault_fill", "Have the owner fill a secret field (password, code, card) through the Secrets Card. The value never reaches you.",
+            MindToolSpec("vault_fill", "Have the owner fill a secret field (password, code, card) through the Secrets Card. The value never reaches you. " +
+                "For a code sent by text to this phone's own number, what=one_time_code fills it from the text by itself.",
                 objectSchema("ref" to REF, "what" to string("What the field needs.", SLOTS.keys.toList()), "reason" to string("Short reason shown to the owner, e.g. Sign in to Gmail."),
                     required = listOf("ref", "what"))),
             MindToolSpec("port_send", "Send something to the owner's PC on a Cyclone Port, for the plugins there (a log, a sheet, a chat). " +

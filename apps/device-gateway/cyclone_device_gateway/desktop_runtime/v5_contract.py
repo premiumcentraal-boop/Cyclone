@@ -1469,7 +1469,8 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
         raise _bad_cc("moment fields")
 
 
-SETUP_STATES = frozenset({"filling", "verification", "created", "failed"})
+# "code" (plan 49): waiting for a code sent by text to the phone itself, which Cyclone fills.
+SETUP_STATES = frozenset({"filling", "verification", "code", "created", "failed"})
 
 
 def _validate_setup(setup: Any) -> None:

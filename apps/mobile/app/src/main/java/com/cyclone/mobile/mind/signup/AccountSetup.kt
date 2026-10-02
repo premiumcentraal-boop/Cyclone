@@ -25,7 +25,10 @@ class AccountSetupPlan(val map: SignupMap, val values: Map<String, String>) {
         append("Sign-up map of ${map.appLabel}:\n")
         for (page in map.pages) {
             append("Page ${page.index}: \"${page.title}\"")
-            page.check?.let { append(" (a person's step: ${it.label})") }
+            page.check?.let {
+                if (it == SignupCheck.SMS_CODE) append(" (${it.label}: call setup_page with check=sms_code; when the code goes to this phone, Cyclone fills it from the text itself, otherwise it is a person's step)")
+                else append(" (a person's step: ${it.label})")
+            }
             append("\n")
             for (field in page.fields) {
                 val value = when {
@@ -73,6 +76,8 @@ data class AccountSetupProgress(
     companion object {
         const val FILLING = "filling"
         const val VERIFICATION = "verification"
+        /** Plan 49: waiting for a code sent by text to this phone; Cyclone fills it itself. */
+        const val CODE = "code"
         const val CREATED = "created"
         const val FAILED = "failed"
 

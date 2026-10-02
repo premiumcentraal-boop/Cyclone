@@ -233,6 +233,10 @@ def test_create_accounts_runs_ready_rows_with_their_values(running):
     center.tick()
     status, progress = row_status(center, table, ready["id"])
     assert status == "Needs verification" and "page 4 changed" in progress and "email code" in progress
+    # Plan 49: a code sent by text to the phone itself is not a person's step; the row keeps saying Creating.
+    contract.status[mission]["setup"] = {"state": "code", "page": 4, "pages": 7, "drift": None, "handle": None, "note": "Waiting for the code on this phone"}
+    center.tick()
+    assert row_status(center, table, ready["id"]) == ("Creating", "Page 4 of 7 · Waiting for the code on this phone")
     contract.status[mission].update(live=False, status="completed", summary="Created.",
                                     setup={"state": "created", "page": 7, "pages": 7, "drift": None, "handle": "brandone.official", "note": "Created."})
     center.tick()
