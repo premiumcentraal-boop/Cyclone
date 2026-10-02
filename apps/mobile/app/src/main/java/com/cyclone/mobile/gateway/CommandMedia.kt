@@ -21,7 +21,8 @@ internal object CommandMedia {
     const val MAX_SIZE = 500L * 1024 * 1024
     const val MAX_CHUNK = 512 * 1024
     private const val MAX_PARTIALS = 3
-    private val TASK_ID = Regex("^tsk_[A-Za-z0-9_-]{6,40}$")
+    /** A Command Center task, or a Cyclone Ports item (plan 48 run 4: a file a plugin delivered). */
+    private val TASK_ID = Regex("^(?:tsk|pt)_[A-Za-z0-9_-]{6,40}$")
     private val NAME = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
     private val MIME = Regex("^(video|image|audio)/[a-z0-9.+-]{1,60}$")
     private val SHA = Regex("^[0-9a-f]{64}$")

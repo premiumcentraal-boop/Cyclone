@@ -268,7 +268,10 @@ internal class AndroidMindOwner(
         }
         // Plan 33 C2: a secret the owner sealed to this phone for this task and this app or site fills once, without
         // the Secrets Card. The value goes straight from the one-shot lease to the field; the Mind never sees it.
-        com.cyclone.mobile.secrets.SealedDelivery.take(missionId, slot, place.id)?.let { taken ->
+        // Plan 48 run 4: a code a Cyclone Ports plugin delivered for this run fills a one-time code field first.
+        val delivered = (if (slot == "otp") com.cyclone.mobile.secrets.SealedDelivery.take(missionId, com.cyclone.mobile.secrets.SealedDelivery.CODE_SLOT, place.id) else null)
+            ?: com.cyclone.mobile.secrets.SealedDelivery.take(missionId, slot, place.id)
+        delivered?.let { taken ->
             val execution = try {
                 taken.lease.consume { com.cyclone.mobile.secrets.PhoneToolSecretFillExecutor(context).fill(fillTarget, it) }
             } catch (_: Exception) {

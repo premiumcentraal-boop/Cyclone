@@ -20,9 +20,16 @@ import org.json.JSONObject
  * - reports only the lease's outcome (used, failed, expired, unused) and forgets the value.
  *
  * A one-time code slot ("otp") carries an authenticator seed; the phone computes the code at fill time.
+ *
+ * Plan 48 run 4: a verification code a Cyclone Ports plugin delivered (`code.in`) arrives the same way, sealed by the
+ * PC's Port Hub to this key for one run and one app or site ([openCode]). It is held as the "code" slot and filled
+ * once, before the "otp" slot, when the Mind asks for a one-time code.
  */
 internal object SealedDelivery {
     const val INFO = "cyclone-sealed-delivery/v1"
+    const val CODE_INFO = "cyclone-port-code/v1"
+    const val CODE_SLOT = "code"
+    private val RUN_ID = Regex("^[A-Za-z0-9_-]{4,80}$")
     val SLOTS = setOf("password", "otp")
     private val LEASE_ID = Regex("^ls_[A-Za-z0-9_-]{12,40}$")
     private val TASK_ID = Regex("^tsk_[A-Za-z0-9_-]{6,40}$")
@@ -103,6 +110,54 @@ internal object SealedDelivery {
             wipe(opened)
             throw error
         }
+    }
+
+    /**
+     * Plan 48 run 4: opens a verification code the PC's Port Hub sealed to this phone for [runId] and [place], and holds
+     * it for [missionId] as the "code" slot. Returns its length (all the run learns). Throws [Rejected] otherwise.
+     */
+    fun openCode(missionId: String, runId: String, place: String, json: JSONObject): Int {
+        val leaseId = json.optString("leaseId")
+        if (!LEASE_ID.matches(leaseId)) throw Rejected(leaseId.take(40), "LEASE_ID")
+        if (json.keys().asSequence().toSet() != setOf("leaseId", "enc", "ct", "aad")) throw Rejected(leaseId, "ENVELOPE_FIELDS")
+        val enc = runCatching { Base64.getDecoder().decode(json.optString("enc")) }.getOrNull()
+        val ct = runCatching { Base64.getDecoder().decode(json.optString("ct")) }.getOrNull()
+        val aad = json.optString("aad")
+        if (enc == null || enc.size != 65 || ct == null || ct.size !in 17..64 || aad.isEmpty() || aad.length > 600) throw Rejected(leaseId, "ENVELOPE_SHAPE")
+        if (!RUN_ID.matches(runId) || !validPlace(place)) throw Rejected(leaseId, "RUN")
+        val bound = runCatching { JSONObject(aad) }.getOrNull() ?: throw Rejected(leaseId, "AAD")
+        when {
+            bound.keys().asSequence().toSet() != setOf("deviceKey", "expiresAt", "leaseId", "place", "runId", "slot") -> throw Rejected(leaseId, "AAD_FIELDS")
+            bound.optString("leaseId") != leaseId -> throw Rejected(leaseId, "AAD_LEASE")
+            bound.optString("slot") != CODE_SLOT -> throw Rejected(leaseId, "AAD_SLOT")
+            bound.optString("runId") != runId -> throw Rejected(leaseId, "AAD_RUN")
+            bound.optString("place") != place -> throw Rejected(leaseId, "AAD_PLACE")
+            bound.optString("deviceKey") != ownFingerprint() -> throw Rejected(leaseId, "NOT_FOR_THIS_PHONE")
+            bound.optLong("expiresAt") <= clock() -> throw Rejected(leaseId, "EXPIRED")
+            !usedLeases.claim(leaseId) -> throw Rejected(leaseId, "REPLAYED")
+        }
+        val plain = try {
+            Hpke.open(enc, ct, CODE_INFO.toByteArray(), aad.toByteArray(), ownPublic(), decap, params())
+        } catch (_: Exception) {
+            throw Rejected(leaseId, "OPEN_FAILED")
+        }
+        val chars = String(plain, Charsets.UTF_8).toCharArray()
+        plain.fill(0)
+        if (chars.size !in 3..12 || chars.any { !(it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '-') }) {
+            chars.fill('\u0000')
+            throw Rejected(leaseId, "VALUE_SIZE")
+        }
+        synchronized(lock) {
+            val slots = held.getOrPut(missionId) { mutableMapOf() }
+            slots.remove(CODE_SLOT)?.let { old ->
+                old.value.fill('\u0000')
+                outcomes[old.leaseId] = "unused"
+            }
+            slots[CODE_SLOT] = Held(leaseId, place, chars, bound.optLong("expiresAt"))
+            outcomes[leaseId] = "delivered"
+            trim()
+        }
+        return chars.size
     }
 
     fun hold(missionId: String, opened: Map<String, Pair<Envelope, CharArray>>) = synchronized(lock) {

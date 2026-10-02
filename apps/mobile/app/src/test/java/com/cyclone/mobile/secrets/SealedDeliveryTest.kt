@@ -164,4 +164,38 @@ class SealedDeliveryTest {
         // RFC 6238 SHA-1 seed "12345678901234567890"; the 8-digit reference 94287082 ends in 287082.
         assertArrayEquals("287082".toCharArray(), SealedDelivery.totp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ".toCharArray(), 59_000))
     }
+
+    // Plan 48 run 4: the PC's Port Hub (Python, ports/seal.py) sealed this code to the RFC key; the phone opens it.
+    private val portCode: JSONObject by lazy {
+        JSONObject(javaClass.classLoader!!.getResource("cyclone-port-code-fixture.json")!!.readText())
+    }
+
+    @Test fun aPortCodeSealedByThePcOpensForItsRunAndPlaceAndFillsBeforeTheAuthenticator() {
+        val length = SealedDelivery.openCode("mabcdefgh", "mabcdefgh", "package:com.example.shop", portCode)
+        assertEquals(6, length)
+        assertTrue(SealedDelivery.has("mabcdefgh", SealedDelivery.CODE_SLOT))
+        assertNull("another app never gets it", SealedDelivery.take("mabcdefgh", SealedDelivery.CODE_SLOT, "package:com.evil.phish"))
+        val taken = SealedDelivery.take("mabcdefgh", SealedDelivery.CODE_SLOT, "package:com.example.shop")!!
+        var seen = ""
+        taken.lease.consume { seen = String(it); SecretFillExecution(true, true) }
+        assertEquals("482913", seen)
+        assertNull("used once", SealedDelivery.take("mabcdefgh", SealedDelivery.CODE_SLOT, "package:com.example.shop"))
+        assertEquals("REPLAYED", code { SealedDelivery.openCode("mabcdefgh", "mabcdefgh", "package:com.example.shop", portCode) })
+    }
+
+    @Test fun aPortCodeIsBoundToItsRunPlaceKeyAndTime() {
+        assertEquals("AAD_RUN", code { SealedDelivery.openCode("mabcdefgh", "mother0000", "package:com.example.shop", portCode) })
+        assertEquals("AAD_PLACE", code { SealedDelivery.openCode("mabcdefgh", "mabcdefgh", "package:com.example.other", portCode) })
+        SealedDelivery.ownFingerprint = { "ANOTHER PHONE" }
+        assertEquals("NOT_FOR_THIS_PHONE", code { SealedDelivery.openCode("mabcdefgh", "mabcdefgh", "package:com.example.shop", portCode) })
+        SealedDelivery.ownFingerprint = { "FIXTURE" }
+        SealedDelivery.clock = { 1_800_000_300_001L }
+        assertEquals("EXPIRED", code { SealedDelivery.openCode("mabcdefgh", "mabcdefgh", "package:com.example.shop", portCode) })
+        SealedDelivery.clock = { 1_800_000_000_000L }
+        val tampered = JSONObject(portCode.toString()).put("aad", portCode.getString("aad").replace("\"slot\":\"code\"", "\"slot\":\"otp\""))
+        assertEquals("AAD_SLOT", code { SealedDelivery.openCode("mabcdefgh", "mabcdefgh", "package:com.example.shop", tampered) })
+        SealedDelivery.decap = decapWith("4995788ef4b9d6132b249ce59a77281493eb39af373d236a1fe415cb0c2d7beb")
+        assertEquals("OPEN_FAILED", code { SealedDelivery.openCode("mabcdefgh", "mabcdefgh", "package:com.example.shop", portCode) })
+        assertFalse(SealedDelivery.has("mabcdefgh", SealedDelivery.CODE_SLOT))
+    }
 }

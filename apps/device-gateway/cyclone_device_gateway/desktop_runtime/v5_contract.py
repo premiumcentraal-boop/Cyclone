@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import ipaddress
+import json
 import re
 import secrets
 from typing import Any
@@ -49,6 +50,10 @@ V5_OPS = frozenset({
     "cc.status",
     "cc.answer",
     "cc.key",
+    "ports.poll",
+    "ports.blob",
+    "ports.answer",
+    "ports.file",
     "dictionary.get",
     "dictionary.edit",
     "models.list",
@@ -869,7 +874,14 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
         _validate_secret_request_ack(value, args)
         return value
 
+    if op == "ports.blob":
+        # Screenshot bytes: base64 only (checked here, so padding like "...Otp=" is never read as a secret field).
+        _validate_ports_blob(value)
+        return value
     reject_secret_payload(value)
+    if op in PORTS_OPS:
+        _validate_ports_response(op, value)
+        return value
     if op == "atlas.places":
         if set(value) != {"places"} or not isinstance(value.get("places"), list):
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android atlas.places result is malformed.")
@@ -1289,6 +1301,87 @@ def _validate_skills_response(value: dict[str, Any]) -> None:
                 raise _bad_skills("waypoint")
             if point["screenId"] is not None and (not isinstance(point["screenId"], str) or not SCREEN_ID.fullmatch(point["screenId"])):
                 raise _bad_skills("waypoint screen")
+
+
+# Cyclone Ports (plan 48 run 4): the PC's Port Hub polls the phone's outbox and answers its waits.
+PORTS_OPS = frozenset({"ports.poll", "ports.blob", "ports.answer", "ports.file"})
+PORTS_ITEM_ID = re.compile(r"^pt_[A-Za-z0-9_-]{6,40}$")
+PORTS_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{4,80}$")
+PORTS_OUT = frozenset({"run.event", "log.line", "screen.shot", "page.text", "account.fields"})
+PORTS_IN = frozenset({"code.in", "value.in", "link.in", "file.in"})
+PORTS_ANSWER_STATES = frozenset({"delivered", "timed_out", "cancelled", "failed", "empty", "conflict", "off", "unavailable", "refused"})
+PORTS_PLACE = re.compile(r"^(?:package:[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+|chrome:https://[a-z0-9-]+(?:\.[a-z0-9-]+)+)$")
+PORTS_MAX_ITEMS = 20
+PORTS_BLOB_CHUNK = 384 * 1024
+PORTS_BLOB_MAX = 4 * 1024 * 1024
+
+
+def _bad_ports(message: str) -> DesktopRuntimeError:
+    return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android ports result is malformed: {message}.")
+
+
+def _validate_ports_blob(value: dict[str, Any]) -> None:
+    if set(value) != {"data", "bytes", "done"} or not isinstance(value["done"], bool) or not _is_int(value["bytes"]):
+        raise _bad_ports("blob")
+    data = value["data"]
+    if not isinstance(data, str) or not _B64.match(data) or len(data) > (PORTS_BLOB_CHUNK * 4) // 3 + 4 or value["bytes"] > PORTS_BLOB_MAX:
+        raise _bad_ports("blob data")
+
+
+def _validate_ports_item(item: Any) -> None:
+    if not isinstance(item, dict) or item.get("kind") not in ("emit", "await", "cancel"):
+        raise _bad_ports("item kind")
+    common = {"kind", "id", "runId", "at", "app", "routine", "taskId"}
+    if not isinstance(item.get("id"), str) or not PORTS_ITEM_ID.match(item["id"]) or not isinstance(item.get("runId"), str) \
+            or not PORTS_RUN_ID.match(item["runId"]) or not _is_int(item.get("at")):
+        raise _bad_ports("item id")
+    if not all(_short_text(item.get(k), 160, nullable=True) for k in ("app", "routine", "taskId")):
+        raise _bad_ports("item run")
+    kind = item["kind"]
+    if kind == "emit":
+        if set(item) - common - {"port", "data", "blob"} or item.get("port") not in PORTS_OUT or not isinstance(item.get("data"), dict):
+            raise _bad_ports("emit")
+        if len(json.dumps(item["data"])) > 64 * 1024:
+            raise _bad_ports("emit size")
+        blob = item.get("blob")
+        if blob is not None and (not isinstance(blob, dict) or set(blob) != {"bytes", "mime"} or not _is_int(blob["bytes"], minimum=1)
+                                 or blob["bytes"] > PORTS_BLOB_MAX or blob["mime"] not in ("image/png", "image/jpeg", "image/webp")):
+            raise _bad_ports("emit blob")
+        if (item["port"] == "screen.shot") != (blob is not None):
+            raise _bad_ports("screen.shot blob")
+    elif kind == "await":
+        if set(item) - common - {"port", "timeoutS", "match", "place"} or item.get("port") not in PORTS_IN or not _is_int(item.get("timeoutS"), minimum=1):
+            raise _bad_ports("await")
+        match = item.get("match")
+        if not isinstance(match, dict) or set(match) - {"ask"} or not _short_text(match.get("ask"), 200, nullable=True):
+            raise _bad_ports("await match")
+        place = item.get("place")
+        if place is not None and (not isinstance(place, str) or not PORTS_PLACE.match(place)):
+            raise _bad_ports("await place")
+        if item["port"] == "code.in" and place is None:
+            raise _bad_ports("a code needs its place")
+    else:
+        if set(item) - common - {"item", "reason"} or not isinstance(item.get("item"), str) or not PORTS_ITEM_ID.match(item["item"]) \
+                or not _short_text(item.get("reason"), 40):
+            raise _bad_ports("cancel")
+
+
+def _validate_ports_response(op: str, value: dict[str, Any]) -> None:
+    if op == "ports.poll":
+        items = value.get("items")
+        if set(value) != {"items"} or not isinstance(items, list) or len(items) > PORTS_MAX_ITEMS:
+            raise _bad_ports("poll")
+        for item in items:
+            _validate_ports_item(item)
+        return
+    if op == "ports.answer":
+        if set(value) != {"handled"} or not isinstance(value["handled"], bool):
+            raise _bad_ports("answer")
+        return
+    if op == "ports.file":
+        if set(value) != {"received", "done", "name", "folder"} or not _is_int(value["received"]) or not isinstance(value["done"], bool):
+            raise _bad_ports("file")
+        return
 
 
 CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media"})
@@ -1900,6 +1993,63 @@ class V5ContractService:
         args = {"taskId": task_id, "name": name, "mime": mime, "size": size, "sha256": sha256, "offset": offset,
                 "data": base64.b64encode(data).decode()}
         return self._call(device_id, "cc.media", args, checked=True)
+
+    # ---- Cyclone Ports (plan 48 run 4) -----------------------------------------------------------------------------
+
+    def ports_poll(self, device_id: str, ack: list[str], *, drop: bool = False, max_items: int = PORTS_MAX_ITEMS) -> dict[str, Any]:
+        """The phone's outbox: what its runs sent and the waits they opened. [ack] removes items the hub handled."""
+        if not isinstance(ack, list) or len(ack) > 100 or not all(isinstance(i, str) and PORTS_ITEM_ID.match(i) for i in ack):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "ack is a list of port item ids.")
+        args: dict[str, Any] = {"ack": ack, "max": max(1, min(int(max_items), PORTS_MAX_ITEMS))}
+        if drop:
+            args["drop"] = True
+        return self._call(device_id, "ports.poll", args)
+
+    def ports_blob(self, device_id: str, item_id: str, offset: int) -> dict[str, Any]:
+        if not isinstance(item_id, str) or not PORTS_ITEM_ID.match(item_id) or type(offset) is not int or offset < 0:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A blob read is {id, offset}.")
+        return self._call(device_id, "ports.blob", {"id": item_id, "offset": offset})
+
+    def ports_answer(self, device_id: str, item_id: str, state: str, *, reason: str | None = None, plugin: str | None = None,
+                     value: Any = None, has_value: bool = False, url: str | None = None, file: dict[str, Any] | None = None,
+                     sealed: dict[str, str] | None = None) -> dict[str, Any]:
+        """Answers a run's wait. A value or link is screened for secrets like every request (fail closed); a code goes
+        only as an envelope sealed to the phone's key, so the PC can relay it but the args carry no readable code."""
+        if not isinstance(item_id, str) or not PORTS_ITEM_ID.match(item_id) or state not in PORTS_ANSWER_STATES:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "An answer names its item and a known state.")
+        args: dict[str, Any] = {"id": item_id, "state": state}
+        if reason:
+            args["reason"] = str(reason)[:200]
+        if plugin:
+            args["plugin"] = str(plugin)[:80]
+        if url is not None:
+            if not isinstance(url, str) or not url.startswith("https://") or len(url) > 2000:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A link is https.")
+            args["url"] = url
+        if file is not None:
+            args["file"] = file
+        if has_value:
+            args["value"] = value
+        if sealed is None:
+            return self._call(device_id, "ports.answer", args)
+        if (not isinstance(sealed, dict) or set(sealed) != {"leaseId", "enc", "ct", "aad"} or not CC_LEASE_ID.match(str(sealed["leaseId"]))
+                or not all(isinstance(sealed[k], str) and _B64.match(sealed[k]) for k in ("enc", "ct"))
+                or not isinstance(sealed["aad"], str) or len(sealed["aad"]) > 600 or has_value or url is not None or file is not None):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A sealed code is {leaseId, enc, ct, aad} only.")
+        reject_secret_payload(args)
+        return self._call(device_id, "ports.answer", {**args, "sealed": sealed}, checked=True)
+
+    def ports_file(self, device_id: str, item_id: str, *, name: str, mime: str, size: int, sha256: str, offset: int,
+                   data: bytes) -> dict[str, Any]:
+        """One chunk of a file a plugin delivered for a wait (image, video, audio) to the phone's gallery."""
+        if (not isinstance(item_id, str) or not PORTS_ITEM_ID.match(item_id) or not isinstance(name, str) or not CC_MEDIA_NAME.match(name)
+                or not isinstance(mime, str) or not CC_MEDIA_MIME.match(mime) or type(size) is not int or not 0 < size <= 20 * 1024 * 1024
+                or not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256) or type(offset) is not int
+                or not 0 <= offset < size or not isinstance(data, bytes) or not 0 < len(data) <= CC_MEDIA_CHUNK or offset + len(data) > size):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A file chunk is {id, name, mime, size, sha256, offset, data}.")
+        args = {"taskId": item_id, "name": name, "mime": mime, "size": size, "sha256": sha256, "offset": offset,
+                "data": base64.b64encode(data).decode()}
+        return self._call(device_id, "ports.file", args, checked=True)
 
     def cc_key(self, device_id: str) -> dict[str, Any]:
         """Plan 33 (C2): the phone's device key (public half and fingerprint) for sealed delivery."""

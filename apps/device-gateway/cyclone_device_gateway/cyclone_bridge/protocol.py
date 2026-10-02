@@ -21,6 +21,8 @@ ALLOWED_OPS = {
     # Cyclone Lab: measured Mind missions (start, watch, answer as the owner, read back).
     "lab.start", "lab.status", "lab.answer", "lab.record",
     "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media",
+    # Cyclone Ports (plan 48 run 4): the PC's Port Hub polls the phone's outbox and answers its runs' waits.
+    "ports.poll", "ports.blob", "ports.answer", "ports.file",
     # Plan 43 T6: the sign-up maps the phone learned (schemas only), and forgetting one.
     "signup.maps", "signup.forget",
     # Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.

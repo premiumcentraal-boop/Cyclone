@@ -164,6 +164,11 @@ internal object GatewayProtocol {
         "cc.answer",
         "cc.key",
         "cc.media",
+        // Cyclone Ports (plan 48 run 4): the PC's Port Hub collects what runs send and answers their waits.
+        "ports.poll",
+        "ports.blob",
+        "ports.answer",
+        "ports.file",
         // The app dictionary (plan 36 §7): read it, the owner's edits from Glass, and the phone's models for the picker.
         "dictionary.get",
         "dictionary.edit",
