@@ -48,6 +48,9 @@ SETUP_ROW_PERMISSIONS = {
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",  # Unrestricted battery
     "android.permission.SYSTEM_ALERT_WINDOW",  # Display over apps
     "android.permission.SCHEDULE_EXACT_ALARM",  # Precise timing
+    # Plan 49: Settings → Permissions → Codes. Read texts only for one code step, in memory; never receive or send.
+    "android.permission.READ_SMS",
+    "android.permission.READ_PHONE_NUMBERS",
 }
 
 # READ_CONTACTS left this list in alpha.45 by the owner's decision (plan 29): it now has a setup row and is asked for

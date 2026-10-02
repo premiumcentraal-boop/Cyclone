@@ -20,3 +20,7 @@ Baseline: published `v5.0.0-alpha.99.dev1`, commit `c7d0526d`, Glass `1.0.0-alph
 5. **Release:** checkpoint source, integrate on the real development branch without overwriting concurrent work, increment coherent product/mobile/PC/Glass versions, release through the existing signed CI lane, verify published assets and provenance. No additional development-branch pushes while publication is running.
 
 The bundled skill describes when to use the plugin and the precise request sequence. The agent chooses it for a matching task; developer rules determine where it is actually callable. Descriptive matching does not grant consent, change phone model selection, or execute a skill automatically.
+
+## Concurrent release integration
+
+Alpha 100 (`c74a6ece`) landed during acceptance. Preserve its codes-from-texts implementation and release notes; resolve the mission/toolbox constructor by passing both the portrait attachment and code capability. The native starter therefore ships as Alpha 101 / Glass Alpha 56, Android 246.

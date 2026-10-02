@@ -433,6 +433,8 @@ class SignupStore:
             parts.append(f"page {setup['drift']} changed since the map; Cyclone worked it out (map it again to refresh)")
         if setup["state"] == "verification":
             parts.append("a person's step: " + (setup["note"] or "check the phone"))
+        elif setup["state"] == "code":
+            parts.append(setup["note"] or "Waiting for the code on the phone")
         elif setup["note"]:
             parts.append(setup["note"])
         return " · ".join(parts)[:300] or "Creating."

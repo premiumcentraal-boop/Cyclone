@@ -1,6 +1,17 @@
 # Plan 49: codes that fill themselves, and Ports run 5 and 6
 
-Date: 2026-10-02. Status: planned, nothing built. Follows plan 48 (runs 1–4 released, alpha.96–99).
+Date: 2026-10-02. Status: **§6.1 built, released in alpha.100**; §6.2–6.4 planned. Follows plan 48 (runs 1–4
+released, alpha.96–99).
+
+**As built in alpha.100** (differences from the text below):
+- **Step 1 reads the SMS database** once a second during the code step. There is no `SMS_RECEIVED` receiver
+  (`RECEIVE_SMS` stays forbidden by the permission guard).
+- **No Shizuku grant.** The Settings row explains Android's "Allow restricted settings" instead.
+- **An unnamed code** (no app name in the text) waits 15 s for a named one before it counts.
+- **The pieces:** pure code in `codes/` (`CodeExtractor`, `AutoCodePolicy`, `CodeCatcher`); Android in `codes/`
+  (`AndroidCodes`, `AndroidMindCodes`); the step itself in `PhoneMindToolbox` (`autoCode`, `fillCode`, `setupCode`).
+- **Account Setup:** a new progress state `code` that the gateway accepts and shows as "Creating · Waiting for the
+  code on this phone".
 
 ## 0. The ask
 

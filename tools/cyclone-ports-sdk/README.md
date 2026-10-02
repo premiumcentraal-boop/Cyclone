@@ -86,7 +86,7 @@ Test it: `python -m cyclone_ports.conformance http://127.0.0.1:8780`, then write
   plugin. De-duplicate on the envelope `id`, and treat a repeated `awaitId` as the same wait.
 - **Safe retries:** `deliver()` adds a `deliveryId` and retries 429, 5xx and network errors. The hub answers a repeat
   with `200 duplicate`.
-- **Your own data points:** extension ports `x.<plugin>.<name>` (SPEC §2.1). Optional capabilities go in `features`.
+- **Your own data points:** extension ports `x.<plugin>.<name>` (SPEC Â§2.1). Optional capabilities go in `features`.
 - **Other languages:**
   - `js/verify.mjs` checks signatures in Node;
   - `schemas/signature-vectors.json` lets any language prove its signature check;
@@ -120,11 +120,11 @@ CI (`pc-companion-ci.yml`) runs these tests on every pull request that touches t
 
 ## Status
 
-The contract is a frozen draft. The real Port Hub lands in the gateway in plan 45 runs P1–P5. Until then:
+The contract is a frozen draft. The real Port Hub lands in the gateway in plan 45 runs P1â€“P5. Until then:
 - `secret.out` and `secret.in` are hub/vault-only and can't be served by a plugin;
 - MCP plugins (`cyclone_port_wait`) and recipes (YAML) come in P5.
 
 Plugins built against this kit keep working once the real hub ships. Builders start at
 `Cyclone V5 plan/HANDOFF-run-ports-plugins.md`.
 
-The native **ID Generator** starter ships with Alpha 100 / Glass Alpha 56. Its developer/agent workflow lives in `starters/id-generator/SKILL.md`; Studio 7.2.1+ owns the rendering engine and Glass owns policy/consent. The real gateway Ports hub is now available, including targeted private traffic and correlated waits.
+The native **ID Generator** starter ships with Alpha 101 / Glass Alpha 56. Its developer/agent workflow lives in `starters/id-generator/SKILL.md`; Studio 7.2.1+ owns the rendering engine and Glass owns policy/consent. The real gateway Ports hub is now available, including targeted private traffic and correlated waits.

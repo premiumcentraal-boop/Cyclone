@@ -393,7 +393,12 @@ internal fun CycloneSettingsPage426(
                 }
             }
 
-            "Permissions" -> item { Permissions426Card(context) }
+            "Permissions" -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Permissions426Card(context)
+                    Codes426Card(context)
+                }
+            }
             "Profile engine" -> item { Settings426Surface { RootFeaturesCard() } }
             "App Maps" -> item { AppMapsSettingsSection(context, refreshTick) }
             "Vault" -> item { VaultSettingsPanel() }
@@ -581,6 +586,68 @@ private fun Permissions426Card(context: Context) {
                 else open426(context, CyclonePermissionSetup.appDetails(context))
             }
             Settings426InfoRow(Icons.Rounded.ScreenShare, "Screen sharing asks every session", "Android capture consent remains temporary and explicit.")
+        }
+    }
+}
+
+/**
+ * Plan 49: Settings → Permissions → Codes. Cyclone fills a code sent by text to this phone's own number, without asking,
+ * when the run plainly uses that number. Texts are read in memory only.
+ */
+@Composable
+private fun Codes426Card(context: Context) {
+    var tick by remember { mutableStateOf(0) }
+    val canRead = remember(tick) { com.cyclone.mobile.codes.AndroidCodes.canReadTexts(context) }
+    var on by remember(tick) { mutableStateOf(com.cyclone.mobile.codes.AndroidCodes.enabled(context)) }
+    val sims = remember(tick) { com.cyclone.mobile.codes.AndroidCodes.simNumbers(context).map { it.second } }
+    var draft by rememberSaveable { mutableStateOf(com.cyclone.mobile.codes.AndroidCodes.confirmed(context).joinToString(", ")) }
+    LaunchedEffect(Unit) { tick++ }
+    Settings426Surface {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Codes from this phone's texts", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "When a sign-up or task uses this phone's number, Cyclone reads the code from the text and fills it. " +
+                            "Never for banking or payments. Texts are read only for that moment and never saved.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                CycloneLiquidToggle(on, { next ->
+                    on = next
+                    com.cyclone.mobile.codes.AndroidCodes.setEnabled(context, next)
+                })
+            }
+            CyclonePermissionRow(Icons.Rounded.Key, "Read texts", "Needed to read the code. If Android says \"Restricted setting\": App info → ⋮ → Allow restricted settings, then try again.",
+                canRead, if (canRead) "Manage" else "Allow") {
+                if (!canRead) (context as? Activity)?.let {
+                    ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_SMS, Manifest.permission.READ_PHONE_NUMBERS), 324)
+                } else open426(context, CyclonePermissionSetup.appDetails(context))
+                tick++
+            }
+            Text(
+                if (sims.isEmpty()) "Your SIM doesn't tell Android its number. Add this phone's number below."
+                else "This phone's number from the SIM: ${sims.joinToString(", ")}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                label = { Text("This phone's numbers (comma separated)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodySmall,
+            )
+            CycloneLiquidTextAction(
+                label = "Save numbers",
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    com.cyclone.mobile.codes.AndroidCodes.setConfirmed(context, draft.split(',', '\n'))
+                    draft = com.cyclone.mobile.codes.AndroidCodes.confirmed(context).joinToString(", ")
+                    tick++
+                },
+            )
         }
     }
 }

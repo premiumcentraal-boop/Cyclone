@@ -694,7 +694,9 @@ object MindMissions {
                 setup = run.setup, setupProgress = { progress -> com.cyclone.mobile.mind.signup.AccountSetupProgress.set(run.id, progress) },
                 // Plan 48 run 4: Cyclone Ports only while the owner's PC is polling this phone; never in a Lab mission.
                 ports = portsLink(run.id, run.mission.lab == null),
-                portPhoto = com.cyclone.mobile.mind.MindPortPhoto.fromDataUrl(attachment?.imageDataUrl))
+                portPhoto = com.cyclone.mobile.mind.MindPortPhoto.fromDataUrl(attachment?.imageDataUrl),
+                // Plan 49: codes sent by text to this phone's own number fill themselves; never in a Lab mission.
+                codes = if (run.mission.lab == null) com.cyclone.mobile.codes.AndroidMindCodes(context) else null)
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
             // own owner question, answered on the same card as any other.
             planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }
