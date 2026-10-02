@@ -1307,7 +1307,7 @@ def _validate_skills_response(value: dict[str, Any]) -> None:
 PORTS_OPS = frozenset({"ports.poll", "ports.blob", "ports.answer", "ports.file"})
 PORTS_ITEM_ID = re.compile(r"^pt_[A-Za-z0-9_-]{6,40}$")
 PORTS_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{4,80}$")
-PORTS_OUT = frozenset({"run.event", "log.line", "screen.shot", "page.text", "account.fields"})
+PORTS_OUT = frozenset({"run.event", "log.line", "screen.shot", "page.text", "account.fields", "file.out"})
 PORTS_IN = frozenset({"code.in", "value.in", "link.in", "file.in"})
 PORTS_ANSWER_STATES = frozenset({"delivered", "timed_out", "cancelled", "failed", "empty", "conflict", "off", "unavailable", "refused"})
 PORTS_PLACE = re.compile(r"^(?:package:[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+|chrome:https://[a-z0-9-]+(?:\.[a-z0-9-]+)+)$")
@@ -1331,7 +1331,10 @@ def _validate_ports_blob(value: dict[str, Any]) -> None:
 def _validate_ports_item(item: Any) -> None:
     if not isinstance(item, dict) or item.get("kind") not in ("emit", "await", "cancel"):
         raise _bad_ports("item kind")
-    common = {"kind", "id", "runId", "at", "app", "routine", "taskId"}
+    common = {"kind", "id", "runId", "at", "app", "routine", "taskId", "plugin"}
+    target = item.get("plugin")
+    if target is not None and (not isinstance(target, str) or not re.fullmatch(r"[a-z][a-z0-9-]{1,40}", target)):
+        raise _bad_ports("plugin target")
     if not isinstance(item.get("id"), str) or not PORTS_ITEM_ID.match(item["id"]) or not isinstance(item.get("runId"), str) \
             or not PORTS_RUN_ID.match(item["runId"]) or not _is_int(item.get("at")):
         raise _bad_ports("item id")
@@ -1339,22 +1342,31 @@ def _validate_ports_item(item: Any) -> None:
         raise _bad_ports("item run")
     kind = item["kind"]
     if kind == "emit":
-        if set(item) - common - {"port", "data", "blob"} or item.get("port") not in PORTS_OUT or not isinstance(item.get("data"), dict):
+        port = item.get("port")
+        extension = isinstance(port, str) and re.fullmatch(r"x\.[a-z][a-z0-9-]{1,40}\.[a-z][a-z0-9-]{0,40}", port)
+        if set(item) - common - {"port", "data", "blob"} or (port not in PORTS_OUT and not extension) or not isinstance(item.get("data"), dict):
             raise _bad_ports("emit")
+        if (port == "file.out" or extension) and not target:
+            raise _bad_ports("private plugin traffic needs a target")
         if len(json.dumps(item["data"])) > 64 * 1024:
             raise _bad_ports("emit size")
         blob = item.get("blob")
         if blob is not None and (not isinstance(blob, dict) or set(blob) != {"bytes", "mime"} or not _is_int(blob["bytes"], minimum=1)
                                  or blob["bytes"] > PORTS_BLOB_MAX or blob["mime"] not in ("image/png", "image/jpeg", "image/webp")):
             raise _bad_ports("emit blob")
-        if (item["port"] == "screen.shot") != (blob is not None):
+        if (item["port"] in ("screen.shot", "file.out")) != (blob is not None):
             raise _bad_ports("screen.shot blob")
     elif kind == "await":
         if set(item) - common - {"port", "timeoutS", "match", "place"} or item.get("port") not in PORTS_IN or not _is_int(item.get("timeoutS"), minimum=1):
             raise _bad_ports("await")
         match = item.get("match")
-        if not isinstance(match, dict) or set(match) - {"ask"} or not _short_text(match.get("ask"), 200, nullable=True):
+        if not isinstance(match, dict) or set(match) - {"ask", "requestId", "output"} or not _short_text(match.get("ask"), 200, nullable=True):
             raise _bad_ports("await match")
+        if set(match) - {"ask"} and (not target or item["port"] not in ("value.in", "file.in")):
+            raise _bad_ports("structured match needs a targeted value/file wait")
+        for key in ("requestId", "output"):
+            if key in match and (not isinstance(match[key], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", match[key])):
+                raise _bad_ports("await correlation")
         place = item.get("place")
         if place is not None and (not isinstance(place, str) or not PORTS_PLACE.match(place)):
             raise _bad_ports("await place")
@@ -1996,13 +2008,18 @@ class V5ContractService:
 
     # ---- Cyclone Ports (plan 48 run 4) -----------------------------------------------------------------------------
 
-    def ports_poll(self, device_id: str, ack: list[str], *, drop: bool = False, max_items: int = PORTS_MAX_ITEMS) -> dict[str, Any]:
+    def ports_poll(self, device_id: str, ack: list[str], *, drop: bool = False, max_items: int = PORTS_MAX_ITEMS,
+                   skills: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """The phone's outbox: what its runs sent and the waits they opened. [ack] removes items the hub handled."""
         if not isinstance(ack, list) or len(ack) > 100 or not all(isinstance(i, str) and PORTS_ITEM_ID.match(i) for i in ack):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "ack is a list of port item ids.")
         args: dict[str, Any] = {"ack": ack, "max": max(1, min(int(max_items), PORTS_MAX_ITEMS))}
         if drop:
             args["drop"] = True
+        if skills is not None:
+            if len(skills) > 8 or len(json.dumps(skills)) > 32000:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Ports skill advertisements are too large.")
+            args["skills"] = skills
         return self._call(device_id, "ports.poll", args)
 
     def ports_blob(self, device_id: str, item_id: str, offset: int) -> dict[str, Any]:

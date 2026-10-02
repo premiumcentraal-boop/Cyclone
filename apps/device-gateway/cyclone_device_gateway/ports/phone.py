@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from ..desktop_runtime.models import DesktopRuntimeError
+from ..desktop_runtime.models import DesktopRuntimeError, RuntimeErrorCode
 from . import seal
 from .traffic import TrafficError
 
@@ -114,7 +114,14 @@ class PhoneBridge:
         with self._lock:
             ack = self._acks.pop(device, [])
         try:
-            items = self.contract.ports_poll(device, ack)["items"]
+            skills = [{k: v for k, v in s.items() if k != "schemaUrl"} for s in self.traffic.hub.id_generator.skills()]
+            try:
+                items = self.contract.ports_poll(device, ack, skills=skills)["items"]
+            except DesktopRuntimeError as error:
+                # Alpha 99 phones do not yet understand advertisements. Ordinary Ports still work on them.
+                if error.code != RuntimeErrorCode.INVALID_REQUEST:
+                    raise
+                items = self.contract.ports_poll(device, ack)["items"]
         except DesktopRuntimeError as error:
             if not _refused(error):
                 with self._lock:  # the phone didn't hear us: acknowledge again next time
@@ -146,7 +153,7 @@ class PhoneBridge:
                 return
             seen.append(item_id)
             del seen[:-SEEN_KEEP]
-        meta = {"app": item.get("app"), "routine": item.get("routine"), "taskId": item.get("taskId")}
+        meta = {"app": item.get("app"), "routine": item.get("routine"), "taskId": item.get("taskId"), "plugin": item.get("plugin")}
         kind = item["kind"]
         if kind == "emit":
             self._emit(device, item, meta)

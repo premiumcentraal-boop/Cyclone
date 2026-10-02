@@ -279,7 +279,7 @@ class Traffic:
         plugin = row["effective"][0]
         await_id, token = "aw_" + secrets.token_hex(8), secrets.token_urlsafe(24)
         request = {"v": 1, "runId": run["runId"], "taskId": run.get("taskId"), "rowId": run.get("rowId"),
-                   "app": run.get("app"), "port": port, "awaitId": await_id, "match": match or {}, "timeoutS": timeout,
+                   "app": run.get("app"), "routine": run.get("routine"), "port": port, "awaitId": await_id, "match": match or {}, "timeoutS": timeout,
                    "sentAt": _now_iso(), "deliverUrl": f"{self.base_url}/v1/ports/{run['runId']}/{port}/deliver"}
         wait = {"awaitId": await_id, "runId": run["runId"], "port": port, "way": row["way"], "plugin": plugin,
                 "request": request, "timeoutAt": now_ms() + int(timeout * 1000)}
@@ -377,6 +377,12 @@ class Traffic:
         if now_ms() >= wait["timeoutAt"]:
             self._time_out(wait)
             return 410, kit.error_body("expired")
+        if wait["plugin"] == "id-generator":
+            request = wait["request"]
+            route = self._route({"app": request.get("app"), "routine": request.get("routine"), "plugin": wait["plugin"]}, port)
+            if wait["plugin"] not in route["effective"]:
+                self.cancel(wait["awaitId"], "plugin permission or usage scope changed")
+                return 410, kit.error_body("expired")
         problems = kit.validate_delivery(port, body, wait["way"])
         if problems:
             return 422, kit.error_body("invalid", "; ".join(problems), problems=problems)

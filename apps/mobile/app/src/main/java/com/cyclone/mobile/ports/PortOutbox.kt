@@ -41,7 +41,7 @@ class PortOutbox(
     )
 
     /** Who a run is: its id (the mission), the app it works in and the routine or task it belongs to. */
-    data class Run(val runId: String, val app: String? = null, val routine: String? = null, val taskId: String? = null)
+    data class Run(val runId: String, val app: String? = null, val routine: String? = null, val taskId: String? = null, val plugin: String? = null)
 
     /**
      * Opens a sealed code for a wait and holds it on the phone. Returns the code's length; throws when it does not open.
@@ -63,8 +63,13 @@ class PortOutbox(
     private val queue = ArrayList<Item>()
     private val waits = HashMap<String, Waiting>()
     @Volatile private var lastPollMs = Long.MIN_VALUE / 2
+    @Volatile private var approvedSkills: List<JSONObject> = emptyList()
 
     fun connected(): Boolean = clock() - lastPollMs <= CONNECTED_MS
+    fun skills(app: String?, routine: String?): List<JSONObject> = if (!connected()) emptyList() else
+        approvedSkills.filter { PortSkills.matches(it, app, routine) }.map { JSONObject(it.toString()) }
+    private fun permitted(run: Run, port: String): Boolean = run.plugin != null &&
+        skills(run.app, run.routine).any { it.optString("name") == run.plugin && PortSkills.has(it, port) }
 
     // ---- the run's side --------------------------------------------------------------------------------------------
 
@@ -74,9 +79,11 @@ class PortOutbox(
      */
     fun emit(run: Run, port: String, data: JSONObject, image: ByteArray? = null, mime: String = "image/png"): String? {
         if (!connected()) return NO_PC
-        if (port !in OUT_PORTS) return "$port is not a port the phone sends on"
+        if (run.plugin != null && !permitted(run, port)) return "this plugin is not allowed here on $port"
+        if (port !in OUT_PORTS && !(run.plugin != null && (port == "file.out" || port.startsWith("x.${run.plugin}.")) && permitted(run, port))) return "$port is not a port the phone sends on"
         val clean = PortScrub.data(port, data) ?: return "nothing was left to send once private fields were taken out"
-        if (port == "screen.shot" && (image == null || image.isEmpty())) return "no screenshot to send"
+        if (port in setOf("screen.shot", "file.out") && (image == null || image.isEmpty())) return "no image to send"
+        if (image != null && mime !in setOf("image/png", "image/jpeg", "image/webp")) return "unsupported image format"
         if (image != null && image.size > MAX_BLOB) return "the screenshot is too large"
         val json = JSONObject().put("kind", "emit").put("port", port).put("data", clean)
         if (image != null) json.put("blob", JSONObject().put("bytes", image.size).put("mime", mime))
@@ -88,14 +95,22 @@ class PortOutbox(
      * Waits on an in port until a plugin answers, [timeoutS] passes or [cancelled] says the run stopped. [place] binds a
      * code to the app or site it is for. Blocks the calling thread.
      */
-    fun await(run: Run, port: String, ask: String, timeoutS: Int, place: String? = null, cancelled: () -> Boolean = { false }): Answer {
+    fun await(run: Run, port: String, ask: String, timeoutS: Int, place: String? = null, cancelled: () -> Boolean = { false }): Answer =
+        awaitMatched(run, port, ask, timeoutS, place, null, cancelled)
+
+    fun awaitMatched(run: Run, port: String, ask: String, timeoutS: Int, place: String? = null, match: JSONObject? = null, cancelled: () -> Boolean = { false }): Answer {
         if (!connected()) return Answer("no_pc", NO_PC)
         if (port !in IN_PORTS) return Answer("refused", "$port is not a port the phone waits on")
+        if (run.plugin != null && !permitted(run, port)) return Answer("refused", "this plugin is not allowed here")
+        if (match != null && (run.plugin == null || port !in setOf("value.in", "file.in") ||
+            match.keys().asSequence().any { it !in setOf("ask", "requestId", "output") } ||
+            match.keys().asSequence().any { k -> match.opt(k) !is String || match.getString(k).length > if (k == "ask") 200 else 80 }))
+            return Answer("refused", "invalid plugin request match")
         if (port == "code.in" && place == null) return Answer("refused", "a code needs the app or site it is for; open it first")
         val timeout = timeoutS.coerceIn(MIN_WAIT_S, MAX_WAIT_S)
         val waiting = Waiting(run, port, place)
         val json = JSONObject().put("kind", "await").put("port", port).put("timeoutS", timeout)
-            .put("match", JSONObject().put("ask", PortScrub.text(ask).take(200)))
+            .put("match", match?.let { JSONObject(it.toString()) } ?: JSONObject().put("ask", PortScrub.text(ask).take(200)))
         if (place != null) json.put("place", place)
         val id = synchronized(lock) { enqueue(run, json, null).also { waits[it] = waiting } }
         // The PC times the wait out itself; the phone's own limit only covers a PC that went away.
@@ -128,6 +143,7 @@ class PortOutbox(
         run.app?.let { json.put("app", it) }
         run.routine?.let { json.put("routine", it) }
         run.taskId?.let { json.put("taskId", it) }
+        run.plugin?.let { json.put("plugin", it) }
         synchronized(lock) {
             queue.add(Item(id, json, blob, clock()))
             // A PC that stops polling must not grow the queue: the oldest out messages go first, waits never.
@@ -151,10 +167,12 @@ class PortOutbox(
      * when the PC could not take it (it looked secret to the PC's own check), failing its wait.
      */
     fun poll(args: JSONObject): JSONObject {
-        if (args.keys().asSequence().any { it !in setOf("ack", "max", "drop") }) throw IllegalArgumentException("ports.poll takes ack, max and drop.")
+        if (args.keys().asSequence().any { it !in setOf("ack", "max", "drop", "skills") }) throw IllegalArgumentException("ports.poll takes ack, max, drop and skills.")
+        val newSkills = args.optJSONArray("skills")?.let(PortSkills::parse).orEmpty()
         val ack = args.optJSONArray("ack")?.let { a -> (0 until minOf(a.length(), 100)).map { a.optString(it) } }.orEmpty().toSet()
         val max = args.optInt("max", MAX_ITEMS).coerceIn(1, MAX_ITEMS)
         lastPollMs = clock()
+        approvedSkills = newSkills
         val dropped: Item?
         val out = JSONArray()
         synchronized(lock) {
@@ -279,6 +297,19 @@ object PortScrub {
             if (clean.length() == 0) null else JSONObject().put("fields", clean)
         }
         "screen.shot" -> JSONObject().apply { data.optString("pageKey").takeIf { it.isNotBlank() }?.let { put("pageKey", it.take(160)) } }
-        else -> null
+        else -> if (port == "file.out" || port.startsWith("x.")) runCatching {
+            require(data.toString().length <= 16_000)
+            checkData(data, 0)
+            JSONObject(data.toString())
+        }.getOrNull() else null
+    }
+
+    private fun checkData(value: Any?, depth: Int) {
+        require(depth <= 8)
+        when (value) {
+            is JSONObject -> { require(value.length() <= 60); value.keys().asSequence().forEach { key -> require(!secretName(key)); checkData(value.opt(key), depth + 1) } }
+            is JSONArray -> { require(value.length() <= 60); for (i in 0 until value.length()) checkData(value.opt(i), depth + 1) }
+            is String -> require(value.length <= 4000 && !INLINE.containsMatchIn(value))
+        }
     }
 }

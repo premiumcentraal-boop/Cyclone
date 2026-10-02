@@ -27,6 +27,7 @@ WORKFLOW = (
     "Get missing employee details and a portrait from the owner; never invent a person or treat a screen screenshot as a portrait. "
     "Use a fresh requestId for each intended employee, and reuse it only when retrying the same request. "
     "Send file.out to plugin id-generator with source=attachment and data.assetId=photoId. "
+    "First read the live schema by waiting on value.in with plugin=id-generator and match={ask:schema}. "
     "Then send x.id-generator.generate to the same plugin with data={requestId,photoId,employee,signature?,photo?}. "
     "The employee requires first_name, last_name and birth_date (YYYY-MM-DD); consult the schema for other fields. "
     "Empty doc_number/personal_number use Studio's country rules; supplied numbers are validated. "
