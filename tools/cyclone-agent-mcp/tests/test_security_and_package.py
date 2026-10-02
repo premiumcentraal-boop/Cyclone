@@ -53,11 +53,14 @@ def test_audit_log_never_receives_argument_values(tmp_path):
     assert "value" not in text.lower()
     assert "token" not in text.lower()
 
-def test_official_mcp_sdk_stdio_tools_list_when_sdk_is_available():
+def test_official_mcp_sdk_stdio_tools_list_when_sdk_is_available(monkeypatch):
+    import sys
     import pytest
     pytest.importorskip("mcp")
-    from cyclone_agent_mcp.connector import verify_tools_list
-    result = verify_tools_list()
+    from cyclone_agent_mcp import connector
+    # Test this checkout, not an older Companion discovered in the Windows user's installed-app directory.
+    monkeypatch.setattr(connector, "resolve_server_command", lambda _: connector.ServerCommand(sys.executable, ["-m", "cyclone_agent_mcp", "serve"]))
+    result = connector.verify_tools_list()
     assert result["ok"] is True
 
 
