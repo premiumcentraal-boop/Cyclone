@@ -48,6 +48,30 @@ def create_ports_router(runtime: Any, token: str) -> APIRouter:
     def overview():
         return call(lambda: hub().overview())
 
+    @router.get("/v1/ports/starters/id-generator", dependencies=[Depends(auth)])
+    def id_generator(refresh: bool = False):
+        return call(lambda: hub().id_generator.status(refresh=refresh))
+
+    @router.post("/v1/ports/starters/id-generator/config", dependencies=[Depends(auth)])
+    def id_generator_config(body: dict[str, Any]):
+        return call(lambda: hub().id_generator.configure(body))
+
+    @router.post("/v1/ports/starters/id-generator/connect", dependencies=[Depends(auth)])
+    def id_generator_connect(body: dict[str, Any]):
+        b = body_of(body, "allowed")
+        return call(lambda: hub().id_generator.connect(b["allowed"]))
+
+    @router.get("/v1/ports/starters/id-generator/schema", dependencies=[Depends(auth)])
+    def id_generator_schema():
+        return call(lambda: hub().id_generator.schema())
+
+    @router.get("/v1/ports/skills", dependencies=[Depends(auth)])
+    def skills(app: str = Query(default="", max_length=120), routine: str = Query(default="", max_length=60)):
+        def approved():
+            hub().resolve(routine, app)  # validate context before advertising
+            return {"skills": hub().id_generator.skills() if hub().id_generator.allows(app or None, routine or None) else []}
+        return call(approved)
+
     @router.post("/v1/ports/plugins/preview", dependencies=[Depends(auth)])
     def preview(body: dict[str, Any]):
         b = body_of(body, "endpoint")

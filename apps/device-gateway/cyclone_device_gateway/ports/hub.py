@@ -171,6 +171,8 @@ class PortHub:
         self.traffic = Traffic(self, root, base_url)
         self.test_runs = TestRuns(self.traffic)
         self._ticker: threading.Thread | None = None
+        from .id_generator import IdGeneratorStarter
+        self.id_generator = IdGeneratorStarter(self)
 
     # ---- lifecycle ---------------------------------------------------------------------------------------------------
 
@@ -202,6 +204,7 @@ class PortHub:
         while not self._stop.wait(MONITOR_EVERY_S):
             try:
                 self.monitor_once()
+                self.id_generator.status(refresh=True)
             except Exception:  # noqa: BLE001 - the monitor never takes the gateway down
                 pass
 
@@ -496,7 +499,11 @@ class PortHub:
             scopes = binding.chain(routine or None, app or None)
         except binding.BindingError as exc:
             raise PortsError(str(exc)) from exc
-        return {"scopes": scopes, "ports": binding.table(self._plugins(), self.store.bindings(), scopes)}
+        plugins = self._plugins()
+        if not self.id_generator.allows(app, routine):
+            # Keep the candidate so an explicit choice fails closed, rather than silently falling back.
+            plugins = [dict(p, status="paused") if p["name"] == "id-generator" else p for p in plugins]
+        return {"scopes": scopes, "ports": binding.table(plugins, self.store.bindings(), scopes)}
 
     # ---- signing and sending -----------------------------------------------------------------------------------------
 

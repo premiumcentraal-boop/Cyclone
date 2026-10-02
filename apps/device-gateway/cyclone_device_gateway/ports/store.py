@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS wait (
 CREATE INDEX IF NOT EXISTS wait_run ON wait(run_id);
 CREATE TABLE IF NOT EXISTS binding (
   scope TEXT NOT NULL, port TEXT NOT NULL, plugins TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(scope, port));
+CREATE TABLE IF NOT EXISTS starter_settings (
+  name TEXT PRIMARY KEY, settings TEXT NOT NULL, updated_at INTEGER NOT NULL);
 """
 ACTIVITY_KEEP = 5_000
 JSON_FIELDS = ("manifest", "pending", "consent", "checks")
@@ -118,6 +120,16 @@ class PortStore:
 
     def _drop_key(self, name: str) -> None:
         self.keys.drop(name)
+
+    def starter_settings(self, name: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute("SELECT settings FROM starter_settings WHERE name=?", (name,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_starter_settings(self, name: str, settings: dict[str, Any]) -> None:
+        with self._lock, self._db:
+            self._db.execute("INSERT OR REPLACE INTO starter_settings VALUES(?,?,?)",
+                             (name, json.dumps(settings), now_ms()))
 
     # ---- bindings (plan 48 run 2) -------------------------------------------------------------------------------------
 
