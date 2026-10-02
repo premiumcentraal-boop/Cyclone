@@ -528,6 +528,7 @@ h4.pt-section-title { font-size: var(--text-md); }
 .idg-starter > span:last-child { margin-left:auto; }
 .idg-section { padding:24px; display:grid; gap:16px; margin-top:20px; }
 .idg-section h2 { margin:0; font-size:20px; }
+.idg-section .pt-note { color:var(--text-muted); font-size:var(--text-sm); line-height:1.5; }
 .idg-field { display:grid; gap:8px; min-width:0; }
 .idg-field input, .idg-field textarea { width:100%; box-sizing:border-box; padding:12px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:10px; font:inherit; }
 .idg-toggle { display:flex; gap:10px; align-items:center; }

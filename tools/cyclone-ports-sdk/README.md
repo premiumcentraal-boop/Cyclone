@@ -126,3 +126,5 @@ The contract is a frozen draft. The real Port Hub lands in the gateway in plan 4
 
 Plugins built against this kit keep working once the real hub ships. Builders start at
 `Cyclone V5 plan/HANDOFF-run-ports-plugins.md`.
+
+The native **ID Generator** starter ships with Alpha 100 / Glass Alpha 56. Its developer/agent workflow lives in `starters/id-generator/SKILL.md`; Studio 7.2.1+ owns the rendering engine and Glass owns policy/consent. The real gateway Ports hub is now available, including targeted private traffic and correlated waits.

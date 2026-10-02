@@ -75,3 +75,5 @@ updates. See [MRZ Studio setup, boundaries and acceptance](../../docs/GLASS_MRZ_
 npm test          # unit + DOM tests
 npm run build     # typecheck + production bundle
 ```
+
+Glass Alpha 56 includes **Ports → ID Generator**, a native starter for MRZ Studio Local 7.2.1+. Its local panels preserve Studio's generator/defaults; Glass controls pairing, consent and developer agent-usage policy. See `tools/cyclone-ports-sdk/starters/id-generator/SKILL.md` and `docs/RELEASE_5.0.0-alpha.100.dev1.md` for the workflow and acceptance limits.
