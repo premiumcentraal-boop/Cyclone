@@ -59,6 +59,7 @@ V5_OPS = frozenset({
     "models.list",
     "manual.get",
     "signup.maps",
+    "numbers.list",
     "signup.forget",
     "profiles.list",
     "profiles.apps",
@@ -882,6 +883,9 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op in PORTS_OPS:
         _validate_ports_response(op, value)
         return value
+    if op == "numbers.list":
+        _validate_numbers_list(value)
+        return value
     if op == "atlas.places":
         if set(value) != {"places"} or not isinstance(value.get("places"), list):
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android atlas.places result is malformed.")
@@ -1394,6 +1398,28 @@ def _validate_ports_response(op: str, value: dict[str, Any]) -> None:
         if set(value) != {"received", "done", "name", "folder"} or not _is_int(value["received"]) or not isinstance(value["done"], bool):
             raise _bad_ports("file")
         return
+
+
+# Plan 49 (alpha.102): the phone's own numbers for Glass → Numbers. Numbers only: never a text, a sender or a code.
+PHONE_NUMBER = re.compile(r"^\+?[0-9]{6,15}$")
+NUMBERS_MAX = 8
+
+
+def _validate_numbers_list(value: dict[str, Any]) -> None:
+    def bad(what: str) -> DesktopRuntimeError:
+        return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android numbers.list result is malformed: {what}.")
+    if set(value) != {"enabled", "canRead", "numbers"} or not isinstance(value["enabled"], bool) or not isinstance(value["canRead"], bool):
+        raise bad("shape")
+    rows = value["numbers"]
+    if not isinstance(rows, list) or len(rows) > NUMBERS_MAX:
+        raise bad("numbers")
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"number", "source", "slot"}:
+            raise bad("row")
+        if not isinstance(row["number"], str) or not PHONE_NUMBER.match(row["number"]) or row["source"] not in ("sim", "confirmed"):
+            raise bad("number")
+        if row["slot"] is not None and not _is_int(row["slot"]):
+            raise bad("slot")
 
 
 CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media"})
@@ -1911,6 +1937,10 @@ class V5ContractService:
     def models_list(self, device_id: str) -> dict[str, Any]:
         """The phone's models for the mapping start sheet's picker. The key stays on the phone."""
         return self._call(device_id, "models.list", {})
+
+    def numbers_list(self, device_id: str) -> dict[str, Any]:
+        """Plan 49: this phone's numbers (each SIM's and the owner's confirmed ones) and whether codes from texts are on."""
+        return self._call(device_id, "numbers.list", {})
 
     def signup_maps(self, device_id: str) -> dict[str, Any]:
         """Plan 43 T6: the sign-up maps the phone learned. Schemas only; every string is checked for values."""

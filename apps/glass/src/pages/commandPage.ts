@@ -34,6 +34,7 @@ import { createVaultView, type VaultView } from "./vaultView.js";
 import { createAccountsView, type AccountsView } from "./accountsView.js";
 import { vaultApi } from "../services/vault.js";
 import { checkGoalRefs, createConnectionsView, createMakeEditor, type ConnectionsView } from "./connectionsView.js";
+import { createNumbersView, type NumbersView } from "./numbersView.js";
 import { TASK_GROUPS, renderRows, taskRow } from "../workspace/views.js";
 
 const POLL_MS = 5_000;
@@ -43,6 +44,7 @@ const TABS: Array<{ id: CommandTab; label: string }> = [
   { id: "routines", label: "Routines" },
   { id: "results", label: "Results" },
   { id: "accounts", label: "Accounts" },
+  { id: "numbers", label: "Numbers" },
   { id: "vault", label: "Vault" },
   { id: "connections", label: "Connections" },
 ];
@@ -63,6 +65,7 @@ const INFO: Record<CommandTab, [string, string, string | null]> = {
   routines: ["Routines", "Tasks on a schedule. A missed time is skipped, never replayed.", "New routine"],
   results: ["Results", "Every run, what happened and why.", null],
   accounts: ["Accounts", "Your phones, their apps and the accounts in each. Map an app's sign-up once; new accounts become table rows.", "New account"],
+  numbers: ["Numbers", "Every number Cyclone can receive codes on: your phones' SIMs, forwarded and rented numbers, and the account each one is for.", null],
   vault: ["Vault", "Passwords sealed in your browser. This PC keeps only ciphertext.", null],
   connections: ["Connections", "MCP servers, APIs and programs Cyclone may call for your tasks.", null],
 };
@@ -191,6 +194,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
 
   let vaultView: VaultView | null = null;
   let connectionsView: ConnectionsView | null = null;
+  let numbersView: NumbersView | null = null;
   let accountsBrowser: AccountsView | null = null;
   const accountsHost = el("div", "ac-all");
 
@@ -199,6 +203,11 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     if (tab === "vault") {
       vaultView ??= createVaultView(ctx, () => data.accounts, say);
       if (body.firstChild !== vaultView.element) setChildren(body, vaultView.element);
+      return;
+    }
+    if (tab === "numbers") {
+      numbersView ??= createNumbersView(ctx, say);
+      if (body.firstChild !== numbersView.element) setChildren(body, numbersView.element);
       return;
     }
     if (tab === "connections") {
@@ -776,6 +785,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     destroy() {
       vaultView?.destroy();
       connectionsView?.destroy();
+      numbersView?.destroy();
       accountsBrowser?.destroy();
       destroyed = true;
       clearInterval(timer);

@@ -231,6 +231,15 @@ class DesktopRuntime:
                 return None if row is None else {"publicKey": row["public_key"], "fingerprint": row["fingerprint"]}
 
             self.port_phones = PhoneBridge(self.ports, share_contract, self.fleet.list_public, trusted_key)
+        # Alpha.102: every number Cyclone can receive codes on (the fleet's SIMs, forwarders, rented numbers).
+        from ..numbers.service import NumbersService
+        self.numbers = NumbersService(
+            settings.runtime_dir / "numbers" / "numbers.db",
+            devices=self.fleet.list_public,
+            read_phone=share_contract.numbers_list,
+            plugins=lambda: self.ports.overview()["plugins"] if self.ports is not None else [],
+            accounts=self.command.list_accounts,
+        )
         self.lan_share = LanShareDirectory(
             status=share_contract.share_status,
             trust_record=self.trust.store.record,
@@ -291,6 +300,7 @@ class DesktopRuntime:
             self.port_phones.stop()
         if self.ports is not None:
             self.ports.stop()
+        self.numbers.close()
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
         self.trust.stop()
         self.live_diagnostics.stop()
@@ -854,6 +864,9 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     app.include_router(create_oauth_callback_router(desktop))
     from ..ports.api import create_ports_router
     app.include_router(create_ports_router(desktop, settings.token))
+    if getattr(desktop, "numbers", None) is not None:
+        from ..numbers.api import create_numbers_router
+        app.include_router(create_numbers_router(desktop.numbers, settings.token))
     # Alpha 87: phone care (update the phone's Cyclone, why it stopped). Test doubles without it skip the routes.
     if getattr(desktop, "care", None) is not None:
         from ..phone_care.api import create_phone_care_router

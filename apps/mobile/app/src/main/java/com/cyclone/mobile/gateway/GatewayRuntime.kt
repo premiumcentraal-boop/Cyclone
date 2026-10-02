@@ -463,6 +463,10 @@ internal object GatewayDispatcher {
             GatewayV5ManualAdapter.install(context)
             GatewayV5ManualAdapter.dispatch(request.op, request.args)
         }
+        "numbers.list" -> {
+            if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "numbers.list takes no arguments.", request.id)
+            com.cyclone.mobile.codes.AndroidCodes.report(context)
+        }
         "apps.list" -> GatewayV5AppsAdapter.dispatch(request.op, request.args)
         "share.status" -> {
             if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "share.status takes no arguments.", request.id)

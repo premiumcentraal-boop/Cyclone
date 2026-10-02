@@ -189,3 +189,22 @@
 .pf-apps { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; max-height: 40vh; overflow-y: auto; }
 .pf-app { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: var(--text-sm); }
 .pf-app .muted { font-family: var(--font-mono); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Command Center → Numbers (alpha.102): every number Cyclone can receive codes on. Tokens only. */
+.nm { display: grid; gap: var(--space-4); }
+.nm-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
+.nm-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.nm-spacer { flex: 1 1 auto; }
+.nm-h { margin: 0; font-size: var(--text-md); }
+.nm-muted { color: var(--text-muted); font-size: var(--text-sm); }
+.nm-warn { color: var(--warning); font-size: var(--text-sm); }
+.nm-number { font-family: var(--font-mono); font-size: var(--text-md); }
+.nm-phone { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; }
+.nm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
+.nm-field { display: grid; gap: var(--space-1); }
+.nm-field[hidden] { display: none; }
+.nm-field-label { font-size: var(--text-sm); color: var(--text-muted); }
+.nm-actions { white-space: nowrap; }
+.nm-account { min-width: 180px; }
+.nm-editor { display: grid; gap: var(--space-3); padding: var(--space-2) 0; }
+.nm-row.nm-paused td { opacity: 0.7; }

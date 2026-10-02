@@ -178,6 +178,8 @@ internal object GatewayProtocol {
         // Plan 43 T6: the sign-up maps this phone learned (schemas only), and forgetting one.
         "signup.maps",
         "signup.forget",
+        // Plan 49 (alpha.102): this phone's numbers (each SIM's and the owner's confirmed ones) for Glass → Numbers.
+        "numbers.list",
         // Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
         "profiles.list",
         "profiles.apps",

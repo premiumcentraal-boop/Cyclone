@@ -84,6 +84,10 @@ object AndroidCodes {
         out
     }
 
+    /** `numbers.list` for the PC's Numbers page: the owner's switch, whether texts can be read, and this phone's numbers. */
+    fun report(context: Context): org.json.JSONObject =
+        NumbersReport.build(enabled(context), canReadTexts(context), simNumbers(context), confirmed(context))
+
     private fun granted(context: Context, permission: String) =
         runCatching { context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED }.getOrDefault(false)
 
