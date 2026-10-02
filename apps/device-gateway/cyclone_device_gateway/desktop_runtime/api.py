@@ -220,6 +220,17 @@ class DesktopRuntime:
                                                  base_url=f"http://127.0.0.1:{settings.port}")
         except RuntimeError:
             self.ports = None
+        # Plan 48 run 4: the hub collects each ready phone's port messages and answers its runs' waits. Codes are sealed
+        # only to a phone key the owner trusted in Glass (the Command Center's device keys).
+        self.port_phones = None
+        if self.ports is not None:
+            from ..ports.phone import PhoneBridge
+
+            def trusted_key(device_id: str) -> dict[str, str] | None:
+                row = self.command.delivery.trusted_key(device_id)
+                return None if row is None else {"publicKey": row["public_key"], "fingerprint": row["fingerprint"]}
+
+            self.port_phones = PhoneBridge(self.ports, share_contract, self.fleet.list_public, trusted_key)
         self.lan_share = LanShareDirectory(
             status=share_contract.share_status,
             trust_record=self.trust.store.record,
@@ -265,6 +276,8 @@ class DesktopRuntime:
         self.command.start()
         if self.ports is not None:
             self.ports.start()
+        if self.port_phones is not None:
+            self.port_phones.start()
         self.care.start()
         self.medic.start()
         self.cloud.start()
@@ -274,6 +287,8 @@ class DesktopRuntime:
         self.medic.stop()
         self.care.stop()
         self.command.stop()
+        if self.port_phones is not None:
+            self.port_phones.stop()
         if self.ports is not None:
             self.ports.stop()
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.

@@ -1,7 +1,8 @@
 # Plan 48: Cyclone Ports in Glass, the Port Hub and its dashboard
 
-Date: 2026-10-01. **Run 1: built, released in alpha.96.** **Run 2: built, released in alpha.97.** **Run 3: built**
-(live traffic, waits that survive restarts, the Activity view and test runs). Builds on plans 45 (Run Ports), 46 (Skill Studio) and 47 (review), and on the kit in
+Date: 2026-10-01. **Run 1: built, released in alpha.96.** **Run 2: built, released in alpha.97.** **Run 3: built, released in alpha.98**
+(live traffic, waits that survive restarts, the Activity view and test runs). **Run 4: built, released in alpha.99**
+(the phone side: the PC polls the phone's outbox, codes sealed to the trusted phone key, `port_send` / `port_wait`). Builds on plans 45 (Run Ports), 46 (Skill Studio) and 47 (review), and on the kit in
 `tools/cyclone-ports-sdk`. Goal: the real Port Hub in the gateway, and a Ports dashboard in Glass that an admin feels
 at home in, built in runs. Each run ships something whole and tested, with nothing half-done.
 
@@ -151,4 +152,51 @@ Endpoint rules:
   waiting.
 
 The per-run lane on the Run page waits for run 4, when phone runs use ports.
+
+## 7. Run 4 detail (built)
+
+**The phone never calls the PC.** The runtime's `PhoneBridge` (`ports/phone.py`) polls every ready, paired phone:
+every 1.5 s while it has traffic or open waits, every 5 s when idle.
+
+**Phone ops** (`desktop_runtime/v5_contract.py`, `gateway/GatewayV5PortsAdapter.kt`):
+- `ports.poll {ack?, max?, drop?}` → `{items}`: emit, await and cancel items, kept until acknowledged;
+- `ports.blob {id, offset}`: a screenshot in 384 KB chunks;
+- `ports.answer {id, state, reason?, plugin?, value?, url?, file?, sealed?}`: a plugin's answer for a wait;
+- `ports.file`: `cc.media` chunks with a `pt_…` task id, for an image, video or audio file.
+
+A phone counts as connected while the PC polled in the last 20 s; without one a run is told `no_pc` at once.
+
+**The bridge:**
+- emits go to `traffic.emit` (screenshots fetched through `ports.blob`);
+- waits go to `traffic.wait`; a worker follows `traffic.result` until the wait ends, then answers the phone;
+- a stopped wait on the phone becomes `traffic.cancel`;
+- messages are deduplicated per phone and acknowledged on the next poll;
+- a message the PC's secret check refuses is isolated (`max=1`) and dropped (`drop`), and the rest keep flowing.
+
+**Codes:**
+- the hub hands the code over once (`take_code`);
+- the bridge seals it with HPKE (P-256, HKDF-SHA256, AES-256-GCM, info `cyclone-port-code/v1`) to the phone key the
+  owner trusted in Command Center → Phones. A phone whose key isn't trusted gets no code, only a reason;
+- the seal is bound to the run, the app or site (`package:…` / `chrome:https://…`), the device key and a 5-minute
+  expiry;
+- the phone opens it (`SealedDelivery.openCode`) and holds it as the `code` slot. `vault_fill what=one_time_code` fills
+  it. The model learns only its length.
+
+**Values, links and files:**
+- a value comes back as quoted data; a secret-looking value fails closed;
+- a link (https only) is opened on the phone, and the model sees only its site;
+- a file is pushed to the phone's gallery folder, and the model gets its name and folder.
+
+**Mind tools** (`PhoneMindToolbox`), offered only while a PC is connected and never in a Lab mission:
+- `port_send` on `run.event`, `log.line`, `screen.shot`, `page.text`, `account.fields`. A screen with a secret field,
+  or an app kept private (banking, payments), is never sent. Secret-looking fields and text are taken out on the phone
+  and again on the PC;
+- `port_wait` on `code.in`, `value.in`, `link.in`, `file.in`. Its brief (the run record's line) never carries a value.
+
+**Tests:** `test_ports_phone.py` (the bridge end to end with the kit's example plugins and a real HPKE open),
+`PortOutboxTest`, `SealedDeliveryTest`, `PortToolsTest`, and the guard `test_ports_run4_guard.py`.
+
+**Not yet (run 5):** Account Setup's verification points don't bind to `code.in` by themselves. Today the Mind waits
+on `code.in` when it reaches a code page. The per-run lane on the Run page is also not built yet.
+
 

@@ -166,6 +166,11 @@ object MindMissions {
     fun canAccept(context: Context, goal: String = ""): Boolean = admission(context, goal) !is Crew.Admit.Queue
 
     /** Learned-screen advice for the Mind; missing knowledge (or a store that will not open) just means no advice. */
+    /** Plan 48 run 4: the mission's Cyclone Ports, only while the owner's PC is polling this phone. */
+    private fun portsLink(runId: String, allowed: Boolean): com.cyclone.mobile.mind.MindPortsLink? =
+        if (allowed && com.cyclone.mobile.ports.PortOutbox.shared.connected()) com.cyclone.mobile.ports.PortOutboxLink(com.cyclone.mobile.ports.PortOutbox.shared, runId)
+        else null
+
     private fun learnedHints(context: Context): ((String, String) -> String?)? = runCatching {
         com.cyclone.mobile.applearner.AppLearnerRuntime.initialize(context.applicationContext)
         val hints = com.cyclone.mobile.mind.learn.LearnedHints(com.cyclone.mobile.mind.learn.AppKnowledgeReader(com.cyclone.mobile.applearner.AppLearnerRuntime.store))
@@ -686,7 +691,9 @@ object MindMissions {
                 planes = planes, workspace = workspace, fast = fast,
                 signup = run.signup?.let { pkg -> com.cyclone.mobile.mind.signup.SignupRecorder(pkg, appLabel(context, pkg), appVersion(context, pkg)) { System.currentTimeMillis() } },
                 saveSignup = { map -> com.cyclone.mobile.mind.signup.SignupMapStore.save(context, map) },
-                setup = run.setup, setupProgress = { progress -> com.cyclone.mobile.mind.signup.AccountSetupProgress.set(run.id, progress) })
+                setup = run.setup, setupProgress = { progress -> com.cyclone.mobile.mind.signup.AccountSetupProgress.set(run.id, progress) },
+                // Plan 48 run 4: Cyclone Ports only while the owner's PC is polling this phone; never in a Lab mission.
+                ports = portsLink(run.id, run.mission.lab == null))
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
             // own owner question, answered on the same card as any other.
             planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }
@@ -694,6 +701,7 @@ object MindMissions {
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 (if (workspace != null) "\n\n" + MindPrompt.workspaceRules() else "") +
                 (if (fast != null) "\n\n" + MindPrompt.PILOT_RULES else "") +
+                (if (toolbox.specs().any { it.name == "port_wait" }) "\n\n" + MindPrompt.PORTS_RULES else "") +
                 (run.signup?.let { "\n\n" + MindPrompt.signupRules(appLabel(context, it)) }.orEmpty()) +
                 (run.setup?.let { "\n\n" + it.promptText() }.orEmpty()) +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
