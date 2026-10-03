@@ -240,6 +240,11 @@ class DesktopRuntime:
             plugins=lambda: self.ports.overview()["plugins"] if self.ports is not None else [],
             accounts=self.command.list_accounts,
         )
+        from ..number_providers.service import NumberProviders
+        self.number_providers = NumberProviders(settings.runtime_dir / "number-providers", self.numbers, self.ports, self.command)
+        self.command.number_providers = self.number_providers
+        if self.ports is not None:
+            self.ports.number_providers = self.number_providers
         self.lan_share = LanShareDirectory(
             status=share_contract.share_status,
             trust_record=self.trust.store.record,
@@ -290,8 +295,10 @@ class DesktopRuntime:
         self.care.start()
         self.medic.start()
         self.cloud.start()
+        self.number_providers.start()
 
     def stop(self) -> None:
+        self.number_providers.stop()
         self.cloud.stop()
         self.medic.stop()
         self.care.stop()
@@ -867,6 +874,9 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     if getattr(desktop, "numbers", None) is not None:
         from ..numbers.api import create_numbers_router
         app.include_router(create_numbers_router(desktop.numbers, settings.token))
+    if getattr(desktop, "number_providers", None) is not None:
+        from ..number_providers.api import create_number_providers_router
+        app.include_router(create_number_providers_router(desktop.number_providers, settings.token))
     # Alpha 87: phone care (update the phone's Cyclone, why it stopped). Test doubles without it skip the routes.
     if getattr(desktop, "care", None) is not None:
         from ..phone_care.api import create_phone_care_router

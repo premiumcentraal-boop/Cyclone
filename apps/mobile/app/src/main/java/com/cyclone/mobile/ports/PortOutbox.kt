@@ -102,9 +102,16 @@ class PortOutbox(
         if (!connected()) return Answer("no_pc", NO_PC)
         if (port !in IN_PORTS) return Answer("refused", "$port is not a port the phone waits on")
         if (run.plugin != null && !permitted(run, port)) return Answer("refused", "this plugin is not allowed here")
-        if (match != null && (run.plugin == null || port !in setOf("value.in", "file.in") ||
-            match.keys().asSequence().any { it !in setOf("ask", "requestId", "output") } ||
-            match.keys().asSequence().any { k -> match.opt(k) !is String || match.getString(k).length > if (k == "ask") 200 else 80 }))
+        if (match != null && (run.plugin == null || port !in setOf("value.in", "file.in", "code.in") ||
+            match.keys().asSequence().any { it !in setOf("ask", "requestId", "output", "country", "planId", "areaCode", "templateId", "period", "accountId", "from", "length") } ||
+            match.keys().asSequence().any { k ->
+                val value = match.opt(k)
+                when (k) {
+                    "planId" -> value !is Int || value !in 1..1_000_000
+                    "length" -> value !is Int || value !in 4..10
+                    else -> value !is String || value.length > (if (k == "ask") 200 else 80) || value.contains('\u0000')
+                }
+            }))
             return Answer("refused", "invalid plugin request match")
         if (port == "code.in" && place == null) return Answer("refused", "a code needs the app or site it is for; open it first")
         val timeout = timeoutS.coerceIn(MIN_WAIT_S, MAX_WAIT_S)

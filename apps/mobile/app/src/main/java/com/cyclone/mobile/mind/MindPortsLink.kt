@@ -24,6 +24,8 @@ interface MindPortsLink {
     fun skills(app: String?): List<JSONObject> = emptyList()
     fun sendTo(plugin: String, port: String, data: JSONObject, image: ByteArray?, mime: String, app: String?): String? = "This PC link does not support plugin requests."
     fun waitFor(plugin: String, port: String, match: JSONObject, timeoutS: Int, app: String?, cancelled: () -> Boolean): MindPortAnswer = MindPortAnswer("refused", "This PC link does not support plugin requests.")
+    fun waitForCode(plugin: String, match: JSONObject, timeoutS: Int, place: String, app: String?, cancelled: () -> Boolean): MindPortAnswer =
+        MindPortAnswer("refused", "This PC link does not support private plugin codes.")
     /** Queues an out-port message; null when queued, else why not. [app] is the app the run is in now. */
     fun send(port: String, data: JSONObject, image: ByteArray?, app: String?): String?
 

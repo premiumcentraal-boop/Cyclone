@@ -23,6 +23,9 @@ class PortOutboxLink(
         outbox.emit(run(app).copy(plugin = plugin), port, data, image, mime)
     override fun waitFor(plugin: String, port: String, match: JSONObject, timeoutS: Int, app: String?, cancelled: () -> Boolean): MindPortAnswer =
         answer(outbox.awaitMatched(run(app).copy(plugin = plugin), port, match.optString("ask"), timeoutS, cancelled = cancelled, match = match))
+    override fun waitForCode(plugin: String, match: JSONObject, timeoutS: Int, place: String, app: String?, cancelled: () -> Boolean): MindPortAnswer =
+        answer(outbox.awaitMatched(run(app).copy(plugin = plugin), "code.in", "Account verification", timeoutS,
+            place = place, cancelled = cancelled, match = match))
 
     override fun send(port: String, data: JSONObject, image: ByteArray?, app: String?): String? =
         outbox.emit(run(app), port, data, image)

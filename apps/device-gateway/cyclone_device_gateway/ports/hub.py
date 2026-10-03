@@ -503,6 +503,11 @@ class PortHub:
         if not self.id_generator.allows(app, routine):
             # Keep the candidate so an explicit choice fails closed, rather than silently falling back.
             plugins = [dict(p, status="paused") if p["name"] == "id-generator" else p for p in plugins]
+        providers = getattr(self, "number_providers", None)
+        if providers is not None:
+            from ..number_providers.service import PLUGIN
+            disabled = {PLUGIN[k] for k in PLUGIN if not providers.allows(k, app, routine)}
+            plugins = [dict(p, status="paused") if p["name"] in disabled else p for p in plugins]
         return {"scopes": scopes, "ports": binding.table(plugins, self.store.bindings(), scopes)}
 
     # ---- signing and sending -----------------------------------------------------------------------------------------
