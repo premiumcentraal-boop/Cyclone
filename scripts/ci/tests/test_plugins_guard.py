@@ -110,3 +110,7 @@ class PluginBuildGuard(unittest.TestCase):
         self.assertIn("os.killpg(proc.pid", build)
         smoke = read(ROOT / "scripts/pc/build-pc-package.ps1")
         self.assertNotRegex(smoke, r"Invoke-RestMethod (?!-TimeoutSec)")
+        # The runtime is a one-file program too: the smoke stops both of its processes by name, never as a tree, so a
+        # plugin that dies proves the Job Object and not the smoke's own kill.
+        self.assertIn("Get-Process CyclonePCRuntime -ErrorAction SilentlyContinue | Where-Object { $_.Path -like \"$Scratch*\" }", smoke)
+        self.assertNotIn("Stop-Process -Id $runtime.Id -Force\n        Start-Sleep", smoke)

@@ -184,13 +184,22 @@ try {
         # A one-file program runs as a starter plus its child, so one plugin shows as one or two processes, never more.
         $running = @(Get-Process run-logger -ErrorAction SilentlyContinue).Count
         if ($running -lt 1 -or $running -gt 2) { throw "One run-logger should run after update and rollback, found $running processes." }
-        # The runtime dies: its Job Objects must take every plugin process with it.
-        Stop-Process -Id $runtime.Id -Force
-        Start-Sleep -Seconds 3
-        if (@(Get-Process run-logger -ErrorAction SilentlyContinue).Count -ne 0) { throw 'A plugin process outlived the runtime.' }
+        # The runtime dies: its Job Objects must take every plugin process with it. The runtime is a one-file program
+        # too (a starter plus its child), so stop both runtime processes, and only them: no tree kill, or the plugins
+        # would be stopped by us instead of by the Job Object.
+        $runtimes = @(Get-Process CyclonePCRuntime -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Scratch*" })
+        if ($runtimes.Count -lt 1) { throw 'The runtime process was not found under the scratch profile.' }
+        $runtimes | Stop-Process -Force
+        $left = 1
+        for ($i = 0; $i -lt 20 -and $left -ne 0; $i++) {
+            Start-Sleep -Milliseconds 500
+            $left = @(Get-Process run-logger -ErrorAction SilentlyContinue).Count
+        }
+        if ($left -ne 0) { throw 'A plugin process outlived the runtime.' }
         Write-Host 'A packaged plugin installed, passed the checks, updated, rolled back and died with the runtime.'
     } finally {
         Stop-Process -Id $runtime.Id -Force -ErrorAction SilentlyContinue
+        Get-Process CyclonePCRuntime, run-logger -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Scratch*" } | Stop-Process -Force -ErrorAction SilentlyContinue
         Get-Process adb -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Scratch*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     }
 } finally {
