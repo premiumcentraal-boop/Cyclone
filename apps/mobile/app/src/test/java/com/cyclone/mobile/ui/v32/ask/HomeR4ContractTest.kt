@@ -32,7 +32,7 @@ class HomeR4ContractTest {
         val home = home.substringBefore("private fun openSearchResult(")
         val order = listOf(
             "HomeTopBar(onSettings = onSettings, onSearch = onSearch, onAi = onAi)",
-            "ProfileSlider(profiles) { onProfiles() }",
+            "ProfileSlider(profiles) { p ->",
             "HomeActions(onAi = onAi, onRoutines = onRoutines, onBrain = onBrain, onMore = onSettings)",
             "InAppTaskStack(current)",
             "AskSectionHeader(\"Recent activity\", \"Open chat\", onAi)",

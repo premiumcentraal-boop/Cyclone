@@ -109,6 +109,40 @@ object ConnectorRuntime {
             .putString("journal", JSONArray(journal.events.map { it.toJson() }).toString())
             .putLong("journal_next", journal.nextSeq)
             .apply()
+        wakeSoon(context.applicationContext)
+    }
+
+    // ---- wakes (plan 51 K3) ------------------------------------------------------------------------------------------
+
+    private val wakeHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+    @Volatile private var wakePending = false
+
+    /** One data-free wake per burst of events, half a second after the first. The connector then pulls `events`. */
+    private fun wakeSoon(context: Context) {
+        if (wakePending) return
+        wakePending = true
+        wakeHandler.postDelayed({
+            wakePending = false
+            runCatching { wake(context) }
+        }, 500)
+    }
+
+    /** Explicit broadcasts to approved connectors with `events.profiles` that declare a wake receiver. No payload. */
+    fun wake(context: Context): Int {
+        var sent = 0
+        ConnectorDiscovery.discover(context)
+            .filter { it.approval != null && it.manifest != null && !it.idConflict && it.manifest.wakeReceiver != null &&
+                ConnectorScope.EVENTS_PROFILES in it.approval.scopes && ConnectorScope.EVENTS_PROFILES in it.manifest.scopes }
+            .forEach { c ->
+                val receiver = ConnectorManifest.qualify(c.packageName, c.manifest!!.wakeReceiver!!)
+                runCatching {
+                    context.sendBroadcast(Intent(ConnectorContract.ACTION_WAKE)
+                        .setComponent(android.content.ComponentName(c.packageName, receiver))
+                        .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES))
+                    sent++
+                }
+            }
+        return sent
     }
 
     // ---- calls -------------------------------------------------------------------------------------------------------
@@ -121,7 +155,28 @@ object ConnectorRuntime {
         override fun setEntries(connectorId: String, entries: List<ConnectorEntry>) = ConnectorRuntime.setEntries(context, connectorId, entries)
         override fun events(since: Long, now: Long) = journal(context).since(since, now)
         override fun now() = System.currentTimeMillis()
+        override fun currentProfile(): String? = current(context)
     }
+
+    /**
+     * Which profile is in front, without a privileged shell: when this Cyclone's own Android user is in front, that one;
+     * otherwise the profile Cyclone last switched to, or null when it can't tell (someone switched outside Cyclone).
+     */
+    fun current(context: Context): String? = runCatching {
+        val myUser = android.os.Process.myUid() / 100_000
+        val records = ProfileRegistryStore.records(context)
+        if (context.getSystemService(android.os.UserManager::class.java).isUserForeground) {
+            records.firstOrNull { it.androidUserId == myUser }?.id ?: ConnectorEvent.OWNER
+        } else {
+            journal(context).events.lastOrNull { it.type == ConnectorEvent.SWITCHED }?.profileId
+                ?.takeIf { it != ConnectorEvent.OWNER && records.any { r -> r.id == it } }
+        }
+    }.getOrNull()
+
+    /** For the PC (`connectors.list`): approved connectors that still match their app, with their entries. */
+    fun report(context: Context): JSONObject = ConnectorReport.build(
+        ConnectorDiscovery.discover(context).mapNotNull { c -> c.approval?.takeIf { !c.idConflict && c.manifest != null }?.let { it to entries(context, it.connectorId) } },
+    )
 
     fun call(context: Context, uid: Int, request: String?): String =
         ConnectorCore(backend(context), limiter).handle(ConnectorDiscovery.caller(context, uid), request)
@@ -240,4 +295,53 @@ class ConnectorPackageReceiver : BroadcastReceiver() {
         val packageName = intent.data?.schemeSpecificPart ?: return
         runCatching { ConnectorRuntime.revokePackage(context.applicationContext, packageName) }
     }
+}
+
+/** A connector entry as the profile selector shows it (plan 51 K3). */
+data class SelectorEntry(
+    val connectorId: String,
+    val connectorLabel: String,
+    val packageName: String,
+    val entry: ConnectorEntry,
+) {
+    val key: String get() = "connector:$connectorId:${entry.id}"
+}
+
+/** Shows approved connectors' entries and opens the connector's own screen from one. */
+object ConnectorLauncher {
+    const val EXTRA_ENTRY_ID = "com.cyclone.connector.ENTRY_ID"
+
+    /** Entries of connectors that are approved for `selector.contribute` now (current manifest, current key). */
+    fun selectorEntries(context: Context): List<SelectorEntry> = runCatching {
+        ConnectorDiscovery.discover(context)
+            .filter { it.approval != null && !it.idConflict && ConnectorScope.SELECTOR_CONTRIBUTE in it.approval.scopes &&
+                it.manifest != null && ConnectorScope.SELECTOR_CONTRIBUTE in it.manifest.scopes }
+            .flatMap { c -> ConnectorRuntime.entries(context, c.manifest!!.id).map { SelectorEntry(c.manifest.id, c.manifest.label, c.packageName, it) } }
+    }.getOrDefault(emptyList())
+
+    /**
+     * Opens the connector's declared entry activity with only the entry id. The activity must be exported and belong to
+     * the connector's own package; Cyclone never opens an intent or address a connector supplies.
+     */
+    fun open(context: Context, item: SelectorEntry): Boolean = runCatching {
+        val found = ConnectorDiscovery.discover(context).firstOrNull { it.packageName == item.packageName && it.manifest?.id == item.connectorId }
+        val manifest = found?.manifest ?: return false
+        if (found.approval == null) return false
+        val activity = manifest.entryActivity ?: return false
+        val component = android.content.ComponentName(item.packageName, ConnectorManifest.qualify(item.packageName, activity))
+        val info = context.packageManager.getActivityInfo(component, PackageManager.ComponentInfoFlags.of(0))
+        if (!info.exported || info.packageName != item.packageName) return false
+        context.startActivity(Intent().setComponent(component).putExtra(EXTRA_ENTRY_ID, item.entry.id)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    }.getOrDefault(false)
+
+    /** The entry's icon from the connector's own resources, or null (the selector then shows the connector's app icon). */
+    fun icon(context: Context, item: SelectorEntry): android.graphics.drawable.Drawable? = runCatching {
+        val name = item.entry.icon ?: return null
+        val res = context.packageManager.getResourcesForApplication(item.packageName)
+        @Suppress("DiscouragedApi")
+        val id = res.getIdentifier(name, "drawable", item.packageName)
+        if (id == 0) null else res.getDrawable(id, null)
+    }.getOrNull()
 }

@@ -251,7 +251,14 @@ private fun V32HomePage(
             ) {
                 item { HomeTopBar(onSettings = onSettings, onSearch = onSearch, onAi = onAi) }
 
-                item { ProfileSlider(profiles) { onProfiles() } }
+                item {
+                    val context = LocalContext.current
+                    ProfileSlider(profiles) { p ->
+                        val entry = p.connector
+                        if (entry == null) onProfiles()
+                        else if (!com.cyclone.mobile.connector.ConnectorLauncher.open(context, entry)) onProfiles()
+                    }
+                }
 
                 if (!ready.ready) {
                     item {

@@ -22,6 +22,8 @@ object ConnectorContract {
     const val ACTION_CONNECT = "com.cyclone.connector.CONNECT"
     /** The action a connector binds to on Cyclone. */
     const val ACTION_SERVICE = "com.cyclone.connector.SERVICE"
+    /** The data-free broadcast Cyclone sends a connector's wake receiver when new events are waiting. */
+    const val ACTION_WAKE = "com.cyclone.connector.WAKE"
     const val MANIFEST_META = "com.cyclone.connector"
 
     const val EXT_MAX_BYTES = 4 * 1024

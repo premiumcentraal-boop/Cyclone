@@ -1,6 +1,6 @@
 # Plan 51: Phone connectors (scope)
 
-Status: **K1 and K2 built in alpha.104** (owner decisions §8 taken as recommended); K3 and K4 next. Written 2026-10-03 at alpha.103. Asked for by a team building a profiles companion module
+Status: **Built: K1 and K2 in alpha.104, K3 and K4 in alpha.105** (owner decisions §8 taken as recommended). Physical acceptance UNVERIFIED. Written 2026-10-03 at alpha.103. Asked for by a team building a profiles companion module
 that wants first-party contracts instead of reverse-engineering the app (their eight questions are answered in §9).
 
 ## 0. The decision in one paragraph
@@ -216,3 +216,33 @@ lineage, OEM background limits on wakes): until it's done, the release notes say
 - **`current`** (which profile is in front) is not in `profiles` yet. Reading it needs a privileged shell, so it
   arrives with K3. `profile.switched` events cover the change.
 - **Spec:** `tools/cyclone-connector-sdk/SPEC.md`. The schemas, client library and conformance app are K4.
+
+## 11. As built (alpha.105: K3 + K4)
+
+- **The selector:**
+  - Approved connectors' entries show on the Home slider and in Profiles ("From your connectors"), after the owner's
+    profiles and marked "From <label>", with the connector's own icon and status.
+  - A tap opens the connector's `entryActivity` with the extra `com.cyclone.connector.ENTRY_ID`, only when that
+    activity is exported and belongs to the connector's own package. Cyclone switches nothing for an entry.
+- **`current`** in `profiles`: when Cyclone's own Android user is in front, that profile (or `owner`); otherwise the
+  last profile Cyclone switched to, or `null` when it can't tell. No privileged shell is used.
+- **Wakes:** after profile events, one explicit, data-free `com.cyclone.connector.WAKE` broadcast per half second to
+  approved connectors that have `events.profiles` and a `wakeReceiver`. The receiver is protected by the signature
+  permission `WAKE_CONNECTOR`, so only Cyclone can send it.
+- **The PC (changed from §7):** a separate read-only phone op `connectors.list` instead of new fields on
+  `profiles.list`. The PC validates `profiles.list` strictly, so new fields would break older PCs and phones.
+  - The answer is connector `id` and `label`, and per entry `id`, `type`, `label`, `subtitle`, `state` and `text`:
+    never `ext`, packages, icons or keys.
+  - The gateway validates it exactly (≤ 16 connectors, ≤ 8 entries). An older phone gets `supported: false`.
+  - Route: `GET /v1/devices/{id}/connectors`. Glass shows a read-only "From your connectors" row on the profiles
+    bar.
+- **The kit (K4):**
+  - `apps/mobile/connector-client`: an AAR with the AIDL, `CycloneConnector.connect()` and a typed call per method.
+  - `apps/mobile/connector-sample`: a debug-signed sample that declares every scope, an entry activity and a wake
+    receiver.
+  - `tools/cyclone-connector-sdk/schemas`: JSON Schemas and `vectors.json`. These replace the separate conformance
+    app in §7: Cyclone's build runs every vector against `ConnectorCore` (`ConnectorVectorsTest`), and the gateway
+    suite validates them against the schemas. The sample's buttons are the on-phone check.
+  - CI builds the AAR and the sample APK on every phone build. The publish attaches them with the schemas zip, each
+    with its SHA-256 in `release-manifest.json`.
+

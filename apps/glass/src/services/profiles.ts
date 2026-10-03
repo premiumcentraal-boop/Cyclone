@@ -49,10 +49,36 @@ export function cssColor(color: string | null): string | null {
   return color && /^#[0-9A-F]{8}$/.test(color) ? `#${color.slice(3)}` : null;
 }
 
+/** Plan 51 K3: an approved phone connector's entry, as the phone's Profiles shows it. Read only in Glass. */
+export interface ConnectorEntry {
+  connectorId: string;
+  connector: string;
+  id: string;
+  label: string;
+  subtitle: string;
+  state: "ready" | "attention" | "off";
+  text: string;
+}
+
+export function parseConnectors(raw: unknown): ConnectorEntry[] {
+  return list(obj(raw).connectors).flatMap((c) => {
+    const o = obj(c);
+    const connectorId = str(o.id);
+    const connector = str(o.label) || connectorId;
+    if (!connectorId) return [];
+    return list(o.entries).map((e) => obj(e)).filter((e) => str(e.id) && str(e.label)).map((e) => ({
+      connectorId, connector, id: str(e.id), label: str(e.label), subtitle: str(e.subtitle),
+      state: (["ready", "attention", "off"].includes(str(e.state)) ? str(e.state) : "ready") as ConnectorEntry["state"], text: str(e.text),
+    }));
+  });
+}
+
 const base = (device: string) => `/v1/devices/${encodeURIComponent(device)}/profiles`;
 
 export const profilesApi = {
   list: async (client: GatewayClient, device: string, signal?: AbortSignal) => parseProfiles(await client.get(base(device), signal)),
+  connectors: async (client: GatewayClient, device: string) =>
+    parseConnectors(await client.get(`/v1/devices/${encodeURIComponent(device)}/connectors`)),
   apps: async (client: GatewayClient, device: string, profile: string) =>
     parseProfileApps(await client.get(`${base(device)}/${encodeURIComponent(profile)}/apps`)),
   switchTo: (client: GatewayClient, device: string, profile: string) => client.post(`${base(device)}/${encodeURIComponent(profile)}/switch`),

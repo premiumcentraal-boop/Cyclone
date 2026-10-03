@@ -14,6 +14,8 @@ interface ConnectorBackend {
     fun setEntries(connectorId: String, entries: List<ConnectorEntry>)
     fun events(since: Long, now: Long): JSONObject
     fun now(): Long
+    /** The profile in front: `owner`, a profile id, or null when Cyclone can't tell (plan 51 K3). */
+    fun currentProfile(): String? = null
 }
 
 /**
@@ -91,7 +93,8 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
             if (ConnectorScope.PROFILES_EXT in granted) o.put("ext", record.ext[connectorId]?.let(::JSONObject) ?: JSONObject.NULL)
             list.put(o)
         }
-        return JSONObject().put("schemaVersion", ProfileRegistryCodec.SCHEMA_VERSION).put("profiles", list)
+        return JSONObject().put("schemaVersion", ProfileRegistryCodec.SCHEMA_VERSION)
+            .put("current", backend.currentProfile() ?: JSONObject.NULL).put("profiles", list)
     }
 
     private fun setExt(connectorId: String, args: JSONObject): JSONObject {

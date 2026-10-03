@@ -96,3 +96,22 @@ test("Accounts lists a Cyclone profile's apps when that profile is chosen", asyn
   await flush(20);
   assert.deepEqual(list().sort(), ["com.brand.shop", "com.instagram.android"]);
 });
+
+test("plan 51: approved phone connectors' entries show next to the profiles, read only", async () => {
+  const { parseConnectors } = await import("../.test-dist/services/profiles.js");
+  assert.deepEqual(parseConnectors({ connectors: [{ id: "x", label: "X", entries: [{ id: "", label: "no id" }, "junk"] }, { label: "no id" }] }), []);
+  const gw = fakeGateway({
+    "GET /v1/devices/pixel8-abc/profiles": () => ({ profiles: [], current: null }),
+    "GET /v1/devices/pixel8-abc/connectors": () => ({ supported: true, connectors: [{ id: "acme-profiles", label: "Acme Profiles", entries: [
+      { id: "work-cloud", type: "acme.cloud", label: "Cloud work", subtitle: "3 devices", state: "attention", text: "Sign in again" }] }] }),
+  });
+  const bar = createProfilesBar(ctx(gw.fetch), () => {}, () => {});
+  mounted.push(bar);
+  await bar.load("pixel8-abc");
+  assert.equal(bar.element.hidden, false, "connector entries alone make the bar worth showing");
+  const text = bar.element.textContent;
+  assert.match(text, /From Acme Profiles/);
+  assert.match(text, /Cloud work/);
+  assert.match(text, /Sign in again/);
+  assert.equal(bar.element.querySelectorAll("button").filter((b) => /Cloud work/.test(b.textContent)).length, 0, "nothing to press: it opens on the phone");
+});

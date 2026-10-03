@@ -162,3 +162,22 @@ class ConnectorJournal(events: List<ConnectorEvent> = emptyList(), nextSeq: Long
             .put("more", kept.count { it.seq > since } > page.size)
     }
 }
+
+/**
+ * Plan 51 K3: what the PC may see about connectors, for Glass (`connectors.list`): approved connectors' names and their
+ * selector entries. Never a connector's profile data, package lists or anything a connector didn't put in an entry.
+ */
+object ConnectorReport {
+    const val MAX_CONNECTORS = 16
+
+    fun build(approved: List<Pair<ConnectorApproval, List<ConnectorEntry>>>): JSONObject = JSONObject().put("connectors", JSONArray(
+        approved.sortedBy { it.first.label.lowercase() }.take(MAX_CONNECTORS).map { (approval, entries) ->
+            JSONObject().put("id", approval.connectorId).put("label", approval.label).put("entries", JSONArray(
+                entries.take(ConnectorContract.ENTRIES_MAX).map {
+                    JSONObject().put("id", it.id).put("type", it.type).put("label", it.label).put("subtitle", it.subtitle)
+                        .put("state", it.state).put("text", it.statusText)
+                },
+            ))
+        },
+    ))
+}

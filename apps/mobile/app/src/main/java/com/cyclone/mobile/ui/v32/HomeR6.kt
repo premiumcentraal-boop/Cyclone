@@ -106,18 +106,24 @@ internal data class HomeProfile(
     val current: Boolean,
     val owner: Boolean,
     val active: Boolean,
+    /** Plan 51: an approved connector's entry. Shown after real profiles, marked as the connector's, opens its screen. */
+    val connector: com.cyclone.mobile.connector.SelectorEntry? = null,
 )
 
 /** Pure: the slider's pages, the profile in use first, then running ones, then by name. Never empty. */
 internal object HomeProfiles {
     val THIS_PHONE = HomeProfile("this-phone", "This phone", emptyList(), ready = true, current = true, owner = true, active = false)
 
-    fun order(profiles: List<HomeProfile>): List<HomeProfile> =
-        profiles.sortedWith(compareByDescending<HomeProfile> { it.current }.thenByDescending { it.active }.thenByDescending { it.owner }.thenBy { it.label.lowercase() })
+    fun order(profiles: List<HomeProfile>): List<HomeProfile> {
+        val (entries, real) = profiles.partition { it.connector != null }
+        val ordered = real.sortedWith(compareByDescending<HomeProfile> { it.current }.thenByDescending { it.active }.thenByDescending { it.owner }.thenBy { it.label.lowercase() })
             .ifEmpty { listOf(THIS_PHONE) }
+        // Connector entries never come first and never pose as profiles: they follow, in the connector's own order.
+        return ordered + entries
+    }
 
     /** The small line over the name: "Profile · In use", "Profile · Working", "Profile · Setting up". */
-    fun kind(profile: HomeProfile): String = "Profile · " + when {
+    fun kind(profile: HomeProfile): String = profile.connector?.let { "From ${it.connectorLabel}" } ?: "Profile · " + when {
         !profile.ready -> "Setting up"
         profile.active -> "Working"
         profile.current -> "In use"
@@ -125,7 +131,9 @@ internal object HomeProfiles {
     }
 
     /** The line under the name: how many apps live in it. */
-    fun apps(profile: HomeProfile): String = when (val n = profile.packages.size) {
+    fun apps(profile: HomeProfile): String = profile.connector?.let { c ->
+        listOf(c.entry.subtitle, c.entry.statusText).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Open in ${c.connectorLabel}" }
+    } ?: when (val n = profile.packages.size) {
         0 -> if (profile.owner) "Your main profile" else "No apps yet"
         1 -> "1 app"
         else -> "$n apps"
@@ -151,7 +159,11 @@ internal fun rememberHomeProfiles(context: Context, refreshTick: Int): List<Home
                     ownerUser = identity?.first,
                     verifiedCurrentUser = identity?.second,
                     foregroundExecuting = OverlayChromeRuntime.hasExecutingTask(),
-                ).map { HomeProfile(it.key, it.label, it.packages.sorted(), it.ready, it.current, it.owner, it.active) }
+                ).map { HomeProfile(it.key, it.label, it.packages.sorted(), it.ready, it.current, it.owner, it.active) } +
+                    com.cyclone.mobile.connector.ConnectorLauncher.selectorEntries(context).map { e ->
+                        HomeProfile(e.key, e.entry.label, listOf(e.packageName), ready = e.entry.state != "off", current = false,
+                            owner = false, active = false, connector = e)
+                    }
             }.getOrDefault(emptyList())
         }
     }

@@ -60,6 +60,7 @@ V5_OPS = frozenset({
     "manual.get",
     "signup.maps",
     "numbers.list",
+    "connectors.list",
     "signup.forget",
     "profiles.list",
     "profiles.apps",
@@ -886,6 +887,9 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op == "numbers.list":
         _validate_numbers_list(value)
         return value
+    if op == "connectors.list":
+        _validate_connectors_list(value)
+        return value
     if op == "atlas.places":
         if set(value) != {"places"} or not isinstance(value.get("places"), list):
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android atlas.places result is malformed.")
@@ -1422,6 +1426,36 @@ def _validate_numbers_list(value: dict[str, Any]) -> None:
             raise bad("slot")
 
 
+# Plan 51 K3 (alpha.105): approved phone connectors and their selector entries. Names and entry labels only.
+CONNECTOR_ID = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
+CONNECTOR_ENTRY_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+CONNECTOR_ENTRY_TYPE = re.compile(r"^[a-z][a-z0-9._-]{0,39}$")
+
+
+def _validate_connectors_list(value: dict[str, Any]) -> None:
+    def bad(what: str) -> DesktopRuntimeError:
+        return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android connectors.list result is malformed: {what}.")
+
+    def text(v: Any, limit: int, empty: bool = True) -> bool:
+        return isinstance(v, str) and len(v) <= limit and (empty or v.strip() != "")
+
+    if set(value) != {"connectors"} or not isinstance(value["connectors"], list) or len(value["connectors"]) > 16:
+        raise bad("shape")
+    for c in value["connectors"]:
+        if not isinstance(c, dict) or set(c) != {"id", "label", "entries"} or not isinstance(c["id"], str) \
+                or not CONNECTOR_ID.match(c["id"]) or not text(c["label"], 40, empty=False):
+            raise bad("connector")
+        if not isinstance(c["entries"], list) or len(c["entries"]) > 8:
+            raise bad("entries")
+        for e in c["entries"]:
+            if not isinstance(e, dict) or set(e) != {"id", "type", "label", "subtitle", "state", "text"}:
+                raise bad("entry")
+            if not isinstance(e["id"], str) or not CONNECTOR_ENTRY_ID.match(e["id"]) or not isinstance(e["type"], str) \
+                    or not CONNECTOR_ENTRY_TYPE.match(e["type"]) or not text(e["label"], 40, empty=False) \
+                    or not text(e["subtitle"], 60) or not text(e["text"], 60) or e["state"] not in ("ready", "attention", "off"):
+                raise bad("entry")
+
+
 CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media"})
 CC_MEDIA_MIME = re.compile(r"^(video|image|audio)/[a-z0-9.+-]{1,60}$")
 CC_MEDIA_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
@@ -1937,6 +1971,17 @@ class V5ContractService:
     def models_list(self, device_id: str) -> dict[str, Any]:
         """The phone's models for the mapping start sheet's picker. The key stays on the phone."""
         return self._call(device_id, "models.list", {})
+
+    def connectors_list(self, device_id: str) -> dict[str, Any]:
+        """Plan 51 K3: approved phone connectors and their selector entries. A phone older than alpha.105 doesn't know
+        the op; that reads as no connectors, never as an error."""
+        try:
+            return {**self._call(device_id, "connectors.list", {}), "supported": True}
+        except DesktopRuntimeError as error:
+            # An older phone answers UNKNOWN_OPERATION, which arrives here as CAPABILITY_UNAVAILABLE.
+            if error.code in (RuntimeErrorCode.INVALID_REQUEST, RuntimeErrorCode.CAPABILITY_UNAVAILABLE):
+                return {"connectors": [], "supported": False}
+            raise
 
     def numbers_list(self, device_id: str) -> dict[str, Any]:
         """Plan 49: this phone's numbers (each SIM's and the owner's confirmed ones) and whether codes from texts are on."""

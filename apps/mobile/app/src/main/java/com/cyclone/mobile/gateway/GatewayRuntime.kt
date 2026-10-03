@@ -463,6 +463,10 @@ internal object GatewayDispatcher {
             GatewayV5ManualAdapter.install(context)
             GatewayV5ManualAdapter.dispatch(request.op, request.args)
         }
+        "connectors.list" -> {
+            if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "connectors.list takes no arguments.", request.id)
+            com.cyclone.mobile.connector.ConnectorRuntime.report(context)
+        }
         "numbers.list" -> {
             if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "numbers.list takes no arguments.", request.id)
             com.cyclone.mobile.codes.AndroidCodes.report(context)

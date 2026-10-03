@@ -1,8 +1,10 @@
 # Cyclone phone connectors `cyclone.connector/1`
 
-Status: **v1, first build** (Cyclone 5.0.0-alpha.104, plan 51 K1–K2). The selector shows connector entries from
-alpha.105 (K3); the client library, JSON Schemas and the conformance app arrive in K4. Until then this file is the
-contract, and the code is `apps/mobile/app/src/main/java/com/cyclone/mobile/connector/`.
+Status: **v1, complete** (Cyclone 5.0.0-alpha.105, plan 51 K1–K4). This file is the contract. The code is
+`apps/mobile/app/src/main/java/com/cyclone/mobile/connector/`. Every release carries the kit (§9):
+`Cyclone-Connector-Client-<version>.aar`, `Cyclone-Connector-Sample-<version>.apk` and
+`Cyclone-Connector-Schemas-<version>.zip` (this file, the JSON Schemas and the test vectors), each listed with its
+SHA-256 in the release's `release-manifest.json`.
 
 "Must", "must not", "should" and "may" are normative.
 
@@ -37,7 +39,8 @@ permission held only by Cyclone, so no other app can bind it either.
     id="acme-profiles"
     label="Acme Profiles"
     scopes="profiles.read profiles.ext selector.contribute events.profiles"
-    entryActivity=".EntryActivity" />
+    entryActivity=".EntryActivity"
+    wakeReceiver=".CycloneWake" />
 ```
 
 | Attribute | Rule |
@@ -46,8 +49,8 @@ permission held only by Cyclone, so no other app can bind it either.
 | `id` | `^[a-z][a-z0-9-]{1,40}$`, unique on the phone, stable for the app's life |
 | `label` | 1–40 characters (a string resource is fine) |
 | `scopes` | space-separated (§4). Unknown names are shown to the owner and ignored |
-| `entryActivity` | optional; the activity Cyclone opens when the owner taps one of your entries (alpha.105) |
-| `wakeReceiver` | optional; reserved for event wakes (alpha.105) |
+| `entryActivity` | optional; the activity Cyclone opens when the owner taps one of your entries (§6). It must be exported and in your package |
+| `wakeReceiver` | optional; the receiver Cyclone pokes when new events wait (§7). It must be exported and protected by `com.cyclone.mobile.permission.WAKE_CONNECTOR` |
 
 ## 3. Call it
 
@@ -70,7 +73,7 @@ Apps sharing a UID are refused. Limits: 20 calls per second, 64 KB per request.
 | Method | Scope | Args → result |
 |---|---|---|
 | `hello` | none | `{contract}` → `{contract, minor, connectorId, approved, granted[], pending[], profileSchema, limits}` |
-| `profiles` | `profiles.read` | → `{schemaVersion, profiles[]}` (§5) |
+| `profiles` | `profiles.read` | → `{schemaVersion, current, profiles[]}` (§5) |
 | `ext.set` | `profiles.ext` | `{profileId, value: object \| null}` → `{profileId, cleared}` |
 | `entries.set` | `selector.contribute` | `{entries[]}` → `{count}` (§6) |
 | `entries.get` | `selector.contribute` | → `{entries[]}` |
@@ -104,7 +107,7 @@ new ones until the owner approves them.
 ## 5. Profiles (schema 2)
 
 ```json
-{"schemaVersion": 2, "profiles": [
+{"schemaVersion": 2, "current": "Cyclone_0123456789abcdef", "profiles": [
   {"id": "owner", "label": "This phone", "kind": "owner", "state": "ready"},
   {"id": "Cyclone_0123456789abcdef", "label": "Work", "kind": "profile", "state": "ready",
    "emoji": "🦊", "color": 4278255360, "appCount": 3,
@@ -113,6 +116,8 @@ new ones until the owner approves them.
 ]}
 ```
 
+- `current`: the profile in front: `owner`, a profile id, or `null` when Cyclone can't tell (for example, after someone
+  switched users outside Cyclone). It is a hint for your UI, not a lock.
 - `id`: `owner` or `Cyclone_<16 hex>`.
 - `state`: `ready` | `setting_up` | `in_trash`.
 - `ext`: your own namespace on a Cyclone profile (not on `owner`). It holds a JSON object of at most 4 KB, at most 32
@@ -138,8 +143,12 @@ Rules:
 - `status.state`: `ready` | `attention` | `off`; `status.text` ≤ 60 characters.
 - Unknown fields are refused.
 
-From alpha.105, entries are shown after the owner's profiles, marked as yours ("From <label>"). A tap opens your
-`entryActivity` with the extra `entryId`.
+Entries are shown in the home slider and in Profiles after the owner's profiles, marked as yours ("From <label>").
+A tap opens your `entryActivity` with the string extra `com.cyclone.connector.ENTRY_ID`. Cyclone never switches
+anything for an entry: what a tap does is up to your app.
+
+Glass on the owner's PC shows your label and your entries' `id`, `type`, `label`, `subtitle` and status (phone op
+`connectors.list`, read only). Nothing else of yours travels: not your profile data, package name, icon or key.
 
 ## 7. Events
 
@@ -152,9 +161,41 @@ From alpha.105, entries are shown after the owner's profiles, marked as yours ("
 - `reset: true` means some events after your `since` are no longer kept (7 days or 1 000 events). Read `profiles`
   again.
 - `profile.switched` names the profile Cyclone switched to (`owner` for this phone's own profile).
+- With a `wakeReceiver` and the `events.profiles` scope, Cyclone sends it the broadcast `com.cyclone.connector.WAKE`
+  (explicit, no data, at most one per half second) when new events wait. Then call `events`. The wake is a hint: it
+  can be late or missed, so read `events` when your app starts too.
 
 ## 8. Versions
 
 `hello` tells you the contract and minor Cyclone speaks. Minor versions only add methods, fields and scopes; both
 sides ignore what they don't know. A new major is announced in the release notes at least two alphas ahead, and
 Cyclone then answers both majors for at least two alphas.
+
+## 9. The kit
+
+**Client library** (`Cyclone-Connector-Client-<version>.aar`, source `apps/mobile/connector-client`). Add it to your
+app. It declares the `<queries>` entry for you.
+
+```kotlin
+// Off the main thread: connect() waits for the bind.
+CycloneConnector.connect(context).use { cyclone ->
+    val hello = cyclone.hello()                 // approved? granted? pending?
+    val profiles = cyclone.profiles()           // {schemaVersion, current, profiles[]}
+    cyclone.setEntries(listOf(CycloneConnector.Entry("work-cloud", "acme.cloud", "Cloud work", "3 devices")))
+    val page = cyclone.events(since = lastSeq)
+}
+```
+
+A call that Cyclone refuses throws `CycloneConnectorException` with the error `code` from §3.
+
+**Sample** (`Cyclone-Connector-Sample-<version>.apk`, source `apps/mobile/connector-sample`). It is a debug-signed
+app to read and try, not a product. It declares every scope, an entry activity and a wake receiver, and has a button
+for each call. Install it, approve it in Cyclone → Settings → Connectors, and press the buttons.
+
+**Schemas and test vectors** (`Cyclone-Connector-Schemas-<version>.zip`, source `tools/cyclone-connector-sdk/schemas`).
+- JSON Schemas (draft 2020-12) for the request, the answer envelope and each method's result.
+- `vectors.json`: a fixed state (approvals, profiles, entries, events), a caller and the exact answer Cyclone gives
+  to each request. Error messages are for people and may change; the codes may not.
+- Cyclone's own build runs every vector against its connector code, so the file is what Cyclone answers. Run the
+  same file against your fakes.
+

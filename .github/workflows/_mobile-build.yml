@@ -63,7 +63,8 @@ jobs:
 
       - name: Test, lint and assemble unsigned release candidate
         shell: bash
-        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:lintDebug :app:assembleRelease --stacktrace
+        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:lintDebug :app:assembleRelease \
+            :connector-client:assembleRelease :connector-sample:assembleDebug --stacktrace
 
       - name: Upload Android test and lint reports
         if: always()
@@ -100,6 +101,20 @@ jobs:
           printf '%s\n' "$GITHUB_RUN_ID" > dist/mobile/run-id.txt
           printf '%s\n' 'UNSIGNED_VERIFIED_CANDIDATE' > dist/mobile/signing-state.txt
           cp mobile-metadata.json dist/mobile/mobile-metadata.json
+
+      - name: Package the connector kit
+        shell: bash
+        env:
+          VERSION: ${{ steps.mobile.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          # Plan 51 K4: the client library, the sample connector (debug-signed: a sample to read and try, not a
+          # product) and the published schemas with their test vectors.
+          mkdir -p dist/mobile/connector
+          cp apps/mobile/connector-client/build/outputs/aar/connector-client-release.aar "dist/mobile/connector/Cyclone-Connector-Client-$VERSION.aar"
+          cp apps/mobile/connector-sample/build/outputs/apk/debug/connector-sample-debug.apk "dist/mobile/connector/Cyclone-Connector-Sample-$VERSION.apk"
+          (cd tools/cyclone-connector-sdk && zip -qr "../../dist/mobile/connector/Cyclone-Connector-Schemas-$VERSION.zip" SPEC.md schemas)
+          (cd dist/mobile/connector && sha256sum * > SHA256SUMS)
 
       - name: Upload release candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

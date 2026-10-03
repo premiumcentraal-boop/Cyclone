@@ -254,4 +254,29 @@ class ConnectorTest {
         call(core, caller, "hello")
         assertEquals("RATE_LIMITED", code(call(core, caller, "hello")))
     }
+
+    // ---- K3: current profile and what the PC sees -----------------------------------------------------------------
+
+    @Test fun profilesSayWhichIsInFrontWhenCycloneKnows() {
+        val backend = object : ConnectorBackend by FakeBackend(listOf(ConnectorApproval("acme-profiles", "com.acme.profiles", cert,
+            setOf(ConnectorScope.PROFILES_READ), "Acme", 1)), listOf(record("Cyclone_aaaaaaaaaaaaaaaa", "Work"))) {
+            override fun currentProfile(): String? = "Cyclone_aaaaaaaaaaaaaaaa"
+        }
+        val caller = ConnectorCaller(10_123, "com.acme.profiles", listOf(cert), manifest())
+        assertEquals("Cyclone_aaaaaaaaaaaaaaaa", call(ConnectorCore(backend), caller, "profiles").getJSONObject("result").getString("current"))
+        val unknown = FakeBackend(backend.approvals(), backend.profiles())
+        assertTrue(call(ConnectorCore(unknown), caller, "profiles").getJSONObject("result").isNull("current"))
+    }
+
+    @Test fun thePcSeesNamesAndEntriesNeverConnectorData() {
+        val approval = ConnectorApproval("acme-profiles", "com.acme.profiles", cert, setOf(ConnectorScope.SELECTOR_CONTRIBUTE), "Acme Profiles", 1)
+        val entry = ConnectorEntry("work-cloud", "acme.cloud", "Cloud work", "3 devices", "ic_cloud", "attention", "Sign in again")
+        val report = ConnectorReport.build(listOf(approval to listOf(entry)))
+        val c = report.getJSONArray("connectors").getJSONObject(0)
+        assertEquals(setOf("id", "label", "entries"), c.keys().asSequence().toSet())
+        assertEquals(setOf("id", "type", "label", "subtitle", "state", "text"), c.getJSONArray("entries").getJSONObject(0).keys().asSequence().toSet())
+        assertFalse("no icon names, packages or keys travel", report.toString().contains("ic_cloud") || report.toString().contains("com.acme") || report.toString().contains(cert))
+        val many = ConnectorReport.build((1..20).map { approval.copy(connectorId = "c$it", label = "C$it") to emptyList() })
+        assertEquals(ConnectorReport.MAX_CONNECTORS, many.getJSONArray("connectors").length())
+    }
 }

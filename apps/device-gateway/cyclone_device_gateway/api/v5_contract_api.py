@@ -24,6 +24,11 @@ def create_v5_contract_router(runtime: Any, token: str) -> APIRouter:
     def apps_list(device_id: str):
         return _call(lambda: service.apps_list(device_id))
 
+    # Plan 51 K3: approved phone connectors and their selector entries (read only).
+    @router.get("/v1/devices/{device_id}/connectors", dependencies=[Depends(auth)])
+    def connectors_list(device_id: str):
+        return _call(lambda: service.connectors_list(device_id))
+
     # Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
     @router.get("/v1/devices/{device_id}/profiles", dependencies=[Depends(auth)])
     def profiles_list(device_id: str):

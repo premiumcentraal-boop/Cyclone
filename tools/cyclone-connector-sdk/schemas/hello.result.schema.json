@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/hello.result.schema.json",
+  "title": "hello",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "minor",
+    "connectorId",
+    "approved",
+    "granted",
+    "pending",
+    "profileSchema",
+    "limits"
+  ],
+  "properties": {
+    "contract": {
+      "const": "cyclone.connector/1"
+    },
+    "minor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "connectorId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,40}$"
+    },
+    "approved": {
+      "type": "boolean"
+    },
+    "granted": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "profiles.read",
+          "profiles.apps.read",
+          "profiles.ext",
+          "selector.contribute",
+          "events.profiles"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "pending": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "profiles.read",
+          "profiles.apps.read",
+          "profiles.ext",
+          "selector.contribute",
+          "events.profiles"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "profileSchema": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extBytes",
+        "extKeys",
+        "entries",
+        "callsPerSecond"
+      ],
+      "properties": {
+        "extBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "extKeys": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "entries": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "callsPerSecond": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

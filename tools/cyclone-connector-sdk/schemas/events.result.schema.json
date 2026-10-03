@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/events.result.schema.json",
+  "title": "events",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "events",
+    "next",
+    "reset",
+    "more"
+  ],
+  "properties": {
+    "events": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "seq",
+          "type",
+          "profileId",
+          "at"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "enum": [
+              "profile.created",
+              "profile.updated",
+              "profile.switched",
+              "profile.trashed",
+              "profile.restored",
+              "profile.removed"
+            ]
+          },
+          "profileId": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "next": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reset": {
+      "type": "boolean"
+    },
+    "more": {
+      "type": "boolean"
+    }
+  }
+}

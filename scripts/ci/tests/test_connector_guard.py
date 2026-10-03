@@ -64,5 +64,47 @@ class ConnectorGuard(unittest.TestCase):
         self.assertIn('const val CONTRACT = "cyclone.connector/1"', contract)
 
 
+class ConnectorKitGuard(unittest.TestCase):
+    """Plan 51 K4: the client library and the sample are separate, small and only speak the public contract."""
+
+    MOBILE_ROOT = ROOT / "apps/mobile"
+
+    def test_the_client_aidl_is_the_apps_aidl(self):
+        app = read(APP / "aidl/com/cyclone/connector/ICycloneConnector.aidl")
+        client = read(self.MOBILE_ROOT / "connector-client/src/main/aidl/com/cyclone/connector/ICycloneConnector.aidl")
+        self.assertEqual(app, client)
+
+    def test_the_kit_never_links_cyclone_itself(self):
+        settings = read(self.MOBILE_ROOT / "settings.gradle.kts")
+        for module in (":connector-client", ":connector-sample"):
+            self.assertIn(f'"{module}"', settings)
+        for folder in ("connector-client", "connector-sample"):
+            build = read(self.MOBILE_ROOT / folder / "build.gradle.kts")
+            self.assertNotIn('project(":app")', build)
+            for path in (self.MOBILE_ROOT / folder / "src").rglob("*.kt"):
+                self.assertNotRegex(read(path), r"import com\.cyclone\.mobile\.|PhoneToolExecutor", path.name)
+
+    def test_the_sample_protects_its_doors_with_cyclones_permissions(self):
+        manifest = read(self.MOBILE_ROOT / "connector-sample/src/main/AndroidManifest.xml")
+        self.assertRegex(manifest, r'(?s)<service[^>]*android:permission="com\.cyclone\.mobile\.permission\.CONNECTOR_HOST"')
+        self.assertRegex(manifest, r'(?s)<receiver[^>]*android:permission="com\.cyclone\.mobile\.permission\.WAKE_CONNECTOR"')
+
+    def test_ci_builds_and_publishes_the_kit_with_checksums(self):
+        build = read(ROOT / ".github/workflows/_mobile-build.yml")
+        self.assertIn(":connector-client:assembleRelease :connector-sample:assembleDebug", build)
+        self.assertIn("sha256sum * > SHA256SUMS", build)
+        publish = read(ROOT / ".github/workflows/v5-publish.yml")
+        self.assertIn("sha256sum --check SHA256SUMS", publish)
+        self.assertIn("kit = sorted(Path('connector').glob('Cyclone-Connector-*'))", publish)
+        self.assertIn("manifest['sha256'].update(", publish, "every kit file is in the release manifest")
+        self.assertIn("connector/* release-manifest.json", publish)
+
+    def test_the_published_vectors_are_checked_on_both_sides(self):
+        schemas = ROOT / "tools/cyclone-connector-sdk/schemas"
+        self.assertTrue((schemas / "vectors.json").is_file())
+        self.assertTrue((ROOT / "apps/mobile/app/src/test/java/com/cyclone/mobile/connector/ConnectorVectorsTest.kt").is_file())
+        self.assertTrue((ROOT / "apps/device-gateway/tests/test_connector_schemas.py").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
