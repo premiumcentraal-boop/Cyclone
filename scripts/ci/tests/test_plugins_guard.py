@@ -98,3 +98,15 @@ class PluginsGuard(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PluginBuildGuard(unittest.TestCase):
+    def test_the_build_never_leaves_a_plugin_holding_the_callers_pipe(self):
+        """alpha.103's first publish hung: a one-file plugin's child kept the build's stdout open. The conformance run
+        sends output nowhere and stops the whole process tree; the release smoke's web calls time out."""
+        build = read(SDK / "build.py")
+        self.assertIn("stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL", build)
+        self.assertIn('"taskkill", "/F", "/T"', build)
+        self.assertIn("os.killpg(proc.pid", build)
+        smoke = read(ROOT / "scripts/pc/build-pc-package.ps1")
+        self.assertNotRegex(smoke, r"Invoke-RestMethod (?!-TimeoutSec)")

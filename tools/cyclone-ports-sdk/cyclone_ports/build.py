@@ -50,7 +50,11 @@ def conformance(program: Path, data_dir: Path, settings: dict, timeout_s: float 
 
     port, key = _free_port(), "k1." + secrets.token_urlsafe(24)
     env = dict(os.environ, **{MANAGED_ENV: "1"})
-    proc = subprocess.Popen([str(program)], stdin=subprocess.PIPE, cwd=str(data_dir), env=env, text=True)
+    # The program's output goes nowhere and its whole process tree is stopped afterwards: a one-file program runs as a
+    # starter plus a child, and a child left holding our stdout would keep the caller's pipe open forever.
+    group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+    proc = subprocess.Popen([str(program)], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            cwd=str(data_dir), env=env, text=True, **group)
     try:
         proc.stdin.write(handshake_line(port, key, str(data_dir), settings))
         proc.stdin.close()
@@ -65,11 +69,24 @@ def conformance(program: Path, data_dir: Path, settings: dict, timeout_s: float 
                 time.sleep(0.3)
         return check_plugin(endpoint, key)
     finally:
-        proc.terminate()
+        stop_tree(proc)
+
+
+def stop_tree(proc: subprocess.Popen) -> None:
+    """Stops a program and every process it started."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        import signal
         try:
-            proc.wait(10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            proc.terminate()
+    try:
+        proc.wait(10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(5)
 
 
 def main(argv: list[str] | None = None) -> int:

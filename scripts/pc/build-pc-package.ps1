@@ -118,16 +118,16 @@ foreach ($folder in $Logger, $Logger2) {
 function Wait-PluginJob($job, $headers) {
     for ($i = 0; $i -lt 240 -and $job.state -eq 'running'; $i++) {
         Start-Sleep -Milliseconds 500
-        $job = Invoke-RestMethod -Headers $headers "http://127.0.0.1:8799/v1/plugins/jobs/$($job.id)"
+        $job = Invoke-RestMethod -TimeoutSec 120 -Headers $headers "http://127.0.0.1:8799/v1/plugins/jobs/$($job.id)"
     }
     if ($job.state -ne 'done') { throw "Plugin job $($job.action) ended $($job.state): $($job.detail)" }
     return $job
 }
 
 function Install-PluginFile($file, $headers) {
-    $resolved = Wait-PluginJob (Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' -Body (@{ source = $file } | ConvertTo-Json) 'http://127.0.0.1:8799/v1/plugins/resolve') $headers
+    $resolved = Wait-PluginJob (Invoke-RestMethod -TimeoutSec 120 -Method Post -Headers $headers -ContentType 'application/json' -Body (@{ source = $file } | ConvertTo-Json) 'http://127.0.0.1:8799/v1/plugins/resolve') $headers
     $body = @{ sha256 = $resolved.result.sha256; accept = $true; trustUnverified = $true; allowed = @('run.event', 'log.line'); settings = @{} } | ConvertTo-Json
-    Wait-PluginJob (Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' -Body $body 'http://127.0.0.1:8799/v1/plugins/install') $headers | Out-Null
+    Wait-PluginJob (Invoke-RestMethod -TimeoutSec 120 -Method Post -Headers $headers -ContentType 'application/json' -Body $body 'http://127.0.0.1:8799/v1/plugins/install') $headers | Out-Null
 }
 
 $savedLocal = $env:LOCALAPPDATA
@@ -160,26 +160,26 @@ try {
             $state = if ($runtime.HasExited) { "exited with code $($runtime.ExitCode)" } else { 'still running' }
             throw "The installed runtime did not serve Glass at /glass/ (runtime $state)."
         }
-        $welcome = Invoke-RestMethod -Headers @{ Authorization = "Bearer $token" } 'http://127.0.0.1:8799/v1/pc/welcome'
+        $welcome = Invoke-RestMethod -TimeoutSec 120 -Headers @{ Authorization = "Bearer $token" } 'http://127.0.0.1:8799/v1/pc/welcome'
         if ($welcome.seen -ne $false) { throw "The /v1/pc routes did not answer as expected: $($welcome | ConvertTo-Json -Compress)" }
-        try { Invoke-RestMethod 'http://127.0.0.1:8799/v1/pc/tunnel'; throw 'The /v1/pc routes answered without the bearer.' } catch { if ($_.Exception.Message -like '*answered without*') { throw } }
+        try { Invoke-RestMethod -TimeoutSec 120 'http://127.0.0.1:8799/v1/pc/tunnel'; throw 'The /v1/pc routes answered without the bearer.' } catch { if ($_.Exception.Message -like '*answered without*') { throw } }
         # Plan 48: the Port Hub ships with the kit it imports; a missing kit answers 503 and fails the build here.
-        $ports = Invoke-RestMethod -Headers @{ Authorization = "Bearer $token" } 'http://127.0.0.1:8799/v1/ports/overview'
+        $ports = Invoke-RestMethod -TimeoutSec 120 -Headers @{ Authorization = "Bearer $token" } 'http://127.0.0.1:8799/v1/ports/overview'
         if ($ports.contract -ne 'cyclone.ports/1' -or @($ports.catalog).Count -lt 12) { throw "The Port Hub did not answer as expected: $($ports | ConvertTo-Json -Compress -Depth 3)" }
         Write-Host 'The installed runtime serves Glass, the authenticated /v1/pc routes and the Port Hub.'
 
         # Plan 50: install a plugin package, see it run and pass the hub's signed checks, update it, roll it back.
         $auth = @{ Authorization = "Bearer $token" }
         Install-PluginFile $pluginBuilds[0] $auth
-        $plugin = Invoke-RestMethod -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
+        $plugin = Invoke-RestMethod -TimeoutSec 120 -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
         if ($plugin.state -ne 'running' -or $plugin.version -ne '0.1.0') { throw "The plugin didn't start: $($plugin | ConvertTo-Json -Compress)" }
-        $checked = Invoke-RestMethod -Method Post -Headers $auth 'http://127.0.0.1:8799/v1/ports/plugins/run-logger/check'
+        $checked = Invoke-RestMethod -TimeoutSec 120 -Method Post -Headers $auth 'http://127.0.0.1:8799/v1/ports/plugins/run-logger/check'
         if ($checked.plugin.status -ne 'active') { throw "The Port Hub's checks failed for the installed plugin: $($checked.plugin | ConvertTo-Json -Compress -Depth 4)" }
         Install-PluginFile $pluginBuilds[1] $auth
-        $plugin = Invoke-RestMethod -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
+        $plugin = Invoke-RestMethod -TimeoutSec 120 -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
         if ($plugin.version -ne '0.1.1' -or $plugin.previous -ne '0.1.0' -or $plugin.state -ne 'running') { throw "The update didn't land: $($plugin | ConvertTo-Json -Compress)" }
-        Wait-PluginJob (Invoke-RestMethod -Method Post -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger/rollback') $auth | Out-Null
-        $plugin = Invoke-RestMethod -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
+        Wait-PluginJob (Invoke-RestMethod -TimeoutSec 120 -Method Post -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger/rollback') $auth | Out-Null
+        $plugin = Invoke-RestMethod -TimeoutSec 120 -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
         if ($plugin.version -ne '0.1.0' -or $plugin.state -ne 'running') { throw "The rollback didn't land: $($plugin | ConvertTo-Json -Compress)" }
         # A one-file program runs as a starter plus its child, so one plugin shows as one or two processes, never more.
         $running = @(Get-Process run-logger -ErrorAction SilentlyContinue).Count
