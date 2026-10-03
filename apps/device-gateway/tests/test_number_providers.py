@@ -12,6 +12,8 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+# Source checkouts load the adjacent SDK before direct imports, just like the runtime.
+from cyclone_device_gateway.ports import kit
 from cyclone_ports import sign
 from cyclone_ports.conformance import Check, check_plugin
 
@@ -415,7 +417,7 @@ def test_native_starters_pass_real_sdk_conformance(tmp_path):
         for kind in ("vmos", "smsbot"):
             overview = world.connect(kind)
             checks = world.hub.plugin(PLUGIN[kind])["plugin"]["checks"]
-            assert checks["passed"], checks
+            assert checks["passed"], [c for c in checks["items"] if not c["ok"]]
             assert world.hub.plugin(PLUGIN[kind])["plugin"]["status"] == "active"
         assert not world.purchases, "conformance samples cannot trigger provider mutations"
     finally:

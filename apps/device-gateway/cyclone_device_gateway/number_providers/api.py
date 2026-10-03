@@ -6,10 +6,9 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from cyclone_ports.sdk import ReplayCache, parse_signature
-
 from ..auth import verify_bearer
 from ..ports import kit
+from cyclone_ports.sdk import ReplayCache, parse_signature
 from .providers import ProviderError
 from .service import PLUGIN
 

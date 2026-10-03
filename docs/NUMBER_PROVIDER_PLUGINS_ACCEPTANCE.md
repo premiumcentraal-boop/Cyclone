@@ -22,8 +22,11 @@ Recorded 2026-10-03. Built on the latest published Cyclone Alpha 102 / Glass Alp
 | CI guard tests | 286 passed |
 | Version metadata, Glass and mobile product guards | Passed |
 | Native plugin conformance | Both providers passed actual SDK checks over local HTTP against isolated fixtures |
+| Source checkout without an installed Ports SDK | 31 provider tests passed using the adjacent SDK fallback |
 
 The final focused suite followed a small read-only ownership/expiry hardening change; the broad gateway result precedes that last check. An earlier broad run hit an existing ordering-sensitive logger assertion in `test_signup_scenario_through_the_gateway_hub`; its focused rerun and the subsequent full run passed. No unrelated logger behavior or test was changed.
+
+Initial GitHub Mobile CI exposed a direct test import before the gateway's source-SDK fallback loaded. The native API and test imports now load the gateway Ports module first. Verified with a Python process whose editable SDK registration was disabled and asserted absent before the gateway import; the full focused suite passed. A first such local run had one transient conformance failure; failure assertions now print only failed checks, and the complete rerun passed. Hosted CI is the additional merge gate; this record does not assert its final status ahead of completion.
 
 Provider tests cover owner approval, decline, expiry, repricing, changed permission, cancelled runs, exact request replay, restart during submission, no second purchase after an uncertain response, authentication/error redaction, signatures and replay refusal, app routing restrictions, correct country-aware number identity, existing account assignment, stale/wrong-sender/ambiguous SMS, one-shot private delivery and no OTP in database dumps. Provider ownership and current rental expiry are checked before inbox access. Fixtures use documented responses; they cannot prove a vendor's production implementation.
 
