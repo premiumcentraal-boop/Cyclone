@@ -62,7 +62,7 @@ test("the page shows the totals, the phones to set up and every number with wher
   assert.match(text, /Rented · Acme Numbers/);
   assert.match(text, /Rented until/);
   assert.match(text, /No source/);
-  assert.equal(gw.calls[0].query.refresh, "true", "the first look asks the phones now");
+  assert.equal(gw.calls.find((c) => c.path === "/v1/numbers").query.refresh, "true", "the first inventory look asks the phones now");
   view.destroy();
 });
 

@@ -282,7 +282,12 @@ class NumberProviders:
             approval = "apv_" + secrets.token_hex(12)
             amount = f"{q['amountCents'] / 100:.2f} {q['currency']}"
             text = f"Rent one {q['country']} number from {NAMES[row['provider']]} for {q['days']} days, {amount}? " + ", ".join(q["services"]) + ". " + q["terms"]
-            preview = {k: q[k] for k in ("country", "services", "days", "amountCents", "currency", "quantity", "autoRenew", "accountId")}
+            preview = {"Country": q["country"], "Services": ", ".join(q["services"]), "Rental period": f"{q['days']} days",
+                       "Total price": amount, "Numbers": 1, "Automatic renewal": "Off", "Refund terms": q["terms"]}
+            if q.get("accountId"):
+                account = next((a for a in self.command.list_accounts() if a["id"] == q["accountId"]), None)
+                if account:
+                    preview["Account"] = account["service"] + " · " + account["handle"]
             with self.command._db:
                 self.command._db.execute("INSERT INTO approval(id,run_id,task_id,device_id,mission_id,request_id,kind,text,gate,send,choices,fields,approvable_here,state,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (approval, "", q.get("taskId") or "", "", "", quote_id, "spend", text, "spend",
@@ -386,10 +391,25 @@ class NumberProviders:
         self._sync(self._row(quote_id))  # explicit owner identifies an actual owned rental; never another debit
         return self.order(quote_id)
 
+    def _withdraw_stale(self):
+        # Quotes/owner prompts must not strand a scope after its task stopped or price expired.
+        # Submitted/uncertain orders are deliberately excluded: their debit may already exist.
+        with self.command._lock, self._lock:
+            rows = self._db.execute("SELECT * FROM number_order WHERE state IN ('quoted','waiting_owner','approved')").fetchall()
+            for row in rows:
+                try:
+                    self._eligible(row)
+                except ProviderError as error:
+                    self._set(row["id"], state="expired" if error.code == "QUOTE_EXPIRED" else "cancelled", error=error.code)
+                    if row["approval_id"]:
+                        with self.command._db:
+                            self.command._db.execute("UPDATE approval SET state='withdrawn' WHERE id=? AND state='open'", (row["approval_id"],))
+
     def tick(self):
         if self._stop.is_set() or not self._tick_lock.acquire(blocking=False):
             return
         try:
+            self._withdraw_stale()
             with self._lock:
                 rows = self._db.execute("SELECT * FROM number_order WHERE state IN ('approved','unknown','processing','syncing')").fetchall()
             for row in rows:

@@ -118,6 +118,38 @@ class PortOutboxTest {
         assertEquals(item.getString("id"), cancel.getString("item"))
     }
 
+    @Test fun approvedNumberPluginMatchPreservesThePrivateCodePlace() {
+        val skill = JSONObject().put("name", "smsbot-numbers").put("title", "SMSBot numbers")
+            .put("description", "New owner-approved number").put("instructions", "Wait for private verification")
+            .put("ports", JSONArray(listOf("value.in", "code.in"))).put("apps", JSONArray()).put("routines", JSONArray())
+        outbox.poll(JSONObject().put("skills", JSONArray().put(skill)))
+        val target = run.copy(plugin = "smsbot-numbers")
+        val match = JSONObject().put("requestId", "job1").put("from", "Bling").put("length", 6)
+        assertEquals("refused", outbox.awaitMatched(target, "code.in", "Verify", 60, match = match).state)
+        assertEquals("refused", outbox.awaitMatched(target, "code.in", "Verify", 60, "package:com.example.shop",
+            JSONObject(match.toString()).put("apiKey", "not-allowed")).state)
+        var opened: String? = null
+        outbox.openCode = { _, place, _ -> opened = place; 6 }
+        var answer: PortOutbox.Answer? = null
+        val waiter = thread { answer = outbox.awaitMatched(target, "code.in", "Verify", 60, "package:com.example.shop", match) }
+        var item: JSONObject? = null
+        val deadline = System.nanoTime() + 2_000_000_000L
+        while (item == null && System.nanoTime() < deadline) {
+            val items = outbox.poll(JSONObject().put("skills", JSONArray().put(skill))).getJSONArray("items")
+            item = if (items.length() > 0) items.getJSONObject(0) else null
+            Thread.sleep(5)
+        }
+        assertTrue("private targeted wait should be queued", item != null)
+        assertEquals("smsbot-numbers", item!!.getString("plugin"))
+        assertEquals("job1", item!!.getJSONObject("match").getString("requestId"))
+        outbox.answer(JSONObject().put("id", item!!.getString("id")).put("state", "delivered").put("plugin", "smsbot-numbers")
+            .put("sealed", JSONObject().put("leaseId", "l").put("enc", "e").put("ct", "c").put("aad", "a")))
+        waiter.join(5_000)
+        assertEquals("package:com.example.shop", opened)
+        assertEquals(6, answer!!.codeLength)
+        assertNull(answer!!.value)
+    }
+
     @Test fun aWaitThePcNeverPickedUpIsTakenBack() {
         poll()
         var stop = false

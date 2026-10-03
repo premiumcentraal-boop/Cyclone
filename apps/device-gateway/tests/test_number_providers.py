@@ -140,6 +140,9 @@ def world(tmp_path):
 def test_keys_are_write_only_and_purchase_needs_the_existing_owner_approval(world, kind):
     world.connect(kind)
     order = world.request(kind)
+    review = world.cc.list_approvals()[0]["send"]["arguments"]
+    assert review["Numbers"] == 1 and review["Automatic renewal"] == "Off"
+    assert review["Total price"] == ("9.98 USD" if kind == "vmos" else "0.30 EUR")
     world.service.tick()
     assert not world.purchases
     assert SECRET not in json.dumps(world.service.overview())
@@ -199,6 +202,26 @@ def test_uncertain_purchase_never_retries_and_restart_reconciles_read_only(world
         assert len(world.purchases) == 1
 
 
+@pytest.mark.parametrize("kind", ["vmos", "smsbot"])
+def test_unrecognized_purchase_error_is_uncertain_not_permission_to_buy_again(world, kind):
+    world.connect(kind)
+    order = world.request(kind)
+    original = world.service.fetch
+    def error_response(method, url, body, headers):
+        result = original(method, url, body, headers)
+        if url.endswith("/purchase"):
+            return 200, {"code": 200, "data": {"errorCode": "INTERNAL_ERROR", "message": SECRET}}
+        if url.endswith("/rent"):
+            return 200, {"success": False, "code": SECRET, "message": SECRET}
+        return result
+    world.service.fetch = error_response
+    world.approve(order); world.service.tick()
+    assert world.service.order(order["id"])["status"] == "unknown"
+    assert SECRET not in json.dumps(world.service.overview())
+    world.service.tick(); world.service.tick()
+    assert len(world.purchases) == 1
+
+
 def test_agent_scopes_and_owner_port_map_choices_are_enforced(world):
     world.connect(apps=["com.example.shop"])
     assert world.service.skills("com.other.app") == []
@@ -219,6 +242,30 @@ def test_stopped_wait_cannot_purchase_after_owner_approval(world):
     world.service.tick()
     assert not world.purchases
     assert world.service.order(order["id"])["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("case", ["expire", "stop", "permission"])
+def test_stale_owner_prompt_is_withdrawn_without_spend_or_stranded_scope(world, case):
+    world.connect()
+    wait = world.wait("vmos", "value.in", {"ask": "rent", **world.selection()})
+    world.service.tick()
+    order = world.service.overview()["orders"][0]
+    assert world.cc.list_approvals()
+    if case == "expire":
+        world.now += TTL + 1
+    elif case == "stop":
+        world.hub.traffic.cancel(wait["awaitId"])
+    else:
+        world.connect(agentEnabled=False)
+    world.service.tick()
+    assert world.service.order(order["id"])["status"] == ("expired" if case == "expire" else "cancelled")
+    assert not world.cc.list_approvals() and not world.purchases
+    # A later request can proceed; the old owner prompt cannot authorize it.
+    world.connect()
+    assert world.service.quote("vmos", world.selection(request="next_request"))["status"] == "quoted"
+    with pytest.raises(ValueError):
+        world.approve(order)
+    assert not world.purchases
 
 
 def test_agent_number_and_code_are_bound_to_the_run_and_never_written(world):

@@ -125,13 +125,18 @@ class Provider:
         if self.kind == "vmos":
             inner = data.get("data")
             if status != 200 or data.get("code") != 200:
-                raise ProviderError({401: "INVALID_API_KEY", 403: "ACCOUNT_BLOCKED", 429: "RATE_LIMITED"}.get(status, "PROVIDER_REJECTED"))
+                known = {401: "INVALID_API_KEY", 403: "ACCOUNT_BLOCKED", 429: "RATE_LIMITED"}.get(status)
+                raise ProviderError(known or "PROVIDER_UNCERTAIN", uncertain=known is None)
             if isinstance(inner, dict) and inner.get("errorCode"):
-                raise ProviderError(inner["errorCode"] if inner["errorCode"] in PUBLIC_ERRORS else "PROVIDER_REJECTED")
+                code = inner["errorCode"]
+                known = isinstance(code, str) and code in PUBLIC_ERRORS and code != "INTERNAL_ERROR"
+                raise ProviderError(code if known else "PROVIDER_UNCERTAIN", uncertain=not known)
             return inner
         if status >= 400 or data.get("success") is not True:
             code = data.get("code")
-            raise ProviderError(code if isinstance(code, str) and code in PUBLIC_ERRORS else "PROVIDER_REJECTED")
+            known = isinstance(code, str) and code in PUBLIC_ERRORS and code != "INTERNAL_ERROR"
+            authentication = {401: "INVALID_API_KEY", 403: "ACCOUNT_BLOCKED", 429: "RATE_LIMITED"}.get(status)
+            raise ProviderError(authentication or (code if known else "PROVIDER_UNCERTAIN"), uncertain=not (known or authentication))
         return data.get("data")
 
     def catalogue(self, country: str | None = None, area: str = "213") -> dict[str, Any]:

@@ -55,6 +55,27 @@ class PortToolsTest {
         assertTrue(box(FakeEnv(feed), null).call("port_send", """{"port":"log.line","text":"hi"}""").text.startsWith("ERROR"))
     }
 
+    @Test fun numberProviderKeepsLongPublicTelephoneIdentifiersAndPrivateCodePlace() {
+        val base = FakeLink()
+        var boundPlace: String? = null
+        val link = object : MindPortsLink by base {
+            override fun waitFor(plugin: String, port: String, match: JSONObject, timeoutS: Int, app: String?, cancelled: () -> Boolean) =
+                MindPortAnswer("delivered", value = JSONObject().put("status", "complete").put("number", "+2348101234567"))
+            override fun waitForCode(plugin: String, match: JSONObject, timeoutS: Int, place: String, app: String?, cancelled: () -> Boolean): MindPortAnswer {
+                boundPlace = place
+                return MindPortAnswer("delivered", codeLength = 6, plugin = plugin)
+            }
+        }
+        val toolbox = box(FakeEnv(codeScreen), link)
+        val number = toolbox.call("port_wait", """{"port":"value.in","plugin":"smsbot-numbers","match":{"ask":"rent","requestId":"job1"}}""")
+        assertTrue(number.text, number.text.contains("Allocated telephone number: +2348101234567"))
+        val code = toolbox.call("port_wait", """{"port":"code.in","plugin":"smsbot-numbers","match":{"requestId":"job1","from":"Bling","length":6}}""")
+        assertTrue(code.text, code.ok)
+        assertEquals("package:com.instagram.android", boundPlace)
+        assertTrue(code.text, code.text.contains("6 characters"))
+        assertFalse(code.text.contains("847291"))
+    }
+
     @Test fun eventsLinesAndFieldsGoOutWithoutSecrets() {
         val link = FakeLink()
         val toolbox = box(FakeEnv(feed), link)

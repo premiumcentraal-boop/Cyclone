@@ -11,6 +11,7 @@
  * Numbers only: no text, sender or code is ever shown here. Nothing is decided here; the gateway's answer is shown.
  */
 import type { GlassContext } from "../app.js";
+import { createNumberProvidersView } from "./numberProvidersView.js";
 import { actionButton, card, chip, emptyState, errorState, loadingState, segmented, statTile, type Tone } from "../ui/components.js";
 import { el, setChildren } from "../ui/dom.js";
 import { relativeTime } from "../ui/format.js";
@@ -82,6 +83,7 @@ export function createNumbersView(ctx: GlassContext, say: (text: string, tone?: 
   const toolbar = el("div", "nm-toolbar");
   const listBox = el("div", "nm-list");
   const addBox = card("cc-card nm-add");
+  const providers = createNumberProvidersView(ctx, say);
   let data: NumbersOverview | null = null;
   let error: { code?: string; message: string } | null = null;
   let filter: Filter = "all";
@@ -108,7 +110,7 @@ export function createNumbersView(ctx: GlassContext, say: (text: string, tone?: 
     renderAdd();
   });
   toolbar.append(filters.element, el("span", "nm-spacer"), refreshButton, addButton);
-  element.append(summary, phones, toolbar, addBox, listBox);
+  element.append(summary, phones, providers.element, toolbar, addBox, listBox);
 
   const schedule = (): void => {
     cancel?.();
@@ -123,6 +125,8 @@ export function createNumbersView(ctx: GlassContext, say: (text: string, tone?: 
       error = { code: (err as { code?: string }).code, message: (err as Error).message || "The numbers couldn't be read." };
     }
     if (destroyed) return;
+    if (data) providers.setAccounts(data.accounts);
+    void providers.refresh();
     render();
     schedule();
   }
@@ -406,6 +410,7 @@ export function createNumbersView(ctx: GlassContext, say: (text: string, tone?: 
     refresh,
     destroy(): void {
       destroyed = true;
+      providers.destroy();
       cancel?.();
     },
   };
