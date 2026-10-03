@@ -164,6 +164,7 @@
               "emoji": "🦊",
               "color": 4278255360,
               "appCount": 1,
+              "androidUserId": 10,
               "ext": {
                 "tier": "gold"
               }
@@ -176,6 +177,7 @@
               "emoji": null,
               "color": null,
               "appCount": 0,
+              "androidUserId": 10,
               "ext": null
             }
           ]

@@ -95,6 +95,11 @@
                 "type": "integer",
                 "minimum": 0
               },
+              "androidUserId": {
+                "description": "only when Cyclone knows the backing Android user",
+                "type": "integer",
+                "minimum": 1
+              },
               "packages": {
                 "description": "only with profiles.apps.read",
                 "type": "array",
