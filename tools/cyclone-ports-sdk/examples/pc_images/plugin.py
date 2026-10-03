@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cyclone_ports import LIMITS, PluginServer, deliver  # noqa: E402
+from cyclone_ports import LIMITS, PluginServer, deliver, is_managed  # noqa: E402
 
 MANIFEST = json.loads((Path(__file__).parent / "cyclone-plugin.json").read_text(encoding="utf-8"))
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -33,9 +33,11 @@ def newest_image(folder: Path) -> Path | None:
     return max(images, key=lambda p: p.stat().st_mtime, default=None)
 
 
-def build(secret: str, folder: str | os.PathLike, host: str = "127.0.0.1", port: int = 0) -> PluginServer:
+def build(secret: str | None, folder: str | os.PathLike, host: str = "127.0.0.1", port: int = 0,
+          server: PluginServer | None = None) -> PluginServer:
     folder = Path(folder)
-    server = PluginServer(dict(MANIFEST), secret, host, port)
+    if server is None:
+        server = PluginServer(dict(MANIFEST), secret, host, port)
     server.manifest["endpoint"] = server.url
     cancelled: set[str] = set()
     active: set[str] = set()
@@ -67,6 +69,10 @@ def build(secret: str, folder: str | os.PathLike, host: str = "127.0.0.1", port:
 
 
 def main() -> None:
+    if is_managed():  # installed by Cyclone (plan 50): address, key and settings come from the start handshake
+        server = PluginServer.managed(MANIFEST)
+        build(None, os.path.expanduser(server.handshake["settings"]["folder"]), server=server).serve_forever()
+        return
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--folder", required=True)
     parser.add_argument("--host", default="127.0.0.1")

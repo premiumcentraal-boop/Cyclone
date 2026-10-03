@@ -1,0 +1,45 @@
+{
+  "about": "cyclone.package/1 settings subset. Shared by the SDK, the gateway and Glass: every side must agree on every case.",
+  "schemas": [
+    {"name": "bad top type", "schema": {"type": "array", "properties": {"a": {"type": "string"}}}, "ok": false},
+    {"name": "no fields", "schema": {"type": "object", "properties": {}}, "ok": false},
+    {"name": "ref refused", "schema": {"type": "object", "properties": {"a": {"$ref": "#/x"}}}, "ok": false},
+    {"name": "remote anything refused", "schema": {"type": "object", "$schema": "https://x", "properties": {"a": {"type": "string"}}}, "ok": false},
+    {"name": "object field refused", "schema": {"type": "object", "properties": {"a": {"type": "object"}}}, "ok": false},
+    {"name": "secret must be string", "schema": {"type": "object", "properties": {"a": {"type": "integer", "x-cyclone-secret": true}}}, "ok": false},
+    {"name": "secret has no default", "schema": {"type": "object", "properties": {"a": {"type": "string", "x-cyclone-secret": true, "default": "x"}}}, "ok": false},
+    {"name": "bad format", "schema": {"type": "object", "properties": {"a": {"type": "string", "format": "regex"}}}, "ok": false},
+    {"name": "maxLength too big", "schema": {"type": "object", "properties": {"a": {"type": "string", "maxLength": 5000}}}, "ok": false},
+    {"name": "required unknown", "schema": {"type": "object", "properties": {"a": {"type": "string"}}, "required": ["b"]}, "ok": false},
+    {"name": "default wrong type", "schema": {"type": "object", "properties": {"a": {"type": "integer", "default": "1"}}}, "ok": false},
+    {"name": "bad field name", "schema": {"type": "object", "properties": {"1a": {"type": "string"}}}, "ok": false},
+    {"name": "additionalProperties true refused", "schema": {"type": "object", "additionalProperties": true, "properties": {"a": {"type": "string"}}}, "ok": false},
+    {"name": "good", "schema": {"type": "object", "properties": {
+      "out": {"type": "string", "title": "Output folder", "default": "logs"},
+      "apiKey": {"type": "string", "title": "API key", "x-cyclone-secret": true},
+      "mode": {"type": "string", "enum": ["fast", "safe"], "default": "safe"},
+      "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10},
+      "ratio": {"type": "number", "minimum": 0, "maximum": 1},
+      "on": {"type": "boolean", "default": true},
+      "site": {"type": "string", "format": "uri"},
+      "mail": {"type": "string", "format": "email"},
+      "day": {"type": "string", "format": "date"}}, "required": ["out"], "additionalProperties": false}, "ok": true}
+  ],
+  "values": [
+    {"name": "all good", "values": {"out": "logs", "mode": "fast", "limit": 5, "ratio": 0.5, "on": false, "site": "https://a.b", "mail": "a@b.co", "day": "2026-10-03"}, "ok": true},
+    {"name": "missing required", "values": {"mode": "fast"}, "ok": false},
+    {"name": "empty required", "values": {"out": ""}, "ok": false},
+    {"name": "unknown field", "values": {"out": "x", "extra": 1}, "ok": false},
+    {"name": "not in enum", "values": {"out": "x", "mode": "slow"}, "ok": false},
+    {"name": "integer as float", "values": {"out": "x", "limit": 1.5}, "ok": false},
+    {"name": "integer as bool", "values": {"out": "x", "limit": true}, "ok": false},
+    {"name": "below minimum", "values": {"out": "x", "limit": 0}, "ok": false},
+    {"name": "above maximum", "values": {"out": "x", "ratio": 2}, "ok": false},
+    {"name": "bool as string", "values": {"out": "x", "on": "true"}, "ok": false},
+    {"name": "bad uri", "values": {"out": "x", "site": "ftp://a"}, "ok": false},
+    {"name": "bad email", "values": {"out": "x", "mail": "nope"}, "ok": false},
+    {"name": "bad date", "values": {"out": "x", "day": "2026-13-01"}, "ok": false},
+    {"name": "number as int ok", "values": {"out": "x", "ratio": 1}, "ok": true},
+    {"name": "secret text ok", "values": {"out": "x", "apiKey": "sk-123"}, "ok": true}
+  ]
+}

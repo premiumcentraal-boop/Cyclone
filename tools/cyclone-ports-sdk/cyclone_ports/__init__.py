@@ -4,8 +4,10 @@ from .sdk import (CONTRACT_HEADER, SIGNATURE_HEADER, TRACE_HEADER, PluginServer,
                   fetch_artifact, secrets_from_env, sign, validate_delivery, validate_envelope, validate_manifest,
                   verify)
 
-__version__ = "0.1.0"
+from .package import PACKAGE, PackageError, is_managed, read_handshake
+
+__version__ = "0.2.0"
 __all__ = ["CATALOG", "CONTRACT", "FEATURES", "LIMITS", "RUN_STAGES", "Port", "is_extension", "plugin_ports",
            "port_spec", "CONTRACT_HEADER", "SIGNATURE_HEADER", "TRACE_HEADER", "PluginServer", "deliver", "error_body",
            "error_code", "fetch_artifact", "secrets_from_env", "sign", "validate_delivery", "validate_envelope",
-           "validate_manifest", "verify"]
+           "validate_manifest", "verify", "PACKAGE", "PackageError", "is_managed", "read_handshake"]

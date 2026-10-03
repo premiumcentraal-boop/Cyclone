@@ -365,6 +365,19 @@ class PluginServer:
         self._routes: dict[tuple[str, str], Callable[[dict | None, dict], tuple[int, dict]]] = {}
         self._httpd = ThreadingHTTPServer((host, port), self._handler())
         self._thread: threading.Thread | None = None
+        self.handshake: dict[str, Any] | None = None
+
+    @classmethod
+    def managed(cls, manifest: dict[str, Any], stream: Any = None) -> "PluginServer":
+        """For a plugin Cyclone installed and starts (plan 50): reads the start handshake from stdin and listens where
+        Cyclone said, with the key Cyclone gave. ``server.handshake`` holds ``dataDir`` and ``settings``."""
+        from .package import read_handshake
+
+        handshake = read_handshake(stream)
+        server = cls(dict(manifest), handshake["key"], handshake["host"], handshake["port"])
+        server.manifest["endpoint"] = server.url
+        server.handshake = {"dataDir": handshake["dataDir"], "settings": handshake["settings"]}
+        return server
 
     @property
     def url(self) -> str:

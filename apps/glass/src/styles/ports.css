@@ -524,15 +524,30 @@ h4.pt-section-title { font-size: var(--text-md); }
 @media (max-width: 720px) { .pa-scenarios { grid-template-columns: 1fr; } .pa-run-head { grid-template-columns: 10px 1fr auto; } .pa-run-meta, .pa-tag { display: none; } }
 @media (prefers-reduced-motion: reduce) { .pa-step-now .pa-step-dot { animation: none; } }
 /* Native Studio starter uses the same card and form tokens as the Ports workspace. */
-.idg-starter { display:flex; align-items:center; gap:16px; padding:20px; color:inherit; text-decoration:none; flex-wrap:wrap; }
-.idg-starter > span:last-child { margin-left:auto; }
-.idg-section { padding:24px; display:grid; gap:16px; margin-top:20px; }
-.idg-section h2 { margin:0; font-size:20px; }
-.idg-section .pt-note { color:var(--text-muted); font-size:var(--text-sm); line-height:1.5; }
-.idg-field { display:grid; gap:8px; min-width:0; }
-.idg-field input, .idg-field textarea { width:100%; box-sizing:border-box; padding:12px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:10px; font:inherit; }
-.idg-toggle { display:flex; gap:10px; align-items:center; }
-.idg-permissions { display:grid; gap:12px; border:1px solid var(--border); border-radius:12px; padding:16px; }
-.idg-actions { display:flex; flex-wrap:wrap; gap:10px; }
-.idg-frame { width:100%; min-height:850px; border:0; border-radius:12px; background:var(--surface); }
-.idg-reference { white-space:pre-wrap; overflow-wrap:anywhere; max-height:600px; overflow:auto; padding:16px; background:var(--surface); border-radius:12px; }
+
+/* Plan 50: Ports → Install (plugins from GitHub). */
+.pl { display:grid; gap:20px; }
+.pl-add-row { display:flex; gap:10px; flex-wrap:wrap; }
+.pl-add-row input { flex:1 1 260px; min-width:0; padding:10px 12px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:10px; }
+.pl-progress { min-height:1.4em; color:var(--text-muted); font-size:var(--text-sm); margin:6px 0 0; }
+.pl-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 16px; margin-top:10px; }
+.pl-row-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px; width:100%; }
+.pl-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.pl-fine { color:var(--text-muted); font-size:var(--text-sm); }
+.pl-card { display:grid; gap:12px; padding:0 20px 20px; max-width:640px; }
+.pl-card h3 { margin:8px 0 0; font-size:15px; }
+.pl-facts { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.pl-perms { margin:0; padding-left:18px; display:grid; gap:4px; }
+.pl-changed { color:var(--warning, #b7791f); }
+.pl-ports { display:grid; gap:6px; }
+.pl-port { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.pl-port-name { font-family:var(--font-mono, monospace); font-size:var(--text-sm); }
+.pl-form { display:grid; gap:12px; }
+.pl-field { display:grid; gap:6px; }
+.pl-field input[type="text"], .pl-field input[type="number"], .pl-field input[type="password"], .pl-field input[type="date"], .pl-field select {
+  width:100%; box-sizing:border-box; padding:10px 12px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:10px; }
+.pl-required { color:var(--danger, #c53030); }
+.pl-trust { display:flex; gap:10px; align-items:flex-start; padding:12px; border:1px solid var(--border); border-radius:10px; }
+.pl-readme, .pl-log { white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; padding:12px; margin:0;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px; font-size:var(--text-sm); }
+.pl-log { max-height:none; margin:0 20px 20px; }

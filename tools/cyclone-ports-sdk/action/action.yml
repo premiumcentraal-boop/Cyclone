@@ -1,0 +1,67 @@
+name: Build a Cyclone plugin package
+description: >
+  Builds a Cyclone plugin (cyclone.package/1) into its release file, runs the Cyclone Ports conformance checks against
+  the built program started the way Cyclone starts it, attests where it was built, and attaches it to the release.
+  Run it on windows-latest for a tag v<version>. The calling job needs permissions contents: write, id-token: write
+  and attestations: write.
+inputs:
+  folder:
+    description: Folder with cyclone-plugin.toml, cyclone-plugin.json, README.md, LICENSE (and settings.schema.json).
+    required: true
+  script:
+    description: The plugin's Python entry point, built into one program with PyInstaller.
+    required: true
+  requirements:
+    description: Optional requirements file installed before the build.
+    required: false
+    default: ""
+  test-settings:
+    description: JSON settings used for the conformance run.
+    required: false
+    default: "{}"
+  python-version:
+    required: false
+    default: "3.12"
+  upload:
+    description: Attach the file to the release of the pushed tag.
+    required: false
+    default: "true"
+outputs:
+  file:
+    description: The release file.
+    value: ${{ steps.build.outputs.file }}
+  sha256:
+    description: Its SHA-256.
+    value: ${{ steps.build.outputs.sha256 }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install the build tools
+      shell: bash
+      run: |
+        python -m pip install --disable-pip-version-check "pyinstaller==6.22.2" "${{ github.action_path }}/.."
+        if [ -n "${{ inputs.requirements }}" ]; then python -m pip install --disable-pip-version-check -r "${{ inputs.requirements }}"; fi
+    - name: Build, check and pack
+      id: build
+      shell: bash
+      env:
+        TEST_SETTINGS: ${{ inputs.test-settings }}
+      run: |
+        tag=""
+        if [ "${GITHUB_REF_TYPE}" = "tag" ]; then tag="${GITHUB_REF_NAME}"; fi
+        python -m cyclone_ports.build --folder "${{ inputs.folder }}" --script "${{ inputs.script }}" --out dist \
+          --test-settings "$TEST_SETTINGS" --tag "$tag" | tee build.json
+        python -c "import json;d=json.load(open('build.json'));print('file='+d['file']);print('sha256='+d['sha256'])" >> "$GITHUB_OUTPUT"
+    - name: Attest where it was built
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-path: ${{ steps.build.outputs.file }}
+    - name: Attach to the release
+      if: ${{ inputs.upload == 'true' && github.ref_type == 'tag' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh release upload "${GITHUB_REF_NAME}" "${{ steps.build.outputs.file }}" --clobber

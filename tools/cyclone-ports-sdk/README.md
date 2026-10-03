@@ -127,4 +127,13 @@ The contract is a frozen draft. The real Port Hub lands in the gateway in plan 4
 Plugins built against this kit keep working once the real hub ships. Builders start at
 `Cyclone V5 plan/HANDOFF-run-ports-plugins.md`.
 
-The native **ID Generator** starter ships with Alpha 101 / Glass Alpha 56. Its developer/agent workflow lives in `starters/id-generator/SKILL.md`; Studio 7.2.1+ owns the rendering engine and Glass owns policy/consent. The real gateway Ports hub is now available, including targeted private traffic and correlated waits.
+## Publish your plugin (plan 50)
+
+Plugins install into Cyclone from a GitHub **release file**, `<name>-<version>-windows-x64.cyclone.zip`. Add
+`cyclone-plugin.toml`, `README.md` and `LICENSE` next to your manifest, copy `starters/plugin-repo/.github/workflows/release.yml`
+into your repo, create a release and push the tag `v<version>`. The build Action (`action/`) builds one program with
+PyInstaller, starts it the way Cyclone does and runs the conformance checks, packs the file, attests where it was built
+and attaches it to the release. Owners then paste your repo's link in Glass → Ports → Install.
+
+The format, the archive rules, the settings schema, the start handshake and the signed Cyclone index are specified in
+[`PACKAGE.md`](PACKAGE.md). `cyclone-plugin pack|check` and `cyclone-plugin-build` run the same checks locally.

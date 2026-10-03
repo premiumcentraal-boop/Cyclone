@@ -51,6 +51,10 @@ class PortStore:
         self._db = sqlite3.connect(str(root / "ports.db"), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
+        # Plan 50: plugins the Plugins installer runs (endpoint and key are set by Cyclone, not by hand).
+        if "managed" not in {r["name"] for r in self._db.execute("PRAGMA table_info(plugin)")}:
+            self._db.execute("ALTER TABLE plugin ADD COLUMN managed INTEGER NOT NULL DEFAULT 0")
+            self._db.commit()
         self._lock = threading.RLock()
         if protect is None and os.name != "nt":
             # Development machines: a file only this user can read. Windows uses DPAPI (GrantStore's default).

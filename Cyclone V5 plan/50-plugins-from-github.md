@@ -1,6 +1,6 @@
 # Plan 50: Plugins from GitHub (alpha one)
 
-Status: **final plan, not built.** Written 2026-10-03. Builds on the frozen Ports contract `cyclone.ports/1`
+Status: **built in alpha.103** (Glass 1.0.0-alpha.58); see §14 for how the build differs from this plan. Written 2026-10-03. Builds on the frozen Ports contract `cyclone.ports/1`
 (`tools/cyclone-ports-sdk/SPEC.md`, plans 45, 47, 48). Supersedes nothing; plan 19 (phone marketplace) stays as is.
 
 ## 0. The decision in one paragraph
@@ -324,3 +324,21 @@ remove. Hand-added plugins keep working as today.
 Alpha two (separate plan): MCP-server plugins for Command Center agents, with per-tool allow lists and the existing
 approval classes. Alpha three: plugin panels in a locked-down iframe and OS isolation (AppContainer + per-plugin
 firewall rules) that enforces the declared `network`/`files` permissions.
+
+## 14. As built (alpha.103)
+
+- **Look-up downloads, install doesn't.** `resolve` downloads the release file into `staging/` (nothing is unpacked or
+  run) because the card's permissions, ports and settings live inside the file. `install` then takes the same SHA-256 and
+  re-hashes the staged file before unpacking.
+- **Settings at install.** The install request carries the first settings (a plugin with a required secret can't start
+  without it). The schema is checked on the gateway and, with the same shared vectors, in Glass.
+- **Local package files.** `cyclone plugin add <path>.cyclone.zip` and `POST /v1/plugins/resolve {source: <path>}`
+  install a file on this PC as Unverified, for plugin authors and the Windows publish smoke.
+- **The index has no trusted key yet.** Format, signing CLI, verification, rollback protection and revocation are built
+  and tested; `TRUSTED_KEYS` stays empty until the owner creates `cyclone-plugins` and its key, so every plugin is
+  Unverified and no index request is made.
+- **Routes:** `/enabled` (turn off/on) replaces `/stop` and `/start`; `/index/refresh` added.
+- **Examples:** `run-logger` and `pc-images` are packaged; `sms-plugin` isn't (a managed plugin listens on loopback only,
+  and the forwarder must be reached from another phone).
+- **A different file claiming the running version is refused** (Cyclone never replaces a running version in place).
+- **Skills:** the phone protocol for plugin skills stays; core advertises none.

@@ -218,6 +218,10 @@ class GrantStore:
             value[key] = grant
             self._save(value)
 
+    def names(self) -> list[str]:
+        with self._lock:
+            return list(self._load())
+
     def drop(self, key: str) -> None:
         with self._lock:
             value = self._load()
@@ -229,8 +233,7 @@ class ConnectionStore:
     def __init__(self, center: "CommandCenter", root: Path, *, grants: GrantStore | None = None,
                  send: Callable[..., mcp.Response] = mcp.http, fetch: Callable[..., tuple[str, int, str]] = mcp.fetch_file,
                  spawn: Callable[[Callable[[], None]], None] | None = None, sleep: Callable[[float], None] = time.sleep,
-                 api_send: Callable[..., mcp.Response] | None = None,
-                 mrz_settings: Path | None = None, mrz_send: Callable[..., mcp.Response] | None = None) -> None:
+                 api_send: Callable[..., mcp.Response] | None = None) -> None:
         self._c = center
         self.root = root
         self.artifacts_dir = root / "artifacts"
@@ -267,9 +270,6 @@ class ConnectionStore:
             # A call that was running when the runtime stopped did not finish; say so instead of leaving it running.
             center._db.execute("UPDATE tool_call SET state = 'failed', summary = 'Cyclone restarted while this ran.', finished_at = ?"
                                " WHERE state = 'running'", (center._clock(),))
-
-        from .mrz import MrzDiscovery, local_http
-        self.mrz = MrzDiscovery(self, settings=mrz_settings, send=mrz_send or local_http)
 
     # ------------------------------------------------------------------ connections
 
@@ -358,9 +358,7 @@ class ConnectionStore:
                 raise CommandError("That server is already connected.") from exc
             self._apply_card_rules(connection_id, card)
             self._c._audit("owner", "connection.add", connection_id, {"url": url})
-        result = self.refresh(connection_id)
-        self.mrz.adopt_paste()
-        return result
+        return self.refresh(connection_id)
 
     def refresh(self, connection_id: str) -> dict[str, Any]:
         """Look at the server again: how to reach it, how to sign in, its tools. Network outside the lock. Each step
@@ -652,9 +650,6 @@ class ConnectionStore:
             raise CommandError("Add one local server at a time.")
         launch = launches[0]
         env = {k: v for k, v in launch.pop("env").items() if v}  # a README's empty placeholder is not a saved key
-        existing = self.mrz.existing_paste(launch)
-        if existing is not None:
-            return existing
         name = body.get("name") or launch["name"]
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60 or INLINE_SECRET.search(name):
             raise CommandError("name is 1..60 characters.")
@@ -671,9 +666,7 @@ class ConnectionStore:
             if env:
                 self.grants.put(f"env:{connection_id}", env)
             self._c._audit("owner", "connection.add_local", connection_id, {"launcher": launch["launcher"], "pinned": launch["pinned"], "hash": launch["hash"]})
-        result = self._set_status(connection_id, "needs_approval", "Approve it to run it on this PC.", [{"step": "Waiting for your OK to run it", "ok": False}])
-        self.mrz.adopt_paste()
-        return result
+        return self._set_status(connection_id, "needs_approval", "Approve it to run it on this PC.", [{"step": "Waiting for your OK to run it", "ok": False}])
 
     def update_local(self, connection_id: str, body: Any) -> dict[str, Any]:
         """A changed config: the new command must be approved again; the card shows what changed."""
@@ -1093,7 +1086,6 @@ class ConnectionStore:
         if not isinstance(arguments, dict) or len(json.dumps(arguments)) > MAX_ARGUMENTS:
             raise CommandError("arguments are an object of at most 8 KB.")
         _screened(arguments)
-        self.mrz.recover(connection_id, tool)
         with self._c._lock:
             row = self._row(connection_id)
             allowed = set(json.loads(row["allowed"]))
@@ -1301,17 +1293,9 @@ class ConnectionStore:
 
     def _save_url(self, url: str, row: Any, call: Any, prompt: str) -> str:
         loopback = urllib.parse.urlsplit(row["url"]).hostname in mcp.LOOPBACK
-        # A local stdio MRZ server returns Studio job URLs. Permit only that linked
-        # origin's output routes; generic local servers still cannot fetch localhost.
-        mrz_output = self.mrz.is_linked(row["id"])
-        policy = (lambda target: self.mrz.artifact_allowed(row["id"], target)) if mrz_output else None
-        if policy and not policy(url):
-            raise mcp.McpError("MRZ files must come from the linked Studio's job-output routes.")
-        loopback = loopback or mrz_output
         temporary = self.artifacts_dir / f"download-{secrets.token_hex(8)}.part"
         try:
-            options = {"url_policy": policy} if policy else {}
-            mime, size, digest = self._fetch(url, temporary, limit=MAX_FILE, allow_loopback=loopback, **options)
+            mime, size, digest = self._fetch(url, temporary, limit=MAX_FILE, allow_loopback=loopback)
             if not mime.startswith(MEDIA):
                 guessed = mimetypes.guess_type(urllib.parse.urlsplit(url).path)[0] or ""
                 if not (mime in ("application/octet-stream", "binary/octet-stream") and guessed.startswith(MEDIA)):
@@ -1373,7 +1357,6 @@ class ConnectionStore:
 
     def close(self) -> None:
         """The runtime stops: local servers stop with it."""
-        self.mrz.close()
         self.local.stop_all()
 
     def calls(self, limit: int = 100) -> list[dict[str, Any]]:

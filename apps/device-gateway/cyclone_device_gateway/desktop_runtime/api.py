@@ -231,6 +231,14 @@ class DesktopRuntime:
                 return None if row is None else {"publicKey": row["public_key"], "fingerprint": row["fingerprint"]}
 
             self.port_phones = PhoneBridge(self.ports, share_contract, self.fleet.list_public, trusted_key)
+        # Plan 50 (alpha.103): plugins installed from GitHub release files, run by the Plugin Host, joined to the Port Hub.
+        self.plugins = None
+        if self.ports is not None:
+            from ..plugins.service import PluginsService
+            try:
+                self.plugins = PluginsService(settings.runtime_dir / "plugins", self.ports)
+            except RuntimeError:
+                self.plugins = None
         # Alpha.102: every number Cyclone can receive codes on (the fleet's SIMs, forwarders, rented numbers).
         from ..numbers.service import NumbersService
         self.numbers = NumbersService(
@@ -287,6 +295,8 @@ class DesktopRuntime:
             self.ports.start()
         if self.port_phones is not None:
             self.port_phones.start()
+        if self.plugins is not None:
+            self.plugins.start()
         self.care.start()
         self.medic.start()
         self.cloud.start()
@@ -298,6 +308,8 @@ class DesktopRuntime:
         self.command.stop()
         if self.port_phones is not None:
             self.port_phones.stop()
+        if self.plugins is not None:
+            self.plugins.stop()
         if self.ports is not None:
             self.ports.stop()
         self.numbers.close()
@@ -864,6 +876,8 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     app.include_router(create_oauth_callback_router(desktop))
     from ..ports.api import create_ports_router
     app.include_router(create_ports_router(desktop, settings.token))
+    from ..plugins.api import create_plugins_router
+    app.include_router(create_plugins_router(lambda: getattr(desktop, "plugins", None), settings.token))
     if getattr(desktop, "numbers", None) is not None:
         from ..numbers.api import create_numbers_router
         app.include_router(create_numbers_router(desktop.numbers, settings.token))

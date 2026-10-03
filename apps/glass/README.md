@@ -51,10 +51,6 @@ Keyboard: `g` then `h` `d` `a` `r` `k` `p` `s` jumps to a page; `/` focuses sear
 
 ## Layout
 
-Command Center â†’ **Connections** includes a dedicated **MRZ Studio Â· Employee ID** entry. The runtime keeps discovering
-Studio on this PC, offers one-click setup or the saved Glass JSON paste path, and preserves approved connections across
-updates. See [MRZ Studio setup, boundaries and acceptance](../../docs/GLASS_MRZ_STUDIO.md).
-
 | Path | What |
 |---|---|
 | `src/app.ts` | Shell: sidebar, phone picker, one mounted page |
@@ -76,4 +72,6 @@ npm test          # unit + DOM tests
 npm run build     # typecheck + production bundle
 ```
 
-Glass Alpha 56 includes **Ports â†’ ID Generator**, a native starter for MRZ Studio Local 7.2.1+. Its local panels preserve Studio's generator/defaults; Glass controls pairing, consent and developer agent-usage policy. See `tools/cyclone-ports-sdk/starters/id-generator/SKILL.md` and `docs/RELEASE_5.0.0-alpha.101.dev1.md` for the workflow and acceptance limits.
+Ports → **Install** (Glass Alpha 58, plan 50) installs plugins from GitHub release files: the card first (what the
+plugin may do, its ports, its settings), then install, update, roll back and remove. See
+`tools/cyclone-ports-sdk/PACKAGE.md`.

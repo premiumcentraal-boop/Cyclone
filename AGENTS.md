@@ -31,6 +31,7 @@ Load more context only when the task needs it.
 - Cyclone for Windows (web-only): `packaging/pc/**`, `scripts/pc/**`, gateway PC features in `apps/device-gateway/cyclone_device_gateway/pc/**` and `terminal/**`; the retired desktop window in `apps/pc-companion/**` (reference only), PyInstaller specs in `packaging/pc-companion/**`
 - Cyclone Glass (local browser dashboard, no intelligence): `apps/glass/**`, gateway hosting in `apps/device-gateway/cyclone_device_gateway/glass/**`
 - PC agent adapters: `tools/codex-phone-mcp/**`, `tools/cyclone-agent-mcp/**`
+- Plugins from GitHub (plan 50): `apps/device-gateway/cyclone_device_gateway/plugins/**`; the package format and index in `tools/cyclone-ports-sdk/cyclone_ports/{package,index}.py`. Core holds no plugin.
 - CI/release: `.github/workflows/**`, `scripts/ci/**`, `release/version.toml`
 
 Keep parallel agents on non-overlapping paths whenever possible.
@@ -79,7 +80,7 @@ python -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp -e
 python -m pytest apps/device-gateway/tests -q
 python -m unittest discover -s tools/codex-phone-mcp/tests -v
 python -m pytest scripts/ci/tests/test_pc_web_only.py -q
-python -m pytest tools/cyclone-ports-sdk/tests -q   # Cyclone Ports kit; the gateway's Port Hub imports it
+python -m pytest tools/cyclone-ports-sdk/tests -q   # Cyclone Ports kit; the gateway's Port Hub and plugin installer import it
 ```
 
 For Cyclone Glass changes:

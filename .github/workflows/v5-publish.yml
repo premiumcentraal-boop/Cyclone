@@ -38,7 +38,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -e 'apps/device-gateway[test]' -e 'tools/cyclone-agent-mcp[test]' -e tools/codex-phone-mcp -e tools/cyclone-ports-sdk
           # What the package runs on Windows: the PC features, the cyclone command, Glass hosting and the tooling seam.
-          python -m pytest -q apps/device-gateway/tests/test_pc_features.py apps/device-gateway/tests/test_cyclone_terminal.py apps/device-gateway/tests/test_glass_hosting.py apps/device-gateway/tests/test_tooling_seam.py apps/device-gateway/tests/test_market.py
+          python -m pytest -q apps/device-gateway/tests/test_pc_features.py apps/device-gateway/tests/test_cyclone_terminal.py apps/device-gateway/tests/test_glass_hosting.py apps/device-gateway/tests/test_tooling_seam.py apps/device-gateway/tests/test_market.py apps/device-gateway/tests/test_plugins.py
       - name: Build, install and smoke-test Cyclone-PC
         shell: pwsh
         run: |

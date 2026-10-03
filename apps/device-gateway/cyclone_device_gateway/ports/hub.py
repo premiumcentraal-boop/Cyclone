@@ -171,8 +171,6 @@ class PortHub:
         self.traffic = Traffic(self, root, base_url)
         self.test_runs = TestRuns(self.traffic)
         self._ticker: threading.Thread | None = None
-        from .id_generator import IdGeneratorStarter
-        self.id_generator = IdGeneratorStarter(self)
 
     # ---- lifecycle ---------------------------------------------------------------------------------------------------
 
@@ -204,7 +202,6 @@ class PortHub:
         while not self._stop.wait(MONITOR_EVERY_S):
             try:
                 self.monitor_once()
-                self.id_generator.status(refresh=True)
             except Exception:  # noqa: BLE001 - the monitor never takes the gateway down
                 pass
 
@@ -325,9 +322,63 @@ class PortHub:
                 "passed": not required_failed, "total": len(items), "failed": len(required_failed), "items": items},
             "pending": _diff(manifest, record["pending"]) if record["pending"] else None,
             "createdAt": record["created_at"],
+            "managed": bool(record.get("managed")),
         }
 
     # ---- changing ----------------------------------------------------------------------------------------------------
+
+    # ---- plugins Cyclone installed and runs (plan 50) -----------------------------------------------------------------
+
+    def _hand_only(self, name: str) -> dict[str, Any]:
+        record = self._get(name)
+        if record.get("managed"):
+            raise PortsError("Cyclone installed this plugin. Manage it under Plugins.")
+        return record
+
+    def register_managed(self, name: str, endpoint: str, manifest: dict[str, Any], key: str,
+                         consent: list[str] | None) -> None:
+        """Adds or re-points a plugin the Plugin Host started. Its address changes on every start; its key and the
+        owner's port choices stay. ``consent`` None keeps the current choices."""
+        record = self.store.plugin(name)
+        if record is not None and not record.get("managed"):
+            raise PortsError(f"A plugin named {name} was added by its address under Ports. Remove it there first.")
+        other = self.store.by_endpoint(endpoint)
+        if other is not None and other["name"] != name:
+            self.store.update(other["name"], endpoint=other["endpoint"] + "#stale")
+        served = {s.get("port") for s in manifest.get("serves") or []}
+        kid, _, secret = key.partition(".")
+        if record is None:
+            chosen = sorted(set(consent or []) & served)
+            self.store.insert({"name": name, "endpoint": endpoint, "manifest": manifest,
+                               "pin_hash": pin_hash(manifest, endpoint), "consent": chosen, "kid": kid})
+            self.store.update(name, managed=1)
+            self.store.log(name, "added", ok=True, detail=f"installed, version {manifest['version']}")
+        else:
+            chosen = sorted(set(record["consent"] if consent is None else consent) & served)
+            if record["manifest"].get("version") != manifest.get("version"):
+                self.store.log(name, "version", ok=True, detail=f"now {manifest.get('version')}")
+            self.store.update(name, endpoint=endpoint, manifest=manifest, pin_hash=pin_hash(manifest, endpoint),
+                              consent=chosen, kid=kid, pending=None, failures=0, health="ok", health_detail="",
+                              seen_at=now_ms())
+        if self.store.key(name) != key:
+            self.store.put_key(name, kid, secret)
+
+    def managed_state(self, name: str, state: str, detail: str = "") -> None:
+        record = self.store.plugin(name)
+        if record is None or not record.get("managed"):
+            return
+        up = state == "running"
+        self.store.update(name, health="ok" if up else "failing", health_detail="" if up else (detail or state),
+                          failures=0 if up else max(record["failures"], FAILURES_UNREACHABLE))
+        self.store.log(name, "health", ok=up, detail=detail or state)
+
+    def unregister_managed(self, name: str) -> None:
+        record = self.store.plugin(name)
+        if record is None or not record.get("managed"):
+            return
+        self.store.delete(name)
+        self.store.forget_plugin_bindings(name)
+        self.store.log(name, "removed", ok=True, detail="uninstalled")
 
     def add(self, raw_endpoint: Any, allowed: Any) -> dict[str, Any]:
         endpoint = normalize_endpoint(raw_endpoint)
@@ -376,14 +427,14 @@ class PortHub:
         return self.plugin(name)
 
     def remove(self, name: str) -> dict[str, Any]:
-        self._get(name)
+        self._hand_only(name)
         self.store.delete(name)
         self.store.forget_plugin_bindings(name)
         self.store.log(name, "removed", ok=True)
         return {"removed": name}
 
     def new_key(self, name: str) -> dict[str, Any]:
-        record = self._get(name)
+        record = self._hand_only(name)
         number = int(re.sub(r"\D", "", record["kid"]) or "1") + 1
         kid, secret = f"k{number}", secrets.token_urlsafe(32)
         self.store.put_key(name, kid, secret)
@@ -416,7 +467,7 @@ class PortHub:
         return self.plugin(name)
 
     def approve_changes(self, name: str) -> dict[str, Any]:
-        record = self._get(name)
+        record = self._hand_only(name)
         if not record["pending"]:
             raise PortsError("There's nothing to review.")
         manifest = record["pending"]
@@ -493,6 +544,11 @@ class PortHub:
         self.store.log("ports", "binding", ok=True, port=port, detail=f"{where}: {what}")
         return self.bindings(scope)
 
+    def skills(self) -> list[dict[str, Any]]:
+        """Plugin skills advertised to phone agents. Core advertises none of its own (plan 50: core holds no plugin);
+        the phone protocol for them stays, so a later contract revision can let installed plugins declare skills."""
+        return []
+
     def resolve(self, routine: str | None = None, app: str | None = None) -> dict[str, Any]:
         """What a run with this routine and app would reach on each port (run 3 sends along this table)."""
         try:
@@ -500,9 +556,6 @@ class PortHub:
         except binding.BindingError as exc:
             raise PortsError(str(exc)) from exc
         plugins = self._plugins()
-        if not self.id_generator.allows(app, routine):
-            # Keep the candidate so an explicit choice fails closed, rather than silently falling back.
-            plugins = [dict(p, status="paused") if p["name"] == "id-generator" else p for p in plugins]
         return {"scopes": scopes, "ports": binding.table(plugins, self.store.bindings(), scopes)}
 
     # ---- signing and sending -----------------------------------------------------------------------------------------

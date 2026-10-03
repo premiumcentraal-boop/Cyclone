@@ -97,6 +97,39 @@ Write-Host "Built $Setup ($SetupHash)"
 $Scratch = Join-Path $Work 'scratch-profile'
 if (Test-Path $Scratch) { Remove-Item -Recurse -Force $Scratch }
 New-Item -ItemType Directory -Force -Path $Scratch | Out-Null
+# Plan 50: two versions of the example run-logger as real plugin packages (PyInstaller program, conformance-checked
+# the way Cyclone starts it), so the smoke below installs, updates and rolls back a plugin with the installed runtime.
+$PluginDist = Join-Path $Work 'plugins'
+$Logger = Join-Path $Repo 'tools\cyclone-ports-sdk\examples\logger'
+$Logger2 = Join-Path $Work 'logger-0.1.1'
+if (Test-Path $Logger2) { Remove-Item -Recurse -Force $Logger2 }
+Copy-Item -Recurse $Logger $Logger2
+foreach ($file in 'cyclone-plugin.toml', 'cyclone-plugin.json') {
+    $path = Join-Path $Logger2 $file
+    (Get-Content $path -Raw).Replace('"0.1.0"', '"0.1.1"') | Set-Content -Path $path -NoNewline
+}
+$pluginBuilds = @()
+foreach ($folder in $Logger, $Logger2) {
+    $built = (& $Python -m cyclone_ports.build --folder $folder --script (Join-Path $folder 'plugin.py') --out $PluginDist --test-settings '{"folder": "runs"}' | Select-Object -Last 1) | ConvertFrom-Json
+    if (-not $built.ok) { throw "The example plugin didn't build: $($built | ConvertTo-Json -Compress)" }
+    $pluginBuilds += $built.file
+}
+
+function Wait-PluginJob($job, $headers) {
+    for ($i = 0; $i -lt 240 -and $job.state -eq 'running'; $i++) {
+        Start-Sleep -Milliseconds 500
+        $job = Invoke-RestMethod -Headers $headers "http://127.0.0.1:8799/v1/plugins/jobs/$($job.id)"
+    }
+    if ($job.state -ne 'done') { throw "Plugin job $($job.action) ended $($job.state): $($job.detail)" }
+    return $job
+}
+
+function Install-PluginFile($file, $headers) {
+    $resolved = Wait-PluginJob (Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' -Body (@{ source = $file } | ConvertTo-Json) 'http://127.0.0.1:8799/v1/plugins/resolve') $headers
+    $body = @{ sha256 = $resolved.result.sha256; accept = $true; trustUnverified = $true; allowed = @('run.event', 'log.line'); settings = @{} } | ConvertTo-Json
+    Wait-PluginJob (Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' -Body $body 'http://127.0.0.1:8799/v1/plugins/install') $headers | Out-Null
+}
+
 $savedLocal = $env:LOCALAPPDATA
 try {
     $env:LOCALAPPDATA = $Scratch
@@ -134,6 +167,28 @@ try {
         $ports = Invoke-RestMethod -Headers @{ Authorization = "Bearer $token" } 'http://127.0.0.1:8799/v1/ports/overview'
         if ($ports.contract -ne 'cyclone.ports/1' -or @($ports.catalog).Count -lt 12) { throw "The Port Hub did not answer as expected: $($ports | ConvertTo-Json -Compress -Depth 3)" }
         Write-Host 'The installed runtime serves Glass, the authenticated /v1/pc routes and the Port Hub.'
+
+        # Plan 50: install a plugin package, see it run and pass the hub's signed checks, update it, roll it back.
+        $auth = @{ Authorization = "Bearer $token" }
+        Install-PluginFile $pluginBuilds[0] $auth
+        $plugin = Invoke-RestMethod -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
+        if ($plugin.state -ne 'running' -or $plugin.version -ne '0.1.0') { throw "The plugin didn't start: $($plugin | ConvertTo-Json -Compress)" }
+        $checked = Invoke-RestMethod -Method Post -Headers $auth 'http://127.0.0.1:8799/v1/ports/plugins/run-logger/check'
+        if ($checked.plugin.status -ne 'active') { throw "The Port Hub's checks failed for the installed plugin: $($checked.plugin | ConvertTo-Json -Compress -Depth 4)" }
+        Install-PluginFile $pluginBuilds[1] $auth
+        $plugin = Invoke-RestMethod -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
+        if ($plugin.version -ne '0.1.1' -or $plugin.previous -ne '0.1.0' -or $plugin.state -ne 'running') { throw "The update didn't land: $($plugin | ConvertTo-Json -Compress)" }
+        Wait-PluginJob (Invoke-RestMethod -Method Post -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger/rollback') $auth | Out-Null
+        $plugin = Invoke-RestMethod -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
+        if ($plugin.version -ne '0.1.0' -or $plugin.state -ne 'running') { throw "The rollback didn't land: $($plugin | ConvertTo-Json -Compress)" }
+        # A one-file program runs as a starter plus its child, so one plugin shows as one or two processes, never more.
+        $running = @(Get-Process run-logger -ErrorAction SilentlyContinue).Count
+        if ($running -lt 1 -or $running -gt 2) { throw "One run-logger should run after update and rollback, found $running processes." }
+        # The runtime dies: its Job Objects must take every plugin process with it.
+        Stop-Process -Id $runtime.Id -Force
+        Start-Sleep -Seconds 3
+        if (@(Get-Process run-logger -ErrorAction SilentlyContinue).Count -ne 0) { throw 'A plugin process outlived the runtime.' }
+        Write-Host 'A packaged plugin installed, passed the checks, updated, rolled back and died with the runtime.'
     } finally {
         Stop-Process -Id $runtime.Id -Force -ErrorAction SilentlyContinue
         Get-Process adb -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Scratch*" } | Stop-Process -Force -ErrorAction SilentlyContinue
