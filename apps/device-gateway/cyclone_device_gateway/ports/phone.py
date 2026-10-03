@@ -115,6 +115,9 @@ class PhoneBridge:
             ack = self._acks.pop(device, [])
         try:
             skills = [{k: v for k, v in s.items() if k != "schemaUrl"} for s in self.traffic.hub.id_generator.skills()]
+            providers = getattr(self.traffic.hub, "number_providers", None)
+            if providers is not None:
+                skills.extend(providers.skills(all_scopes=True))
             try:
                 items = self.contract.ports_poll(device, ack, skills=skills)["items"]
             except DesktopRuntimeError as error:

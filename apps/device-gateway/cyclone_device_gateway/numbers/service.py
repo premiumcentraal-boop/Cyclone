@@ -55,14 +55,17 @@ def clean_number(raw: Any) -> str:
     text = raw.strip()
     digits = re.sub(r"[^0-9]", "", text)
     clean = ("+" if text.startswith("+") else "") + digits
+    if text.startswith("00"):
+        clean = "+" + digits[2:]
     if not NUMBER.match(clean) or re.search(r"[^0-9+\s().-]", text):
         raise NumbersError("That isn't a phone number: use 6 to 15 digits, like +31 6 1234 5678.")
     return clean
 
 
 def number_key(number: str) -> str:
-    """The same number written two ways (+31 6… and 06…) is one number: its last 9 digits."""
-    return re.sub(r"[^0-9]", "", number)[-9:]
+    """Full international identity; national numbers need country context before they can be merged."""
+    clean = clean_number(number)
+    return clean if clean.startswith("+") else "national:" + clean
 
 
 def _text(value: Any, limit: int, what: str, *, required: bool = False) -> str:
@@ -87,6 +90,10 @@ class NumbersService:
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
         self._lock = threading.RLock()
+        # Alpha.102 used suffixes: different countries could collide. Preserve rows/assignments, migrate their keys.
+        with self._db:
+            for row in self._db.execute("SELECT id,number FROM number").fetchall():
+                self._db.execute("UPDATE number SET key=? WHERE id=?", (number_key(row["number"]), row["id"]))
         self._devices = devices
         self._read_phone = read_phone
         self._plugins = plugins
@@ -98,6 +105,20 @@ class NumbersService:
     def close(self) -> None:
         with self._lock:
             self._db.close()
+
+    def register_provider_number(self, number: str, source: str, provider: str, expires: int, account_id: str | None):
+        """Inventory import only. Never performs a provider request or merges country suffixes."""
+        number = clean_number(number)
+        if not number.startswith("+"):
+            raise NumbersError("A provider number must include its country code.")
+        with self._lock:
+            row = self._db.execute("SELECT * FROM number WHERE key=?", (number_key(number),)).fetchone()
+            if row is None:
+                return self.add({"number": number, "origin": "rental", "provider": provider, "source": source,
+                                 "expiresAt": expires, "accountId": account_id})
+            if row["origin"] != "rental" or row["origin_ref"] != source or row["provider"] != provider or row["account_id"] != account_id:
+                raise NumbersError("This number is already registered to another source or account.")
+            return self.update(row["id"], {"expiresAt": expires})
 
     # ---- the overview --------------------------------------------------------------------------------------------
 

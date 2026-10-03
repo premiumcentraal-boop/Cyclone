@@ -154,8 +154,16 @@ def validate_manifest(m: Any) -> list[str]:
     endpoint = m.get("endpoint")
     if not isinstance(endpoint, str) or not re.match(r"^https?://", endpoint):
         problems.append("endpoint must be an http(s) URL")
-    elif endpoint.startswith("http://") and not re.match(r"^http://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?/?$", endpoint):
-        problems.append("plain http is only allowed on loopback (127.0.0.1, localhost, ::1); use https elsewhere")
+    else:
+        try:
+            address = urlparse(endpoint)
+            address.port  # validate port syntax/range
+            if not address.hostname or address.username or address.password or address.query or address.fragment:
+                problems.append("endpoint must have a host and no credentials, query or fragment")
+            if address.scheme == "http" and address.hostname not in ("127.0.0.1", "localhost", "::1"):
+                problems.append("plain http is only allowed on loopback (127.0.0.1, localhost, ::1); use https elsewhere")
+        except ValueError:
+            problems.append("endpoint is not a valid URL")
     if "features" in m and (not isinstance(m["features"], list) or not all(isinstance(f, str) for f in m["features"])):
         problems.append("features must be a list of strings")
     serves = m.get("serves")

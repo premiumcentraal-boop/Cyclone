@@ -69,7 +69,12 @@ def create_ports_router(runtime: Any, token: str) -> APIRouter:
     def skills(app: str = Query(default="", max_length=120), routine: str = Query(default="", max_length=60)):
         def approved():
             hub().resolve(routine, app)  # validate context before advertising
-            return {"skills": hub().id_generator.skills() if hub().id_generator.allows(app or None, routine or None) else []}
+            found = hub()
+            skills = found.id_generator.skills() if found.id_generator.allows(app or None, routine or None) else []
+            providers = getattr(found, "number_providers", None)
+            if providers is not None:
+                skills.extend(providers.skills(app or None, routine or None))
+            return {"skills": skills}
         return call(approved)
 
     @router.post("/v1/ports/plugins/preview", dependencies=[Depends(auth)])

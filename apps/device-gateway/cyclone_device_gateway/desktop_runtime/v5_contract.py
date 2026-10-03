@@ -1364,13 +1364,20 @@ def _validate_ports_item(item: Any) -> None:
         if set(item) - common - {"port", "timeoutS", "match", "place"} or item.get("port") not in PORTS_IN or not _is_int(item.get("timeoutS"), minimum=1):
             raise _bad_ports("await")
         match = item.get("match")
-        if not isinstance(match, dict) or set(match) - {"ask", "requestId", "output"} or not _short_text(match.get("ask"), 200, nullable=True):
+        if not isinstance(match, dict) or set(match) - {"ask", "requestId", "output", "country", "planId", "areaCode", "templateId", "period", "accountId", "from", "length"} or not _short_text(match.get("ask"), 200, nullable=True):
             raise _bad_ports("await match")
-        if set(match) - {"ask"} and (not target or item["port"] not in ("value.in", "file.in")):
-            raise _bad_ports("structured match needs a targeted value/file wait")
-        for key in ("requestId", "output"):
+        if set(match) - {"ask"} and (not target or item["port"] not in ("value.in", "file.in", "code.in")):
+            raise _bad_ports("structured match needs a targeted value/file/code wait")
+        for key in ("requestId", "output", "templateId", "accountId", "period", "areaCode"):
             if key in match and (not isinstance(match[key], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", match[key])):
                 raise _bad_ports("await correlation")
+        if "country" in match and (not isinstance(match["country"], str) or not re.fullmatch(r"[A-Z]{2}", match["country"])):
+            raise _bad_ports("await country")
+        if "from" in match and not _short_text(match["from"], 80):
+            raise _bad_ports("await sender")
+        for key, low, high in (("planId", 1, 1000000), ("length", 4, 10)):
+            if key in match and (not _is_int(match[key], minimum=low) or match[key] > high):
+                raise _bad_ports("await numeric selection")
         place = item.get("place")
         if place is not None and (not isinstance(place, str) or not PORTS_PLACE.match(place)):
             raise _bad_ports("await place")

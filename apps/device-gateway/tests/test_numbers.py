@@ -56,13 +56,16 @@ def world():
 
 
 def by_number(overview, key):
-    return next(n for n in overview["numbers"] if number_key(n["number"]) == key)
+    # Test shorthand for fixtures only; production uses the full international identity.
+    return next(n for n in overview["numbers"] if n["number"].endswith(key))
 
 
 def test_numbers_are_cleaned_and_one_number_written_two_ways_is_one():
     assert clean_number(" +31 6 1234 5678 ") == "+31612345678"
     assert clean_number("06-1234-5678") == "0612345678"
-    assert number_key("+31612345678") == number_key("0612345678")
+    assert number_key("+31612345678") == number_key("0031612345678")
+    assert number_key("+31612345678") != number_key("0612345678"), "national format needs country context"
+    assert number_key("+31612345678") != number_key("+44612345678"), "country codes must never collide"
     for bad in ["12345", "+31 6 abc", "phone", "+1234567890123456", 612345678]:
         with pytest.raises(NumbersError):
             clean_number(bad)
@@ -207,7 +210,7 @@ def test_routes_need_the_bearer_and_speak_plainly(world, tmp_path):
     added = client.post("/v1/numbers", headers=auth, json={"number": "+447700900123", "origin": "rental", "provider": "Acme"})
     assert added.status_code == 200
     number_id = added.json()["id"]
-    assert client.post("/v1/numbers", headers=auth, json={"number": "07700900123", "origin": "other"}).status_code == 409
+    assert client.post("/v1/numbers", headers=auth, json={"number": "00447700900123", "origin": "other"}).status_code == 409
     assert client.post(f"/v1/numbers/{number_id}", headers=auth, json={"accountId": "acc_fit"}).json()["account"]["handle"] == "brand.fit"
     assert client.get("/v1/accounts/acc_fit/number", headers=auth).json()["number"]["number"] == "+447700900123"
     assert client.post("/v1/numbers/num_missing/delete", headers=auth).status_code == 404

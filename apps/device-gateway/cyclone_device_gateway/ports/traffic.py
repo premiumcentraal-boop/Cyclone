@@ -338,7 +338,7 @@ class Traffic:
             event = self._events.setdefault(await_id, threading.Event())
             event.wait(min(float(wait_s), 30.0))
             wait = self.store.wait(await_id) or wait
-        if wait["plugin"] == "id-generator" and wait["state"] in ("waiting", "delivered") and not self._generator_allowed(wait):
+        if wait["plugin"] in ("id-generator", "vmos-numbers", "smsbot-numbers") and wait["state"] in ("waiting", "delivered") and not self._generator_allowed(wait):
             if wait["state"] == "waiting":
                 return self.cancel(await_id, "plugin permission or usage scope changed")
             self.store.finish_wait(await_id, "cancelled", {"reason": "plugin permission or usage scope changed"}, only_if_waiting=False)
@@ -365,9 +365,14 @@ class Traffic:
 
     def take_code(self, await_id: str) -> str | None:
         """Run 4's sealed delivery takes the code once; it is gone from memory afterwards."""
+        wait = self.store.wait(await_id)
+        if not wait or wait["state"] != "delivered" or not self._generator_allowed(wait):
+            with self._lock:
+                self._held.pop(await_id, None)
+            return None
         with self._lock:
             held = self._held.pop(await_id, None)
-        return held.get("code") if held else None
+        return held.get("code") if held and held["until"] > now_ms() else None
 
     # ---- plugin -> hub -------------------------------------------------------------------------------------------------
 
@@ -392,7 +397,7 @@ class Traffic:
         if now_ms() >= wait["timeoutAt"]:
             self._time_out(wait)
             return 410, kit.error_body("expired")
-        if wait["plugin"] == "id-generator":
+        if wait["plugin"] in ("id-generator", "vmos-numbers", "smsbot-numbers"):
             if not self._generator_allowed(wait):
                 self.cancel(wait["awaitId"], "plugin permission or usage scope changed")
                 return 410, kit.error_body("expired")

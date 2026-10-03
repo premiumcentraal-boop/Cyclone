@@ -833,7 +833,17 @@ class CommandCenter:
                 # Plan 33 (C3): the owner's OK for a connection call (it may use credits). Only approve or decline.
                 if action not in ("approve", "decline"):
                     raise CommandError("A connection call is approved or declined.")
-                result = self.connections.answer(row, action)
+                if row["request_id"].startswith("nr_"):
+                    providers = getattr(self, "number_providers", None)
+                    if providers is None:
+                        raise CommandError("Number providers are not available.")
+                    from ..number_providers.providers import ProviderError
+                    try:
+                        result = providers.answer(row, action)
+                    except ProviderError as error:
+                        raise CommandError(str(error)) from None
+                else:
+                    result = self.connections.answer(row, action)
                 self._db.execute("UPDATE approval SET state = 'answered', answer = ?, answered_at = ? WHERE id = ?", (action, self._clock(), approval_id))
                 self._audit("owner", f"approval.{action}", approval_id, {"kind": "spend", "call": row["request_id"]})
                 return {"approval": self._approval_public(self._db.execute(
