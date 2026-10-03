@@ -63,8 +63,7 @@ jobs:
 
       - name: Test, lint and assemble unsigned release candidate
         shell: bash
-        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:lintDebug :app:assembleRelease \
-            :connector-client:assembleRelease :connector-sample:assembleDebug --stacktrace
+        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:lintDebug :app:assembleRelease :connector-client:assembleRelease :connector-sample:assembleDebug --stacktrace
 
       - name: Upload Android test and lint reports
         if: always()
