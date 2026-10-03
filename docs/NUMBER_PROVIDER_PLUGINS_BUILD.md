@@ -2,6 +2,8 @@
 
 Baseline: Alpha 102 / Glass Alpha 57, source `079085ce`. This builds on the existing Numbers inventory, Ports routing, Command Center owner approvals and encrypted delivery to the paired phone. It does not create a second phone engine.
 
+Upstream reviewed through `bef41004` (2026-10-03). Plan 50, "Plugins from GitHub", is explicitly a plan, not an implemented installer. These are bundled native Ports starters on the current released architecture, not `.cyclone.zip` packages or a claim that the future Plugin Host exists. Their provider adapters, order service and documented Ports workflow are isolated for extraction into that host when it ships. The frozen `cyclone.ports/1` remains unchanged; its open `match` hints are extended. No model or Astra settings change.
+
 | Provider | Account connection | Catalogue / quote | Safe first purchase | SMS |
 | --- | --- | --- | --- | --- |
 | VMOS Cloud Numbers | Owner's access key and secret key; current V2 signature | Live countries, area codes, plans; USD cents | One number, `clientToken`, `expectedTotalCents`, explicit `autoRenew=0`; reconcile with purchase/status | Exact owned number, fresh message, GMT+8 timestamps |
@@ -22,3 +24,5 @@ Primary contracts: [VMOS API](https://cloud.vmoscloud.com/vmoscloud/doc/en/serve
 SMSBot's ordinary `POST /rentals` does not document an exact-price guard; this build uses the documented template price guard instead. A template can include several services; all are shown before approval. Templates cannot be partially refunded. Unknown SMSBot outcomes are never retried or inferred from similar numbers. No provider promises that a particular website will accept a rental, or that a temporary number remains available for account recovery. Keep recovery details independent and extend deliberately in the provider dashboard.
 
 No provider credentials or spending approval were supplied for this development task. Automated acceptance uses fake transports and isolated data. Live account authentication, paid allocation and a physical account-creation mission require owner credentials and a separate exact-price approval; do not label those verified without evidence.
+
+Recorded results and the owner acceptance steps: [NUMBER_PROVIDER_PLUGINS_ACCEPTANCE.md](NUMBER_PROVIDER_PLUGINS_ACCEPTANCE.md).

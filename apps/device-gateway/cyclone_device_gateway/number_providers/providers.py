@@ -222,13 +222,16 @@ class Provider:
 
     def messages(self, rental_id: str, expected_number: str) -> list[dict[str, Any]]:
         if self.kind == "vmos":
+            rental = self.rental(rental_id)
+            if rental["number"] != expected_number or not rental["active"] or not rental["expiresAt"] or rental["expiresAt"] <= self.clock() * 1000:
+                raise ProviderError("RENTAL_NOT_ACTIVE")
             data = self.call("POST", PREFIX + "/sms/list", {"number": phone(expected_number).lstrip("+"), "page": 1, "size": 100})
             rows = data.get("records", [])
             return [{"id": str(r["id"]), "sender": str(r.get("sender", "")), "body": str(r.get("content", "")),
                      "at": stamp(r.get("receivedTime"), vmos=True)} for r in rows
                     if not r.get("number") or phone(r["number"]) == expected_number]
         data = self.call("GET", "/rentals/" + identifier(rental_id))
-        if not isinstance(data, dict) or data.get("id") != rental_id or phone(data.get("number")) != expected_number or data.get("status") != "ACTIVE":
+        if not isinstance(data, dict) or data.get("id") != rental_id or phone(data.get("number")) != expected_number or data.get("status") != "ACTIVE" or not stamp(data.get("endDate")) or stamp(data["endDate"]) <= self.clock() * 1000:
             raise ProviderError("RENTAL_NOT_ACTIVE")
         return [{"id": str(r["id"]), "sender": str(r.get("sender", "")), "body": str(r.get("message", "")),
                  "extractedCode": r.get("extractedCode"), "at": stamp(r.get("receivedAt"))} for r in data.get("smsMessages", [])]

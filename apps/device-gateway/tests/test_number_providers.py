@@ -335,6 +335,24 @@ def test_failed_account_authentication_preserves_the_old_connection_and_redacts_
     assert not world.purchases
 
 
+@pytest.mark.parametrize("kind", ["vmos", "smsbot"])
+def test_provider_checks_current_rental_ownership_and_expiry_before_reading_codes(world, kind):
+    world.connect(kind)
+    original = world.service.fetch
+    def expired(method, url, body, headers):
+        status, response = original(method, url, body, headers)
+        if url.endswith("/list"):
+            response["data"]["records"][0]["status"] = "expired"
+        elif url.endswith("/rentals/rental_1"):
+            response["data"]["endDate"] = world.iso(world.now - 1000)
+        return status, response
+    world.service.fetch = expired
+    with pytest.raises(ProviderError, match="Rental not active"):
+        world.service._provider(kind).messages("447700900123" if kind == "vmos" else "rental_1",
+                                               "+447700900123" if kind == "vmos" else "+34689018024")
+    assert not world.purchases
+
+
 def test_vmos_business_error_and_secret_echo_are_redacted():
     p = Provider("vmos", {"accessKey": SECRET, "secretKey": SECRET}, fetch=lambda *args: (200, {"code": 200, "data": {"errorCode": "REJECTED", "message": SECRET}}))
     with pytest.raises(ProviderError) as error: p.catalogue()
