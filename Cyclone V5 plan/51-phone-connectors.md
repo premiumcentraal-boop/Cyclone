@@ -1,6 +1,6 @@
 # Plan 51: Phone connectors (scope)
 
-Status: **scope, not built.** Written 2026-10-03 at alpha.103. Asked for by a team building a profiles companion module
+Status: **K1 and K2 built in alpha.104** (owner decisions §8 taken as recommended); K3 and K4 next. Written 2026-10-03 at alpha.103. Asked for by a team building a profiles companion module
 that wants first-party contracts instead of reverse-engineering the app (their eight questions are answered in §9).
 
 ## 0. The decision in one paragraph
@@ -116,7 +116,8 @@ A connector contributes **entries**, not profiles: `{id, type, label ≤ 40, sub
 
 ```xml
 <!-- AndroidManifest.xml of the connector -->
-<service android:name=".CycloneConnect" android:exported="false">
+<service android:name=".CycloneConnect" android:exported="true"
+         android:permission="com.cyclone.mobile.permission.CONNECTOR_HOST">
   <intent-filter><action android:name="com.cyclone.connector.CONNECT" /></intent-filter>
   <meta-data android:name="com.cyclone.connector" android:resource="@xml/cyclone_connector" />
 </service>
@@ -131,7 +132,9 @@ A connector contributes **entries**, not profiles: `{id, type, label ≤ 40, sub
     entryActivity=".EntryActivity" wakeReceiver=".CycloneWake" />
 ```
 
-`WAKE_CONNECTOR` is a signature permission held only by Cyclone, so no other app can fake a wake.
+`CONNECTOR_HOST` and `WAKE_CONNECTOR` are signature permissions held only by Cyclone: Android lists only exported
+services of other apps, so the marker service is exported, and the permission keeps every other app from binding it
+or faking a wake. Cyclone never binds the marker; it reads its manifest.
 
 ## 5. Packaging, SDK and publication
 
@@ -189,3 +192,27 @@ lineage, OEM background limits on wakes): until it's done, the release notes say
 7. **Versioning:** `hello` negotiation, majors N and N−1, additive minors; schemas + AAR as release assets (§3, §5).
 8. **Roadmap:** none of this exists today. A spec PR from the team is welcome **against this plan**: the contract
    lands as a first-party extension point owned by `apps/mobile`, after the owner decisions in §8.
+
+## 10. As built (alpha.104: K1 + K2)
+
+- **Profile schema 2:** `ProfileRegistryCodec` writes `schema_version` 2 and an `ext` object; every save and checkpoint
+  carries `ext` through. Schema 1 records read as 2 with no `ext`.
+- **Events:** every registry save is diffed into created/updated/trashed/restored/removed (an `ext`-only change is
+  not an event); `profile.switched` comes from both switch paths (the phone's Profiles page and the PC's
+  `profiles.switch`). The journal keeps 7 days or 1 000 events, pages of 200, with `reset` when a reader fell behind.
+- **The door:** `ConnectorService` (exported, action `com.cyclone.connector.SERVICE`) with one AIDL call,
+  `String call(String)`.
+  - Identity comes from `Binder.getCallingUid()`, the package manager and the signing-certificate lineage; apps that
+    share a UID are refused.
+  - It is rate-limited at 20 calls/s, requests are capped at 64 KB, and `INTERNAL` errors carry no details.
+- **Calls:** `hello`, `profiles`, `ext.set`, `entries.set`, `entries.get`, `events`. Entries are stored and checked
+  now; showing them is K3.
+- **Settings → Connectors:**
+  - discovered connector apps with their key fingerprint and what they ask for, in plain words;
+  - approve with two taps; revoke;
+  - "asks for more" after an update, and "signed by a different key" blocks until approved again.
+- **Cleanup:** uninstalling a connector (`PACKAGE_FULLY_REMOVED`), or revoking it, removes its approval, its entries
+  and its data on every profile. Settings also forgets approvals for apps that are gone.
+- **`current`** (which profile is in front) is not in `profiles` yet. Reading it needs a privileged shell, so it
+  arrives with K3. `profile.switched` events cover the change.
+- **Spec:** `tools/cyclone-connector-sdk/SPEC.md`. The schemas, client library and conformance app are K4.

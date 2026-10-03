@@ -1,0 +1,243 @@
+package com.cyclone.mobile.connector
+
+import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.content.res.XmlResourceParser
+import android.os.Binder
+import android.os.IBinder
+import com.cyclone.connector.ICycloneConnector
+import com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord
+import com.cyclone.mobile.runtime.workspaces.ProfileRegistryStore
+import org.json.JSONArray
+import org.json.JSONObject
+import org.xmlpull.v1.XmlPullParser
+import java.security.MessageDigest
+
+/** A connector app found on this phone, and what the owner sees about it in Settings → Connectors. */
+data class DiscoveredConnector(
+    val packageName: String,
+    val appLabel: String,
+    val manifest: ConnectorManifest?,
+    val problem: String?,
+    val certHistory: List<String>,
+    val approval: ConnectorApproval?,
+    /** An approval exists for this package and id, but the app is now signed by a key outside the approved lineage. */
+    val signerChanged: Boolean,
+    /** Another installed app already uses this connector id. */
+    val idConflict: Boolean,
+)
+
+/**
+ * Plan 51: the Android side of connectors. Approvals, entries and the event journal live in Cyclone's private
+ * preferences; profile data (`ext`) lives in the profile registry. Nothing here logs request or answer bodies.
+ */
+object ConnectorRuntime {
+    private const val PREFS = "cyclone_connectors"
+    private val limiter = ConnectorRateLimiter()
+
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    // ---- approvals ---------------------------------------------------------------------------------------------------
+
+    @Synchronized fun approvals(context: Context): List<ConnectorApproval> {
+        val array = JSONArray(prefs(context).getString("approvals", "[]"))
+        return (0 until array.length()).mapNotNull { array.optJSONObject(it)?.let(ConnectorApproval::fromJson) }
+    }
+
+    @Synchronized private fun saveApprovals(context: Context, list: List<ConnectorApproval>) {
+        check(prefs(context).edit().putString("approvals", JSONArray(list.map { it.toJson() }).toString()).commit()) {
+            "Couldn't save the connector approval."
+        }
+    }
+
+    /** The owner approved [found] for every scope its manifest asks for, at its current signing key. */
+    @Synchronized fun approve(context: Context, found: DiscoveredConnector) {
+        val manifest = checkNotNull(found.manifest) { found.problem ?: "This connector can't be used." }
+        check(!found.idConflict) { "Another app already uses the connector id ${manifest.id}." }
+        val cert = checkNotNull(found.certHistory.firstOrNull()) { "Android didn't report this app's signing key." }
+        val others = approvals(context).filterNot { it.packageName == found.packageName || it.connectorId == manifest.id }
+        saveApprovals(context, others + ConnectorApproval(manifest.id, found.packageName, cert, manifest.scopes, manifest.label, System.currentTimeMillis()))
+    }
+
+    /** Revoking forgets the approval, the connector's entries and its data on every profile. */
+    @Synchronized fun revoke(context: Context, connectorId: String) {
+        saveApprovals(context, approvals(context).filterNot { it.connectorId == connectorId })
+        setEntries(context, connectorId, emptyList())
+        runCatching { ProfileRegistryStore.dropExt(context, connectorId) }
+    }
+
+    @Synchronized fun revokePackage(context: Context, packageName: String) {
+        approvals(context).filter { it.packageName == packageName }.forEach { revoke(context, it.connectorId) }
+    }
+
+    // ---- entries -----------------------------------------------------------------------------------------------------
+
+    @Synchronized fun entries(context: Context, connectorId: String): List<ConnectorEntry> {
+        val all = JSONObject(prefs(context).getString("entries", "{}"))
+        val array = all.optJSONArray(connectorId) ?: return emptyList()
+        return (0 until array.length()).mapNotNull { array.optJSONObject(it)?.let(ConnectorEntry::fromJson) }
+    }
+
+    /** Every approved connector's entries, for the selector (plan 51 K3). */
+    @Synchronized fun allEntries(context: Context): Map<ConnectorApproval, List<ConnectorEntry>> =
+        approvals(context).associateWith { entries(context, it.connectorId) }.filterValues { it.isNotEmpty() }
+
+    @Synchronized fun setEntries(context: Context, connectorId: String, entries: List<ConnectorEntry>) {
+        val all = JSONObject(prefs(context).getString("entries", "{}"))
+        if (entries.isEmpty()) all.remove(connectorId) else all.put(connectorId, JSONArray(entries.map { it.toJson() }))
+        check(prefs(context).edit().putString("entries", all.toString()).commit()) { "Couldn't save the connector's entries." }
+    }
+
+    // ---- the event journal -------------------------------------------------------------------------------------------
+
+    @Synchronized internal fun journal(context: Context): ConnectorJournal {
+        val array = JSONArray(prefs(context).getString("journal", "[]"))
+        val events = (0 until array.length()).mapNotNull { array.optJSONObject(it)?.let(ConnectorEvent::fromJson) }
+        return ConnectorJournal(events, prefs(context).getLong("journal_next", 1L))
+    }
+
+    @Synchronized internal fun record(context: Context, items: List<Pair<String, String>>) {
+        if (items.isEmpty()) return
+        val journal = journal(context)
+        val now = System.currentTimeMillis()
+        items.forEach { (type, id) -> journal.append(type, id, now) }
+        prefs(context).edit()
+            .putString("journal", JSONArray(journal.events.map { it.toJson() }).toString())
+            .putLong("journal_next", journal.nextSeq)
+            .apply()
+    }
+
+    // ---- calls -------------------------------------------------------------------------------------------------------
+
+    fun backend(context: Context): ConnectorBackend = object : ConnectorBackend {
+        override fun approvals() = ConnectorRuntime.approvals(context)
+        override fun profiles(): List<CycloneProfileRecord> = ProfileRegistryStore.records(context)
+        override fun setExt(profileId: String, connectorId: String, json: String?) = ProfileRegistryStore.setExt(context, profileId, connectorId, json)
+        override fun entries(connectorId: String) = ConnectorRuntime.entries(context, connectorId)
+        override fun setEntries(connectorId: String, entries: List<ConnectorEntry>) = ConnectorRuntime.setEntries(context, connectorId, entries)
+        override fun events(since: Long, now: Long) = journal(context).since(since, now)
+        override fun now() = System.currentTimeMillis()
+    }
+
+    fun call(context: Context, uid: Int, request: String?): String =
+        ConnectorCore(backend(context), limiter).handle(ConnectorDiscovery.caller(context, uid), request)
+}
+
+/** Profile events from the registry and from switches (plan 51 §3.3). */
+object ConnectorEvents {
+    fun changed(context: Context, before: List<CycloneProfileRecord>, after: List<CycloneProfileRecord>) {
+        ConnectorRuntime.record(context, ConnectorEvent.diff(before, after))
+    }
+
+    fun switched(context: Context, androidUserId: Int) {
+        val id = ProfileRegistryStore.records(context).firstOrNull { it.androidUserId == androidUserId }?.id ?: ConnectorEvent.OWNER
+        ConnectorRuntime.record(context, listOf(ConnectorEvent.SWITCHED to id))
+    }
+}
+
+/** Finds connector apps and tells who a Binder caller is. */
+object ConnectorDiscovery {
+    fun discover(context: Context): List<DiscoveredConnector> {
+        val pm = context.packageManager
+        val approvals = ConnectorRuntime.approvals(context)
+        val services = pm.queryIntentServices(Intent(ConnectorContract.ACTION_CONNECT),
+            PackageManager.ResolveInfoFlags.of(PackageManager.GET_META_DATA.toLong()))
+            .mapNotNull { it.serviceInfo }
+            .filter { it.packageName != context.packageName }
+            .distinctBy { it.packageName }
+        val found = services.map { service ->
+            val (manifest, problem) = runCatching { read(context, service) to null }
+                .getOrElse { (null to ((it as? ConnectorException)?.message ?: "Its connector manifest couldn't be read.")) }
+            val certs = certHistory(context, service.packageName)
+            val approval = manifest?.let { m -> approvals.firstOrNull { it.packageName == service.packageName && it.connectorId == m.id } }
+            DiscoveredConnector(
+                service.packageName,
+                runCatching { service.applicationInfo.loadLabel(pm).toString() }.getOrDefault(service.packageName),
+                manifest, problem, certs,
+                approval?.takeIf { it.certSha256 in certs },
+                signerChanged = approval != null && approval.certSha256 !in certs,
+                idConflict = false,
+            )
+        }
+        val ids = found.mapNotNull { it.manifest?.id }
+        val duplicated = ids.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        // Approvals for apps that are gone are forgotten (the uninstall receiver is the first line; this is the second).
+        approvals.filter { a -> found.none { it.packageName == a.packageName } }.forEach { ConnectorRuntime.revoke(context, it.connectorId) }
+        return found.map { it.copy(idConflict = it.manifest?.id in duplicated) }.sortedBy { it.appLabel.lowercase() }
+    }
+
+    /** The caller behind a Binder UID, or null when it isn't exactly one installed connector app. */
+    fun caller(context: Context, uid: Int): ConnectorCaller? {
+        val pm = context.packageManager
+        val packages = pm.getPackagesForUid(uid)?.toList().orEmpty()
+        if (packages.size != 1) return null // shared user ids are refused
+        val packageName = packages.single()
+        val service = pm.queryIntentServices(Intent(ConnectorContract.ACTION_CONNECT).setPackage(packageName),
+            PackageManager.ResolveInfoFlags.of(PackageManager.GET_META_DATA.toLong())).firstOrNull()?.serviceInfo
+        val manifest = service?.let { runCatching { read(context, it) }.getOrNull() }
+        return ConnectorCaller(uid, packageName, certHistory(context, packageName), manifest)
+    }
+
+    private fun read(context: Context, service: ServiceInfo): ConnectorManifest {
+        val pm = context.packageManager
+        val parser: XmlResourceParser = service.loadXmlMetaData(pm, ConnectorContract.MANIFEST_META)
+            ?: throw ConnectorException("BAD_MANIFEST", "It doesn't include a Cyclone connector manifest.")
+        parser.use { xml ->
+            val resources = pm.getResourcesForApplication(service.applicationInfo)
+            while (xml.next() != XmlPullParser.END_DOCUMENT) {
+                if (xml.eventType != XmlPullParser.START_TAG || xml.name != "cyclone-connector") continue
+                val attrs = (0 until xml.attributeCount).associate { i ->
+                    val raw = xml.getAttributeValue(i)
+                    val ref = xml.getAttributeResourceValue(i, 0)
+                    xml.getAttributeName(i) to if (ref != 0) runCatching { resources.getString(ref) }.getOrNull() else raw
+                }
+                return ConnectorManifest.parse(service.packageName, attrs)
+            }
+        }
+        throw ConnectorException("BAD_MANIFEST", "Its connector manifest has no <cyclone-connector> element.")
+    }
+
+    /** SHA-256 of the signing certificates, current first, then the earlier keys in its rotation lineage. */
+    fun certHistory(context: Context, packageName: String): List<String> = runCatching {
+        val info = context.packageManager.getPackageInfo(packageName,
+            PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()))
+        val signing = info.signingInfo ?: return emptyList()
+        val digest = { bytes: ByteArray -> MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) } }
+        if (signing.hasMultipleSigners()) {
+            // Several signers have no lineage: the set of them, together, is the identity.
+            listOf(digest(signing.apkContentsSigners.map { digest(it.toByteArray()) }.sorted().joinToString(",").toByteArray()))
+        } else {
+            signing.signingCertificateHistory.map { digest(it.toByteArray()) }.reversed()
+        }
+    }.getOrDefault(emptyList())
+}
+
+/** The Binder door. Exported, but every call is checked: who (from the kernel), approved by the owner, which scope. */
+class ConnectorService : Service() {
+    private val binder = object : ICycloneConnector.Stub() {
+        override fun call(request: String?): String {
+            val uid = Binder.getCallingUid()
+            val token = Binder.clearCallingIdentity()
+            return try {
+                ConnectorRuntime.call(applicationContext, uid, request)
+            } finally {
+                Binder.restoreCallingIdentity(token)
+            }
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder = binder
+}
+
+/** An uninstalled connector loses its approval, entries and profile data at once. */
+class ConnectorPackageReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_PACKAGE_FULLY_REMOVED) return
+        val packageName = intent.data?.schemeSpecificPart ?: return
+        runCatching { ConnectorRuntime.revokePackage(context.applicationContext, packageName) }
+    }
+}

@@ -98,7 +98,10 @@ object ProfileApps {
         if (profileId != MAIN) prepare(context, target.user, profileId)
         run(ProfileSetupPlan.switchUser(target.user))
         repeat(40) {
-            if (current() == target.user) return target.user
+            if (current() == target.user) {
+                runCatching { com.cyclone.mobile.connector.ConnectorEvents.switched(context, target.user) }
+                return target.user
+            }
             sleep(150)
         }
         throw Refused("DEVICE_NOT_READY", "Android hasn't finished switching profiles yet. Check the phone.")

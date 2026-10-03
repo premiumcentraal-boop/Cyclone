@@ -14,20 +14,31 @@ data class CycloneProfileRecord(
     /** The owner's look for it: an emoji and a colour (ARGB), shown on the slider and in Profiles. */
     val emoji: String? = null,
     val color: Long? = null,
+    /**
+     * Plan 51: each approved connector's own data on this profile, `connectorId -> JSON object text`. Cyclone keeps it
+     * untouched through every save and gives it back only to that connector: never to Glass, the PC, a model or logs.
+     */
+    val ext: Map<String, String> = emptyMap(),
 ) {
     val inTrash: Boolean get() = removedAtMs != null
 }
 
-object ProfileRegistryStore {
-    const val JOURNAL_DISPLAY_LABEL = "display_label"
+/**
+ * The registry's stored form (pure, tested). Schema 2 (plan 51) adds `ext`; schema 1 records read as 2 with none.
+ * Every field Cyclone knows is written back, and `ext` is carried through every save.
+ */
+internal object ProfileRegistryCodec {
+    const val SCHEMA_VERSION = 2
 
-    private fun store(context: Context) = context.getSharedPreferences("cyclone_profile_registry", Context.MODE_PRIVATE)
-
-    @Synchronized fun records(context: Context): List<CycloneProfileRecord> {
-        val array = JSONArray(store(context).getString("profiles", "[]"))
+    fun decode(text: String?): List<CycloneProfileRecord> {
+        val array = JSONArray(text ?: "[]")
         return (0 until array.length()).map { index ->
             val o = array.getJSONObject(index)
             val apps = o.getJSONArray("packages")
+            val extObject = o.optJSONObject("ext")
+            val ext = extObject?.keys()?.asSequence()?.mapNotNull { key ->
+                extObject.optJSONObject(key)?.let { key to it.toString() }
+            }?.toMap().orEmpty()
             CycloneProfileRecord(
                 o.getString("id"),
                 o.getString("label"),
@@ -40,9 +51,43 @@ object ProfileRegistryStore {
                 o.optLong("removed_at", 0L).takeIf { it > 0L },
                 o.optString("emoji").takeIf { it.isNotBlank() },
                 o.optLong("color", 0L).takeIf { it != 0L },
+                ext,
             )
         }
     }
+
+    fun encode(entries: List<CycloneProfileRecord>): String {
+        val array = JSONArray()
+        entries.forEach { record ->
+            val ext = JSONObject()
+            record.ext.toSortedMap().forEach { (key, value) -> ext.put(key, JSONObject(value)) }
+            array.put(
+                JSONObject()
+                    .put("id", record.id)
+                    .put("label", record.label)
+                    .put("user", record.androidUserId ?: -1)
+                    .put("parent", record.parentUserId)
+                    .put("secondary", record.secondaryUser)
+                    .put("packages", JSONArray(record.packages.sorted()))
+                    .put("stage", record.stage)
+                    .put("ready", record.ready)
+                    .put("removed_at", record.removedAtMs ?: 0L)
+                    .put("emoji", record.emoji ?: "")
+                    .put("color", record.color ?: 0L)
+                    .put("ext", ext),
+            )
+        }
+        return array.toString()
+    }
+}
+
+object ProfileRegistryStore {
+    const val JOURNAL_DISPLAY_LABEL = "display_label"
+
+    private fun store(context: Context) = context.getSharedPreferences("cyclone_profile_registry", Context.MODE_PRIVATE)
+
+    @Synchronized fun records(context: Context): List<CycloneProfileRecord> =
+        ProfileRegistryCodec.decode(store(context).getString("profiles", "[]"))
 
     @Synchronized fun checkpoint(context: Context, journal: SharedPreferences) {
         val id = journal.getString("name", null) ?: return
@@ -71,6 +116,7 @@ object ProfileRegistryStore {
             removedAtMs = previous?.removedAtMs,
             emoji = previous?.emoji,
             color = previous?.color,
+            ext = previous?.ext.orEmpty(),
         )
         save(context, existing.filterNot { it.id == id } + row)
     }
@@ -117,6 +163,23 @@ object ProfileRegistryStore {
         save(context, records(context).filterNot { it.id == id })
     }
 
+    /** Plan 51: sets (or, with null, clears) one connector's data on one profile. Rules are checked by the caller. */
+    @Synchronized fun setExt(context: Context, id: String, connectorId: String, json: String?) {
+        val entries = records(context)
+        check(entries.any { it.id == id }) { "Profile not found." }
+        save(context, entries.map { record ->
+            if (record.id != id) record
+            else record.copy(ext = if (json == null) record.ext - connectorId else record.ext + (connectorId to json))
+        })
+    }
+
+    /** Plan 51: a connector was revoked or uninstalled; its data leaves every profile. */
+    @Synchronized fun dropExt(context: Context, connectorId: String) {
+        val entries = records(context)
+        if (entries.none { connectorId in it.ext }) return
+        save(context, entries.map { it.copy(ext = it.ext - connectorId) })
+    }
+
     fun cleanLabel(label: String): String {
         val clean = label.trim().replace(Regex("\\s+"), " ").take(40)
         require(clean.isNotBlank()) { "Give this profile a name." }
@@ -124,26 +187,15 @@ object ProfileRegistryStore {
     }
 
     private fun save(context: Context, entries: List<CycloneProfileRecord>) {
-        val array = JSONArray()
-        entries.forEach { record ->
-            array.put(
-                JSONObject()
-                    .put("id", record.id)
-                    .put("label", record.label)
-                    .put("user", record.androidUserId ?: -1)
-                    .put("parent", record.parentUserId)
-                    .put("secondary", record.secondaryUser)
-                    .put("packages", JSONArray(record.packages.sorted()))
-                    .put("stage", record.stage)
-                    .put("ready", record.ready)
-                    .put("removed_at", record.removedAtMs ?: 0L)
-                    .put("emoji", record.emoji ?: "")
-                    .put("color", record.color ?: 0L),
-            )
-        }
-        check(store(context).edit().putString("profiles", array.toString()).commit()) {
+        val before = records(context)
+        check(store(context).edit()
+            .putString("profiles", ProfileRegistryCodec.encode(entries))
+            .putInt("schema_version", ProfileRegistryCodec.SCHEMA_VERSION)
+            .commit()) {
             "Couldn't save profile registry."
         }
+        // Plan 51: connectors hear about it. Best effort: the registry never fails because of a connector.
+        runCatching { com.cyclone.mobile.connector.ConnectorEvents.changed(context, before, entries) }
     }
 }
 

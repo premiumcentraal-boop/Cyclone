@@ -192,6 +192,8 @@ internal fun CycloneSettingsPage426(
                 ),
                 "Connections" to listOf(
                     Settings426Row("PC Gateway", "PC Gateway", Icons.Rounded.Smartphone, "Optional"),
+                    Settings426Row("Connectors", "Connectors", Icons.Rounded.Layers,
+                        com.cyclone.mobile.connector.ConnectorRuntime.approvals(context).size.let { if (it == 0) "None" else "$it on" }),
                 ),
                 "Privacy & safety" to listOf(
                     Settings426Row("Privacy & safety", "Privacy & safety", Icons.Rounded.Security),
@@ -427,6 +429,7 @@ internal fun CycloneSettingsPage426(
                     }
                 }
             }
+            "Connectors" -> item { Connectors426Card(context) }
             "Privacy & safety" -> item {
                 Settings426Surface {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -652,6 +655,92 @@ private fun Codes426Card(context: Context) {
     }
 }
 
+/**
+ * Plan 51: Settings → Connectors. Apps on this phone that ask to work with Cyclone. Each is approved by name and signing
+ * key, for exactly the things listed; revoking removes its entries and its data on every profile.
+ */
+@Composable
+private fun Connectors426Card(context: Context) {
+    var tick by remember { mutableStateOf(0) }
+    val found = remember(tick) { runCatching { com.cyclone.mobile.connector.ConnectorDiscovery.discover(context) }.getOrDefault(emptyList()) }
+    var armed by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { tick++ }
+    Settings426Surface {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Apps that connect to Cyclone", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "A connector is an app you installed that asks to work with Cyclone on this phone. It can only do what you " +
+                    "approve here. It can't create, switch or remove your profiles, control your phone, or see your passwords or codes.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (found.isEmpty()) {
+                Text("No connector apps are installed.", style = MaterialTheme.typography.bodySmall)
+            }
+            found.forEach { c ->
+                val manifest = c.manifest
+                val key = c.packageName
+                val pending = if (manifest != null && c.approval != null) manifest.scopes - c.approval.scopes else emptySet()
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(manifest?.label ?: c.appLabel, style = MaterialTheme.typography.titleSmall)
+                    Text("${c.packageName} · key ${c.certHistory.firstOrNull()?.let(com.cyclone.mobile.connector.ConnectorIdentity::fingerprint) ?: "unknown"}",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val status = when {
+                        manifest == null -> c.problem ?: "This app's connector manifest can't be used."
+                        c.idConflict -> "Another app uses the same connector name. Remove one of them."
+                        c.signerChanged -> "Signed by a different key since you approved it. Blocked until you approve it again."
+                        c.approval != null && pending.isNotEmpty() -> "Approved. It now also asks to:"
+                        c.approval != null -> "Approved. It may:"
+                        else -> "Not approved. It asks to:"
+                    }
+                    Text(status, style = MaterialTheme.typography.bodySmall)
+                    val listed = when {
+                        manifest == null -> emptySet()
+                        c.approval != null && pending.isNotEmpty() -> pending
+                        else -> manifest.scopes
+                    }
+                    listed.forEach { scope -> Text("• ${scope.plain}", style = MaterialTheme.typography.bodySmall) }
+                    if (manifest != null && manifest.unknownScopes.isNotEmpty()) {
+                        Text("It also asks for things this Cyclone doesn't know (${manifest.unknownScopes.joinToString(", ")}). Those are ignored.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (manifest != null && !c.idConflict) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (c.approval == null || pending.isNotEmpty()) {
+                                CycloneLiquidTextAction(
+                                    label = if (armed == key) "Tap again to approve" else if (pending.isNotEmpty()) "Approve the new requests" else "Approve",
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        if (armed != key) {
+                                            armed = key
+                                        } else {
+                                            armed = null
+                                            note = runCatching { com.cyclone.mobile.connector.ConnectorRuntime.approve(context, c) }.exceptionOrNull()?.message
+                                            tick++
+                                        }
+                                    },
+                                )
+                            }
+                            if (c.approval != null || c.signerChanged) {
+                                CycloneLiquidTextAction(
+                                    label = "Revoke",
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        note = runCatching { com.cyclone.mobile.connector.ConnectorRuntime.revoke(context, manifest.id) }.exceptionOrNull()?.message
+                                        tick++
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
 @Composable
 private fun Settings426Readiness(title: String, body: String, ready: Boolean) {
     Surface(
@@ -705,6 +794,7 @@ private fun Settings426DetailSubtitle(section: String): String? = when (section)
     "Profile engine" -> "Create and manage separate app profiles."
     "Storage" -> "Where Cyclone keeps local knowledge."
     "PC Gateway" -> "Connect Cyclone to desktop agents when needed."
+    "Connectors" -> "Apps on this phone that work with Cyclone, only as far as you approve."
     else -> null
 }
 

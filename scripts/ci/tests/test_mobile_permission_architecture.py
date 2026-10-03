@@ -9,6 +9,10 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 # Auto-granted infrastructure permissions that keep the app alive and connected but do not
 # expose user data or device capabilities; they intentionally have no setup row.
 INFRASTRUCTURE_PERMISSIONS = {
+    # Plan 51: Cyclone's own signature permissions. Connectors protect their marker service and wake receiver with
+    # them so only Cyclone can reach those; they grant nothing on the phone and need no owner decision.
+    "com.cyclone.mobile.permission.CONNECTOR_HOST",
+    "com.cyclone.mobile.permission.WAKE_CONNECTOR",
     "android.permission.INTERNET",
     "android.permission.RECEIVE_BOOT_COMPLETED",
     "android.permission.WAKE_LOCK",
