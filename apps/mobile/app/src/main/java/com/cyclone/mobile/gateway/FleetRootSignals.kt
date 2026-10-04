@@ -11,7 +11,7 @@ object FleetRootSignals {
     data class Result(val rooted: Boolean, val verified: Boolean, val signals: List<String>)
 
     private val SU_DIRS = listOf("/system/bin", "/system/xbin", "/sbin", "/su/bin", "/system/sbin", "/vendor/bin",
-        "/data/local/xbin", "/data/local/bin", "/system/bin/.ext")
+        "/data/local/xbin", "/data/local/bin")
     private val MANAGERS = mapOf(
         "magisk" to listOf("/data/adb/magisk", "/sbin/.magisk", "/cache/.disable_magisk", "/dev/.magisk.unblock"),
         "kernelsu" to listOf("/data/adb/ksu", "/data/adb/ksud"),

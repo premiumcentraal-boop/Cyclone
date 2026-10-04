@@ -12,6 +12,6 @@ Glass: phone search and a 40-row window. Not measured at 100 phones in a browser
 
 Backup: copy fleet.db and the Command Center database. Restore those two files, then start the gateway. Open tasks stay in the Command Center database, so a killed gateway does not invent a second task for the same request id.
 
-Not measured: dispatch latency, event lag, CPU, and memory on 10, 30, or 100 devices. Caps stay 32, 16, and 5,000.
+Not measured: dispatch latency, event lag, CPU, and memory on 10, 30, or 100 devices. Since alpha.107 there is no phone cap; the mission store keeps 5,000.
 
 Not run on a phone: Owner Moment, locked, offline, gateway restart, broadcast, stops, handoff, scheduled run. Those stay UNVERIFIED.

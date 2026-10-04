@@ -1,11 +1,9 @@
 # Fleet limits
 
-Defaults, overridable by environment. Invalid values fall back to the default.
+There is no phone limit (alpha.107). The one remaining limit is the mission store.
 
 | Name | Default | Meaning |
 | --- | --- | --- |
-| FLEET_MAX_PHONES | 32 | Phones the fleet layer will address |
-| FLEET_MAX_PER_COMMAND | 16 | Phones in one command |
 | store cap | 5000 | Stored missions, open ones kept |
 
 Mission store is `fleet.db` next to the old `missions.json`. Copy that file to back up. A restart reads it again and does not create a second task for the same request id.

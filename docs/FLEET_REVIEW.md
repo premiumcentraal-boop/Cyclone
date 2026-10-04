@@ -43,3 +43,7 @@ Caps stay 16 per command and 32 phones, from `FLEET_MAX_PER_COMMAND` and `FLEET_
 Gateway and CI suites exited 0 before this pass. The new tests exited 0.
 
 No phone, no emulator, no Glass browser, no `npm test` on this pass. Owner Moment, locked, offline, restart, and broadcast stay UNVERIFIED. Dispatch latency at 30 and 100 phones was not measured because the cap refuses them.
+
+## Alpha 107 follow-up
+
+The caps above were removed in alpha.107: a mission addresses every phone it names, and the views page and batch their reads (`CommandCenter.task_states`, `open_tasks_brief`). The READY casing, canary, rollout-validation, orphan-task, retry, spend-cap and Glass defects found in the alpha.107 review are fixed; see `docs/RELEASE_5.0.0-alpha.107.dev1.md`.
