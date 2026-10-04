@@ -101,6 +101,28 @@ class CycloneConnector private constructor(
     /** Events after [since]. Keep `next` and send it next time; on `reset`, read [profiles] again. */
     fun events(since: Long): JSONObject = call("events", JSONObject().put("since", since))
 
+    /** The config API never invokes the launch provider. Null clears the blob. */
+    fun getConfig(profileId: String, androidUserId: Int, packageName: String): JSONObject =
+        call("config.get.v1", tuple(profileId, androidUserId, packageName))
+    fun setConfig(profileId: String, androidUserId: Int, packageName: String, value: JSONObject?): JSONObject =
+        call("config.set.v1", tuple(profileId, androidUserId, packageName).put("value", value ?: JSONObject.NULL))
+    fun configStatus(profileId: String, androidUserId: Int, packageName: String, state: String): JSONObject =
+        call("config.status.v1", tuple(profileId, androidUserId, packageName).put("state", state))
+    fun startupStatus(profileId: String, androidUserId: Int, packageName: String): JSONObject =
+        call("startup.status.v1", tuple(profileId, androidUserId, packageName))
+    private fun tuple(profileId: String, androidUserId: Int, packageName: String) = JSONObject()
+        .put("profileId", profileId).put("androidUserId", androidUserId).put("packageName", packageName)
+
+    /** Keep the Binder alive and re-register after reconnecting. Null unregisters. */
+    fun registerProfileProvider(provider: com.cyclone.connector.IProfileBehaviorProvider?): JSONObject {
+        val answer = JSONObject(service.registerProfileProvider(JSONObject().put("version", 1).toString(), provider))
+        if (!answer.optBoolean("ok")) {
+            val error = answer.getJSONObject("error")
+            throw CycloneConnectorException(error.getString("code"), error.getString("message"))
+        }
+        return answer.getJSONObject("result")
+    }
+
     override fun close() {
         runCatching { context.unbindService(connection) }
     }

@@ -1,6 +1,6 @@
 # Cyclone phone connectors `cyclone.connector/1`
 
-Status: **v1, complete** (Cyclone 5.0.0-alpha.105, plan 51 K1–K4). This file is the contract. The code is
+Status: **v1, minor 1 alpha** (Cyclone 5.0.0-alpha.106), building on alpha.105 / plan 51 K1–K4. This file is the contract. The code is
 `apps/mobile/app/src/main/java/com/cyclone/mobile/connector/`. Every release carries the kit (§9):
 `Cyclone-Connector-Client-<version>.aar`, `Cyclone-Connector-Sample-<version>.apk` and
 `Cyclone-Connector-Schemas-<version>.zip` (this file, the JSON Schemas and the test vectors), each listed with its
@@ -199,3 +199,103 @@ for each call. Install it, approve it in Cyclone → Settings → Connectors, an
 - Cyclone's own build runs every vector against its connector code, so the file is what Cyclone answers. Run the
   same file against your fakes.
 
+
+## 10. Profile config provider (minor 1, alpha.106)
+
+This API is independent of startup callbacks. Requesting `profiles.config` adds a dedicated approval in the existing
+Connectors settings. Existing approvals do not silently gain it. No additional UI is introduced.
+
+| Method | Arguments | Result |
+|---|---|---|
+| `config.get.v1` | `{profileId, androidUserId, packageName}` | `{version:1, profileId, androidUserId, packageName, storageKey, value, state}` |
+| `config.set.v1` | same tuple + `value: object or null` | same result; null clears the blob |
+| `config.status.v1` | same tuple + `state` | same result |
+
+`profiles` now includes `androidUserId` on registry profiles (null while unassigned). The tuple must match a ready, non-trashed registry profile and one of its scoped packages. User id is an integer,
+not a string. Each connector installation has a separate namespace derived from its authenticated connector id
+and Binder UID's Android user. The synthetic `owner` entry is not a registry profile and is outside this API. The target tuple's Android user is independent of the caller's Android user.
+An installation may keep settings for another registered profile; it cannot read another connector installation's data.
+
+`value` is an opaque JSON object, limited to **4096 UTF-8 bytes** after serialization. Cyclone checks structure and
+size only, never keys or behavior. Whole Binder requests are limited to 64 KiB and 32 nesting levels. Do not put
+credentials in this generic settings store; it is not a vault. No blob or config reference reaches logs, models,
+Glass or the PC. `state` is `unknown` (default), `ready`, `degraded` or `failed`.
+
+The provider persists atomically in Cyclone's private `noBackupFilesDir`, with at most 256 tuples per connector
+installation. `storageKey` is lowercase SHA-256 of UTF-8 `profileId + "\n" + androidUserId + "\n" + packageName`.
+It is a logical identity, not a path into Cyclone. Renames and updates preserve it. Revocation/uninstall removes the
+namespace; permanent profile deletion or removal of a package from the registry removes its tuples. Trashing and
+restoring a profile preserves its data. Clearing app data removes it; it is excluded from Android backup.
+
+For connector-owned state, the client library provides
+`ProfileBehaviorProvider.stateDirectory(context, profileId, androidUserId, packageName)`. It returns the connector's
+own private `noBackupFilesDir/cyclone-profile-state-v1/<storageKey>`. Cyclone neither reads nor manages that directory.
+The same connector installed under different Android users gets Android-isolated private directories.
+
+## 11. Profile startup provider (minor 1)
+
+Ask for `profiles.startup` and obtain explicit approval, independently of `profiles.config`. Check `hello.minor >= 1`
+before using the new appended Binder transaction. The original `ICycloneConnector.call` transaction and descriptor
+are unchanged. Register a live `IProfileBehaviorProvider` using
+`ICycloneConnector.registerProfileProvider("{\"version\":1}", provider)` (or the SDK helper). Null unregisters.
+The result envelope contains `{version:1, registered:boolean}`. Unsupported registration versions are refused.
+
+The connector registers with Cyclone **in its own Android user**. Identity is kernel UID + package + signing lineage
++ manifest + approved scope, checked at registration and again before every dispatch. One provider is held per full
+UID; re-registration replaces it. Binder death, revocation and uninstall remove it. Re-register after either process
+restarts; registrations are intentionally not persisted. Each user must approve its own connector installation.
+An owner-user provider is never substituted for a provider in a different Android user. If Cyclone cannot reach a
+provider in the target user, the app launch proceeds without one; no privileged cross-user bridge is introduced.
+
+Cyclone calls the provider before its scoped app launch dispatch, using the oneway callback:
+
+```aidl
+oneway interface IProfileBehaviorProvider {
+    void beforeLaunch(String event, IProfileBehaviorResult result);
+}
+oneway interface IProfileBehaviorResult {
+    void complete(String response);
+}
+```
+
+```json
+{"contract":"cyclone.profile-startup/1","version":1,
+ "profileId":"Cyclone_0123456789abcdef","androidUserId":10,"packageName":"com.acme.target",
+ "eventType":"cold_start","deadlineElapsedRealtimeMs":123456}
+```
+
+Events cover Cyclone's foreground phone-tool launches, workspace launches (including background and second-window
+launches), and its app-opening controls. They do not cover Android launcher taps, third-party launches, task adoption,
+or system-restored processes. `eventType` describes Cyclone's dispatch: `cold_start` is the first observed dispatch for
+that tuple in this Cyclone process, `relaunch` is a subsequent one (also second-window starts), and `profile_switch`
+is a workspace switch launch or the first dispatch after a recorded profile switch. These are dispatch hints, not
+proof of Android process state. The tracker is bounded and resets on process restart.
+
+Reply once with `{version:1, configRef:null|string, state?:enum}`. An omitted `configRef` is also no reference.
+The entire response is at most 4096 UTF-8 bytes; references are at most 1024 UTF-8 bytes. References are opaque:
+Cyclone never resolves, executes or displays them. Unknown fields are ignored; unknown major versions are refused.
+No reply is required. SDK providers may return null for a ready response with no reference.
+
+All providers share a **250 ms total dispatch deadline**, expressed in the device's monotonic elapsed-realtime clock.
+Providers run on Binder workers and must not wait on the UI thread or synchronously request a Cyclone launch.
+Cyclone uses a bounded dispatch pool; failure or timeout never vetoes launch. No response by the deadline means
+`degraded`; malformed reply or transport failure means `failed`. Only the registered UID can reply; duplicates and
+late responses are discarded. The SDK checks the deadline before invoking connector logic.
+`startup.status.v1` (same tuple, `profiles.startup` scope) returns the last ephemeral `{version:1,state,configRef}` for
+that connector installation and tuple, or `unknown` with no reference. Status is bounded and may be lost on restart.
+
+Example (connector-owned implementation; no behavior is supplied by Cyclone):
+
+```kotlin
+val provider = object : ProfileBehaviorProvider(context) {
+    override fun beforeLaunch(event: JSONObject): JSONObject? = null
+}
+CycloneConnector.connect(context).use { cyclone ->
+    check(cyclone.hello().getInt("minor") >= 1)
+    cyclone.registerProfileProvider(provider)
+    // Keep provider alive; re-register when Cyclone reconnects.
+}
+```
+
+JSON Schemas express JSON types/code-point limits; the UTF-8 byte and serialized-size limits above are also enforced
+at runtime. `vectors.json` includes config and version negotiation cases executed by Cyclone's unit tests.

@@ -17,7 +17,7 @@ import org.json.JSONObject
 object ConnectorContract {
     const val CONTRACT = "cyclone.connector/1"
     const val MAJOR = 1
-    const val MINOR = 0
+    const val MINOR = 1
     /** The action a connector's service declares, so Cyclone can find it. */
     const val ACTION_CONNECT = "com.cyclone.connector.CONNECT"
     /** The action a connector binds to on Cyclone. */
@@ -40,7 +40,9 @@ enum class ConnectorScope(val wire: String, val plain: String) {
     PROFILES_APPS_READ("profiles.apps.read", "See which apps are in each profile"),
     PROFILES_EXT("profiles.ext", "Keep its own small notes on a profile"),
     SELECTOR_CONTRIBUTE("selector.contribute", "Add its own entries to your profiles list"),
-    EVENTS_PROFILES("events.profiles", "Hear when profiles are added, changed, switched or removed");
+    EVENTS_PROFILES("events.profiles", "Hear when profiles are added, changed, switched or removed"),
+    PROFILE_CONFIG("profiles.config", "Keep settings for each profile and app"),
+    PROFILE_STARTUP("profiles.startup", "Receive a callback before Cyclone opens a profile app");
 
     companion object {
         fun of(wire: String): ConnectorScope? = values().firstOrNull { it.wire == wire }

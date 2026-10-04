@@ -22,6 +22,7 @@ class ConnectorVectorsTest {
     }
 
     private class StateBackend(state: JSONObject) : ConnectorBackend {
+        private val configs = HashMap<Triple<String, Int, ProfileConfigKey>, String>()
         private val now = state.getLong("now")
         private val current = state.optString("current").takeIf { it.isNotEmpty() }
         private val approvalList = state.getJSONArray("approvals").let { a -> (0 until a.length()).map { ConnectorApproval.fromJson(a.getJSONObject(it))!! } }
@@ -51,6 +52,10 @@ class ConnectorVectorsTest {
         override fun entries(connectorId: String) = entryMap[connectorId].orEmpty()
         override fun setEntries(connectorId: String, entries: List<ConnectorEntry>) { entryMap[connectorId] = entries }
         override fun events(since: Long, now: Long) = journal.since(since, now)
+        override fun config(connectorId: String, callerUser: Int, key: ProfileConfigKey) = configs[Triple(connectorId, callerUser, key)]
+        override fun setConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, json: String?) {
+            if (json == null) configs.remove(Triple(connectorId, callerUser, key)) else configs[Triple(connectorId, callerUser, key)] = json
+        }
         override fun now() = now
         override fun currentProfile() = current
     }

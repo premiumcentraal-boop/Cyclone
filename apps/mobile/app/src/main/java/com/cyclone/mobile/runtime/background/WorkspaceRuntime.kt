@@ -62,7 +62,10 @@ object WorkspaceRuntime {
         if (mainTaskPresent(packageName)) return@synchronized open(packageName) { id -> checked(backend!!.adopt(id, packageName)) }
         val component = context.packageManager.getLaunchIntentForPackage(packageName)?.component?.flattenToString()
             ?: error("No launchable app for that package")
-        open(packageName) { id -> checked(backend!!.launch(id, component)) }
+        open(packageName) { id ->
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeLaunch(context, packageName, android.os.Process.myUid() / 100_000)
+            checked(backend!!.launch(id, component))
+        }
     }
 
     /** Plan 26: where the app is now: on the owner's screen, only in Recents, or nowhere. */
@@ -84,7 +87,10 @@ object WorkspaceRuntime {
         connect(context)
         val component = context.packageManager.getLaunchIntentForPackage(packageName)?.component?.flattenToString()
             ?: error("No launchable app for that package")
-        open(packageName) { id -> checked(backend!!.launchSecond(id, component)) }
+        open(packageName) { id ->
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeLaunch(context, packageName, android.os.Process.myUid() / 100_000, "relaunch")
+            checked(backend!!.launchSecond(id, component))
+        }
     }
 
     /** Plan 26 (A42-3): open a link in the app this background screen holds. */

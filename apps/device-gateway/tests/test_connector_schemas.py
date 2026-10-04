@@ -52,3 +52,15 @@ def test_the_schemas_refuse_what_cyclone_never_sends():
         profiles.validate(bad)
     with pytest.raises(jsonschema.ValidationError):
         _validator("answer.schema.json").validate({"ok": False, "error": {"code": "MADE_UP", "message": "x"}})
+
+
+def test_startup_callback_vectors_match_schemas():
+    vectors = _load("startup-vectors.json")
+    _validator("startup.event.schema.json").validate(vectors["event"])
+    for case in vectors["replies"]:
+        if "error" in case:
+            with pytest.raises(jsonschema.ValidationError):
+                _validator("startup.reply.schema.json").validate(case["response"])
+        else:
+            _validator("startup.reply.schema.json").validate(case["response"])
+            _validator("startup.status.result.schema.json").validate(case["result"])

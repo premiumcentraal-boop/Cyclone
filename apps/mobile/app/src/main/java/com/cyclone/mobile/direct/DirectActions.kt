@@ -271,6 +271,7 @@ object DirectActions {
     private fun start(context: Context, intent: Intent): DirectResult? {
         intent.putExtra(AlarmClock.EXTRA_SKIP_UI, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
             context.startActivity(intent)
             null
         } catch (_: android.content.ActivityNotFoundException) {

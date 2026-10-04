@@ -45,8 +45,20 @@ class ConnectorGuard(unittest.TestCase):
         core = read(CONNECTOR / "ConnectorCore.kt")
         self.assertIn('if (method == "hello") return hello(caller, approval, args)', core)
         self.assertIn('throw ConnectorException("NOT_APPROVED"', core)
-        self.assertEqual(core.count("need(ConnectorScope."), 5, "each non-hello call checks its scope")
+        self.assertEqual(core.count("need(ConnectorScope."), 8, "each method family checks its scope")
         self.assertNotRegex(core, r'"profiles\.(switch|create|remove|rename)"|ProfileRegistryStore\.(rename|setLook|markRemoved|restore|drop)')
+
+    def test_startup_has_a_deadline_identity_check_and_no_reference_execution(self):
+        runtime = read(CONNECTOR / "ProfileBehaviorRuntime.kt")
+        self.assertIn("linkToDeath", runtime)
+        self.assertIn("uid / 100_000", runtime)
+        self.assertIn("ProfileReplyGate(p.uid, deadline", runtime)
+        self.assertIn("replyGate.accept(Binder.getCallingUid())", runtime)
+        self.assertIn("deadline - android.os.SystemClock.elapsedRealtime()", runtime)
+        self.assertIn("ConnectorScope.PROFILE_STARTUP !in granted", runtime)
+        self.assertNotRegex(runtime, r"startActivity|openInputStream|Uri.parse|Runtime.getRuntime|ProcessBuilder")
+        for name in ("IProfileBehaviorProvider.aidl", "IProfileBehaviorResult.aidl"):
+            self.assertEqual(read(APP / "aidl/com/cyclone/connector" / name), read(ROOT / "apps/mobile/connector-client/src/main/aidl/com/cyclone/connector" / name))
 
     def test_connector_data_stays_on_the_phone(self):
         for folder in ("gateway", "observability", "mind", "brain", "ports", "codes", "secrets", "agent"):
@@ -56,10 +68,10 @@ class ConnectorGuard(unittest.TestCase):
         self.assertIn("ext = previous?.ext.orEmpty()", registry, "a checkpoint keeps connector data")
         self.assertIn('.put("ext", ext)', registry, "every save writes connector data back")
 
-    def test_the_contract_is_one_json_call(self):
+    def test_original_json_transaction_is_preserved_and_registration_is_appended(self):
         aidl = read(APP / "aidl/com/cyclone/connector/ICycloneConnector.aidl")
         methods = re.findall(r"^\s*\w[\w<>]*\s+\w+\(.*\);", aidl, re.M)
-        self.assertEqual(methods, ["    String call(String request);"])
+        self.assertEqual(methods, ["    String call(String request);", "    String registerProfileProvider(String request, IProfileBehaviorProvider provider);"])
         contract = read(CONNECTOR / "ConnectorContract.kt")
         self.assertIn('const val CONTRACT = "cyclone.connector/1"', contract)
 

@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.105 dev1: Phone connectors, complete (plan 51 K3+K4) - connector entries in the selector and Profiles, the profile in front, event wakes, read-only connectors in Glass, and the connector kit (client library, sample, schemas and test vectors). Glass 1.0.0-alpha.59.
+# Cyclone V5 alpha.106 dev1: scoped config provider and versioned startup extension.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.105.dev1"
+product_version = "5.0.0-alpha.106.dev1"
 channel = "development"
-android_version_code = 250
+android_version_code = 251
 python_version = "5.0.0-alpha.105.dev1"
 
 [components]
-mobile = "5.0.0-alpha.105.dev1"
+mobile = "5.0.0-alpha.106.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha105-dev1-connector-kit"
+candidate_generation = "cyclone-v5-alpha106-dev1-profile-provider"
