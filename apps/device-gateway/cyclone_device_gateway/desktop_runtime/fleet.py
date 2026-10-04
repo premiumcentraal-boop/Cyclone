@@ -39,6 +39,18 @@ class RememberedSession:
     local_port: int | None = None
 
 
+_ROOT_SIGNALS = {"su", "magisk", "kernelsu", "apatch", "superuser", "test-keys"}
+
+
+def _root_of(raw: Any) -> dict[str, Any] | None:
+    """The phone's root report, reduced to known words. Anything else from the phone is dropped."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("rooted"), bool):
+        return None
+    signals = raw.get("signals") if isinstance(raw.get("signals"), list) else []
+    return {"rooted": raw["rooted"], "verified": raw.get("verified") is True,
+            "signals": [s for s in signals if isinstance(s, str) and s in _ROOT_SIGNALS][:8]}
+
+
 @dataclass
 class DeviceSession:
     device_id: str
@@ -636,6 +648,9 @@ class DeviceFleetManager:
                     "freeStorageMb": health.get("freeStorageMb") if isinstance(health.get("freeStorageMb"), int) else None,
                     "os": str(health.get("os") or "")[:40],
                     "model": str(health.get("model") or "")[:40],
+                    "manufacturer": str(health.get("manufacturer") or "")[:40] or None,
+                    # Alpha 107: rooted or not, from files a root manager leaves (the phone never runs su for this).
+                    "root": _root_of(health.get("root")),
                     "permissions": {
                         key: bool(permissions.get(key))
                         for key in ("accessibility", "camera", "notifications")

@@ -234,5 +234,47 @@ class StoreAndWorkspaceTests(unittest.TestCase):
             self.assertEqual(FleetWorkspaceStore(path).color_map(), {})
 
 
+class RealSessionTests(unittest.TestCase):
+    """The gateway's own DeviceSession objects, not hand-written dicts."""
+
+    def session(self, **extra):
+        from cyclone_device_gateway.adb.client import ADBDevice
+        from cyclone_device_gateway.desktop_runtime.fleet import DeviceSession
+        from cyclone_device_gateway.desktop_runtime.models import DeviceFleetState
+
+        device = ADBDevice(serial="ABC123", state="device", model="Pixel_8", device="shiba", product="shiba", transport_id="1")
+        return DeviceSession(device_id="dev1", serial="ABC123", adb_device=device, adb=None, local_port=18001,
+                             usb_session_id="u", state=DeviceFleetState.READY, credential="tok", accessibility_connected=True, **extra)
+
+    def test_a_real_ready_phone_gets_its_task(self):
+        live = self.session()
+        phones = FakePhones()
+        center = CommandCenter(Path(tempfile.mkdtemp()) / "cc.db", phones, lambda: [live.public()], clock=Clock())
+        try:
+            task = center.create_task({"goal": "open the camera", "deviceId": "dev1"})
+            center.tick()
+            self.assertEqual(center.get_task(task["id"])["status"], "running")
+        finally:
+            center.stop()
+
+    def test_the_phone_root_report_is_kept_to_known_words(self):
+        import threading
+
+        from cyclone_device_gateway.desktop_runtime.fleet import DeviceFleetManager
+
+        live = self.session()
+        manager = DeviceFleetManager.__new__(DeviceFleetManager)
+        manager._lock = threading.RLock()
+        manager.record_bridge_status(live, {"accessibilityConnected": True, "fleetHealth": {
+            "model": "Pixel 8", "manufacturer": "Google",
+            "root": {"rooted": True, "verified": False, "signals": ["magisk", "<script>", 7]},
+        }})
+        health = live.public()["health"]
+        self.assertEqual(health["manufacturer"], "Google")
+        self.assertEqual(health["root"], {"rooted": True, "verified": False, "signals": ["magisk"]})
+        manager.record_bridge_status(live, {"fleetHealth": {"model": "Pixel 8", "root": "yes"}})
+        self.assertIsNone(live.public()["health"]["root"])          # not a report: unknown, never a guess
+
+
 if __name__ == "__main__":
     unittest.main()

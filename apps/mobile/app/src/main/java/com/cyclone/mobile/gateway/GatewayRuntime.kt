@@ -126,6 +126,9 @@ object GatewayRuntime {
             caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
             else -> "other"
         }
+        val root = fleetRoot()
+        val camera = context.checkSelfPermission(android.Manifest.permission.CAMERA) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
         return JSONObject()
             .put("version", 1)
             .put("batteryPercent", percent ?: JSONObject.NULL)
@@ -133,7 +136,28 @@ object GatewayRuntime {
             .put("network", network)
             .put("os", "Android ${android.os.Build.VERSION.RELEASE}")
             .put("model", android.os.Build.MODEL)
-            .put("permissions", JSONObject().put("accessibility", DeviceState.accessibilityConnected))
+            .put("manufacturer", android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() })
+            .put("root", JSONObject()
+                .put("rooted", root.rooted)
+                .put("verified", root.verified)
+                .put("signals", JSONArray(root.signals)))
+            .put("permissions", JSONObject()
+                .put("accessibility", DeviceState.accessibilityConnected)
+                .put("camera", camera))
+    }
+
+    @Volatile private var fleetRootCache: Pair<Long, FleetRootSignals.Result>? = null
+
+    /** Root files change only when the owner roots or unroots, so one look a minute is plenty for a status poll. */
+    private fun fleetRoot(): FleetRootSignals.Result {
+        val now = android.os.SystemClock.elapsedRealtime()
+        fleetRootCache?.let { (at, result) -> if (now - at < 60_000L) return result }
+        val result = runCatching {
+            FleetRootSignals.detect({ File(it).exists() }, System.getenv("PATH"), Build.TAGS,
+                com.cyclone.mobile.runtime.workspaces.RootProbe.status)
+        }.getOrDefault(FleetRootSignals.Result(false, false, emptyList()))
+        fleetRootCache = now to result
+        return result
     }
 
     /** Kept only for compatibility callers. V3.3 UI must never expose this value. */
