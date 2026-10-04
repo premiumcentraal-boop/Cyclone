@@ -66,6 +66,8 @@ object ConnectorRuntime {
     /** Revoking forgets the approval, the connector's entries and its data on every profile. */
     @Synchronized fun revoke(context: Context, connectorId: String) {
         saveApprovals(context, approvals(context).filterNot { it.connectorId == connectorId })
+        ProfileConfigStore.revoke(context, connectorId)
+        ProfileBehaviorRuntime.revoke(connectorId)
         setEntries(context, connectorId, emptyList())
         runCatching { ProfileRegistryStore.dropExt(context, connectorId) }
     }
@@ -154,6 +156,10 @@ object ConnectorRuntime {
         override fun entries(connectorId: String) = ConnectorRuntime.entries(context, connectorId)
         override fun setEntries(connectorId: String, entries: List<ConnectorEntry>) = ConnectorRuntime.setEntries(context, connectorId, entries)
         override fun events(since: Long, now: Long) = journal(context).since(since, now)
+        override fun startupStatus(uid: Int, key: ProfileConfigKey) = ProfileBehaviorRuntime.status(uid, key)
+        override fun config(connectorId: String, callerUser: Int, key: ProfileConfigKey) = ProfileConfigStore.get(context, connectorId, callerUser, key)
+        override fun updateConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, transform: (String?) -> String) = ProfileConfigStore.update(context, connectorId, callerUser, key, transform)
+        override fun setConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, json: String?) = ProfileConfigStore.set(context, connectorId, callerUser, key, json)
         override fun now() = System.currentTimeMillis()
         override fun currentProfile(): String? = current(context)
     }
@@ -185,10 +191,12 @@ object ConnectorRuntime {
 /** Profile events from the registry and from switches (plan 51 §3.3). */
 object ConnectorEvents {
     fun changed(context: Context, before: List<CycloneProfileRecord>, after: List<CycloneProfileRecord>) {
+        ProfileConfigStore.removed(context, after)
         ConnectorRuntime.record(context, ConnectorEvent.diff(before, after))
     }
 
     fun switched(context: Context, androidUserId: Int) {
+        ProfileBehaviorRuntime.switched(androidUserId)
         val id = ProfileRegistryStore.records(context).firstOrNull { it.androidUserId == androidUserId }?.id ?: ConnectorEvent.OWNER
         ConnectorRuntime.record(context, listOf(ConnectorEvent.SWITCHED to id))
     }
@@ -227,6 +235,7 @@ object ConnectorDiscovery {
 
     /** The caller behind a Binder UID, or null when it isn't exactly one installed connector app. */
     fun caller(context: Context, uid: Int): ConnectorCaller? {
+        if (uid / 100_000 != android.os.Process.myUid() / 100_000) return null
         val pm = context.packageManager
         val packages = pm.getPackagesForUid(uid)?.toList().orEmpty()
         if (packages.size != 1) return null // shared user ids are refused
@@ -274,6 +283,12 @@ object ConnectorDiscovery {
 /** The Binder door. Exported, but every call is checked: who (from the kernel), approved by the owner, which scope. */
 class ConnectorService : Service() {
     private val binder = object : ICycloneConnector.Stub() {
+        override fun registerProfileProvider(request: String?, provider: com.cyclone.connector.IProfileBehaviorProvider?): String {
+            val uid = Binder.getCallingUid()
+            val token = Binder.clearCallingIdentity()
+            return try { ProfileBehaviorRuntime.register(applicationContext, uid, request, provider) }
+            finally { Binder.restoreCallingIdentity(token) }
+        }
         override fun call(request: String?): String {
             val uid = Binder.getCallingUid()
             val token = Binder.clearCallingIdentity()

@@ -37,7 +37,9 @@
           "profiles.apps.read",
           "profiles.ext",
           "selector.contribute",
-          "events.profiles"
+          "events.profiles",
+          "profiles.config",
+          "profiles.startup"
         ]
       },
       "uniqueItems": true
@@ -50,7 +52,9 @@
           "profiles.apps.read",
           "profiles.ext",
           "selector.contribute",
-          "events.profiles"
+          "events.profiles",
+          "profiles.config",
+          "profiles.startup"
         ]
       },
       "uniqueItems": true

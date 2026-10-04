@@ -417,6 +417,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
 
     private fun openInstalledApp(packageName: String) {
         packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(this, launch)
             startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         finish()

@@ -45,7 +45,7 @@ object DriveScreen {
 
     private fun giveBack(context: Context, packageName: String) {
         val intent = context.packageManager.getLaunchIntentForPackage(packageName) ?: return
-        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)) }
+        runCatching { com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent); context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)) }
     }
 
     private const val RETURN_DELAY_MS = 1_200L

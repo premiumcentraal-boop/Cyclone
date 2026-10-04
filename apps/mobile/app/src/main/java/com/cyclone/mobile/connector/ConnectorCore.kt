@@ -16,6 +16,14 @@ interface ConnectorBackend {
     fun now(): Long
     /** The profile in front: `owner`, a profile id, or null when Cyclone can't tell (plan 51 K3). */
     fun currentProfile(): String? = null
+    fun startupStatus(uid: Int, key: ProfileConfigKey): JSONObject = JSONObject().put("version", 1).put("state", "unknown").put("configRef", JSONObject.NULL)
+    fun config(connectorId: String, callerUser: Int, key: ProfileConfigKey): String? = null
+    fun updateConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, transform: (String?) -> String): String {
+        val updated = transform(config(connectorId, callerUser, key))
+        setConfig(connectorId, callerUser, key, updated)
+        return updated
+    }
+    fun setConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, json: String?) { error("Config storage unavailable") }
 }
 
 /**
@@ -30,7 +38,8 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
     fun handle(caller: ConnectorCaller?, request: String?): String = try {
         if (caller == null) throw ConnectorException("NOT_A_CONNECTOR", "Only an app that declares a Cyclone connector can call Cyclone.")
         if (!limiter.allow(caller.uid)) throw ConnectorException("RATE_LIMITED", "Too many calls. Slow down and try again.")
-        if (request == null || request.length > ConnectorContract.REQUEST_MAX_BYTES) throw ConnectorException("BAD_REQUEST", "The request is empty or too large.")
+        if (request == null || request.toByteArray(Charsets.UTF_8).size > ConnectorContract.REQUEST_MAX_BYTES) throw ConnectorException("BAD_REQUEST", "The request is empty or too large.")
+        ProfileConfigRules.checkNesting(request)
         val body = runCatching { JSONObject(request) }.getOrNull() ?: throw ConnectorException("BAD_REQUEST", "The request isn't a JSON object.")
         val method = body.optString("method")
         val args = body.optJSONObject("args") ?: JSONObject()
@@ -51,6 +60,31 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
             if (scope !in granted) throw ConnectorException("SCOPE_NOT_GRANTED", "${manifest.label} isn't allowed to ${scope.plain.replaceFirstChar { it.lowercase() }}.")
         }
         return when (method) {
+            "config.get.v1", "config.set.v1", "config.status.v1" -> {
+                need(ConnectorScope.PROFILE_CONFIG)
+                val key = ProfileConfigKey.parse(args, backend.profiles())
+                val user = caller.uid / 100_000
+                val stored = if (method == "config.get.v1") {
+                    backend.config(manifest.id, user, key)?.let(::JSONObject) ?: JSONObject()
+                } else JSONObject(backend.updateConfig(manifest.id, user, key) { text ->
+                    val previous = text?.let(::JSONObject) ?: JSONObject()
+                    if (method == "config.set.v1") {
+                        if (!args.has("value")) throw ConnectorException("BAD_REQUEST", "Send an object or null as value.")
+                        previous.put("value", ProfileConfigRules.value(args.opt("value"))?.let(::JSONObject) ?: JSONObject.NULL)
+                    } else previous.put("state", ProfileConfigRules.state(args.opt("state")))
+                    key.json().put("value", previous.opt("value") ?: JSONObject.NULL)
+                        .put("state", previous.optString("state", "unknown")).toString()
+                })
+                key.json().put("version", 1).put("storageKey", key.storageKey())
+                    .put("value", stored.opt("value") ?: JSONObject.NULL)
+                    .put("state", stored.optString("state", "unknown"))
+            }
+            "startup.status.v1" -> { need(ConnectorScope.PROFILE_STARTUP); backend.startupStatus(caller.uid, ProfileConfigKey.parse(args, backend.profiles())) }
+            "startup.check.v1" -> {
+                need(ConnectorScope.PROFILE_STARTUP)
+                if (args.opt("version") != 1) throw ConnectorException("UNSUPPORTED_CONTRACT", "Startup contract version must be 1.")
+                JSONObject().put("version", 1).put("deadlineMs", 250)
+            }
             "profiles" -> { need(ConnectorScope.PROFILES_READ); profiles(manifest.id, granted) }
             "ext.set" -> { need(ConnectorScope.PROFILES_EXT); setExt(manifest.id, args) }
             "entries.get" -> { need(ConnectorScope.SELECTOR_CONTRIBUTE); JSONObject().put("entries", JSONArray(backend.entries(manifest.id).map { it.toJson() })) }
@@ -88,7 +122,7 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
             val o = JSONObject().put("id", record.id).put("label", record.label).put("kind", "profile")
                 .put("state", when { record.inTrash -> "in_trash"; record.ready -> "ready"; else -> "setting_up" })
                 .put("emoji", record.emoji ?: JSONObject.NULL).put("color", record.color ?: JSONObject.NULL)
-                .put("appCount", record.packages.size)
+                .put("appCount", record.packages.size).put("androidUserId", record.androidUserId ?: JSONObject.NULL)
             if (ConnectorScope.PROFILES_APPS_READ in granted) o.put("packages", JSONArray(record.packages.sorted()))
             if (ConnectorScope.PROFILES_EXT in granted) o.put("ext", record.ext[connectorId]?.let(::JSONObject) ?: JSONObject.NULL)
             list.put(o)

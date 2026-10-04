@@ -709,6 +709,7 @@ object PhoneToolExecutor {
                 // Mapping returns to the app's entry room instead of resuming a deep screen.
                 if (p.optBoolean("clearTask", false)) intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 val eventGeneration = DeviceState.uiGeneration()
+                com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                 context.startActivity(intent)
                 TraceFieldSignals.navigated()
                 launchedOutcome(service, before, p, eventGeneration, JSONObject().put("package", packageName).put("launched", true))
@@ -752,6 +753,7 @@ object PhoneToolExecutor {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 val generation = DeviceState.uiGeneration()
+                com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                 context.startActivity(intent)
                 launchedOutcome(service, before, p, generation, JSONObject().put("started", true))
             }
@@ -768,6 +770,7 @@ object PhoneToolExecutor {
                     }
                     val eventGeneration = DeviceState.uiGeneration()
                     try {
+                        com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                         context.startActivity(intent)
                     } catch (_: android.content.ActivityNotFoundException) {
                         return errorResult(PhoneToolErrorCode.ACTION_FAILED, "No camera app on this phone")
@@ -783,6 +786,7 @@ object PhoneToolExecutor {
                 val intent = Intent(Intent.ACTION_VIEW, parsed).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 p.optString("package").takeIf { it.isNotBlank() }?.let(intent::setPackage)
                 val eventGeneration = DeviceState.uiGeneration()
+                com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                 context.startActivity(intent)
                 launchedOutcome(service, before, p, eventGeneration, JSONObject().put("uri", uri).put("started", true))
             }
@@ -809,6 +813,7 @@ object PhoneToolExecutor {
                     ?.let { intent.putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, it) }
                 val eventGeneration = DeviceState.uiGeneration()
                 try {
+                    com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                     context.startActivity(intent)
                 } catch (_: android.content.ActivityNotFoundException) {
                     return errorResult(PhoneToolErrorCode.APP_NOT_FOUND, "No clock app on this phone accepts this request")
@@ -831,6 +836,7 @@ object PhoneToolExecutor {
                 }
                 val eventGeneration = DeviceState.uiGeneration()
                 try {
+                    com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                     context.startActivity(intent)
                 } catch (_: android.content.ActivityNotFoundException) {
                     return errorResult(PhoneToolErrorCode.APP_NOT_FOUND, "This phone has no $key settings page")

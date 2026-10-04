@@ -108,6 +108,13 @@
                   "object",
                   "null"
                 ]
+              },
+              "androidUserId": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
               }
             }
           }

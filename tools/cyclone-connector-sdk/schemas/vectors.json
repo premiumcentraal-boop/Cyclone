@@ -13,7 +13,9 @@
           "events.profiles",
           "profiles.ext",
           "profiles.read",
-          "selector.contribute"
+          "selector.contribute",
+          "profiles.config",
+          "profiles.startup"
         ],
         "label": "Acme Profiles",
         "approvedAt": 1
@@ -101,7 +103,7 @@
         "ok": true,
         "result": {
           "contract": "cyclone.connector/1",
-          "minor": 0,
+          "minor": 1,
           "connectorId": "acme-profiles",
           "approved": true,
           "granted": [
@@ -166,7 +168,8 @@
               "appCount": 1,
               "ext": {
                 "tier": "gold"
-              }
+              },
+              "androidUserId": 10
             },
             {
               "id": "Cyclone_bbbbbbbbbbbbbbbb",
@@ -176,7 +179,8 @@
               "emoji": null,
               "color": null,
               "appCount": 0,
-              "ext": null
+              "ext": null,
+              "androidUserId": 10
             }
           ]
         }
@@ -437,6 +441,332 @@
           "code": "BAD_REQUEST"
         }
       }
+    },
+    {
+      "name": "config empty",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.get.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "version": 1,
+          "storageKey": "0cf9bb70c6a5cd90ef10edcfdde83559a0de9b6255fe6366177c146ed09be0ff",
+          "value": null,
+          "state": "unknown"
+        }
+      },
+      "schema": "config.result.schema.json"
+    },
+    {
+      "name": "config opaque set",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.set.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "value": {
+            "automation": true,
+            "token": "opaque"
+          }
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "version": 1,
+          "storageKey": "0cf9bb70c6a5cd90ef10edcfdde83559a0de9b6255fe6366177c146ed09be0ff",
+          "value": {
+            "automation": true,
+            "token": "opaque"
+          },
+          "state": "unknown"
+        }
+      },
+      "schema": "config.result.schema.json"
+    },
+    {
+      "name": "config clear",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.set.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "value": null
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "version": 1,
+          "storageKey": "0cf9bb70c6a5cd90ef10edcfdde83559a0de9b6255fe6366177c146ed09be0ff",
+          "value": null,
+          "state": "unknown"
+        }
+      },
+      "schema": "config.result.schema.json"
+    },
+    {
+      "name": "config readiness",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.status.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "state": "degraded"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "version": 1,
+          "storageKey": "0cf9bb70c6a5cd90ef10edcfdde83559a0de9b6255fe6366177c146ed09be0ff",
+          "value": null,
+          "state": "degraded"
+        }
+      },
+      "schema": "config.result.schema.json"
+    },
+    {
+      "name": "config wrong user",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.get.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 11,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "NO_SUCH_PROFILE"
+        }
+      }
+    },
+    {
+      "name": "config unscoped package",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.get.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.other.app"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "BAD_REQUEST"
+        }
+      }
+    },
+    {
+      "name": "config missing value",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.set.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "BAD_REQUEST"
+        }
+      }
+    },
+    {
+      "name": "config scope required",
+      "caller": {},
+      "request": {
+        "method": "config.get.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "SCOPE_NOT_GRANTED"
+        }
+      }
+    },
+    {
+      "name": "startup version one",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "startup.check.v1",
+        "args": {
+          "version": 1
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "version": 1,
+          "deadlineMs": 250
+        }
+      },
+      "schema": "startup.check.result.schema.json"
+    },
+    {
+      "name": "startup version two",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "startup.check.v1",
+        "args": {
+          "version": 2
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "UNSUPPORTED_CONTRACT"
+        }
+      }
+    },
+    {
+      "name": "startup status empty",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "startup.status.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "version": 1,
+          "state": "unknown",
+          "configRef": null
+        }
+      },
+      "schema": "startup.status.result.schema.json"
     }
   ]
 }
