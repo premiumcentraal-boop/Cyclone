@@ -89,6 +89,7 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
                 .put("state", when { record.inTrash -> "in_trash"; record.ready -> "ready"; else -> "setting_up" })
                 .put("emoji", record.emoji ?: JSONObject.NULL).put("color", record.color ?: JSONObject.NULL)
                 .put("appCount", record.packages.size)
+            record.androidUserId?.let { o.put("androidUserId", it) }
             if (ConnectorScope.PROFILES_APPS_READ in granted) o.put("packages", JSONArray(record.packages.sorted()))
             if (ConnectorScope.PROFILES_EXT in granted) o.put("ext", record.ext[connectorId]?.let(::JSONObject) ?: JSONObject.NULL)
             list.put(o)

@@ -120,6 +120,7 @@ new ones until the owner approves them.
   switched users outside Cyclone). It is a hint for your UI, not a lock.
 - `id`: `owner` or `Cyclone_<16 hex>`.
 - `state`: `ready` | `setting_up` | `in_trash`.
+- `androidUserId`: the backing Android user id, only when Cyclone knows it.
 - `ext`: your own namespace on a Cyclone profile (not on `owner`). It holds a JSON object of at most 4 KB, at most 32
   keys in total and at most 4 levels deep.
   - Keys or values that look like secrets (password, token, API key, OTP…) are refused.
