@@ -115,11 +115,11 @@ class SnapshotDetailTests(Base):
         self.assertTrue(approval["answerHere"])
 
     def test_a_phone_that_cannot_start_says_why_in_one_line(self):
-        self.devices[1] = paired("dev_b", "SM-X710", state="sleeping", connectionLabel="Sleeping")
+        self.devices[1] = paired("dev_b", "SM-X710", state="SLEEPING", connectionLabel="Sleeping")
         mission = self.fleet.run_command("open Maps on Tablet")["mission"]
         phone = mission["phones"][0]
         self.assertEqual(phone["state"], "WAITING")
-        self.assertIn("sleeping", phone["hint"].lower())
+        self.assertIn("asleep", phone["hint"].lower())
 
     def test_a_phone_that_is_running_has_no_hint(self):
         mission = self.fleet.run_command("open Maps on Tablet")["mission"]
@@ -149,7 +149,10 @@ class OverviewTests(Base):
         self.assertEqual([t["status"] for t in by_label["Tablet"]["tasks"]], ["RUNNING"])
         self.assertFalse(by_label["Old Pixel"]["addressable"])
         self.assertEqual(by_label["Old Pixel"]["tasks"], [])
-        self.assertEqual(overview["counts"], {"phones": 3, "ready": 2, "busy": 2, "needYou": 1})
+        # Ready counts idle phones that can start now; Work Phone needs you, Tablet works, Old Pixel isn't paired.
+        self.assertEqual(overview["counts"], {"phones": 3, "ready": 0, "busy": 2, "needYou": 1, "offline": 1, "rooted": 0})
+        self.assertEqual({r["label"]: r["presence"] for r in overview["phones"]},
+                         {"Work Phone": "needs_you", "Tablet": "working", "Old Pixel": "unpaired"})
         self.assertEqual([p["label"] for p in overview["phones"]][-1], "Old Pixel")   # addressable phones come first
 
     def test_the_overview_survives_an_unreadable_task_list(self):

@@ -810,7 +810,7 @@ class AiStore:
                                  "summary": openapi.hide_secrets(r["summary"] or "")[:400], "ended": self._iso(r["endedAt"])}
                                 for r in c.results(limit)]}
         if name == "list_phones":
-            return {"phones": [{"id": d["deviceId"], "name": d.get("name"), "state": d.get("state"), "ready": d.get("state") == "ready"}
+            return {"phones": [{"id": d["deviceId"], "name": d.get("name"), "state": d.get("state"), "ready": str(d.get("state") or "").upper() == "READY"}
                                for d in c._devices()]}
         if name == "list_accounts":
             return {"accounts": [{"id": a["id"], "service": a["service"], "handle": a["handle"], "status": a["status"],

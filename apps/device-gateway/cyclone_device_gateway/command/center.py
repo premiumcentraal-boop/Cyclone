@@ -561,6 +561,35 @@ class CommandCenter:
             raise CommandError("No such task.")
         return self._task_public(row)
 
+    def task_states(self, task_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Status, cause and latest run of many tasks in a few queries, for views that watch hundreds of tasks at once
+        (the fleet). Unknown ids are simply absent."""
+        wanted = list(dict.fromkeys(str(t) for t in task_ids if t))
+        out: dict[str, dict[str, Any]] = {}
+        with self._lock:
+            for start in range(0, len(wanted), 400):
+                chunk = wanted[start:start + 400]
+                marks = ",".join("?" * len(chunk))
+                for r in self._db.execute(
+                        f"SELECT id, device_id, status, cause, created_at, updated_at FROM task WHERE id IN ({marks})", chunk):
+                    out[r["id"]] = {"id": r["id"], "deviceId": r["device_id"], "status": r["status"], "cause": r["cause"],
+                                    "createdAt": r["created_at"], "updatedAt": r["updated_at"], "run": None}
+                for r in self._db.execute(
+                        f"SELECT task_id, summary, turns, cost_usd FROM run WHERE task_id IN ({marks}) ORDER BY started_at ASC",
+                        chunk):
+                    if r["task_id"] in out:   # ascending, so the newest run is the one left
+                        out[r["task_id"]]["run"] = {"summary": r["summary"], "turns": r["turns"], "costUsd": r["cost_usd"]}
+        return out
+
+    def open_tasks_brief(self, limit: int = 100_000) -> list[dict[str, Any]]:
+        """Open tasks, newest first (insertion order breaks ties): id, phone, title, status and age only, in one query."""
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT id, device_id, title, status, created_at FROM task WHERE status IN ({','.join('?' * len(OPEN_TASK_STATES))}) "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?", (*OPEN_TASK_STATES, limit)).fetchall()
+        return [{"id": r["id"], "deviceId": r["device_id"], "title": r["title"], "status": r["status"], "createdAt": r["created_at"]}
+                for r in rows]
+
     def _task_public(self, r: sqlite3.Row) -> dict[str, Any]:
         run = self._db.execute("SELECT * FROM run WHERE task_id = ? ORDER BY started_at DESC LIMIT 1", (r["id"],)).fetchone()
         return {
@@ -959,7 +988,7 @@ class CommandCenter:
             listed = self._devices()
         except Exception:  # noqa: BLE001 - discovery trouble means no phone is ready this tick
             return {}
-        return {str(d.get("deviceId")): d for d in listed if d.get("paired") and d.get("state") == "ready" and d.get("deviceId")}
+        return {str(d.get("deviceId")): d for d in listed if d.get("paired") and str(d.get("state") or "").upper() == "READY" and d.get("deviceId")}
 
     def _dispatch(self, ready: dict[str, dict[str, Any]]) -> None:
         now = self._clock()

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from cyclone_device_gateway.command.center import CommandCenter
-from cyclone_device_gateway.desktop_runtime.fleet_orchestrator import FleetOrchestrator
+from cyclone_device_gateway.desktop_runtime.fleet_orchestrator import FleetError, FleetOrchestrator
 from tests.test_fleet_orchestrator import Clock, FakePhones, paired
 
 
@@ -101,7 +101,15 @@ class AcceptanceTests(unittest.TestCase):
         ], canary=1, command="canary")
         self.assertEqual(rolled["remaining"], 1)
         self.assertEqual([device for device, _goal in self.phones.started], ["dev_a"])
-        self.fleet.continue_rollout(rolled["mission"]["missionId"])
+        mission_id = rolled["mission"]["missionId"]
+        # The rest wait for the canary to FINISH, not merely to not have failed yet.
+        with self.assertRaises(FleetError) as running:
+            self.fleet.continue_rollout(mission_id)
+        self.assertEqual(running.exception.code, "CANARY_RUNNING")
+        self.assertEqual([device for device, _goal in self.phones.started], ["dev_a"])
+        self.phones.finish(self.phones.mission_for("dev_a", "open mail"))
+        self.center.tick()
+        self.fleet.continue_rollout(mission_id)
         self.assertIn("dev_b", [device for device, _goal in self.phones.started])
 
     def test_empty_group_addresses_nobody(self):

@@ -220,6 +220,7 @@ class DesktopRuntime:
             self.command, self.fleet.list_public, self.workspace.nickname_map, settings.runtime_dir / "fleet" / "missions.json",
             groups=lambda: list(self.workspace.public().get("groups") or []),
             events=getattr(self.fleet, "events", None),
+            colors=self.workspace.color_map,
         )
         self.command.set_task_listener(self.fleet_orchestrator.enqueue_task_change)
         # Plan 48: the Port Hub (Cyclone Ports). Absent only when the ports kit isn't installed.

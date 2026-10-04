@@ -34,8 +34,8 @@ Phase 1 changes (alpha.95.dev1):
 """
 from __future__ import annotations
 
+import hashlib
 import logging
-import os
 import queue
 import secrets
 import threading
@@ -48,22 +48,13 @@ from .fleet_store import FleetStore
 from .models import FleetEventType
 
 
-def _cap(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
-MAX_ASSIGNMENTS = _cap("FLEET_MAX_PER_COMMAND", 16)
-MAX_PHONES = _cap("FLEET_MAX_PHONES", 32)
+# Alpha 107: there is no phone limit. A mission addresses every phone it names; the views page and batch their reads
+# so a large fleet stays fast instead of being capped.
 CACHE_LIMIT = 200
 TRIM_EVERY_MS = 60_000
-OPEN_TASK_LIMIT = 5000
+OPEN_TASK_LIMIT = 1_000_000
+CHANGE_QUEUE = 8192
+MAX_RETRIES = 3
 log = logging.getLogger("cyclone.fleet")
 
 # Command Center task state -> what the person sees for one phone.
@@ -73,6 +64,41 @@ _PHONE_STATE = {
 }
 _TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
 _CC_OPEN = {"scheduled", "making", "waiting_device", "running", "needs_you"}
+_CC_DONE = {"succeeded", "failed", "cancelled"}
+
+
+def is_ready(device: dict[str, Any] | None) -> bool:
+    """The device list says READY (the gateway's enum); older callers and tests say ready. Both mean ready."""
+    return bool(device) and str(device.get("state") or "").upper() == "READY"
+
+
+def presence(device: dict[str, Any], tasks: list[dict[str, Any]]) -> str:
+    """One word for the status dot of a phone: what a person needs to know first."""
+    state = str(device.get("state") or "").upper()
+    screen = str(device.get("screenState") or device.get("screen") or "").upper()
+    if not device.get("paired"):
+        return "unpaired"
+    if any(t.get("needsYou") for t in tasks):
+        return "needs_you"
+    if state in {"DISCONNECTED", "UNAUTHORIZED"}:
+        return "offline"
+    if state == "PAIRING":
+        return "connecting"
+    if state == "ATTENTION":
+        return "attention"
+    if state == "SLEEPING" or screen == "SLEEPING":
+        return "asleep"
+    if any(t.get("status") == "RUNNING" for t in tasks):
+        return "working"
+    return "ready" if state == "READY" else "attention"
+
+
+def root_of(health: dict[str, Any] | None) -> str:
+    """ROOTED, NOT_ROOTED or UNKNOWN (a phone too old to say)."""
+    root = (health or {}).get("root")
+    if isinstance(root, dict) and isinstance(root.get("rooted"), bool):
+        return "ROOTED" if root["rooted"] else "NOT_ROOTED"
+    return "UNKNOWN"
 
 
 class FleetError(Exception):
@@ -104,6 +130,15 @@ def mission_status(states: list[str]) -> str:
     return "PARTIAL_FAILURE" if "COMPLETED" in states else "FAILED"
 
 
+def _request_id(mission_id: str, suffix: str) -> str:
+    """A Command Center requestId (8..80 of A-Z a-z 0-9 _ -). Long ones are shortened to a stable digest, never cut."""
+    raw = f"{mission_id}-{suffix}"
+    clean = "".join(ch for ch in raw if ch.isalnum() or ch in "_-")
+    if clean == raw and 8 <= len(raw) <= 80:
+        return raw
+    return f"{mission_id[:40]}-{hashlib.sha256(raw.encode()).hexdigest()[:32]}"
+
+
 class FleetOrchestrator:
     def __init__(
         self,
@@ -115,11 +150,13 @@ class FleetOrchestrator:
         clock: Callable[[], int] = _now_ms,
         groups: Callable[[], list[dict[str, Any]]] | None = None,
         events: Any = None,
+        colors: Callable[[], dict[str, str]] | None = None,
     ):
         self._cc = command_center
         self._devices = fleet_devices
         self._nicknames = nicknames
         self._groups = groups or (lambda: [])
+        self._colors = colors or (lambda: {})
         self._clock = clock
         self._events = events
         self._paused = False
@@ -146,7 +183,7 @@ class FleetOrchestrator:
         self._excluded = {part for part in raw_excluded.split(",") if part}
         cap = self._store.control("spendCap")
         self._spend_cap = float(cap) if cap else None
-        self._changes: queue.Queue = queue.Queue(maxsize=256)
+        self._changes: queue.Queue = queue.Queue(maxsize=CHANGE_QUEUE)
         self._changes_dropped = 0
         self._change_stop = threading.Event()
         self._change_thread = threading.Thread(target=self._change_loop, name="fleet-changes", daemon=True)
@@ -226,31 +263,14 @@ class FleetOrchestrator:
         client_request_id: str | None = None, strict: bool = False,
     ) -> dict[str, Any]:
         """Create one Command Center task per phone. `strict` refuses the whole mission if any phone is unusable."""
-        items = [a if isinstance(a, Assignment) else Assignment(
-            str(a.get("deviceId") or ""), str(a.get("label") or a.get("deviceId") or ""), str(a.get("goal") or "").strip(),
-        ) for a in assignments]
-        if not items:
-            raise FleetError("INVALID_REQUEST", "There is nothing to run.")
-        if self._paused:
-            raise FleetError("FLEET_PAUSED", "Fleet dispatch is paused. Resume it before starting phones.")
-        excluded = [item.label for item in items if item.device_id in self._excluded]
-        if excluded:
-            raise FleetError("DO_NOT_TARGET", "These phones are marked do-not-target: " + ", ".join(excluded))
-        if len(items) > MAX_ASSIGNMENTS:
-            raise FleetError("INVALID_REQUEST", f"A mission can address at most {MAX_ASSIGNMENTS} phones.")
-        seen: set[str] = set()
-        for item in items:
-            if not item.device_id or not item.goal:
-                raise FleetError("INVALID_REQUEST", "Every assignment needs a phone and a goal.")
-            if item.device_id in seen:
-                raise FleetError("INVALID_REQUEST", "Each phone can be given one instruction per mission; merge them into one.")
-            seen.add(item.device_id)
+        items = self._validate(assignments)
 
         mission_id = self._mission_id(client_request_id) if client_request_id else f"flt_{secrets.token_hex(6)}"
         owner, existing = self._reserve(mission_id, command, notes)
         if existing is not None:
             return self._snapshot(existing)
         committed = False
+        created: list[str] = []
         try:
             live = {str(d.get("deviceId") or d.get("id")): d for d in self._devices()}
             problems: dict[str, str] = {}
@@ -272,12 +292,16 @@ class FleetOrchestrator:
                         task = self._cc.create_task({
                             "title": f"{item.label}: {item.goal}"[:80], "goal": item.goal, "deviceId": item.device_id,
                             # Idempotent: the same mission+phone can never become two tasks, even on a double submit.
-                            "requestId": f"{mission_id}-{index}",
+                            "requestId": _request_id(mission_id, str(index)),
                         })
+                        created.append(task["id"])
                         row["taskId"] = task["id"]
                         self._store.bind_task(task["id"], mission_id)
                     except ValueError as exc:            # the Command Center's own refusal, written for the owner
                         row["error"] = str(exc)
+                    except Exception:                    # noqa: BLE001 - one phone's trouble never sinks the others
+                        log.exception("fleet.create_failed mission=%s device=%s", mission_id, item.device_id)
+                        row["error"] = f"Cyclone couldn't start {item.label}'s task. Try it again."
                 rows.append(row)
 
             mission = {"missionId": mission_id, "command": command[:2000], "createdAt": self._clock(),
@@ -293,6 +317,11 @@ class FleetOrchestrator:
             self._emit(FleetEventType.MISSION_CREATED, missionId=mission_id, status="queued")
         except Exception:
             log.exception("fleet.dispatch_failed mission=%s", mission_id)
+            if not committed and not client_request_id:
+                # A task that started without its mission would run where no fleet view can see or stop it. (With a
+                # requestId the owner's retry finds the same tasks again through their idempotent keys.)
+                for task_id in created:
+                    self._cancel_task(task_id)
             if not committed:
                 self._store.delete(mission_id)
                 with self._lock:
@@ -306,6 +335,27 @@ class FleetOrchestrator:
         if self._sync_nudge:
             self.flush()
         return self._snapshot(mission)
+
+    def _validate(self, assignments: list[Assignment | dict[str, Any]]) -> list[Assignment]:
+        """Every way into the fleet (a sentence, dispatch, a rollout, a scene) checks the same rules, all up front."""
+        items = [a if isinstance(a, Assignment) else Assignment(
+            str(a.get("deviceId") or ""), str(a.get("label") or a.get("deviceId") or ""), str(a.get("goal") or "").strip(),
+        ) for a in assignments if isinstance(a, (Assignment, dict))]
+        if not items or len(items) != len(assignments):
+            raise FleetError("INVALID_REQUEST", "There is nothing to run." if not assignments else "Every assignment is a phone and a goal.")
+        if self._paused:
+            raise FleetError("FLEET_PAUSED", "Fleet dispatch is paused. Resume it before starting phones.")
+        excluded = [item.label for item in items if item.device_id in self._excluded]
+        if excluded:
+            raise FleetError("DO_NOT_TARGET", "These phones are marked do-not-target: " + ", ".join(excluded))
+        seen: set[str] = set()
+        for item in items:
+            if not item.device_id or not item.goal:
+                raise FleetError("INVALID_REQUEST", "Every assignment needs a phone and a goal.")
+            if item.device_id in seen:
+                raise FleetError("INVALID_REQUEST", "Each phone can be given one instruction per mission; merge them into one.")
+            seen.add(item.device_id)
+        return items
 
     def on_task_change(self, change: dict[str, Any]) -> None:
         """Command Center state transition. Ids and the new status only — no goal, summary, or secret."""
@@ -345,25 +395,18 @@ class FleetOrchestrator:
         mission = self._lookup(mission_id)
         if not mission:
             return False
-        terminal = {"succeeded", "failed", "cancelled"}
-        for row in mission.get("assignments") or []:
-            if row.get("error"):
-                continue
-            tid = row.get("taskId")
-            if not tid:
-                return False
-            if tid == task_id:
-                if status not in terminal:
-                    return False
-                continue
-            try:
-                task = self._cc.get_task(tid)
-            except Exception:  # noqa: BLE001 - an unreadable sibling is not done
-                log.info("fleet.sibling_unreadable mission=%s task=%s", mission_id, tid)
-                return False
-            if task is None or str(task.get("status") or "") not in terminal:
-                return False
-        return True
+        rows = [row for row in mission.get("assignments") or [] if not row.get("error")]
+        if any(not row.get("taskId") for row in rows):
+            return False                                  # a phone held back by a canary has not run yet
+        siblings = [row["taskId"] for row in rows if row["taskId"] != task_id]
+        try:
+            tasks = self._tasks(siblings)
+        except Exception:  # noqa: BLE001 - an unreadable sibling is not done
+            log.info("fleet.sibling_unreadable mission=%s", mission_id)
+            return False
+        if status not in _CC_DONE:
+            return False
+        return all(str((tasks.get(tid) or {}).get("status") or "") in _CC_DONE for tid in siblings)
 
     def _reserve(self, mission_id: str, command: str, notes: list[str] | None) -> tuple[bool, dict[str, Any] | None]:
         """Reserve a mission id before any task is created. The waiter of a parallel duplicate gets the finished one."""
@@ -437,14 +480,16 @@ class FleetOrchestrator:
     def missions_page(self, limit: int = 50, *, cursor: str | None = None) -> dict[str, Any]:
         """Newest first. `cursor` is the previous page's nextCursor. Memory is a cache, not the list."""
         items, next_cursor = self._store.page(max(1, int(limit)), cursor=cursor)
+        items = [item for item in items if not item.get("pending")]
+        # One read of each source for the whole page, however many phones each mission has.
         approvals = self._open_approvals()
         index = self._open_task_index()
+        live = self._live_by_id()
+        tasks = self._tasks([row.get("taskId") for item in items for row in item.get("assignments") or [] if row.get("taskId")])
         missions = []
         for item in items:
-            if item.get("pending"):
-                continue
             self._remember(item)
-            missions.append(self._snapshot(item, approvals, index))
+            missions.append(self._snapshot(item, approvals, index, live, tasks))
         return {"missions": missions, "nextCursor": next_cursor}
 
     def cancel_mission(self, mission_id: str) -> dict[str, Any]:
@@ -464,8 +509,8 @@ class FleetOrchestrator:
         untouched. Use stop_all() as the emergency 'cancel everything' path.
         """
         stopped = 0
-        open_ids = {task["id"] for task in self._cc.list_tasks(status="open", limit=5000)}
-        fleet_task_ids: set[str] = set()
+        open_ids = {task["id"] for task in self._open_tasks()}
+        fleet_task_ids: set[str] = self._store.bound_tasks(sorted(open_ids))
         cursor: str | None = None
         while True:
             items, cursor = self._store.page(200, cursor=cursor)
@@ -489,13 +534,14 @@ class FleetOrchestrator:
         the scope obvious to the owner.
         """
         stopped = 0
-        for task in self._cc.list_tasks(status="open", limit=1000):
+        for task in self._open_tasks():
             if self._cancel_task(task["id"]):
                 stopped += 1
         return {"stopped": stopped, "scope": "all"}
 
     def retry_failed(self, mission_id: str) -> dict[str, Any]:
-        """Retry failed phones on this mission. Completed phones are not given a new task."""
+        """Retry failed phones on this mission. Completed phones are not given a new task, and a phone the owner
+        stopped stays stopped: Stop is an answer, not a failure."""
         mission = self._lookup(mission_id)
         if mission is None:
             raise FleetError("NOT_FOUND", "That mission is not here.")
@@ -505,14 +551,15 @@ class FleetOrchestrator:
         retried = 0
         rows = list(mission.get("assignments") or [])
         by_id = {row.get("deviceId"): row for row in rows}
+        old_tasks = self._tasks([row.get("taskId") for row in rows if row.get("taskId")])
         try:
-            for phone in snap["phones"]:
-                if phone.get("state") not in {"FAILED", "CANCELLED"}:
+            for index, phone in enumerate(snap["phones"]):
+                if phone.get("state") != "FAILED":
                     continue
                 row = by_id.get(phone.get("deviceId"))
                 if row is None or not row.get("goal") or row.get("deviceId") in self._excluded:
                     continue
-                if int(row.get("retries") or 0) >= 3:
+                if int(row.get("retries") or 0) >= MAX_RETRIES:
                     row["error"] = "Retry limit reached."
                     continue
                 attempt = int(row.get("retries") or 0) + 1
@@ -521,11 +568,15 @@ class FleetOrchestrator:
                         "title": f"{row.get('label')}: {row.get('goal')}"[:80],
                         "goal": row.get("goal"),
                         "deviceId": row.get("deviceId"),
-                        "requestId": f"{mission_id}-retry-{row.get('deviceId')}-{attempt}",
+                        "requestId": _request_id(mission_id, f"r{index}-{attempt}"),
                     })
                 except ValueError as exc:          # the Command Center's own refusal; keep going with the other phones
                     row["error"] = str(exc)
                     continue
+                # What the failed attempt spent stays counted against the spend cap and in the export.
+                spent = ((old_tasks.get(row.get("taskId") or "") or {}).get("run") or {}).get("costUsd")
+                if isinstance(spent, (int, float)):
+                    row["priorCostUsd"] = float(row.get("priorCostUsd") or 0.0) + float(spent)
                 row["taskId"] = task["id"]
                 row["error"] = None
                 row["retries"] = attempt
@@ -553,9 +604,11 @@ class FleetOrchestrator:
         if self._paused:
             raise FleetError("FLEET_PAUSED", "Fleet dispatch is paused. Resume it before continuing the rollout.")
         snap = self._snapshot(mission)
-        canary_failed = any(phone.get("state") == "FAILED" and phone.get("taskId") for phone in snap["phones"])
-        if canary_failed:
+        canary = [phone for phone in snap["phones"] if phone.get("taskId")]
+        if any(phone.get("state") in {"FAILED", "CANCELLED"} for phone in canary) or not canary:
             raise FleetError("CANARY_FAILED", "The canary did not succeed. The rest were not started.")
+        if any(phone.get("state") != "COMPLETED" for phone in canary):
+            raise FleetError("CANARY_RUNNING", "The canary is still working. Continue when it has finished.")
         live = {str(d.get("deviceId") or d.get("id")): d for d in self._devices()}
         started = 0
         try:
@@ -573,7 +626,7 @@ class FleetOrchestrator:
                         "title": f"{row.get('label')}: {row.get('goal')}"[:80],
                         "goal": row.get("goal"),
                         "deviceId": device_id,
-                        "requestId": f"{mission_id}-rollout-{device_id}-{index}",
+                        "requestId": _request_id(mission_id, f"c{index}"),
                     })
                 except ValueError as exc:
                     row["error"], row["stage"] = str(exc), "skipped"
@@ -613,7 +666,7 @@ class FleetOrchestrator:
                     "status": phone.get("state"),
                     "reason": phone.get("hint") or phone.get("cause") or "Waiting for the phone.",
                 })
-        return {"waiting": waiting, "count": len(waiting), "maxPhones": MAX_PHONES, "maxPerCommand": MAX_ASSIGNMENTS, "paused": self._paused}
+        return {"waiting": waiting, "count": len(waiting), "phoneLimit": None, "paused": self._paused}
 
     def preflight(self, assignments: list[Any]) -> list[str]:
         """Owner-facing warnings. Never a secret, and never a reason to guess a phone."""
@@ -662,14 +715,15 @@ class FleetOrchestrator:
         """Start the canary phones. The rest are stored on the same mission and do not run yet."""
         if canary < 1:
             raise FleetError("INVALID_REQUEST", "A rollout needs at least one canary phone.")
-        first = assignments[:canary]
-        rest = assignments[canary:]
-        mission = self.dispatch(first, command, notes=[f"Canary {len(first)} of {len(assignments)}. The rest wait."])
+        items = self._validate(assignments)          # the held-back phones follow the same rules as the canary
+        first = items[:canary]
+        rest = items[canary:]
+        mission = self.dispatch(first, command, notes=[f"Canary {len(first)} of {len(items)}. The rest wait."])
         stored = self._lookup(str(mission.get("missionId") or ""))
         if stored is not None and rest:
             rows = list(stored.get("assignments") or [])
             for item in rest:
-                rows.append({"deviceId": item.get("deviceId"), "label": item.get("label"), "goal": item.get("goal"), "taskId": None, "error": None, "stage": "waiting"})
+                rows.append({"deviceId": item.device_id, "label": item.label, "goal": item.goal, "taskId": None, "error": None, "stage": "waiting"})
             stored["assignments"] = rows
             self._store.save(stored)
             mission = self._snapshot(stored)
@@ -689,8 +743,7 @@ class FleetOrchestrator:
             "paused": self._paused,
             "excluded": sorted(self._excluded),
             "queueDepth": waiting["count"],
-            "maxPhones": MAX_PHONES,
-            "maxPerCommand": MAX_ASSIGNMENTS,
+            "phoneLimit": None,
             "spendCap": self._spend_cap,
             "eventSubscribers": subscribers,
             "store": "fleet.db",
@@ -714,7 +767,7 @@ class FleetOrchestrator:
         phones = []
         cost = 0.0
         for phone in mission.get("phones") or []:
-            amount = phone.get("costUsd")
+            amount = phone.get("totalCostUsd")
             if isinstance(amount, (int, float)):
                 cost += float(amount)
             phones.append({
@@ -800,6 +853,9 @@ class FleetOrchestrator:
             return True
         except ValueError:                      # already finished - nothing to stop
             return False
+        except Exception:                       # noqa: BLE001 - one stuck cancel never stops the rest of a stop
+            log.exception("fleet.cancel_failed task=%s", task_id)
+            return False
 
     # ------------------------------------------------------------------ saved multi-phone commands
 
@@ -815,12 +871,12 @@ class FleetOrchestrator:
     # ------------------------------------------------------------------ the whole fleet at a glance
 
     def overview(self) -> dict[str, Any]:
-        """Every phone you can address: its state, what it is doing, what it is queued for, and when it was last seen.
+        """Every phone you can address: its status, name, colour, model, root state, health and what it is doing.
 
-        Read-only. It reads the fleet list and the Command Center's open tasks; it never touches a phone.
+        Read-only. It reads the fleet list and the Command Center's open tasks once each; it never touches a phone.
         """
         try:
-            open_tasks = self._cc.list_tasks(status="open", limit=1000)
+            open_tasks = self._open_tasks()
         except Exception:  # noqa: BLE001 - a dashboard must still show phones if the task list is briefly unreadable
             open_tasks = []
         by_phone: dict[str, list[dict[str, Any]]] = {}
@@ -829,40 +885,57 @@ class FleetOrchestrator:
                 by_phone.setdefault(task["deviceId"], []).append(task)
         approvals = self._open_approvals()
         nicknames = self._nicknames()
+        try:
+            colors = self._colors() or {}
+        except Exception:  # noqa: BLE001 - a colour is decoration; never fail the list for it
+            colors = {}
         rows: list[dict[str, Any]] = []
         for device in self._devices():
             device_id = str(device.get("deviceId") or device.get("id") or "")
             if not device_id:
                 continue
-            tasks = sorted(by_phone.get(device_id, []), key=lambda t: t.get("createdAt") or 0)
-            health = device.get("connectionHealth") or {}
+            tasks = [{
+                "taskId": t["id"], "title": t.get("title") or "", "status": _PHONE_STATE.get(t.get("status"), "UNKNOWN"),
+                "needsYou": t["id"] in approvals,
+                "approval": {
+                    "id": approvals[t["id"]]["id"],
+                    "text": approvals[t["id"]].get("text") or "",
+                    "answerHere": bool(approvals[t["id"]].get("answerHere")),
+                } if t["id"] in approvals else None,
+            } for t in sorted(by_phone.get(device_id, []), key=lambda t: t.get("createdAt") or 0)]
+            connection = device.get("connectionHealth") or {}
+            health = device.get("health") if isinstance(device.get("health"), dict) else None
+            model = (health or {}).get("model") or device.get("model") or device.get("name")
             rows.append({
                 "deviceId": device_id,
                 "label": nicknames.get(device_id) or str(device.get("name") or device_id),
                 "nickname": nicknames.get(device_id),
-                "model": device.get("model") or device.get("name"),
-                "state": str(device.get("state") or "unknown"),
+                "color": colors.get(device_id),
+                "model": model,
+                "manufacturer": (health or {}).get("manufacturer") or device.get("manufacturer"),
+                "os": (health or {}).get("os"),
+                "root": root_of(health),
+                "presence": presence(device, tasks),
+                "state": str(device.get("state") or "UNKNOWN"),
                 "stateLabel": str(device.get("connectionLabel") or device.get("state") or ""),
                 "paired": bool(device.get("paired")),
                 "source": str(device.get("source") or "USB"),
                 "screen": device.get("screen"),
                 "lastSeenMs": device.get("lastSeenMs"),
-                "accessibilityConnected": health.get("accessibilityConnected"),
+                "accessibilityConnected": connection.get("accessibilityConnected"),
                 "addressable": bool(device.get("paired")),
-                "tasks": [{
-                    "taskId": t["id"], "title": t.get("title") or "", "status": _PHONE_STATE.get(t.get("status"), "UNKNOWN"),
-                    "needsYou": t["id"] in approvals,
-                    "approval": {
-                        "id": approvals[t["id"]]["id"],
-                        "text": approvals[t["id"]].get("text") or "",
-                        "answerHere": bool(approvals[t["id"]].get("answerHere")),
-                    } if t["id"] in approvals else None,
-                } for t in tasks],
+                "doNotTarget": device_id in self._excluded,
+                "health": {key: health.get(key) for key in ("batteryPercent", "charging", "network", "freeStorageMb")} if health else None,
+                "tasks": tasks,
             })
         rows.sort(key=lambda r: (not r["paired"], r["label"].casefold()))
-        return {"phones": rows, "counts": {
-            "phones": len(rows), "ready": sum(1 for r in rows if r["state"] == "ready"),
-            "busy": sum(1 for r in rows if r["tasks"]), "needYou": sum(1 for r in rows if any(t["needsYou"] for t in r["tasks"])),
+        return {"phones": rows, "phoneLimit": None, "counts": {
+            "phones": len(rows),
+            "ready": sum(1 for r in rows if r["presence"] == "ready"),
+            "busy": sum(1 for r in rows if r["tasks"]),
+            "needYou": sum(1 for r in rows if r["presence"] == "needs_you"),
+            "offline": sum(1 for r in rows if r["presence"] in {"offline", "unpaired"}),
+            "rooted": sum(1 for r in rows if r["root"] == "ROOTED"),
         }}
 
     def approvals(self) -> dict[str, Any]:
@@ -880,6 +953,31 @@ class FleetOrchestrator:
 
     # ------------------------------------------------------------------ internals
 
+    def _open_tasks(self) -> list[dict[str, Any]]:
+        """Every open Command Center task, newest first, in one light query when the Command Center offers one."""
+        brief = getattr(self._cc, "open_tasks_brief", None)
+        if callable(brief):
+            return brief(OPEN_TASK_LIMIT)
+        return self._cc.list_tasks(status="open", limit=OPEN_TASK_LIMIT)
+
+    def _tasks(self, task_ids: list[Any]) -> dict[str, dict[str, Any]]:
+        """Many tasks by id, batched when the Command Center can. Missing ids are absent from the result."""
+        ids = [str(t) for t in dict.fromkeys(task_ids) if t]
+        if not ids:
+            return {}
+        batch = getattr(self._cc, "task_states", None)
+        if callable(batch):
+            return batch(ids)
+        out: dict[str, dict[str, Any]] = {}
+        for task_id in ids:
+            try:
+                task = self._cc.get_task(task_id)
+            except ValueError:
+                continue
+            if task is not None:
+                out[task_id] = task
+        return out
+
     def _live_by_id(self) -> dict[str, dict[str, Any]]:
         try:
             return {str(d.get("deviceId") or d.get("id")): d for d in self._devices()}
@@ -894,14 +992,14 @@ class FleetOrchestrator:
         if not device.get("paired"):
             return "This phone isn't paired. Pair it and the task starts."
         state = str(device.get("state") or "")
-        screen = str(device.get("screenState") or device.get("screen") or "")
-        if state in {"DISCONNECTED", "UNAUTHORIZED"}:
+        screen = str(device.get("screenState") or device.get("screen") or "").upper()
+        if state.upper() in {"DISCONNECTED", "UNAUTHORIZED"}:
             return "This phone is offline. It starts by itself when it comes back."
-        if state == "SLEEPING" or screen == "SLEEPING":
+        if state.upper() == "SLEEPING" or screen == "SLEEPING":
             return "This phone is asleep or locked. It starts by itself when you wake it."
         if device.get("appRunning") is False:
             return "Cyclone isn't running on this phone yet. It starts by itself when the app is ready."
-        if state == "ready":
+        if state.upper() == "READY":
             return ""
         label = str(device.get("connectionLabel") or state or "not ready")
         return f"This phone is {label.lower()}. It starts by itself when the phone is ready."
@@ -916,7 +1014,7 @@ class FleetOrchestrator:
     def _open_task_index(self) -> dict[str, list[dict[str, Any]]]:
         """Open Command Center tasks by phone, oldest first. One query per request, never one per phone row."""
         try:
-            tasks = self._cc.list_tasks(status="open", limit=OPEN_TASK_LIMIT)
+            tasks = self._open_tasks()
         except Exception:  # noqa: BLE001 - extra detail; never fail a status read because of it
             return {}
         index: dict[str, list[dict[str, Any]]] = {}
@@ -941,16 +1039,15 @@ class FleetOrchestrator:
         mission = self._lookup(mission_id)
         if mission is None:
             return
+        rows = mission.get("assignments") or []
+        try:
+            tasks = self._tasks([row.get("taskId") for row in rows if row.get("taskId")])
+        except Exception:  # noqa: BLE001 - the cap is checked again on the next change
+            return
         cost = 0.0
-        for row in mission.get("assignments") or []:
-            task_id = row.get("taskId")
-            if not task_id:
-                continue
-            try:
-                task = self._cc.get_task(task_id)
-            except Exception:
-                continue
-            amount = ((task or {}).get("run") or {}).get("costUsd")
+        for row in rows:
+            cost += float(row.get("priorCostUsd") or 0.0)      # earlier attempts were spent too
+            amount = ((tasks.get(row.get("taskId") or "") or {}).get("run") or {}).get("costUsd")
             if isinstance(amount, (int, float)):
                 cost += float(amount)
         if cost >= self._spend_cap:
@@ -964,25 +1061,28 @@ class FleetOrchestrator:
             return {}
 
     def _snapshot(self, mission: dict[str, Any], approvals: dict[str, dict[str, Any]] | None = None,
-                  index: dict[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+                  index: dict[str, list[dict[str, Any]]] | None = None, live: dict[str, dict[str, Any]] | None = None,
+                  tasks: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         approvals = self._open_approvals() if approvals is None else approvals
         index = self._open_task_index() if index is None else index
-        live = self._live_by_id()
+        live = self._live_by_id() if live is None else live
+        rows = mission["assignments"]
+        if tasks is None:
+            tasks = self._tasks([row.get("taskId") for row in rows if row.get("taskId")])
         phones: list[dict[str, Any]] = []
-        for row in mission["assignments"]:
+        for row in rows:
+            prior = float(row.get("priorCostUsd") or 0.0)
             entry: dict[str, Any] = {
                 "deviceId": row.get("deviceId", ""), "label": row.get("label", ""), "goal": row.get("goal", ""),
                 "taskId": row.get("taskId"), "state": "FAILED", "cause": row.get("error") or "", "summary": "",
-                "turns": 0, "approval": None, "hint": "",
+                "turns": 0, "approval": None, "hint": "", "retries": int(row.get("retries") or 0),
+                "costUsd": None, "totalCostUsd": prior or None,
             }
             if row.get("stage") == "waiting" and not row.get("taskId"):
                 entry["state"] = "QUEUED"                       # held back by a canary; not a failure
                 entry["hint"] = "Held back by the canary. It starts when you continue the rollout."
             elif row.get("taskId"):
-                try:
-                    task = self._cc.get_task(row["taskId"])
-                except ValueError:
-                    task = None
+                task = tasks.get(row["taskId"])
                 if task is None:
                     entry["cause"] = "The task no longer exists."
                 else:
@@ -992,7 +1092,10 @@ class FleetOrchestrator:
                     entry["summary"] = run.get("summary") or ""
                     entry["turns"] = int(run.get("turns") or 0)
                     entry["costUsd"] = run.get("costUsd")
-                    blocked = self._why_not_running(live.get(row.get("deviceId")))
+                    if isinstance(run.get("costUsd"), (int, float)):
+                        entry["totalCostUsd"] = prior + float(run["costUsd"])
+                    device = live.get(row.get("deviceId"))
+                    blocked = self._why_not_running(device)
                     # A locked, asleep, offline, or not-ready phone is never shown as working.
                     if blocked and entry["state"] in {"QUEUED", "WAITING", "RUNNING"}:
                         entry["state"] = "WAITING"
@@ -1009,13 +1112,13 @@ class FleetOrchestrator:
                             "answerHere": bool(approval.get("answerHere")), "approvableHere": bool(approval.get("approvableHere")),
                             "choices": list(approval.get("choices") or []),
                         }
-                    if entry["state"] in ("QUEUED", "WAITING") and not entry["hint"]:
-                        entry["hint"] = self._why_not_running(live.get(row.get("deviceId")))
                     behind = self._queued_behind(row.get("deviceId", ""), row.get("taskId"), index)
-                    if behind and entry["state"] not in {"COMPLETED", "FAILED", "CANCELLED"}:
+                    if behind and entry["state"] not in _TERMINAL and entry["state"] != "NEEDS_YOU":
                         entry["hint"] = f"Queued behind {behind}."
                         if entry["state"] == "RUNNING":
                             entry["state"] = "QUEUED"
+                    if entry["state"] in ("QUEUED", "WAITING") and not entry["hint"]:
+                        entry["hint"] = "Starting…" if is_ready(device) else "Waiting for the phone."
             phones.append(entry)
         states = [p["state"] for p in phones]
         counts: dict[str, int] = {}
@@ -1067,9 +1170,9 @@ class FleetOrchestrator:
     def _open_mission_ids(self) -> set[str]:
         """Missions the Command Center still has open. trim() must not delete these."""
         try:
-            open_tasks = [t["id"] for t in self._cc.list_tasks(status="open", limit=5000)]
+            open_tasks = [t["id"] for t in self._open_tasks()]
         except Exception:  # noqa: BLE001 - if we cannot tell, protect everything we can see
-            return {item["missionId"] for item in self._store.page(5000)[0]}
+            return set(self._store.all_ids())
         protect = set(self._store.missions_for_tasks(open_tasks))
         cursor: str | None = None
         while True:

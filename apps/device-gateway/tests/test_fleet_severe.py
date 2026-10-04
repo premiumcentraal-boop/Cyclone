@@ -2,7 +2,7 @@
 import tempfile
 from pathlib import Path
 
-from cyclone_device_gateway.desktop_runtime.fleet_orchestrator import FleetOrchestrator
+from cyclone_device_gateway.desktop_runtime.fleet_orchestrator import CHANGE_QUEUE, FleetOrchestrator
 from cyclone_device_gateway.desktop_runtime.fleet_store import FleetStore
 
 
@@ -53,11 +53,12 @@ def test_full_change_queue_keeps_the_newest():
     with tempfile.TemporaryDirectory() as folder:
         fleet = FleetOrchestrator(_Cc(), lambda: [], lambda: {}, Path(folder) / "missions.json", clock=lambda: 1)
         fleet._change_stop.set()
-        for i in range(300):
+        total = CHANGE_QUEUE + 50
+        for i in range(total):
             fleet.enqueue_task_change({"taskId": f"t{i}", "status": "running"})
         newest = None
         while not fleet._changes.empty():
             newest = fleet._changes.get_nowait()
-        assert newest["taskId"] == "t299"
+        assert newest["taskId"] == f"t{total - 1}"
         assert fleet._changes_dropped > 0
         fleet.close()

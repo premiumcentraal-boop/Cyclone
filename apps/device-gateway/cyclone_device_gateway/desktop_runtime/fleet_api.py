@@ -15,6 +15,7 @@ from ..auth import verify_bearer
 from .fleet_orchestrator import FleetError, FleetOrchestrator
 from .models import DesktopRuntimeError
 from .scenes import SceneError
+from .workspace import PHONE_COLORS
 
 
 def create_fleet_router(runtime: Any, token: str) -> APIRouter:
@@ -86,6 +87,25 @@ def create_fleet_router(runtime: Any, token: str) -> APIRouter:
                 raise FleetError("NOT_FOUND", "That phone isn't known to the fleet. Connect it first.")
             return runtime.workspace.set_nickname(device_id, str(b.get("nickname") or ""))
         return call(rename)
+
+    @router.post("/v1/fleet/phones/{device_id}/appearance", dependencies=[Depends(auth)])
+    def set_appearance(device_id: str, body: dict[str, Any] = Body(...)):
+        """The owner's name and colour for one phone. Either may be left out; an empty value clears it."""
+        b = body_of(body)
+        def save():
+            if not fleet().knows_device(device_id):
+                raise FleetError("NOT_FOUND", "That phone isn't known to the fleet. Connect it first.")
+            raw_color = b.get("color")
+            if "color" in b and raw_color not in (None, "") and str(raw_color).strip().lower() not in PHONE_COLORS:
+                raise FleetError("INVALID_REQUEST", "Pick one of: " + ", ".join(PHONE_COLORS))   # before anything is saved
+            out: dict[str, Any] = {"deviceId": device_id}
+            if "nickname" in b:
+                out["nickname"] = runtime.workspace.set_nickname(device_id, str(b.get("nickname") or ""))["nickname"]
+            if "color" in b:
+                raw = b.get("color")
+                out["color"] = runtime.workspace.set_color(device_id, raw if isinstance(raw, str) else None)["color"]
+            return out
+        return call(save)
 
     @router.post("/v1/fleet/command/preview", dependencies=[Depends(auth)])
     def preview(body: dict[str, Any] = Body(...)):

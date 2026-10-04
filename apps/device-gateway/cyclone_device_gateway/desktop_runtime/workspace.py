@@ -10,6 +10,8 @@ from typing import Any
 
 _GROUP_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 _NICKNAME_MAX = 40
+# Alpha 107: the colours an owner can give a phone. Names, not hex: Glass maps each to a light and a dark tint.
+PHONE_COLORS = ("blue", "indigo", "purple", "pink", "red", "orange", "yellow", "green", "mint", "teal", "cyan", "graphite")
 
 
 class FleetWorkspaceStore:
@@ -23,6 +25,7 @@ class FleetWorkspaceStore:
         self._groups: dict[str, dict[str, Any]] = {}
         self._selected: list[str] = []
         self._nicknames: dict[str, str] = {}
+        self._colors: dict[str, str] = {}
         self._load()
 
     def public(self) -> dict[str, Any]:
@@ -32,6 +35,7 @@ class FleetWorkspaceStore:
                 "groups": [dict(self._groups[key]) for key in sorted(self._groups)],
                 "selectedDeviceIds": list(self._selected),
                 "nicknames": dict(self._nicknames),
+                "colors": dict(self._colors),
             }
 
     def put_group(self, group_id: str, name: str, device_ids: list[str]) -> dict[str, Any]:
@@ -80,6 +84,25 @@ class FleetWorkspaceStore:
                 self._nicknames.pop(device_id, None)
             self._persist()
         return {"deviceId": device_id, "nickname": name or None}
+
+    def color_map(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._colors)
+
+    def set_color(self, device_id: str, color: str | None) -> dict[str, Any]:
+        device_id = device_id.strip()
+        value = (color or "").strip().lower() or None
+        if not device_id or len(device_id) > 128:
+            raise ValueError("deviceId is required")
+        if value is not None and value not in PHONE_COLORS:
+            raise ValueError("pick one of: " + ", ".join(PHONE_COLORS))
+        with self._lock:
+            if value:
+                self._colors[device_id] = value
+            else:
+                self._colors.pop(device_id, None)
+            self._persist()
+        return {"deviceId": device_id, "color": value}
 
     def resolve_nickname(self, name: str) -> str | None:
         key = " ".join(name.split()).casefold()
@@ -143,10 +166,14 @@ class FleetWorkspaceStore:
                     for device_id, nickname in raw_names.items()
                     if isinstance(device_id, str) and isinstance(nickname, str) and nickname.strip()
                 }
+            raw_colors = payload.get("colors")
+            if isinstance(raw_colors, dict):
+                self._colors = {str(k): v for k, v in raw_colors.items() if isinstance(k, str) and v in PHONE_COLORS}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             self._groups = {}
             self._selected = []
             self._nicknames = {}
+            self._colors = {}
 
     def _persist(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

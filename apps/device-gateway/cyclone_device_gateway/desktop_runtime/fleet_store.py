@@ -122,10 +122,12 @@ class FleetStore:
         except sqlite3.DatabaseError as exc:
             self._db.close()
             broken = db_path.with_suffix(".broken")
-            try:
-                db_path.replace(broken)
-            except OSError:
-                pass
+            # The journal files belong to the broken file: left behind, SQLite would replay them into the new one.
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    Path(f"{db_path}{suffix}").replace(Path(f"{broken}{suffix}"))
+                except OSError:
+                    pass
             self.open_error = str(exc)
             self._db = sqlite3.connect(str(db_path), check_same_thread=False)
             self._db.row_factory = sqlite3.Row
@@ -278,6 +280,18 @@ class FleetStore:
                 found += [r[0] for r in self._db.execute(
                     f"SELECT DISTINCT mission_id FROM fleet_task WHERE task_id IN ({marks})", chunk,
                 )]
+        return found
+
+    def bound_tasks(self, task_ids: list[str]) -> set[str]:
+        """The subset of `task_ids` that belong to a fleet mission."""
+        found: set[str] = set()
+        with self._lock:
+            for i in range(0, len(task_ids), 500):
+                chunk = task_ids[i:i + 500]
+                if not chunk:
+                    continue
+                marks = ",".join("?" for _ in chunk)
+                found.update(r[0] for r in self._db.execute(f"SELECT task_id FROM fleet_task WHERE task_id IN ({marks})", chunk))
         return found
 
     def delete_empty(self) -> int:

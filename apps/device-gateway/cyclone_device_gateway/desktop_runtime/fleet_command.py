@@ -522,5 +522,6 @@ def split_command(text: str, directory: list[KnownDevice], groups: list[KnownGro
     if sequencing_seen and len(plan.assignments) > 1:
         plan.notes.append("\"then\" was read as \"and\": the phones start at the same time. Ordering one phone's work "
                           "after another's isn't supported yet.")
-    plan.needs_confirmation = plan.confidence != "high"
+    # "then" asks for an order the fleet does not keep, so the owner sees that note and says yes before anything runs.
+    plan.needs_confirmation = plan.confidence != "high" or (sequencing_seen and len(plan.assignments) > 1)
     return plan

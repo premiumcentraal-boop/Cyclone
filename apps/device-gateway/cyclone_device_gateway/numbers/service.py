@@ -146,7 +146,7 @@ class NumbersService:
             device_id = str(device.get("deviceId") or "")
             if not device_id or not device.get("paired"):
                 continue
-            if device.get("state") != "ready":
+            if str(device.get("state") or "").upper() != "READY":
                 cached = self._phones.get(device_id)
                 self._phones[device_id] = (cached[0], cached[1], "offline") if cached else (now, None, "offline")
                 continue

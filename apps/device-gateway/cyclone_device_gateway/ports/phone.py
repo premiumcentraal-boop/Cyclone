@@ -98,7 +98,7 @@ class PhoneBridge:
             listed = self._devices()
         except Exception:  # noqa: BLE001 - discovery trouble means no phone is ready this tick
             return []
-        return [str(d["deviceId"]) for d in listed if d.get("paired") and d.get("state") == "ready" and d.get("deviceId")]
+        return [str(d["deviceId"]) for d in listed if d.get("paired") and str(d.get("state") or "").upper() == "READY" and d.get("deviceId")]
 
     def tick(self) -> None:
         now = self._clock()

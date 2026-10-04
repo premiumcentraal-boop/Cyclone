@@ -65,7 +65,8 @@ class Clock:
 
 
 def paired(device_id: str, name: str, **extra: Any) -> dict[str, Any]:
-    return {"deviceId": device_id, "id": device_id, "name": name, "model": name, "paired": True, "state": "ready", **extra}
+    # The gateway's device list says READY (DeviceFleetState); alpha.107 fixed the views that only knew "ready".
+    return {"deviceId": device_id, "id": device_id, "name": name, "model": name, "paired": True, "state": "READY", **extra}
 
 
 class FleetIntegrationTests(unittest.TestCase):

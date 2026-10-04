@@ -79,7 +79,7 @@ class DeliveryStore:
                 if not device_id:
                     continue
                 seen.add(device_id)
-                out.append(self._phone_public(device_id, str(d.get("name") or device_id), bool(d.get("paired")) and d.get("state") == "ready", keys.get(device_id)))
+                out.append(self._phone_public(device_id, str(d.get("name") or device_id), bool(d.get("paired")) and str(d.get("state") or "").upper() == "READY", keys.get(device_id)))
             for device_id, row in keys.items():
                 if device_id not in seen:
                     out.append(self._phone_public(device_id, device_id, False, row))
