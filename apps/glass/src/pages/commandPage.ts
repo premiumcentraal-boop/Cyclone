@@ -36,6 +36,7 @@ import { vaultApi } from "../services/vault.js";
 import { checkGoalRefs, createConnectionsView, createMakeEditor, type ConnectionsView } from "./connectionsView.js";
 import { createNumbersView, type NumbersView } from "./numbersView.js";
 import { TASK_GROUPS, renderRows, taskRow } from "../workspace/views.js";
+import { createFleetView, type FleetView } from "./fleetView.js";
 
 const POLL_MS = 5_000;
 const TABS: Array<{ id: CommandTab; label: string }> = [
@@ -47,6 +48,7 @@ const TABS: Array<{ id: CommandTab; label: string }> = [
   { id: "numbers", label: "Numbers" },
   { id: "vault", label: "Vault" },
   { id: "connections", label: "Connections" },
+  { id: "fleet", label: "Multi-phone" },
 ];
 
 interface Data {
@@ -68,6 +70,7 @@ const INFO: Record<CommandTab, [string, string, string | null]> = {
   numbers: ["Numbers", "Every number Cyclone can receive codes on: your phones' SIMs, forwarded and rented numbers, and the account each one is for.", null],
   vault: ["Vault", "Passwords sealed in your browser. This PC keeps only ciphertext.", null],
   connections: ["Connections", "MCP servers, APIs and programs Cyclone may call for your tasks.", null],
+  fleet: ["Multi-phone", "One sentence, several phones. Each phone does its own part. You approve what matters.", null],
 };
 
 export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: { workspace?: boolean } = {}): GlassPage {
@@ -82,6 +85,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
   let loaded = false;
   let error: Error | null = null;
   let devices = ctx.devices;
+  let fleetView: FleetView | null = null;
 
   const tabs = segmented<CommandTab>(TABS, tab, (id) => ctx.navigate({ name: "command", tab: id }));
   let taskLayout: "table" | "board" | "calendar" = "table";
@@ -213,6 +217,11 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     if (tab === "connections") {
       connectionsView ??= createConnectionsView(ctx, say);
       if (body.firstChild !== connectionsView.element) setChildren(body, connectionsView.element);
+      return;
+    }
+    if (tab === "fleet") {
+      fleetView ??= createFleetView({ client: ctx.client, navigate: (route) => ctx.navigate(route) });
+      if (body.firstChild !== fleetView.element) setChildren(body, fleetView.element);
       return;
     }
     // Plan 43 (T5 + T6): phone → apps → accounts manages itself; the poll only redraws the list of all accounts.
@@ -785,6 +794,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     destroy() {
       vaultView?.destroy();
       connectionsView?.destroy();
+      fleetView?.destroy();
       numbersView?.destroy();
       accountsBrowser?.destroy();
       destroyed = true;

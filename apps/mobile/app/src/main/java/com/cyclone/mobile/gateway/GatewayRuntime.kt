@@ -113,6 +113,29 @@ object GatewayRuntime {
 
     fun isEnabled(context: Context): Boolean = GatewaySessionStore.enabled(context)
 
+    fun fleetHealth(context: Context): JSONObject {
+        val battery = context.getSystemService(android.os.BatteryManager::class.java)
+        val percent = battery?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }
+        val charging = battery?.isCharging == true
+        val caps = context.getSystemService(android.net.ConnectivityManager::class.java)?.let { cm ->
+            cm.getNetworkCapabilities(cm.activeNetwork)
+        }
+        val network = when {
+            caps == null -> "offline"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+            else -> "other"
+        }
+        return JSONObject()
+            .put("version", 1)
+            .put("batteryPercent", percent ?: JSONObject.NULL)
+            .put("charging", charging)
+            .put("network", network)
+            .put("os", "Android ${android.os.Build.VERSION.RELEASE}")
+            .put("model", android.os.Build.MODEL)
+            .put("permissions", JSONObject().put("accessibility", DeviceState.accessibilityConnected))
+    }
+
     /** Kept only for compatibility callers. V3.3 UI must never expose this value. */
     fun tokenForUser(context: Context): String? = GatewaySessionStore.token(context)
 
@@ -200,6 +223,7 @@ object GatewayRuntime {
             .put("socketName", GatewayProtocol.SOCKET_NAME)
             .put("networkListener", false)
             .put("accessibilityConnected", DeviceState.accessibilityConnected)
+            .put("fleetHealth", fleetHealth(context))
             .put("phoneControlReady", phoneControlReady)
             .put("phoneControlNeedsRepair", phoneControlNeedsRepair)
             .put("nextAction", nextAction?.let { action ->

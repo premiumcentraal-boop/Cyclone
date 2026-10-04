@@ -8,6 +8,8 @@ from typing import Any
 
 from .models import FleetEventType, now_ms
 
+MISSION_EVENT_KEYS = ("missionId", "taskId", "deviceId", "status")
+
 
 @dataclass(frozen=True)
 class FleetEvent:
@@ -59,6 +61,22 @@ class FleetEventBroker:
                     q.put_nowait(item)
                 except queue.Full:
                     pass
+
+    def publish_state(self, event: FleetEventType, device_id: str = "", **payload: Any) -> dict[str, Any]:
+        clean = {key: str(payload[key]) for key in MISSION_EVENT_KEYS if payload.get(key)}
+        self.publish(event, device_id or clean.get("deviceId", ""), **clean)
+        return {"event": event.value, "deviceId": device_id or clean.get("deviceId", ""), **clean}
+
+    def subscriber_count(self) -> int:
+        with self._lock:
+            return len(self._subscribers)
+
+    def close(self) -> None:
+        with self._lock:
+            subscribers = tuple(self._subscribers)
+            self._subscribers.clear()
+        for q in subscribers:
+            q.put_nowait(None)
 
     def recent(self, limit: int = 256) -> list[dict[str, Any]]:
         """Bounded snapshot of the most recent fleet events for diagnostics."""

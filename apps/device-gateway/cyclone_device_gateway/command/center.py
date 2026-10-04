@@ -193,6 +193,14 @@ class CommandCenter:
         # Plan 33 §7 (C4, moved forward): the AI project manager, on the owner's OpenRouter key.
         from .ai import AiStore
         self.ai = AiStore(self, **(ai or {}))
+        self._task_listener = None
+        self._wake = threading.Event()
+        self._tick_done = threading.Condition()
+        self._ticks = 0
+        self._last_tick_ms = 0
+
+    def set_task_listener(self, listener) -> None:
+        self._task_listener = listener
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -203,8 +211,21 @@ class CommandCenter:
         self._thread = threading.Thread(target=self._loop, name="cyclone-command-center", daemon=True)
         self._thread.start()
 
+    def request_tick(self) -> None:
+        self._wake.set()
+
+    def flush_tick(self, timeout: float = 5.0) -> None:
+        if not (self._thread and self._thread.is_alive()):
+            self.tick()
+            return
+        with self._tick_done:
+            target = self._ticks + 1
+            self._wake.set()
+            self._tick_done.wait_for(lambda: self._ticks >= target, timeout)
+
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
         if self._thread:
             self._thread.join(timeout=5)
         self.connections.close()
@@ -212,11 +233,19 @@ class CommandCenter:
             self._db.close()
 
     def _loop(self) -> None:
-        while not self._stop.wait(self._tick_seconds):
+        while not self._stop.is_set():
+            self._wake.wait(self._tick_seconds)
+            self._wake.clear()
+            if self._stop.is_set():
+                break
             try:
                 self.tick()
             except Exception:  # noqa: BLE001 - the loop must survive one bad tick; the next one retries
-                continue
+                pass
+            self._last_tick_ms = self._clock()
+            with self._tick_done:
+                self._ticks += 1
+                self._tick_done.notify_all()
 
     # ---------------------------------------------------------------- audit
 
@@ -516,7 +545,7 @@ class CommandCenter:
         with self._lock:
             if status == "open":
                 rows = self._db.execute(
-                    f"SELECT * FROM task WHERE status IN ({','.join('?' * len(OPEN_TASK_STATES))}) ORDER BY created_at DESC LIMIT ?",
+                    f"SELECT * FROM task WHERE status IN ({','.join('?' * len(OPEN_TASK_STATES))}) ORDER BY created_at DESC, rowid DESC LIMIT ?",
                     (*OPEN_TASK_STATES, limit)).fetchall()
             elif status == "done":
                 rows = self._db.execute(
@@ -584,6 +613,16 @@ class CommandCenter:
         sets = ", ".join(f"{k} = ?" for k in extra)
         self._db.execute(f"UPDATE task SET status = ?, cause = ?, updated_at = ?{', ' + sets if sets else ''} WHERE id = ?",
                          (status, cause[:300], self._clock(), *extra.values(), task_id))
+        listener = getattr(self, "_task_listener", None)
+        if listener is not None:
+            device_id = str(extra.get("device_id") or "")
+            if not device_id:
+                row = self._db.execute("SELECT device_id FROM task WHERE id = ?", (task_id,)).fetchone()
+                device_id = str(row["device_id"] or "") if row else ""
+            try:
+                listener({"taskId": task_id, "status": status, "deviceId": device_id})
+            except Exception:
+                return
 
     def _open_run(self, task_id: str) -> sqlite3.Row | None:
         return self._db.execute("SELECT * FROM run WHERE task_id = ? AND ended_at IS NULL", (task_id,)).fetchone()

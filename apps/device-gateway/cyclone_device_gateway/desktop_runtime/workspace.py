@@ -9,6 +9,7 @@ from typing import Any
 
 
 _GROUP_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
+_NICKNAME_MAX = 40
 
 
 class FleetWorkspaceStore:
@@ -21,6 +22,7 @@ class FleetWorkspaceStore:
         self._lock = threading.RLock()
         self._groups: dict[str, dict[str, Any]] = {}
         self._selected: list[str] = []
+        self._nicknames: dict[str, str] = {}
         self._load()
 
     def public(self) -> dict[str, Any]:
@@ -29,6 +31,7 @@ class FleetWorkspaceStore:
                 "schemaVersion": self.SCHEMA_VERSION,
                 "groups": [dict(self._groups[key]) for key in sorted(self._groups)],
                 "selectedDeviceIds": list(self._selected),
+                "nicknames": dict(self._nicknames),
             }
 
     def put_group(self, group_id: str, name: str, device_ids: list[str]) -> dict[str, Any]:
@@ -55,6 +58,36 @@ class FleetWorkspaceStore:
             self._selected = unique
             self._persist()
         return list(unique)
+
+    def nickname_map(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._nicknames)
+
+    def set_nickname(self, device_id: str, nickname: str) -> dict[str, Any]:
+        device_id = device_id.strip()
+        name = " ".join(nickname.split())
+        if not device_id or len(device_id) > 128:
+            raise ValueError("deviceId is required")
+        if len(name) > _NICKNAME_MAX:
+            raise ValueError(f"a nickname is at most {_NICKNAME_MAX} characters")
+        with self._lock:
+            taken = {value.casefold(): key for key, value in self._nicknames.items() if key != device_id}
+            if name and name.casefold() in taken:
+                raise ValueError("another phone already has that nickname")
+            if name:
+                self._nicknames[device_id] = name
+            else:
+                self._nicknames.pop(device_id, None)
+            self._persist()
+        return {"deviceId": device_id, "nickname": name or None}
+
+    def resolve_nickname(self, name: str) -> str | None:
+        key = " ".join(name.split()).casefold()
+        with self._lock:
+            for device_id, nickname in self._nicknames.items():
+                if nickname.casefold() == key:
+                    return device_id
+        return None
 
     @staticmethod
     def search(devices: list[dict[str, Any]], query: str = "", *, source: str | None = None, group: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -103,9 +136,17 @@ class FleetWorkspaceStore:
                         "deviceIds": self._unique_ids(list(group.get("deviceIds") or [])),
                     }
             self._selected = self._unique_ids(list(payload.get("selectedDeviceIds") or []))
+            raw_names = payload.get("nicknames")
+            if isinstance(raw_names, dict):
+                self._nicknames = {
+                    str(device_id): str(nickname)
+                    for device_id, nickname in raw_names.items()
+                    if isinstance(device_id, str) and isinstance(nickname, str) and nickname.strip()
+                }
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             self._groups = {}
             self._selected = []
+            self._nicknames = {}
 
     def _persist(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

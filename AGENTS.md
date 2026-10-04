@@ -19,6 +19,8 @@ Load more context only when the task needs it.
 - Re-observe after page-changing actions. Ordinary taps use Fast Path fingerprint settle (300ms, then +500/+1000); Unchanged is not a second click.
 - Transport success is not task success. One screen-changing mutation per agent decision turn; form fills may batch.
 - Keep approval boundaries for pay/send/delete/permission/authentication-sensitive actions.
+- The fleet layer never answers an approval. Glass may show the ask and open the Command Center approvals tab. It must not add an approve or send route.
+- The PC holds no model key and makes no model call. Each phone's own Mind does the work.
 - Never persist passwords, OTPs, API keys, payment data or raw typed secret values in Brain, learning stores or diagnostics.
 - Run diagnostics may contain model-visible context, decisions, tool calls/results, verification and recovery—not hidden provider chain-of-thought.
 - PC integrations route through the constrained gateway/MCP contracts; do not expose generic shell/root control to the model.
