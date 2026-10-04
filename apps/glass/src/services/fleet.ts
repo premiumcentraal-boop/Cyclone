@@ -8,9 +8,10 @@
  */
 import type { GatewayClient } from "./gateway.js";
 
-export type PhoneState = "QUEUED" | "WAITING" | "RUNNING" | "NEEDS_YOU" | "COMPLETED" | "FAILED" | "CANCELLED";
+/** UNKNOWN: the Command Center reported a state this Glass doesn't know yet. Shown as "Checking…", never as failed. */
+export type PhoneState = "QUEUED" | "WAITING" | "RUNNING" | "NEEDS_YOU" | "COMPLETED" | "FAILED" | "CANCELLED" | "UNKNOWN";
 export type MissionStatus = PhoneState | "PARTIAL_FAILURE";
-const PHONE_STATES: PhoneState[] = ["QUEUED", "WAITING", "RUNNING", "NEEDS_YOU", "COMPLETED", "FAILED", "CANCELLED"];
+const PHONE_STATES: PhoneState[] = ["QUEUED", "WAITING", "RUNNING", "NEEDS_YOU", "COMPLETED", "FAILED", "CANCELLED", "UNKNOWN"];
 const MISSION_STATES: MissionStatus[] = [...PHONE_STATES, "PARTIAL_FAILURE"];
 const TERMINAL: MissionStatus[] = ["COMPLETED", "FAILED", "CANCELLED", "PARTIAL_FAILURE"];
 
@@ -38,6 +39,7 @@ export interface MissionPhone {
   /** One honest line on why a queued/waiting phone has not started ("This phone is sleeping…"). */
   hint: string;
   approval: FleetApproval | null;
+  retries: number;
 }
 
 export interface Mission {
@@ -83,11 +85,33 @@ export interface PhoneTask {
   approvalText?: string;
 }
 
+/** What a phone's status dot says, worked out by the gateway from its connection, screen and tasks. */
+export type Presence = "ready" | "working" | "needs_you" | "asleep" | "offline" | "attention" | "unpaired" | "connecting";
+const PRESENCES: Presence[] = ["ready", "working", "needs_you", "asleep", "offline", "attention", "unpaired", "connecting"];
+export type RootState = "ROOTED" | "NOT_ROOTED" | "UNKNOWN";
+
+/** The owner's colours for a phone (names; fleet.css gives each a light and a dark tint). */
+export const PHONE_COLORS = ["blue", "indigo", "purple", "pink", "red", "orange", "yellow", "green", "mint", "teal", "cyan", "graphite"] as const;
+export type PhoneColor = (typeof PHONE_COLORS)[number];
+
+export interface PhoneHealth {
+  batteryPercent: number | null;
+  charging: boolean;
+  network: string;
+  freeStorageMb: number | null;
+}
+
 export interface FleetPhone {
   deviceId: string;
   label: string;
   nickname: string | null;
+  color: PhoneColor | null;
   model: string | null;
+  manufacturer: string | null;
+  os: string | null;
+  root: RootState;
+  presence: Presence;
+  doNotTarget: boolean;
   /** The gateway's own state word (ready, sleeping, attention, unpaired…), kept for tone; show `stateLabel`. */
   state: string;
   stateLabel: string;
@@ -97,12 +121,21 @@ export interface FleetPhone {
   /** Can a sentence address this phone right now (paired)? An unpaired phone is listed but never targeted. */
   addressable: boolean;
   tasks: PhoneTask[];
-  health?: { batteryPercent?: number | null; charging?: boolean; network?: string; freeStorageMb?: number | null } | null;
+  health: PhoneHealth | null;
+}
+
+export interface FleetCounts {
+  phones: number;
+  ready: number;
+  busy: number;
+  needYou: number;
+  offline: number;
+  rooted: number;
 }
 
 export interface FleetOverview {
   phones: FleetPhone[];
-  counts: { phones: number; ready: number; busy: number; needYou: number };
+  counts: FleetCounts;
 }
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
@@ -135,12 +168,13 @@ export function parseMissionPhone(raw: unknown): MissionPhone {
     label: str(r.label, str(r.deviceId)),
     goal: str(r.goal),
     taskId: optStr(r.taskId),
-    state: PHONE_STATES.includes(r.state as PhoneState) ? (r.state as PhoneState) : "FAILED",
+    state: PHONE_STATES.includes(r.state as PhoneState) ? (r.state as PhoneState) : "UNKNOWN",
     cause: str(r.cause),
     summary: str(r.summary),
     turns: num(r.turns),
     hint: str(r.hint),
     approval: parseApproval(r.approval),
+    retries: num(r.retries),
   };
 }
 
@@ -186,40 +220,101 @@ export function parseCommandResult(raw: unknown): CommandResult {
   };
 }
 
+export function parseHealth(raw: unknown): PhoneHealth | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const h = obj(raw);
+  return {
+    batteryPercent: typeof h.batteryPercent === "number" ? Math.max(0, Math.min(100, Math.round(h.batteryPercent))) : null,
+    charging: h.charging === true,
+    network: str(h.network),
+    freeStorageMb: typeof h.freeStorageMb === "number" ? h.freeStorageMb : null,
+  };
+}
+
+function legacyPresence(p: Record<string, unknown>): Presence {
+  // A gateway older than alpha.107 sends no presence word; read its state like the gateway does now.
+  const state = str(p.state).toUpperCase();
+  if (p.paired !== true) return "unpaired";
+  if (list(p.tasks).some((t) => obj(t).needsYou === true)) return "needs_you";
+  if (state === "DISCONNECTED" || state === "UNAUTHORIZED") return "offline";
+  if (state === "SLEEPING") return "asleep";
+  if (state === "ATTENTION") return "attention";
+  if (state === "PAIRING") return "connecting";
+  if (list(p.tasks).some((t) => obj(t).status === "RUNNING")) return "working";
+  return state === "READY" ? "ready" : "attention";
+}
+
+export function parsePhone(item: unknown): FleetPhone | null {
+  const p = obj(item);
+  const deviceId = str(p.deviceId);
+  if (!deviceId) return null;
+  const color = str(p.color) as PhoneColor;
+  const root = str(p.root);
+  return {
+    deviceId,
+    label: str(p.label, deviceId),
+    nickname: optStr(p.nickname),
+    color: (PHONE_COLORS as readonly string[]).includes(color) ? color : null,
+    model: optStr(p.model),
+    manufacturer: optStr(p.manufacturer),
+    os: optStr(p.os),
+    root: root === "ROOTED" || root === "NOT_ROOTED" ? root : "UNKNOWN",
+    presence: PRESENCES.includes(p.presence as Presence) ? (p.presence as Presence) : legacyPresence(p),
+    doNotTarget: p.doNotTarget === true,
+    state: str(p.state, "UNKNOWN"),
+    stateLabel: str(p.stateLabel, str(p.state, "Unknown")),
+    paired: p.paired === true,
+    source: str(p.source, "USB"),
+    lastSeenMs: typeof p.lastSeenMs === "number" ? p.lastSeenMs : null,
+    addressable: p.addressable === true,
+    health: parseHealth(p.health),
+    tasks: list(p.tasks).map((t) => ({
+      taskId: str(obj(t).taskId),
+      title: str(obj(t).title),
+      status: PHONE_STATES.includes(obj(t).status as PhoneState) ? (obj(t).status as PhoneState) : "UNKNOWN",
+      needsYou: obj(t).needsYou === true,
+      approvalText: str(obj(obj(t).approval).text),
+    })),
+  };
+}
+
 export function parseOverview(raw: unknown): FleetOverview {
   const r = obj(raw);
-  const phones = list(r.phones).flatMap((item): FleetPhone[] => {
-    const p = obj(item);
-    const deviceId = str(p.deviceId);
-    if (!deviceId) return [];
-    return [{
-      deviceId,
-      label: str(p.label, deviceId),
-      nickname: optStr(p.nickname),
-      model: optStr(p.model),
-      state: str(p.state, "unknown"),
-      stateLabel: str(p.stateLabel, str(p.state, "Unknown")),
-      paired: p.paired === true,
-      source: str(p.source, "USB"),
-      lastSeenMs: typeof p.lastSeenMs === "number" ? p.lastSeenMs : null,
-      addressable: p.addressable === true,
-      health: obj(p.health).batteryPercent == null && !p.health ? null : {
-        batteryPercent: typeof obj(p.health).batteryPercent === "number" ? obj(p.health).batteryPercent as number : null,
-        charging: obj(p.health).charging === true,
-        network: str(obj(p.health).network),
-        freeStorageMb: typeof obj(p.health).freeStorageMb === "number" ? obj(p.health).freeStorageMb as number : null,
-      },
-      tasks: list(p.tasks).map((t) => ({
-        taskId: str(obj(t).taskId),
-        title: str(obj(t).title),
-        status: PHONE_STATES.includes(obj(t).status as PhoneState) ? (obj(t).status as PhoneState) : "RUNNING",
-        needsYou: obj(t).needsYou === true,
-        approvalText: str(obj(obj(t).approval).text),
-      })),
-    }];
-  });
+  const phones = list(r.phones).map(parsePhone).filter((p): p is FleetPhone => p !== null);
   const c = obj(r.counts);
-  return { phones, counts: { phones: num(c.phones, phones.length), ready: num(c.ready), busy: num(c.busy), needYou: num(c.needYou) } };
+  const count = (key: string, presences: Presence[]): number =>
+    typeof c[key] === "number" ? num(c[key]) : phones.filter((p) => presences.includes(p.presence)).length;
+  return {
+    phones,
+    counts: {
+      phones: num(c.phones, phones.length),
+      ready: count("ready", ["ready"]),
+      busy: typeof c.busy === "number" ? num(c.busy) : phones.filter((p) => p.tasks.length > 0).length,
+      needYou: count("needYou", ["needs_you"]),
+      offline: count("offline", ["offline", "unpaired"]),
+      rooted: typeof c.rooted === "number" ? num(c.rooted) : phones.filter((p) => p.root === "ROOTED").length,
+    },
+  };
+}
+
+/** "Google Pixel 8 Pro", "Samsung SM-S918B": the maker once, then the model. */
+export function phoneType(phone: Pick<FleetPhone, "model" | "manufacturer">): string {
+  const model = (phone.model ?? "").replace(/_/g, " ").trim();
+  const maker = (phone.manufacturer ?? "").trim();
+  if (!model) return maker || "Android phone";
+  if (!maker || model.toLowerCase().startsWith(maker.toLowerCase())) return model;
+  return `${maker.charAt(0).toUpperCase()}${maker.slice(1)} ${model}`;
+}
+
+export function presenceLabel(presence: Presence): string {
+  return {
+    ready: "Ready", working: "Working", needs_you: "Needs you", asleep: "Asleep", offline: "Offline",
+    attention: "Needs attention", unpaired: "Not paired", connecting: "Connecting",
+  }[presence];
+}
+
+export function rootLabel(root: RootState): string {
+  return root === "ROOTED" ? "Rooted" : root === "NOT_ROOTED" ? "Not rooted" : "Root unknown";
 }
 
 export function isOpen(status: MissionStatus): boolean {
@@ -229,23 +324,23 @@ export function isOpen(status: MissionStatus): boolean {
 export function stateLabel(state: MissionStatus): string {
   return {
     QUEUED: "Queued", WAITING: "Waiting for the phone", RUNNING: "Working", NEEDS_YOU: "Needs you", COMPLETED: "Done",
-    FAILED: "Failed", CANCELLED: "Stopped", PARTIAL_FAILURE: "Some failed",
+    FAILED: "Failed", CANCELLED: "Stopped", PARTIAL_FAILURE: "Some failed", UNKNOWN: "Checking…",
   }[state];
 }
 
 export function stateTone(state: MissionStatus): "neutral" | "accent" | "success" | "warning" | "danger" {
   return ({
     QUEUED: "neutral", WAITING: "warning", RUNNING: "accent", NEEDS_YOU: "warning", COMPLETED: "success",
-    FAILED: "danger", CANCELLED: "neutral", PARTIAL_FAILURE: "warning",
+    FAILED: "danger", CANCELLED: "neutral", PARTIAL_FAILURE: "warning", UNKNOWN: "neutral",
   } as const)[state];
 }
 
-/** A phone state word from the gateway ("ready", "sleeping", "attention"…) as a chip tone. */
-export function phoneTone(phone: Pick<FleetPhone, "state" | "paired">): "neutral" | "accent" | "success" | "warning" | "danger" {
-  if (!phone.paired) return "neutral";
-  if (phone.state === "ready") return "success";
-  if (phone.state === "attention" || phone.state === "unauthorized" || phone.state === "disconnected") return "danger";
-  return "warning";
+/** A phone's presence as a tone. The gateway's state words are upper case (READY); presence already reads them. */
+export function phoneTone(phone: Pick<FleetPhone, "presence">): "neutral" | "accent" | "success" | "warning" | "danger" {
+  return ({
+    ready: "success", working: "accent", needs_you: "warning", asleep: "neutral", offline: "neutral",
+    attention: "danger", unpaired: "neutral", connecting: "warning",
+  } as const)[phone.presence];
 }
 
 /** An idempotency key for one submit of the command box, so a double click can never start two missions. */
@@ -273,12 +368,21 @@ export const fleetApi = {
     parseMission(await client.post(`/v1/fleet/missions/${encodeURIComponent(missionId)}/cancel`)),
   retry: async (client: GatewayClient, missionId: string): Promise<number> =>
     num(obj(await client.post(`/v1/fleet/missions/${encodeURIComponent(missionId)}/retry`)).retried),
+  // The gateway answers a handoff with the new mission itself, not wrapped.
   handoff: async (client: GatewayClient, missionId: string, deviceId: string, goal: string): Promise<Mission | null> =>
-    parseMission(obj(await client.post(`/v1/fleet/missions/${encodeURIComponent(missionId)}/handoff`, { deviceId, goal })).mission),
+    parseMission(await client.post(`/v1/fleet/missions/${encodeURIComponent(missionId)}/handoff`, { deviceId, goal })),
   stopFleetMissions: async (client: GatewayClient): Promise<number> =>
     num(obj(await client.post("/v1/fleet/stop-fleet-missions")).stopped),
   stopAll: async (client: GatewayClient): Promise<number> => num(obj(await client.post("/v1/fleet/stop-all")).stopped),
   nickname: async (client: GatewayClient, deviceId: string, nickname: string): Promise<void> => {
     await client.post(`/v1/fleet/phones/${encodeURIComponent(deviceId)}/nickname`, { nickname });
+  },
+  /** Do-not-target: a fleet command never starts this phone while it is set. */
+  exclude: async (client: GatewayClient, deviceId: string, excluded: boolean): Promise<void> => {
+    await client.post(`/v1/fleet/phones/${encodeURIComponent(deviceId)}/exclude`, { excluded });
+  },
+  /** The owner's name and colour for a phone. Send only what changed; an empty name or a null colour clears it. */
+  appearance: async (client: GatewayClient, deviceId: string, change: { nickname?: string; color?: PhoneColor | null }): Promise<void> => {
+    await client.post(`/v1/fleet/phones/${encodeURIComponent(deviceId)}/appearance`, change);
   },
 };
