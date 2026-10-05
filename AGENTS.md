@@ -33,6 +33,7 @@ Load more context only when the task needs it.
 - Cyclone for Windows (web-only): `packaging/pc/**`, `scripts/pc/**`, gateway PC features in `apps/device-gateway/cyclone_device_gateway/pc/**` and `terminal/**`; the retired desktop window in `apps/pc-companion/**` (reference only), PyInstaller specs in `packaging/pc-companion/**`
 - Cyclone Glass (local browser dashboard, no intelligence): `apps/glass/**`, gateway hosting in `apps/device-gateway/cyclone_device_gateway/glass/**`
 - PC agent adapters: `tools/codex-phone-mcp/**`, `tools/cyclone-agent-mcp/**`
+- Testing (round-the-clock Lab testbench): `tools/cyclone-testbench/**`, `.claude/skills/cyclone-testing/**`
 - Plugins from GitHub (plan 50): `apps/device-gateway/cyclone_device_gateway/plugins/**`; the package format and index in `tools/cyclone-ports-sdk/cyclone_ports/{package,index}.py`. Core holds no plugin.
 - CI/release: `.github/workflows/**`, `scripts/ci/**`, `release/version.toml`
 

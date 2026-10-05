@@ -1,0 +1,136 @@
+[
+ {
+  "id": "tb.hands.unicode",
+  "title": "Accents and symbols",
+  "goal": "Create a new Google Keep note with the text \"tb 7731 café – naïve ✓\"",
+  "category": "hands",
+  "suites": [
+   "hands2"
+  ],
+  "apps": [
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "tb 7731 café"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.hands.gmail.subject",
+  "title": "Subject and body",
+  "goal": "Start a new Gmail draft with the subject \"tb 7731 subject\" and the body \"hello there\". No recipient, don't send it.",
+  "category": "hands",
+  "suites": [
+   "hands2"
+  ],
+  "apps": [
+   "com.google.android.gm"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.gm"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.gm"
+   },
+   {
+    "check": "screen",
+    "all": [
+     "tb 7731 subject",
+     "hello there"
+    ]
+   },
+   {
+    "check": "approval",
+    "requested": false
+   }
+  ]
+ },
+ {
+  "id": "tb.hands.url",
+  "title": "Type a URL",
+  "goal": "Go to example.com in Chrome",
+  "category": "hands",
+  "suites": [
+   "hands2"
+  ],
+  "apps": [
+   "com.android.chrome"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.android.chrome"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Example Domain"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.hands.long.note",
+  "title": "A long note",
+  "goal": "Create a Google Keep note that starts with \"tb 7731 essay\" followed by a 500-word essay about the sea",
+  "category": "hands",
+  "suites": [
+   "hands2"
+  ],
+  "apps": [
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "minutes": 9,
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "tb 7731 essay"
+    ]
+   }
+  ]
+ }
+]
