@@ -419,7 +419,9 @@ class PhoneMindToolbox(
     private fun abilitiesFind(goalText: String, app: String): MindToolResult {
         if (goalText.isBlank()) return MindToolResult.error("goal is required: what you want to do in the app, in plain words.")
         val (packageName, view) = manualFor(app)
-            ?: return MindToolResult.error("There is no manual for ${app.ifBlank { "this app" }} yet. Find the way yourself.")
+            // Alpha 109: a missing manual is a fact, not a failed action (it counted toward the lab's early stop).
+            ?: return MindToolResult("There is no manual for ${app.ifBlank { "this app" }} yet. Find the way yourself.",
+                "abilities_find: no manual", ok = true)
         val hits = view.index.search(goalText, 6)
         if (hits.isEmpty()) return MindToolResult("The manual of ${view.appLabel} has nothing that fits \"$goalText\". Find the way yourself.",
             "abilities_find: nothing", ok = true)
@@ -428,7 +430,8 @@ class PhoneMindToolbox(
 
     private fun howToFind(list: String, app: String): MindToolResult {
         val (packageName, view) = manualFor(app)
-            ?: return MindToolResult.error("There is no manual for ${app.ifBlank { "this app" }} yet.")
+            ?: return MindToolResult("There is no manual for ${app.ifBlank { "this app" }} yet. Find the way yourself.",
+                "how_to_find: no manual", ok = true)
         val finds = view.howToFind(list).take(4)
         if (finds.isEmpty()) return MindToolResult("The manual of ${view.appLabel} knows no searchable or ordered list yet.", "how_to_find: none")
         val lines = finds.joinToString("\n") { a -> "  ${handle(packageName, a.id)} ${a.name} → ${a.pathText}: ${a.note ?: "scroll to find one"}" }
@@ -1205,7 +1208,9 @@ class PhoneMindToolbox(
                 }
                 MindApproval.DECLINED -> return finishAction(tool, null, approval.change?.let { change ->
                     "Not sent yet: the owner wants a change first: \"$change\". Edit the message box to make exactly that change, then press send again."
-                } ?: "The owner declined: $done was not done. Respect this decision.", false, waited, changesScreen)
+                } ?: ("The owner declined: $done was not done. Respect this decision: do not try it again or reach the same result " +
+                    "another way. If part of the goal does not need it (keeping a draft, reading, saying what is left), finish that part, " +
+                    "then report what was not done."), false, waited, changesScreen)
                 MindApproval.CANCELLED -> return MindToolResult("NOT RUN: the owner stopped the mission.", ok = false, ownerWaitMs = waited)
                 MindApproval.TIMED_OUT -> return finishAction(tool, null, "The owner did not approve in time; $done was not done.", false, waited, changesScreen)
                 MindApproval.NOT_PENDING -> return finishAction(tool, null,
