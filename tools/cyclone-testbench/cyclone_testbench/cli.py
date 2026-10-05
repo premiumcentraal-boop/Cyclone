@@ -12,6 +12,7 @@
     cyclone-testbench findings [--all]            the ledger, most severe first
     cyclone-testbench finding F-1234abcd --status fixed --note "alpha.108: ..."
     cyclone-testbench dashboard                   write DASHBOARD.md: recent runs and open findings
+    cyclone-testbench soak --reads 50             read the phone's screen 50 times (gate 1: 0 may fail)
     cyclone-testbench accounts-map --package com.example.app --basis mine
     cyclone-testbench task TASK_ID                a Command Center task's state
 
@@ -140,7 +141,9 @@ def _preflight(catalog: dict[str, Any], *, fix: bool) -> int:
     if not adb:
         _out("✗ adb not found (Cyclone's own adb is in %LOCALAPPDATA%\\Cyclone One\\android-platform-tools)")
         return 2
-    serials = preflight_ops.devices(preflight_ops.adb_shell(adb, None))
+    serials, restarted = preflight_ops.devices_restarting(preflight_ops.adb_shell(adb, None))
+    if restarted:
+        _out(f"• adb saw no phone; restarted the ADB server ({len(serials)} phone(s) now)")
     if len(serials) != 1:
         _out(f"✗ adb sees {len(serials)} authorised phones; connect exactly one over USB and allow USB debugging")
         return 2
@@ -388,6 +391,43 @@ def cmd_accounts_map(args: argparse.Namespace) -> int:
     return 0
 
 
+def soak(observe, reads: int, sleep=time.sleep, pause: float = 0.5) -> dict[str, Any]:
+    """Alpha 109: read the phone's screen `reads` times through the gateway and count reads Cyclone threw away."""
+    failed: list[str] = []
+    times: list[float] = []
+    for _ in range(reads):
+        started = time.monotonic()
+        try:
+            observe()
+        except GatewayError as exc:
+            failed.append(str(exc)[:160])
+        times.append(time.monotonic() - started)
+        sleep(pause)
+    times.sort()
+    return {"reads": reads, "failed": len(failed), "errors": sorted(set(failed))[:5],
+            "medianSeconds": round(times[len(times) // 2], 2) if times else None}
+
+
+def cmd_soak(args: argparse.Namespace) -> int:
+    """Gate 1 of a run: the phone's screen can be read reliably (alpha 109). Opens Settings > Display unless --here."""
+    gw = _gateway(args)
+    device = _pick_device(gw, args.device)
+    if not args.here:
+        adb = preflight_ops.find_adb()
+        if adb:
+            run = preflight_ops.adb_shell(adb, None)
+            run(["shell", "input", "keyevent", "KEYCODE_WAKEUP"])
+            run(["shell", "am", "start", "-a", "android.settings.DISPLAY_SETTINGS"])
+            time.sleep(3)
+    result = soak(lambda: gw.post(f"/v1/devices/{device}/agent/observe", {"mode": "full", "include_screenshot": False}), args.reads)
+    res = _results(args)
+    res.write_jsonl("soak.jsonl", res.read_jsonl("soak.jsonl") + [{**result, "at": now_ms(), "device": device}])
+    ok = result["failed"] <= args.max_failed
+    _out(f"{'✓' if ok else '✗'} {result['reads'] - result['failed']} of {result['reads']} screen reads succeeded "
+         f"(median {result['medianSeconds']} s)" + ("" if ok else f"; errors: {'; '.join(result['errors'])}"))
+    return 0 if ok else 5
+
+
 def cmd_task(args: argparse.Namespace) -> int:
     task = _gateway(args).get(f"/v1/cc/tasks/{args.task}")
     run = task.get("run") or {}
@@ -456,6 +496,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--basis", choices=["mine", "company", "client"], required=True, help="whose account it would be")
     p.add_argument("--device")
     p.set_defaults(fn=cmd_accounts_map)
+    p = sub.add_parser("soak", help="read the phone's screen many times; gate 1 of a run")
+    p.add_argument("--reads", type=int, default=50)
+    p.add_argument("--max-failed", type=int, default=0)
+    p.add_argument("--here", action="store_true", help="read the current screen instead of opening Settings > Display")
+    p.add_argument("--device")
+    p.set_defaults(fn=cmd_soak)
     p = sub.add_parser("task")
     p.add_argument("task")
     p.set_defaults(fn=cmd_task)

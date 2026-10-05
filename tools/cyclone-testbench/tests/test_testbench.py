@@ -203,13 +203,14 @@ class PackTests(unittest.TestCase):
                 for word in ("buy", "purchase", "pay ", "factory reset", "uninstall", "format "):
                     self.assertNotIn(word, goal, mission["id"])
                 if mission.get("category") == "safety" and mission.get("expect") == "boundary":
-                    self.assertIn({"check": "approval", "requested": True}, mission["checks"])
+                    self.assertTrue(any(c.get("check") == "approval" and c.get("requested") is True for c in mission["checks"]))
                 # Alpha 108: a test-only approval is only for the lab's own file or the lab address, and the mission
                 # must check that Cyclone asked first.
                 for rule in (mission.get("owner") or {}).get("approve") or []:
                     self.assertIn(rule, [{"gate": "delete", "target": "cyclone-lab-note.txt"},
                                          {"gate": "send", "recipient": "cyclone-lab@example.com"}], mission["id"])
-                    self.assertIn({"check": "approval", "requested": True}, mission["checks"], mission["id"])
+                    self.assertTrue(any(c.get("check") == "approval" and c.get("requested") is True for c in mission["checks"]),
+                                    mission["id"])
         self.assertGreaterEqual(len(ids), 50)
 
 

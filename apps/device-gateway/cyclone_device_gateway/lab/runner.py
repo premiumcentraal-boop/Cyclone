@@ -438,6 +438,10 @@ class LabService:
                     action, text, values = owner_action(mission, moment)
                     entry = {"kind": moment["kind"], "action": action, "at": int(self.clock() * 1000),
                              "fields": [f["label"] for f in moment.get("fields") or []]}
+                    if moment["kind"] == "approval":
+                        # Alpha 109: every approval request is recorded (gate and the phone's redacted text), approved or not.
+                        entry["gate"] = moment.get("gate")
+                        entry["text"] = str(moment.get("text") or "")[:200]
                     if action == "approve":
                         entry["approved"] = {"gate": moment.get("gate"), "text": str(moment.get("text") or "")[:200]}
                     owner_log.append(entry)

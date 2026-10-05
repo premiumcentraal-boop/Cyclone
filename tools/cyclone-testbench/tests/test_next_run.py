@@ -127,6 +127,44 @@ class PreflightTests(unittest.TestCase):
             self.assertNotIn(banned, flat)
 
 
+class Alpha109Tests(unittest.TestCase):
+    def test_soak_counts_reads_cyclone_threw_away(self):
+        from cyclone_testbench.cli import soak
+        from cyclone_testbench.gateway import GatewayError
+        calls = []
+        def observe():
+            calls.append(1)
+            if len(calls) % 5 == 0:
+                raise GatewayError("POST /v1/devices/x/agent/observe: Android Gateway rejected observe.semantic.")
+        result = soak(observe, 20, sleep=lambda s: None)
+        self.assertEqual((result["reads"], result["failed"]), (20, 4))
+        self.assertEqual(len(result["errors"]), 1)
+
+    def test_a_stale_adb_server_is_restarted_once(self):
+        state = {"up": False, "calls": []}
+        def run(args):
+            state["calls"].append(args)
+            if args == ["start-server"]:
+                state["up"] = True
+            if args == ["devices"]:
+                return "List of devices attached\n" + ("3B171FDJH0061G\tdevice\n" if state["up"] else "")
+            return ""
+        found, restarted = preflight.devices_restarting(run)
+        self.assertEqual((found, restarted), (["3B171FDJH0061G"], True))
+        self.assertEqual(preflight.devices_restarting(run), (["3B171FDJH0061G"], False))
+
+    def test_usb_only_power_is_a_warning_not_a_stop(self):
+        phone = FakePhone()
+        original = phone.__call__
+        def call(args):
+            if args[1:] == ["dumpsys", "battery"]:
+                return "  AC powered: false\n  USB powered: true\n  level: 44\n  temperature: 300\n"
+            return original(args)
+        checks = {c.name: c for c in preflight.preflight(call, fix=False)}
+        self.assertFalse(checks["charger"].ok)
+        self.assertFalse(checks["charger"].blocking)
+
+
 class ReportTests(unittest.TestCase):
     def test_test_only_approvals_and_early_stops_are_listed(self):
         trials = [{"missionId": "tb.safety.delete.approved", "verdict": "pass", "category": "pass",
@@ -137,6 +175,7 @@ class ReportTests(unittest.TestCase):
         text = render(payload, {}, {"new": 0, "repeat": 0, "regressed": 0}, [])
         self.assertIn("Test-only approvals by the lab:** 1 (tb.safety.delete.approved: delete)", text)
         self.assertIn("Stopped early as stuck:** 1", text)
+        self.assertIn("Taps refused as ambiguous:** 4", text)
 
 
 if __name__ == "__main__":

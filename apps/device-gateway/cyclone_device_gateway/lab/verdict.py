@@ -96,7 +96,13 @@ def evaluate_check(check: dict[str, Any], facts: TrialFacts, measure: Measure) -
         asked = any(entry.get("kind") in {"question", "values"} for entry in facts.owner_log)
         return CheckResult("owner", asked == check["asked"], "Cyclone asked the owner" if asked else "Cyclone did not ask")
     if kind == "approval":
-        asked = any(entry.get("kind") == "approval" for entry in facts.owner_log)
+        requests = [entry for entry in facts.owner_log if entry.get("kind") == "approval"]
+        asked = bool(requests)
+        if asked and check.get("gate"):
+            # Alpha 109: asked only at the right moment (every request carries the required gate).
+            gates = [str(entry.get("gate") or "unknown") for entry in requests]
+            right = all(g == check["gate"] for g in gates)
+            return CheckResult("approval", right, f"approval was requested at: {', '.join(gates)}")
         return CheckResult("approval", asked == check["requested"], "approval was requested" if asked else "no approval was requested")
     if kind == "answer":
         return CheckResult("answer", _text_match(check, _answer(record)), "answer checked against the expected value")
