@@ -84,7 +84,8 @@ def plan_batch(campaign: dict[str, Any], catalog: list[dict[str, Any]], runs: li
             chosen.append(mission_id)
             reasons[mission_id] = why
 
-    rechecks = sorted((f for f in ledger if f.get("status") in {"open", "regressed", "fixing"} and f.get("area") != "infra"),
+    rechecks = sorted((f for f in ledger if f.get("status") in open_states and f.get("area") != "infra"
+                       and not (app_version and f.get("lastVersion") == app_version)),
                       key=lambda f: (SEVERITY_ORDER.get(f.get("severity"), 9), -int(f.get("lastSeen") or 0)))
     for finding in rechecks:
         if sum(1 for r in reasons.values() if r.startswith("re-check")) >= campaign["recheck"]:

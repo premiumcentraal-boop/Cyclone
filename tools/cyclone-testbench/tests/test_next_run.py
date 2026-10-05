@@ -49,6 +49,13 @@ class RecheckTests(unittest.TestCase):
         self.assertEqual(plan["missions"][0], "settings.timeout.2min")
         self.assertIn("new build", plan["reasons"]["settings.timeout.2min"])
 
+    def test_a_slow_pass_is_not_rechecked_on_the_same_build_but_may_run_in_its_slot(self):
+        slow = {"verdict": "pass", "category": "pass", "missionId": "nav.home", "phone": {"turns": 25}, "durationMs": 200000}
+        led, _ = findings.merge([], [findings.classify(slow)], at=1, app_version="107")
+        plan = plan_batch(DEFAULT_CAMPAIGN, self.catalog, [], led, app_version="107")
+        self.assertFalse(any(r.startswith("re-check") for r in plan["reasons"].values()))
+        self.assertIn("nav.home", plan["missions"])
+
     def test_without_a_known_version_it_behaves_as_before(self):
         plan = plan_batch(DEFAULT_CAMPAIGN, self.catalog, [], self.ledger("107"))
         self.assertIn("settings.timeout.2min", plan["missions"])
