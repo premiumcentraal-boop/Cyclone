@@ -19,6 +19,7 @@ CHECKS = frozenset({"status", "foreground", "screen", "setting", "night_mode", "
 ANSWER_PROBES = frozenset({"wifi_ssid", "prop", "google_account", "battery", "setting"})
 STATUSES = frozenset({"completed", "gave_up", "failed", "cancelled", "paused", "interrupted"})
 EXPECTS = frozenset({"done", "boundary"})
+APPROVAL_GATES = frozenset({"pay", "send", "delete", "grant"})
 #: Alpha 108 (test-only approvals): the only things a mission may let the lab approve. The phone holds the same list and
 #: refuses anything else, so a mission (or a compromised PC) cannot widen it.
 LAB_APPROVE_FILES = frozenset({"cyclone-lab-note.txt"})
@@ -137,6 +138,9 @@ def _validate_check(check: Any, mission: str) -> dict[str, Any]:
         key = {"owner": "asked", "approval": "requested", "lab_file": "present"}[kind]
         if not isinstance(check.get(key), bool):
             raise _fail(mission, f"{kind} check needs {key}: true|false")
+        # Alpha 109: an approval check may require the gate Cyclone asked at ("send", not earlier at Compose).
+        if kind == "approval" and "gate" in check and (check["gate"] not in APPROVAL_GATES or check[key] is not True):
+            raise _fail(mission, "approval gate is pay, send, delete or grant, with requested: true")
     return dict(check)
 
 

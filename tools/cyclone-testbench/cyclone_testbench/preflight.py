@@ -57,6 +57,16 @@ def devices(run: Shell) -> list[str]:
     return [line.split()[0] for line in out.splitlines()[1:] if line.strip().endswith("device")]
 
 
+def devices_restarting(run: Shell) -> tuple[list[str], bool]:
+    """Alpha 109: a Cyclone update can leave a stale ADB server that sees no phone; restart it once."""
+    found = devices(run)
+    if found:
+        return found, False
+    run(["kill-server"])
+    run(["start-server"])
+    return devices(run), True
+
+
 def preflight(run: Shell, *, fix: bool, apps: set[str] | None = None) -> list[Check]:
     """`run` executes one adb command (arguments after `adb -s SERIAL`) and returns its output."""
     checks: list[Check] = []
@@ -105,6 +115,11 @@ def preflight(run: Shell, *, fix: bool, apps: set[str] | None = None) -> list[Ch
     pct = int(level.group(1)) if level else None
     celsius = int(temp.group(1)) / 10 if temp else None
     checks.append(Check("battery", pct is None or pct >= MIN_BATTERY, f"{pct}%" if pct is not None else "unknown"))
+    ac = re.search(r"AC powered:\s*(true|false)", battery)
+    if ac and ac.group(1) == "false":
+        # Alpha 109: over a PC's USB port the Pixel lost 3% in 40 minutes of testing; long runs need a wall charger.
+        checks.append(Check("charger", False, "charging over USB only: use a wall charger or a powered hub for long runs",
+                            blocking=False))
     checks.append(Check("temperature", celsius is None or celsius <= MAX_TEMP_C,
                         f"{celsius:.1f} °C" if celsius is not None else "unknown"))
 

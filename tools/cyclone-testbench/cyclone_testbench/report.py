@@ -82,6 +82,12 @@ def render(payload: dict[str, Any], expectations: dict[str, bool], merge_counts:
         # Alpha 108: every test-only approval the lab gave, so nothing is approved out of sight.
         lines.append(f"- **Test-only approvals by the lab:** {len(approvals)} (" + "; ".join(
             f"{m}: {(e.get('approved') or {}).get('gate') or '?'}" for m, e in approvals[:6]) + ")")
+    reads = sum(1 for t in trials for e in ((t.get("phone") or {}).get("events") or [])
+                if "scope changed during capture" in str(e.get("text") or ""))
+    ambiguous = sum(1 for t in trials for e in ((t.get("phone") or {}).get("events") or [])
+                    if "could not tell that control apart" in str(e.get("text") or ""))
+    # Alpha 109: the two numbers the screen-reading and tap-guard fixes move; both should be 0.
+    lines.append(f"- **Screen reads that failed:** {reads} · **Taps refused as ambiguous:** {ambiguous}")
     stuck = sum(1 for t in trials if t.get("category") == "stuck")
     if stuck:
         lines.append(f"- **Stopped early as stuck:** {stuck}")

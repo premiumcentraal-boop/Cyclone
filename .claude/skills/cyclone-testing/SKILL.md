@@ -37,7 +37,8 @@ The full guide for people is `tools/cyclone-testbench/GUIDE.md`. This file is ho
 cyclone-testbench doctor --fix
 ```
 
-`--fix` also checks the phone over ADB (awake, unlocked, stays awake on power, Cyclone not put to sleep, accessibility,
+Then `cyclone-testbench soak --reads 50` (alpha 109): Cyclone must read the screen 50 times with 0 failures before a
+round means anything. `--fix` also checks the phone over ADB (awake, unlocked, stays awake on power, Cyclone not put to sleep, accessibility,
 battery and heat, mission apps) and fixes what is safe. "Not ready" means wait and tell the owner; never run anyway.
 
 - No gateway → ask the owner to start Cyclone (`cyclone` in a terminal).
