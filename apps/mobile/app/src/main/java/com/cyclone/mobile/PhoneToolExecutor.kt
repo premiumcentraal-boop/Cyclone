@@ -320,8 +320,12 @@ object PhoneToolExecutor {
                     val x = p.optDouble("x"); val y = p.optDouble("y")
                     x >= it.bounds.left && x < it.bounds.right && y >= it.bounds.top && y < it.bounds.bottom && it.clickable
                 }.minByOrNull { it.bounds.width * it.bounds.height } ?: error("UNSUPPORTED: a grounded control is required")
-                workspaceGate(scope, request.tool, com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, selector),
-                    node.id, snapshot.fingerprint)
+                // Review only what this tap does on the page it lands on (same rule as a foreground tap by position).
+                val gateLabels = if (chosen != null) com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, selector)
+                    else com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsAtPoint(snapshot.nodes,
+                        p.optDouble("x").toInt(), p.optDouble("y").toInt(), snapshot.windows)
+                        .ifEmpty { com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, null) }
+                workspaceGate(scope, request.tool, gateLabels, node.id, snapshot.fingerprint)
                 return node
             }
             val commands = com.cyclone.mobile.runtime.background.WorkspaceCommands
