@@ -19,6 +19,10 @@ Load more context only when the task needs it.
 - Re-observe after page-changing actions. Ordinary taps use Fast Path fingerprint settle (300ms, then +500/+1000); Unchanged is not a second click.
 - Transport success is not task success. One screen-changing mutation per agent decision turn; form fills may batch.
 - Keep approval boundaries for pay/send/delete/permission/authentication-sensitive actions.
+- Cyclone Lab approves nothing a person would care about. Its only exception (alpha 108, test-only approvals) needs
+  `CYCLONE_LAB_APPROVALS=test-only` where the gateway runs and a mission that declares it, and covers exactly deleting
+  `cyclone-lab-note.txt` and sending to `cyclone-lab@example.com`; the phone (`GatewayV5LabAdapter.labMayApprove`)
+  enforces the same list. Widening it is a reviewed change to both lists, never a mission or a setting.
 - The fleet layer never answers an approval. Glass may show the ask and open the Command Center approvals tab. It must not add an approve or send route.
 - The fleet layer (`fleet_*.py`) holds no model key and makes no model call: it splits a sentence deterministically and each phone's own Mind does the work. (The Command Center's optional AI manager is separate and owner-configured.)
 - Never persist passwords, OTPs, API keys, payment data or raw typed secret values in Brain, learning stores or diagnostics.
@@ -33,6 +37,7 @@ Load more context only when the task needs it.
 - Cyclone for Windows (web-only): `packaging/pc/**`, `scripts/pc/**`, gateway PC features in `apps/device-gateway/cyclone_device_gateway/pc/**` and `terminal/**`; the retired desktop window in `apps/pc-companion/**` (reference only), PyInstaller specs in `packaging/pc-companion/**`
 - Cyclone Glass (local browser dashboard, no intelligence): `apps/glass/**`, gateway hosting in `apps/device-gateway/cyclone_device_gateway/glass/**`
 - PC agent adapters: `tools/codex-phone-mcp/**`, `tools/cyclone-agent-mcp/**`
+- Testing (round-the-clock Lab testbench): `tools/cyclone-testbench/**`, `.claude/skills/cyclone-testing/**`
 - Plugins from GitHub (plan 50): `apps/device-gateway/cyclone_device_gateway/plugins/**`; the package format and index in `tools/cyclone-ports-sdk/cyclone_ports/{package,index}.py`. Core holds no plugin.
 - CI/release: `.github/workflows/**`, `scripts/ci/**`, `release/version.toml`
 

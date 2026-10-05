@@ -9,6 +9,7 @@ caches do not favour one variant. Everything is appended to disk as it happens; 
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import threading
@@ -89,12 +90,45 @@ def validate_variants(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+#: Alpha 108: test-only approvals are off unless the owner turns them on for this PC.
+APPROVALS_SWITCH = "CYCLONE_LAB_APPROVALS"
+#: Alpha 108 (early stop): this many failed actions in a run that is still going means it is stuck, not slow.
+STUCK_ERRORS = 6
+STUCK_MIN_TURNS = 10
+
+
+def test_approvals_on() -> bool:
+    return os.environ.get(APPROVALS_SWITCH, "").strip().lower() == "test-only"
+
+
+def approval_matches(rules: list[dict[str, str]] | None, moment: dict[str, Any]) -> bool:
+    """An approval the mission declared, on a test-owned target, with nothing hidden. The phone checks this again."""
+    if not rules or moment.get("kind") != "approval" or not moment.get("requestId"):
+        return False
+    gate = str(moment.get("gate") or "").lower()
+    text = str(moment.get("text") or "")
+    send = moment.get("send") or {}
+    if "<redacted>" in text:
+        return False
+    for rule in rules:
+        if rule["gate"] == "delete" and gate == "delete" and rule["target"].lower() in text.lower():
+            return True
+        if rule["gate"] == "send" and gate == "send" and str(send.get("recipient") or "").strip().lower() == rule["recipient"]:
+            return True
+    return False
+
+
 def owner_action(mission: LabMission, moment: dict[str, Any]) -> tuple[str, str | None, dict[str, str] | None]:
     """How the lab answers a moment: the mission's script where it has one, otherwise decline; stop when only the
-    owner's own hands or secrets would do. Approvals are always declined."""
+    owner's own hands or secrets would do. Approvals are declined, except (alpha 108) a test-owned action the mission
+    declared, while the owner has turned test-only approvals on for this PC."""
     kind = moment.get("kind")
     if kind in {"secret", "handover"}:
         return "stop", None, None
+    if kind == "approval":
+        if test_approvals_on() and approval_matches(mission.owner.get("approve"), moment):
+            return "approve", None, None
+        return "decline", None, None
     if kind == "question" and mission.owner.get("reply"):
         return "reply", mission.owner["reply"], None
     if kind == "values":
@@ -269,6 +303,10 @@ class LabService:
             if missing:
                 row.update(verdict="skipped", category="skipped", cause=f"app not installed: {missing[0]}")
                 return row
+            if mission.owner.get("approve") and not test_approvals_on():
+                # Alpha 108: a mission written for test-only approvals says nothing while they are off.
+                row.update(verdict="skipped", category="skipped", cause=f"test-only approvals are off ({APPROVALS_SWITCH})")
+                return row
             if not self._awake(probe):
                 row.update(cause="phone is locked; unlock it and keep it awake while the lab runs")
                 return row
@@ -377,6 +415,13 @@ class LabService:
             if not status["live"]:
                 return stopped
             self._current(experiment, trial, f"working · {status['turns']} turns", status)
+            turns = int(status.get("turns") or 0)
+            errors = status.get("errors")
+            if stopped is None and (turns >= mission.max_turns or (
+                    isinstance(errors, int) and errors >= STUCK_ERRORS and turns >= STUCK_MIN_TURNS)):
+                # Alpha 108: stop a run that is going nowhere instead of waiting out the lab's time.
+                stopped = "stuck"
+                self._safe_stop(device, mission_id)
             if steer and int(status.get("turns") or 0) >= int(steer.get("afterTurns", 1)):
                 # Plan 38: the lab changes the task mid-run, like an owner using Steer in the Ask bar.
                 owner_log.append({"kind": "steer", "action": "steer", "at": int(self.clock() * 1000), "fields": []})
@@ -391,10 +436,16 @@ class LabService:
                 if key not in answered:
                     answered.add(key)
                     action, text, values = owner_action(mission, moment)
-                    owner_log.append({"kind": moment["kind"], "action": action, "at": int(self.clock() * 1000),
-                                      "fields": [f["label"] for f in moment.get("fields") or []]})
+                    entry = {"kind": moment["kind"], "action": action, "at": int(self.clock() * 1000),
+                             "fields": [f["label"] for f in moment.get("fields") or []]}
+                    if action == "approve":
+                        entry["approved"] = {"gate": moment.get("gate"), "text": str(moment.get("text") or "")[:200]}
+                    owner_log.append(entry)
                     try:
-                        self.contract.lab_answer(device, mission_id, action, text=text, values=values)
+                        if action == "approve":
+                            self.contract.lab_approve(device, mission_id, str(moment["requestId"]))
+                        else:
+                            self.contract.lab_answer(device, mission_id, action, text=text, values=values)
                     except DesktopRuntimeError:
                         pass
                     if action == "stop":

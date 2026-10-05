@@ -29,9 +29,10 @@ jobs:
       - name: Verify PC Gateway and MCP contracts
         shell: bash
         run: |
-          python3 -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp
+          python3 -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp -e tools/cyclone-testbench
           python3 -m pytest apps/device-gateway/tests -q
           python3 -m unittest discover -s tools/codex-phone-mcp/tests -v
+          python3 -m unittest discover -s tools/cyclone-testbench/tests -v
 
       - name: Dry-run Windows gateway setup
         shell: pwsh

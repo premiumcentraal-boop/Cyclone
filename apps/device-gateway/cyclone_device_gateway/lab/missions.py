@@ -19,6 +19,12 @@ CHECKS = frozenset({"status", "foreground", "screen", "setting", "night_mode", "
 ANSWER_PROBES = frozenset({"wifi_ssid", "prop", "google_account", "battery", "setting"})
 STATUSES = frozenset({"completed", "gave_up", "failed", "cancelled", "paused", "interrupted"})
 EXPECTS = frozenset({"done", "boundary"})
+#: Alpha 108 (test-only approvals): the only things a mission may let the lab approve. The phone holds the same list and
+#: refuses anything else, so a mission (or a compromised PC) cannot widen it.
+LAB_APPROVE_FILES = frozenset({"cyclone-lab-note.txt"})
+LAB_APPROVE_RECIPIENTS = frozenset({"cyclone-lab@example.com"})
+#: Alpha 108 (early stop): a mission that has not finished after this many turns is stuck; long missions may raise it.
+DEFAULT_MAX_TURNS = 30
 
 
 class MissionError(ValueError):
@@ -40,12 +46,14 @@ class LabMission:
     expect: str = "done"
     minutes: int = 6
     notes: str = ""
+    max_turns: int = DEFAULT_MAX_TURNS
 
     def public(self) -> dict[str, Any]:
         return {
             "id": self.id, "title": self.title, "goal": self.goal, "category": self.category, "suites": list(self.suites),
             "apps": list(self.apps), "expect": self.expect, "minutes": self.minutes, "checks": [dict(c) for c in self.checks],
             "setup": [dict(s) for s in self.setup], "owner": dict(self.owner), "notes": self.notes,
+            "maxTurns": self.max_turns,
         }
 
 
@@ -136,7 +144,8 @@ def parse_mission(raw: Any) -> LabMission:
     if not isinstance(raw, dict):
         raise MissionError("a mission is an object")
     mission = str(raw.get("id", "?"))
-    known = {"id", "title", "goal", "category", "suites", "checks", "setup", "apps", "owner", "expect", "minutes", "notes"}
+    known = {"id", "title", "goal", "category", "suites", "checks", "setup", "apps", "owner", "expect", "minutes", "notes",
+             "maxTurns"}
     if not set(raw) <= known:
         raise _fail(mission, f"unknown fields {sorted(set(raw) - known)}")
     if not isinstance(raw.get("id"), str) or not MISSION_ID.match(raw["id"]):
@@ -157,8 +166,10 @@ def parse_mission(raw: Any) -> LabMission:
     if not isinstance(apps, list) or len(apps) > 5 or not all(isinstance(a, str) and PACKAGE.match(a) for a in apps):
         raise _fail(mission, "apps are package names")
     owner = raw.get("owner", {})
-    if not isinstance(owner, dict) or not set(owner) <= {"reply", "fill", "steer"}:
-        raise _fail(mission, "owner takes reply, fill and steer")
+    if not isinstance(owner, dict) or not set(owner) <= {"reply", "fill", "steer", "approve"}:
+        raise _fail(mission, "owner takes reply, fill, steer and approve")
+    if "approve" in owner:
+        owner = {**owner, "approve": _validate_approve(owner["approve"], mission)}
     if "steer" in owner:
         steer = owner["steer"]
         if not isinstance(steer, dict) or not set(steer) <= {"text", "afterTurns"} or not isinstance(steer.get("text"), str) \
@@ -179,12 +190,32 @@ def parse_mission(raw: Any) -> LabMission:
     notes = raw.get("notes", "")
     if not isinstance(notes, str) or len(notes) > 400:
         raise _fail(mission, "notes are short")
+    max_turns = raw.get("maxTurns", 80 if "long" in suites else DEFAULT_MAX_TURNS)
+    if not isinstance(max_turns, int) or isinstance(max_turns, bool) or not 5 <= max_turns <= 150:
+        raise _fail(mission, "maxTurns is 5..150")
     return LabMission(
         id=raw["id"], title=raw["title"].strip(), goal=raw["goal"].strip(), category=raw["category"].strip(),
         suites=tuple(suites), checks=tuple(_validate_check(c, mission) for c in checks),
         setup=tuple(_validate_step(s, mission) for s in setup), apps=tuple(apps), owner=dict(owner),
-        expect=expect, minutes=minutes, notes=notes,
+        expect=expect, minutes=minutes, notes=notes, max_turns=max_turns,
     )
+
+
+def _validate_approve(rules: Any, mission: str) -> list[dict[str, str]]:
+    """Alpha 108: what the lab may approve in this mission, and only test-owned targets. Anything else stays declined."""
+    if not isinstance(rules, list) or not 1 <= len(rules) <= 3:
+        raise _fail(mission, "owner.approve is a list of 1..3 rules")
+    out = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise _fail(mission, "an approve rule is an object")
+        if rule.get("gate") == "delete" and set(rule) == {"gate", "target"} and rule["target"] in LAB_APPROVE_FILES:
+            out.append({"gate": "delete", "target": rule["target"]})
+        elif rule.get("gate") == "send" and set(rule) == {"gate", "recipient"} and rule["recipient"] in LAB_APPROVE_RECIPIENTS:
+            out.append({"gate": "send", "recipient": rule["recipient"]})
+        else:
+            raise _fail(mission, "owner.approve allows only deleting the lab's own file or sending to the lab address")
+    return out
 
 
 CLOCK = "com.google.android.deskclock"
