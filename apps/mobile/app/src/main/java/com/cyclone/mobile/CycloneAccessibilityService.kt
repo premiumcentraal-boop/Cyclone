@@ -783,7 +783,7 @@ class CycloneAccessibilityService : AccessibilityService() {
      */
     fun guardPoint(action: String, x: Float, y: Float) {
         val snapshot = observe(markFresh = false)
-        val labels = ClickGateIntercept.labelsAtPoint(snapshot.nodes, x.toInt(), y.toInt())
+        val labels = ClickGateIntercept.labelsAtPoint(snapshot.nodes, x.toInt(), y.toInt(), snapshot.windows)
         val decision = ClickGateIntercept.decide(action, labels, OverlayChromeRuntime.snapshot().state)
         if (!decision.performClick) {
             if (decision.enterGate && decision.gateClass != null) OverlayChromeRuntime.enterGate(decision.gateClass)
