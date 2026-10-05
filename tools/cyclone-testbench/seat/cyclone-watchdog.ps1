@@ -1,4 +1,4 @@
-# Cyclone testbench watchdog (alpha 108).
+# Cyclone testbench watchdog (alpha 108; starts the link keeper since alpha 109).
 # Keeps Cyclone's gateway running WITHOUT a console window (a click in a console froze the gateway on 5 October 2026),
 # with test-only Lab approvals switched on, and restarts it when it stops answering. Close: stop this PowerShell process.
 # It never updates Cyclone (run `cyclone update` yourself, then the watchdog starts the new version).
@@ -32,8 +32,12 @@ if (-not (Test-Path $Runtime)) { Say "Cyclone is not installed at $Runtime"; exi
 Say "watchdog started"
 $misses = 0
 while ($true) {
-  if (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'Cyclone One\\install\.ps1' }) {
-    # `cyclone update` is installing: leave Cyclone alone until it is done.
+  $procs = @(Get-CimInstance Win32_Process)
+  $installers = @($procs | Where-Object { $_.CommandLine -match 'Cyclone One\\install\.ps1' })
+  $installing = @($installers | Where-Object { $i = $_.ProcessId; -not ($procs | Where-Object { $_.ParentProcessId -eq $i -and $_.Name -eq 'CyclonePCRuntime.exe' }) })
+  if ($installing.Count -gt 0) {
+    # `cyclone update` is still installing (it has not relaunched Cyclone yet): leave everything alone. Once it has
+    # relaunched Cyclone in its console, that Cyclone is replaced below like any other we did not start.
     Start-Sleep -Seconds 15; continue
   }
   $all = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'CyclonePCRuntime.exe' -and $_.CommandLine -match ' terminal' })
@@ -53,6 +57,12 @@ while ($true) {
     $misses++
     Say "gateway did not answer ($misses)"
     if ($misses -ge 2) { Say "restarting Cyclone"; Stop-Cyclone; Start-Sleep -Seconds 3; Start-Cyclone; Start-Sleep -Seconds 40; $misses = 0 }
+  }
+  # The link keeper (alpha 109) keeps the phone's USB debugging link up; start it if it is not running.
+  $keeper = Join-Path $PSScriptRoot 'cyclone-link-keeper.ps1'
+  if ((Test-Path $keeper) -and -not ($procs | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -match 'cyclone-link-keeper\.ps1' })) {
+    Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$keeper`"" -WindowStyle Hidden
+    Say "started the link keeper"
   }
   Start-Sleep -Seconds $EverySeconds
 }

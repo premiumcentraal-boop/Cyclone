@@ -27,6 +27,25 @@ gateway on 5 October 2026), restarts it when `127.0.0.1:8765` stops answering, a
 updates Cyclone: run `cyclone update` yourself; the watchdog then starts the new version. `-Approvals off` keeps every
 Lab approval declined.
 
+## The link keeper (alpha 109)
+
+`cyclone-link-keeper.ps1` keeps the phone's USB debugging link up; the watchdog starts it. Every 30 s it sends a
+tiny `adb shell true`, so the link is never idle long enough for Windows to suspend it. When the link drops it heals
+in steps: `adb reconnect offline`, then `adb -s <serial> reconnect` (after 20 s), then an ADB server restart (after
+60 s, again every 5 minutes). It waits while Cyclone's PC updater runs and while a job holds
+`runtime\adb.lock` (create that file around an install; locks older than 20 minutes are ignored). Status:
+`runtime\link.json` (`connected`, `offline`, `missing`, `unauthorized`, `paused`, with a plain note when only a
+replug can help); log: `runtime\link-keeper.log`. It changes no settings.
+
+What prevents drops (the owner sets these; the seat never changes Windows or phone settings):
+- Windows: Power Options, USB selective suspend **Disabled**; Device Manager, each USB Root Hub, Power Management,
+  untick "Allow the computer to turn off this device to save power". On 5 October 2026 both were on, and the link went
+  `offline` twice while the phone and cable never moved.
+- Phone: Developer options, "Disable adb authorization timeout" on; Stay awake on.
+- Power: a wall charger or a powered hub; the PC's USB port alone drains the phone during runs.
+- One owner of ADB: never install on the phone while Cyclone updates on the PC (the updater stops ADB). Update the
+  PC first, then install the APK.
+
 ## Test-only approvals (alpha 108)
 
 With the switch on, the Lab approves exactly two things, and only in missions that declare them (`owner.approve`):
