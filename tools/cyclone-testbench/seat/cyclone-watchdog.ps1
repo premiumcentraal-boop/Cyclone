@@ -31,18 +31,24 @@ function Start-Cyclone {
 if (-not (Test-Path $Runtime)) { Say "Cyclone is not installed at $Runtime"; exit 1 }
 Say "watchdog started"
 $misses = 0
-$first = $true
 while ($true) {
-  $own = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'CyclonePCRuntime.exe' -and $_.CommandLine -match ' terminal' }
-  if ($first -and $own) {
-    # A Cyclone started by hand runs in a console that can be frozen by a click, and without the approval switch:
-    # replace it once with a hidden one.
-    Say "replacing a Cyclone that runs in a console"
+  if (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'Cyclone One\\install\.ps1' }) {
+    # `cyclone update` is installing: leave Cyclone alone until it is done.
+    Start-Sleep -Seconds 15; continue
+  }
+  $all = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'CyclonePCRuntime.exe' -and $_.CommandLine -match ' terminal' })
+  $ids = $all | ForEach-Object { $_.ProcessId }
+  # The root Cyclone process (its packaged child has a Cyclone parent). Ours has this watchdog as its parent.
+  $roots = @($all | Where-Object { $ids -notcontains $_.ParentProcessId })
+  $foreign = @($roots | Where-Object { $_.ParentProcessId -ne $PID })
+  if ($foreign.Count -gt 0) {
+    # A Cyclone started by hand or by `cyclone update` runs in a console that a click can freeze, and without the
+    # approval switch: replace it with a hidden one.
+    Say "replacing a Cyclone this watchdog did not start"
     Stop-Cyclone; Start-Sleep -Seconds 3; Start-Cyclone; Start-Sleep -Seconds 40
-  } elseif (-not $own) {
+  } elseif ($roots.Count -eq 0) {
     Start-Cyclone; Start-Sleep -Seconds 40
   }
-  $first = $false
   if (Test-Gateway) { $misses = 0 } else {
     $misses++
     Say "gateway did not answer ($misses)"
