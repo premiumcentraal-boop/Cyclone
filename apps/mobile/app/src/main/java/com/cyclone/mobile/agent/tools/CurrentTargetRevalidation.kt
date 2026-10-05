@@ -62,6 +62,12 @@ internal object CurrentTargetRevalidation {
             // that doesn't even cover the point Cyclone would press can't take the press. Refusing these made every
             // ordinary Settings toggle "ambiguous" and pushed the Mind onto coordinate taps.
             if (nestedWith(target, other) && (isCheckable(target) || isCheckable(other) || !coversCenter(other, rect))) return@any false
+            // Alpha 108: a clickable ancestor that wholly contains a clickable target can't take the press: Android gives it to
+            // the innermost clickable view under the finger, which is the target. Android 16 Settings makes its page container
+            // (`content_parent`) clickable over the whole page, so every ordinary row (Screen timeout, Font size) was refused
+            // as ambiguous and the Mind fell back to coordinate taps that missed. Inner buttons (descendants of the target)
+            // and overlapping siblings still fail closed.
+            if (target.evidence.optBoolean("clickable") && containsAsAncestor(other, target, rect)) return@any false
             val b = other.evidence.optJSONObject("bounds") ?: return@any false
             b.optInt("left") < rect.optInt("right") && b.optInt("right") > rect.optInt("left") &&
                 b.optInt("top") < rect.optInt("bottom") && b.optInt("bottom") > rect.optInt("top")
@@ -123,6 +129,16 @@ internal object CurrentTargetRevalidation {
         val cx = (target.optInt("left") + target.optInt("right")) / 2
         val cy = (target.optInt("top") + target.optInt("bottom")) / 2
         return cx >= b.optInt("left") && cx < b.optInt("right") && cy >= b.optInt("top") && cy < b.optInt("bottom")
+    }
+
+    /** [ancestor] holds [target]: its raw path is a strict prefix of the target's and its bounds contain the target's. */
+    private fun containsAsAncestor(ancestor: GatewayElement, target: GatewayElement, rect: org.json.JSONObject): Boolean {
+        val a = rawPath(ancestor)
+        val t = rawPath(target)
+        if (a.isBlank() || t.isBlank() || !t.startsWith("$a/")) return false
+        val b = ancestor.evidence.optJSONObject("bounds") ?: return false
+        return b.optInt("left") <= rect.optInt("left") && b.optInt("top") <= rect.optInt("top") &&
+            b.optInt("right") >= rect.optInt("right") && b.optInt("bottom") >= rect.optInt("bottom")
     }
 
     private fun isEditable(element: GatewayElement): Boolean =
