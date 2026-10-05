@@ -172,6 +172,17 @@ class GatewayTests(unittest.TestCase):
             with self.assertRaises(GatewayError):
                 check_loopback(bad)
 
+    def test_a_gateway_that_hangs_is_a_clear_error_not_a_crash(self):
+        from cyclone_testbench.gateway import Connection, Gateway
+        def hang(request, timeout):
+            raise TimeoutError("timed out")
+        gw = Gateway(Connection("http://127.0.0.1:8765", "secret-token", None), timeout=1, opener=hang)
+        with self.assertRaises(GatewayError) as caught:
+            gw.get("/v1/devices")
+        self.assertEqual(caught.exception.code, "timeout")
+        self.assertIn("did not answer", str(caught.exception))
+        self.assertNotIn("secret-token", str(caught.exception))
+
     def test_the_token_is_never_shown(self):
         connection = find_connection("http://127.0.0.1:8765", "s3cret-token", "/tmp/rt")
         self.assertNotIn("s3cret", repr(connection))

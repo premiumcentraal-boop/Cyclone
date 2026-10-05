@@ -97,6 +97,10 @@ class Gateway:
             raise GatewayError(f"{method} {path}: {message}", status=exc.code, code=code) from None
         except urllib.error.URLError as exc:
             raise GatewayError(f"Can't reach the Cyclone gateway at {self.connection.url}: {exc.reason}. Is Cyclone running?") from None
+        except (TimeoutError, OSError) as exc:  # a read timeout is not a URLError
+            raise GatewayError(f"{method} {path}: the Cyclone gateway at {self.connection.url} did not answer "
+                               f"within {self.timeout:.0f}s ({type(exc).__name__}). Is its console window paused "
+                               f"(title starts with 'Select')? Press Esc in it.", code="timeout") from None
         if not raw:
             return {}
         try:
