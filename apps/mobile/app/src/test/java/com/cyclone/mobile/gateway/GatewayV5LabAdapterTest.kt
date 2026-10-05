@@ -103,6 +103,49 @@ class GatewayV5LabAdapterTest {
         assertEquals("RUN_NOT_FOUND", code { answer(JSONObject().put("action", "stop")) })
     }
 
+    private fun approval(text: String, gate: String?, send: com.cyclone.mobile.mind.mission.OwnerSend? = null, request: String = "req-9") =
+        OwnerMoment("mission-m1abcdefgh", TaskEngine.MIND, MomentKind.APPROVAL, text, emptyList(), requestId = request, gate = gate, send = send)
+
+    @Test fun theLabApprovesOnlyTheTestOwnedDeleteOrSendAndOnlyTheOpenRequest() {
+        // Alpha 108: test-only approvals, decided on the phone whatever the PC asks.
+        live = mission
+        fun approve(request: String = "req-9") = GatewayV5LabAdapter.answer(JSONObject().put("missionId", "m1abcdefgh")
+            .put("action", "approve").put("requestId", request))
+        moment = approval("Cyclone wants to: delete cyclone-lab-note.txt from Downloads", "delete")
+        approve()
+        moment = approval("Cyclone wants to: send the mail", "send", com.cyclone.mobile.mind.mission.OwnerSend("tb 4821", "cyclone-lab@example.com", "Gmail"))
+        approve()
+        assertEquals(listOf(TaskCommand.Approve, TaskCommand.Approve), sent.map { it.second })
+
+        val refused = listOf(
+            approval("Cyclone wants to: delete holiday.jpg from Downloads", "delete"),
+            approval("Cyclone wants to: delete cyclone-lab-note.txt and holiday.jpg", "delete"),
+            approval("Cyclone wants to: pay 5 euro", "pay"),
+            approval("Cyclone wants to: delete cyclone-lab-note.txt", null),
+            approval("Cyclone wants to: send the mail", "send", com.cyclone.mobile.mind.mission.OwnerSend("hi", "mum@example.com", "Gmail")),
+            approval("Cyclone wants to: grant access", "grant"),
+        )
+        refused.forEach { moment = it; assertEquals(it.text, "ANSWER_ON_PHONE", code { approve() }) }
+        moment = approval("Cyclone wants to: delete cyclone-lab-note.txt", "delete")
+        assertEquals("MOMENT_CHANGED", code { approve("req-other") })
+        assertEquals("INVALID_REQUEST", code { GatewayV5LabAdapter.answer(JSONObject().put("missionId", "m1abcdefgh").put("action", "approve")) })
+        assertEquals(2, sent.size)
+    }
+
+    @Test fun statusSaysTheGateTheLabRecipientOnlyAndTheFailedActions() {
+        live = mission
+        GatewayV5LabAdapter.liveMetrics = { JSONObject().put("errors", 4) }
+        moment = approval("Cyclone wants to: send the mail", "send", com.cyclone.mobile.mind.mission.OwnerSend("hi", "cyclone-lab@example.com", "Gmail"))
+        val status = GatewayV5LabAdapter.status(JSONObject().put("missionId", "m1abcdefgh"))
+        assertEquals(4, status.getInt("errors"))
+        assertEquals("send", status.getJSONObject("moment").getString("gate"))
+        assertEquals("cyclone-lab@example.com", status.getJSONObject("moment").getJSONObject("send").getString("recipient"))
+        moment = approval("Cyclone wants to: send the mail", "send", com.cyclone.mobile.mind.mission.OwnerSend("hi", "mum.private@gmail.com", "Gmail"))
+        val other = GatewayV5LabAdapter.status(JSONObject().put("missionId", "m1abcdefgh"))
+        assertFalse(other.toString().contains("mum.private@gmail.com"))
+        assertEquals("<not the lab address>", other.getJSONObject("moment").getJSONObject("send").getString("recipient"))
+    }
+
     @Test fun theRecordIsRedactedAndSaysWhatProducedIt() {
         val record = GatewayV5LabAdapter.record(JSONObject().put("missionId", "m1abcdefgh"))
         assertEquals("completed", record.getString("status"))

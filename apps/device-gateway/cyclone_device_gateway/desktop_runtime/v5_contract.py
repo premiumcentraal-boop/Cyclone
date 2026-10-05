@@ -1001,8 +1001,20 @@ def _bad_lab(message: str) -> DesktopRuntimeError:
 def _validate_lab_moment(moment: Any) -> None:
     if moment is None:
         return
-    if not isinstance(moment, dict) or set(moment) != {"kind", "text", "choices", "fields", "requestId"}:
+    base = {"kind", "text", "choices", "fields", "requestId"}
+    # Alpha 108: a phone from alpha 108 on also says an approval's gate and a send's exact recipient, so the lab can
+    # tell a test-owned action from anything else. Older phones send the base keys only.
+    if not isinstance(moment, dict) or set(moment) not in (base, base | {"gate", "send"}):
         raise _bad_lab("moment")
+    if "gate" in moment:
+        if not _short_text(moment["gate"], 40, nullable=True):
+            raise _bad_lab("moment gate")
+        send = moment["send"]
+        if send is not None and (
+            not isinstance(send, dict) or set(send) != {"text", "recipient", "app"}
+            or not _short_text(send["text"], 1000) or not _short_text(send["recipient"], 200) or not _short_text(send["app"], 120)
+        ):
+            raise _bad_lab("moment send")
     if moment["kind"] not in LAB_MOMENT_KINDS or not _short_text(moment["text"], 300):
         raise _bad_lab("moment kind")
     if not isinstance(moment["choices"], list) or len(moment["choices"]) > 6 or not all(_short_text(c, 80) for c in moment["choices"]):
@@ -1028,7 +1040,9 @@ def _validate_lab_response(op: str, value: dict[str, Any], args: dict[str, Any])
     if value.get("missionId") != args.get("missionId") and op != "lab.answer":
         raise _bad_lab("mission id")
     if op == "lab.status":
-        if set(value) != {"missionId", "status", "live", "turns", "workingMs", "costUsd", "moment"}:
+        base = {"missionId", "status", "live", "turns", "workingMs", "costUsd", "moment"}
+        # Alpha 108: newer phones add a live count of failed actions, for the lab's early stop.
+        if set(value) not in (base, base | {"errors"}) or ("errors" in value and not _is_int(value["errors"])):
             raise _bad_lab("status")
         if value["status"] not in LAB_STATUSES or not isinstance(value["live"], bool):
             raise _bad_lab("status state")
@@ -1926,6 +1940,14 @@ class V5ContractService:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A lab fill is 1..8 short text values.")
             args["values"] = values
         return self._call(device_id, "lab.answer", args)
+
+    def lab_approve(self, device_id: str, mission_id: str, request_id: str) -> dict[str, Any]:
+        """Alpha 108: approve one open request of a lab mission. Only a test-owned action passes: the phone approves
+        deleting the lab's own file or sending to the lab address and refuses everything else (ANSWER_ON_PHONE)."""
+        if not isinstance(request_id, str) or not re.match(r"^[A-Za-z0-9._:-]{1,120}$", request_id):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "requestId is malformed.")
+        return self._call(device_id, "lab.answer", {"missionId": _lab_mission(mission_id), "action": "approve",
+                                                    "requestId": request_id})
 
     def learn_run(self, device_id: str, run_id: str) -> dict[str, Any]:
         """Learn everything one run saw and did, on the phone. Returns counts only."""
