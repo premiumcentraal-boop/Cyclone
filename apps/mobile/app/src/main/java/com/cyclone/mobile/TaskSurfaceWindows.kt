@@ -35,6 +35,24 @@ object TaskSurfaceWindows {
         type != 4 && type != 2 && packageName.isNotBlank() && packageName != "com.android.systemui" &&
             (packageName != "com.cyclone.mobile" || hostPackage == "com.cyclone.mobile")
 
+    /**
+     * Alpha 109: whether an event in this window can change what a read of the task's screen sees. The status bar and
+     * the closed notification shade are system windows (type 3) that are neither active nor focused and cover a strip
+     * of the display; their clock, icons and notifications tick about once a second, and counting them made Cyclone
+     * throw away its own screen reads ("the screen could not be read") on every page. A system window that is active
+     * or focused, or covers at least half the display (an opened shade, a full-screen system surface), still counts.
+     * Windows appearing, moving, resizing or taking focus are caught by the window signature either way. Cyclone's own
+     * overlays (type 4) never count.
+     */
+    fun changesTaskRead(type: Int, active: Boolean, focused: Boolean, width: Int, height: Int, displayWidth: Int, displayHeight: Int): Boolean {
+        if (type == 4) return false
+        if (type != 3) return true
+        if (active || focused) return true
+        val area = width.coerceAtLeast(0).toLong() * height.coerceAtLeast(0)
+        val display = displayWidth.coerceAtLeast(0).toLong() * displayHeight.coerceAtLeast(0)
+        return display <= 0L || area * 2 >= display
+    }
+
     fun eventBelongsToTask(type: Int?, packageName: String, hostPackage: String?): Boolean =
         type != 4 && type != 2 &&
             (packageName != "com.cyclone.mobile" || hostPackage == "com.cyclone.mobile")

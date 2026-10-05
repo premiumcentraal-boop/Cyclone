@@ -16,6 +16,23 @@ class TaskSurfaceWindowsTest {
     private val chrome = TaskSurfaceWindows.Window(1, 1, "com.android.chrome", 1)
     private val overlay = TaskSurfaceWindows.Window(2, 4, "com.cyclone.mobile", 9, active = true, focused = true)
 
+    @Test fun statusBarAndClosedShadeTicksDoNotChangeTheTaskRead() {
+        // Alpha 109, captured on a Pixel 8 (Android 16): status bar 1080x132, closed notification shade 996x467, both
+        // system windows, neither active nor focused, on a 1080x2400 display.
+        assertFalse(TaskSurfaceWindows.changesTaskRead(3, false, false, 1080, 132, 1080, 2400))
+        assertFalse(TaskSurfaceWindows.changesTaskRead(3, false, false, 996, 467, 1080, 2400))
+        assertFalse(TaskSurfaceWindows.changesTaskRead(4, true, true, 1080, 2400, 1080, 2400))
+    }
+
+    @Test fun theAppKeyboardAndAnyFrontOrLargeSystemWindowStillChangeTheTaskRead() {
+        assertTrue(TaskSurfaceWindows.changesTaskRead(1, false, false, 1080, 2400, 1080, 2400))  // the app
+        assertTrue(TaskSurfaceWindows.changesTaskRead(2, false, false, 1080, 900, 1080, 2400))   // the keyboard
+        assertTrue(TaskSurfaceWindows.changesTaskRead(3, false, false, 1080, 2400, 1080, 2400))  // the opened shade
+        assertTrue(TaskSurfaceWindows.changesTaskRead(3, true, false, 600, 300, 1080, 2400))     // an active system dialog
+        assertTrue(TaskSurfaceWindows.changesTaskRead(3, false, true, 600, 300, 1080, 2400))     // a focused system dialog
+        assertTrue(TaskSurfaceWindows.changesTaskRead(3, false, false, 100, 100, 0, 0))          // unknown display: count it
+    }
+
     @Test fun activeCycloneOverlayCannotBecomeTaskRoot() {
         assertEquals(chrome, TaskSurfaceWindows.primary(listOf(chrome, overlay), overlay.id))
         assertFalse(TaskSurfaceWindows.includeSibling(4, "com.cyclone.mobile", "com.android.chrome"))

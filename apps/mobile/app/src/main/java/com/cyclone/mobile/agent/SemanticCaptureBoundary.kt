@@ -41,6 +41,26 @@ object SemanticCaptureBoundary {
      * all the time) while the window set, size, rotation and scope stayed the same. Only the mapper's last attempt
      * asks for this; its taps still go through PhoneToolExecutor's own freshness checks.
      */
+    /**
+     * Alpha 109: a read that changed under it is retried in place, after the screen settles, up to [attempts] times
+     * while the first one started less than [budgetMs] ago. Before this every race cost the Mind a whole turn.
+     * Scope, profile and session changes are not retried: they throw from [surface] or [workspaceProfile] as before.
+     */
+    fun <T> captureRetrying(surface: () -> ObservationSurface, semantic: () -> T,
+        image: (() -> JSONObject)? = null, clock: () -> Long = { android.os.SystemClock.uptimeMillis() },
+        settle: () -> Unit = {}, tolerateContentChange: Boolean = false, attempts: Int = 3, budgetMs: Long = 600): CapturedSemantic<T> {
+        val first = clock()
+        var tries = 0
+        while (true) {
+            tries++
+            try {
+                return capture(surface, semantic, image, clock, settle, tolerateContentChange)
+            } catch (changed: CaptureChanged) {
+                if (tries >= attempts || clock() - first >= budgetMs) throw changed
+            }
+        }
+    }
+
     fun <T> capture(surface: () -> ObservationSurface, semantic: () -> T,
         image: (() -> JSONObject)? = null, clock: () -> Long = { android.os.SystemClock.uptimeMillis() },
         settle: () -> Unit = {}, tolerateContentChange: Boolean = false): CapturedSemantic<T> {

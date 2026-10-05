@@ -90,6 +90,14 @@ class CycloneAccessibilityService : AccessibilityService() {
         val owner = (0 until listed.size()).firstOrNull { i -> listed.valueAt(i).any { it.id == event.windowId } }
         val window = owner?.let { listed.valueAt(it).first { window -> window.id == event.windowId } }
         if (window?.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return
+        if (window != null && owner != null) {
+            // Alpha 109: the status bar and the closed notification shade tick all the time; they are not the task's screen.
+            val siblings = listed.valueAt(owner)
+            val bounds = Rect().also { window.getBoundsInScreen(it) }
+            val display = Rect().also { union -> siblings.forEach { w -> union.union(Rect().also { r -> w.getBoundsInScreen(r) }) } }
+            if (!TaskSurfaceWindows.changesTaskRead(window.type, window.isActive, window.isFocused, bounds.width(), bounds.height(),
+                    display.width(), display.height())) return
+        }
         if (window == null && event.packageName?.toString() == packageName &&
             preferredForegroundRoot(listed.get(0).orEmpty())?.packageName?.toString() != packageName) return
         // A removed or unidentified window cannot safely be assigned to one display.
