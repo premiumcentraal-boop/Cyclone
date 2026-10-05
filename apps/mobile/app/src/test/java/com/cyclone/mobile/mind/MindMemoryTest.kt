@@ -86,4 +86,22 @@ class PointLabelsTest {
         assertTrue("Send" in ClickGateIntercept.labelsAtPoint(nodes, 950, 2250))
         assertTrue(ClickGateIntercept.labelsAtPoint(nodes, 10, 10).isEmpty())
     }
+
+    @Test fun aFloatingButtonSpeaksForTheTapNotTheDeeperRowUnderIt() {
+        // Alpha 109, Gmail: the inbox list is deep in the tree; the Compose button floats over it as a later sibling.
+        val nodes = listOf(
+            node("root", "0", 0, UiBounds(0, 0, 1080, 2400)),
+            node("list", "0/1", 1, UiBounds(0, 300, 1080, 2300)),
+            node("row", "0/1/4", 2, UiBounds(0, 1900, 1080, 2150), clickable = true),
+            node("subject", "0/1/4/2", 3, UiBounds(200, 1950, 1000, 2010), text = "Your parcel was posted"),
+            node("snippet", "0/1/4/3", 3, UiBounds(200, 2010, 1000, 2100), text = "Send us your feedback"),
+            node("compose", "0/3", 1, UiBounds(700, 1980, 1040, 2120), text = "Compose", clickable = true),
+        )
+        val labels = ClickGateIntercept.labelsAtPoint(nodes, 850, 2050)
+        assertEquals("Compose", labels.first())
+        assertFalse(labels.any { it.contains("posted") || it.contains("Send us") })
+        assertEquals(null, com.cyclone.mobile.policy.GateClassifier.classify("phone.tap_point", labels))
+        // The row itself, away from the button, still carries its own words.
+        assertTrue(ClickGateIntercept.labelsAtPoint(nodes, 300, 1980).any { it.contains("posted") })
+    }
 }

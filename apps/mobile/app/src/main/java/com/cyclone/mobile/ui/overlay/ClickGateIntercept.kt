@@ -49,13 +49,24 @@ object ClickGateIntercept {
      * text of a button) and the innermost clickable node with its activation target. Used so a tap by position gets
      * exactly the approval check a tap on the labelled control would get.
      */
+    /** Tree order: a later sibling's subtree is drawn over an earlier one's; a child over its parent. */
+    private val DRAW_ORDER = Comparator<UiNodeSnapshot> { a, b ->
+        val pa = a.path.split('/').map { it.removePrefix("w").toIntOrNull() ?: 0 }
+        val pb = b.path.split('/').map { it.removePrefix("w").toIntOrNull() ?: 0 }
+        val diff = pa.zip(pb).firstOrNull { (x, y) -> x != y }
+        if (diff != null) diff.first.compareTo(diff.second) else pa.size.compareTo(pb.size)
+    }
+
     fun labelsAtPoint(nodes: List<UiNodeSnapshot>, x: Int, y: Int): List<String> {
         val under = nodes.filter { node ->
             node.visibleToUser && node.bounds.width > 0 && node.bounds.height > 0 &&
                 x >= node.bounds.left && x < node.bounds.right && y >= node.bounds.top && y < node.bounds.bottom
         }
-        val innermost = under.maxByOrNull { it.depth } ?: return emptyList()
-        val clickable = under.filter { it.clickable || it.longClickable }.maxByOrNull { it.depth }
+        // Alpha 109: what takes a tap is the TOPMOST node under the point, not the deepest. Android draws later siblings
+        // over earlier ones, so the last node in tree order wins. Picking the deepest let a list row under Gmail's
+        // floating Compose button (deeper in the tree) speak for the tap, and an e-mail's words made Compose a "send".
+        val innermost = under.maxWithOrNull(DRAW_ORDER) ?: return emptyList()
+        val clickable = under.filter { it.clickable || it.longClickable }.maxWithOrNull(DRAW_ORDER)
         val labels = labelsFor(innermost).toMutableList()
         clickable?.let { node ->
             val activation = com.cyclone.mobile.AccessibilityRoles.resolveActivationTarget(nodes, node)
