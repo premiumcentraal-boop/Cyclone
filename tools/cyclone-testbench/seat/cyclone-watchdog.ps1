@@ -32,8 +32,12 @@ if (-not (Test-Path $Runtime)) { Say "Cyclone is not installed at $Runtime"; exi
 Say "watchdog started"
 $misses = 0
 while ($true) {
-  if (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'Cyclone One\\install\.ps1' }) {
-    # `cyclone update` is installing: leave Cyclone alone until it is done.
+  $procs = @(Get-CimInstance Win32_Process)
+  $installers = @($procs | Where-Object { $_.CommandLine -match 'Cyclone One\\install\.ps1' })
+  $installing = @($installers | Where-Object { $i = $_.ProcessId; -not ($procs | Where-Object { $_.ParentProcessId -eq $i -and $_.Name -eq 'CyclonePCRuntime.exe' }) })
+  if ($installing.Count -gt 0) {
+    # `cyclone update` is still installing (it has not relaunched Cyclone yet): leave everything alone. Once it has
+    # relaunched Cyclone in its console, that Cyclone is replaced below like any other we did not start.
     Start-Sleep -Seconds 15; continue
   }
   $all = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'CyclonePCRuntime.exe' -and $_.CommandLine -match ' terminal' })
