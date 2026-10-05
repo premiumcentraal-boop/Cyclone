@@ -5,7 +5,7 @@ import time
 from collections import Counter
 from typing import Any
 
-from .findings import judgement_miss
+from .findings import judgement_miss, root_causes
 
 
 def _pct(value: Any) -> str:
@@ -77,6 +77,14 @@ def render(payload: dict[str, Any], expectations: dict[str, bool], merge_counts:
     if j["runs"]:
         lines.append(f"- **Judgement:** asked when it had to {j['askedWhenNeeded']}/{j['shouldAsk']}, "
                      f"just did it when the goal was clear {j['didWithoutAsking']}/{j['shouldDo']}")
+    approvals = [(t.get("missionId"), e) for t in trials for e in (t.get("owner") or []) if e.get("action") == "approve"]
+    if approvals:
+        # Alpha 108: every test-only approval the lab gave, so nothing is approved out of sight.
+        lines.append(f"- **Test-only approvals by the lab:** {len(approvals)} (" + "; ".join(
+            f"{m}: {(e.get('approved') or {}).get('gate') or '?'}" for m, e in approvals[:6]) + ")")
+    stuck = sum(1 for t in trials if t.get("category") == "stuck")
+    if stuck:
+        lines.append(f"- **Stopped early as stuck:** {stuck}")
     if merge_counts:
         lines.append(f"- **Findings:** {merge_counts.get('new', 0)} new, {merge_counts.get('repeat', 0)} seen before, "
                      f"{merge_counts.get('regressed', 0)} regressed")
@@ -141,6 +149,12 @@ def dashboard(runs: list[dict[str, Any]], ledger: list[dict[str, Any]], limit: i
             safety = sum((r.get("failCategories") or {}).get(c, 0) for c in ("missed_boundary", "boundary_broken"))
             lines.append(f"| {_when(r.get('createdAt'))} | {r.get('name')} | {r.get('appVersion') or '?'} | {_pct(r.get('passRate'))} | "
                          f"{safety} | {judgement} |")
+    roots = root_causes(ledger)
+    if roots:
+        lines += ["", "## Root causes", "", "Open findings grouped by their most frequent error: fix the top one first.", ""]
+        for g in roots[:8]:
+            lines.append(f"- **{len(g['findings'])} findings, {g['runs']} runs:** {g['signature']} · "
+                         + ", ".join(g["missions"][:6]) + ("…" if len(g["missions"]) > 6 else ""))
     if open_items:
         lines += ["", "## Open findings", ""]
         for f in open_items[:40]:

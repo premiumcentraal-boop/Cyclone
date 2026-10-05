@@ -1,6 +1,7 @@
 """`cyclone-testbench`: run Cyclone Lab missions round the clock, keep every result, and keep one findings ledger.
 
-    cyclone-testbench doctor                      is Cyclone running, which phone, are the missions installed
+    cyclone-testbench doctor [--fix]              is Cyclone running, which phone, are the missions installed; --fix
+                                                  also checks the phone over ADB (awake, unlocked, apps) and fixes what is safe
     cyclone-testbench install                     copy the mission packs into Cyclone's Lab missions folder
     cyclone-testbench validate FILE...            check mission files with the Lab's own rules
     cyclone-testbench catalog [--suite S]         list the missions Cyclone knows
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from . import findings as ledger_ops
+from . import preflight as preflight_ops
 from .gateway import Gateway, GatewayError, find_connection
 from .report import dashboard, render, summarize
 from .results import Results, now_ms
@@ -70,6 +72,16 @@ def _expectations(catalog: dict[str, Any]) -> dict[str, bool]:
             if check.get("check") == "owner" and isinstance(check.get("asked"), bool):
                 out[mission["id"]] = check["asked"]
     return out
+
+
+def _app_version(gw: Gateway, device: str | None) -> str | None:
+    """The phone's Cyclone version, so the rotation re-checks a failure only on a newer build."""
+    try:
+        devices = (gw.get("/v1/devices") or {}).get("devices") or []
+        device = device or _pick_device(gw, None)
+    except GatewayError:
+        return None
+    return next((str(d.get("mobileVersion")) for d in devices if d.get("deviceId") == device and d.get("mobileVersion")), None)
 
 
 def _pick_device(gw: Gateway, wanted: str | None) -> str:
@@ -118,7 +130,27 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if running:
         _out(f"• an experiment is running: {running[0].get('id')} ({running[0].get('done')}/{running[0].get('total')})")
     _out(f"✓ results folder {Path(args.results).resolve()}")
-    return 0
+    if not getattr(args, "fix", False):
+        return 0
+    return _preflight(catalog, fix=True)
+
+
+def _preflight(catalog: dict[str, Any], *, fix: bool) -> int:
+    adb = preflight_ops.find_adb()
+    if not adb:
+        _out("✗ adb not found (Cyclone's own adb is in %LOCALAPPDATA%\\Cyclone One\\android-platform-tools)")
+        return 2
+    serials = preflight_ops.devices(preflight_ops.adb_shell(adb, None))
+    if len(serials) != 1:
+        _out(f"✗ adb sees {len(serials)} authorised phones; connect exactly one over USB and allow USB debugging")
+        return 2
+    apps = {a for m in catalog.get("missions") or [] for a in (m.get("apps") or [])}
+    checks = preflight_ops.preflight(preflight_ops.adb_shell(adb, serials[0]), fix=fix, apps=apps)
+    for check in checks:
+        _out(check.line())
+    blocking = [c for c in checks if not c.ok and c.blocking]
+    _out("✓ ready for a round" if not blocking else f"✗ not ready: {', '.join(c.name for c in blocking)}")
+    return 0 if not blocking else 4
 
 
 def cmd_install(args: argparse.Namespace) -> int:
@@ -207,13 +239,16 @@ def cmd_catalog(args: argparse.Namespace) -> int:
 def cmd_next(args: argparse.Namespace) -> int:
     gw = _gateway(args)
     res = _results(args)
-    plan = plan_batch(_campaign(args), _catalog(gw).get("missions") or [], res.runs(), res.read_jsonl("findings.jsonl"))
+    plan = plan_batch(_campaign(args), _catalog(gw).get("missions") or [], res.runs(), res.read_jsonl("findings.jsonl"),
+                      app_version=_app_version(gw, None))
     if args.json:
         _out(json.dumps(plan, indent=1))
         return 0
     _out(f"Next: {plan['name']}  ({len(plan['missions'])} missions)")
     for mission_id in plan["missions"]:
         _out(f"  {mission_id:<34} {plan['reasons'][mission_id]}")
+    for mission_id, why in (plan.get("skipped") or {}).items():
+        _out(f"  skipped {mission_id:<26} {why}")
     return 0
 
 
@@ -234,7 +269,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     catalog = _catalog(gw)
     slot = None
     if args.next:
-        plan = plan_batch(campaign, catalog.get("missions") or [], res.runs(), res.read_jsonl("findings.jsonl"))
+        plan = plan_batch(campaign, catalog.get("missions") or [], res.runs(), res.read_jsonl("findings.jsonl"),
+                          app_version=_app_version(gw, args.device))
         missions, name, slot = plan["missions"], plan["name"], plan["slot"]
     elif args.suite:
         missions = [m["id"] for m in catalog.get("missions") or [] if args.suite in (m.get("suites") or [])]
@@ -366,7 +402,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime", help="Cyclone runtime folder (default: what `cyclone` saved)")
     parser.add_argument("--results", default="testbench-results", help="results folder (default ./testbench-results)")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
+    p = sub.add_parser("doctor")
+    p.add_argument("--fix", action="store_true", help="also check the phone over ADB and fix what is safe")
+    p.set_defaults(fn=cmd_doctor)
     p = sub.add_parser("install")
     p.add_argument("--packs", default=str(PACKS_DIR))
     p.add_argument("--missions-dir")

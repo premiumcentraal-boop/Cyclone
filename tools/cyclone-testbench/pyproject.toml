@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyclone-testbench"
-version = "1.0.0"
+version = "1.1.0"
 description = "Round-the-clock Cyclone Lab testing on a real phone, with one findings ledger"
 requires-python = ">=3.11"
 dependencies = []

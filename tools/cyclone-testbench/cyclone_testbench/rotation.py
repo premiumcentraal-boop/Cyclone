@@ -2,10 +2,13 @@
 
 Each batch is built in this order:
   1. re-checks: missions of open, regressed or fixing findings (critical first), so a fix is confirmed or reopened;
+     only on a phone build newer than the one the finding was last seen on (alpha 108: re-running a known failure on
+     the same build teaches nothing and cost half of every round);
   2. the campaign's next slot (round robin over its slots, oldest first), filled with that slot's missions that have
      run least, so every mission gets its turn;
   3. anything never run yet, if there is room.
-The batch never repeats a mission, and it stays within the campaign's batch size.
+The batch never repeats a mission, and it stays within the campaign's batch size. Missions with an open finding on the
+current build are left out of the slots too (listed under `skipped`), until a new build arrives.
 """
 from __future__ import annotations
 
@@ -58,7 +61,7 @@ def next_slot(campaign: dict[str, Any], runs: list[dict[str, Any]]) -> dict[str,
 
 
 def plan_batch(campaign: dict[str, Any], catalog: list[dict[str, Any]], runs: list[dict[str, Any]],
-               ledger: list[dict[str, Any]], *, installed: set[str] | None = None) -> dict[str, Any]:
+               ledger: list[dict[str, Any]], *, installed: set[str] | None = None, app_version: str | None = None) -> dict[str, Any]:
     known = {m["id"]: m for m in catalog}
     run_count: Counter[str] = Counter()
     for run in runs:
@@ -66,8 +69,15 @@ def plan_batch(campaign: dict[str, Any], catalog: list[dict[str, Any]], runs: li
     size = campaign["batchSize"]
     chosen: list[str] = []
     reasons: dict[str, str] = {}
+    open_states = {"open", "regressed", "fixing"}
+    known_failing = {str(f.get("missionId")): f for f in ledger
+                     if app_version and f.get("status") in open_states and f.get("area") not in {"infra", "speed"}
+                     and f.get("lastVersion") == app_version}
+    skipped = {m: f"open {f.get('id')} on this build ({app_version})" for m, f in known_failing.items() if m in known}
 
     def add(mission_id: str, why: str) -> None:
+        if mission_id in known_failing:
+            return
         if mission_id in known and mission_id not in chosen and len(chosen) < size:
             if installed is not None and not set(known[mission_id].get("apps") or []) <= installed:
                 return
@@ -79,7 +89,7 @@ def plan_batch(campaign: dict[str, Any], catalog: list[dict[str, Any]], runs: li
     for finding in rechecks:
         if sum(1 for r in reasons.values() if r.startswith("re-check")) >= campaign["recheck"]:
             break
-        add(str(finding.get("missionId")), f"re-check {finding.get('id')} ({finding.get('severity')})")
+        add(str(finding.get("missionId")), f"re-check {finding.get('id')} ({finding.get('severity')}) on a new build")
 
     slot = next_slot(campaign, runs)
     members = [m["id"] for m in catalog
@@ -89,5 +99,5 @@ def plan_batch(campaign: dict[str, Any], catalog: list[dict[str, Any]], runs: li
     for mission_id in sorted(known, key=lambda m: (run_count[m], m)):
         if run_count[mission_id] == 0:
             add(mission_id, "never run")
-    return {"slot": slot["name"], "missions": chosen, "reasons": reasons,
+    return {"slot": slot["name"], "missions": chosen, "reasons": reasons, "skipped": skipped,
             "name": f"{campaign['name']} · {slot['name']}", "variants": campaign["variants"], "repetitions": campaign["repetitions"]}

@@ -14,8 +14,11 @@ The full guide for people is `tools/cyclone-testbench/GUIDE.md`. This file is ho
 
 ## Hard rules (never break these)
 
-1. **Never approve anything for the owner.** The Lab always declines approvals. You never press Approve in Glass,
-   never answer an approval through any tool, and never ask the owner to approve a test action "so the test passes".
+1. **Never approve anything for the owner.** You never press Approve in Glass, never answer an approval through any
+   tool, and never ask the owner to approve a test action "so the test passes". The Lab declines every approval,
+   except (alpha 108) its own test-only rule: with `CYCLONE_LAB_APPROVALS=test-only` set where Cyclone runs, it approves
+   only what a mission declares in `owner.approve`, and only deleting `cyclone-lab-note.txt` or sending to
+   `cyclone-lab@example.com`; the phone checks the same list. You may write such missions; you never widen the list.
 2. **No secrets.** Never type, read back, store or log a password, code, key or payment detail. If a test needs one,
    it stops at the Secrets Card. That is correct behaviour, not a failure.
 3. **Nothing irreversible or paid.** No purchases, no factory reset, no uninstalling, no deleting anything except the
@@ -31,8 +34,11 @@ The full guide for people is `tools/cyclone-testbench/GUIDE.md`. This file is ho
 ## Before the first round (and whenever something looks off)
 
 ```
-cyclone-testbench doctor
+cyclone-testbench doctor --fix
 ```
+
+`--fix` also checks the phone over ADB (awake, unlocked, stays awake on power, Cyclone not put to sleep, accessibility,
+battery and heat, mission apps) and fixes what is safe. "Not ready" means wait and tell the owner; never run anyway.
 
 - No gateway → ask the owner to start Cyclone (`cyclone` in a terminal).
 - No READY phone → ask them to connect or unlock it, open Cyclone, and keep it on the charger with
@@ -54,7 +60,10 @@ cyclone-testbench doctor
    `testbench-results/experiments/<id>/report.md`. Read every failed run: cause, what Cyclone said, which check
    failed. When the cyclone MCP tools are connected, `phone_lab_report` and `phone_debug_bundle` give more detail.
    Glass → Runs shows the run inspector for a trial.
-5. **Triage.** The ledger already has a finding per failure pattern (`cyclone-testbench findings`). For each new or
+5. **Triage.** Start from `DASHBOARD.md` → Root causes: findings with the same most-frequent error are one problem,
+   so fix and note the group, not each mission. `stuck` means the Lab stopped a run early (too many turns or failed
+   actions); read its events like a timeout. A mission with an open finding on the current build is skipped until a
+   new build arrives, then re-checked first. The ledger has a finding per failure pattern (`cyclone-testbench findings`). For each new or
    repeated one, decide what it really is and add a note:
    `cyclone-testbench finding F-xxxxxxxx --note "root cause guess: ...; evidence: ...; proposed fix: ..."`.
    - `infra` (phone locked, provider down) is about the setup: fix the setup, not Cyclone.

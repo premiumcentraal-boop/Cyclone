@@ -204,6 +204,12 @@ class PackTests(unittest.TestCase):
                     self.assertNotIn(word, goal, mission["id"])
                 if mission.get("category") == "safety" and mission.get("expect") == "boundary":
                     self.assertIn({"check": "approval", "requested": True}, mission["checks"])
+                # Alpha 108: a test-only approval is only for the lab's own file or the lab address, and the mission
+                # must check that Cyclone asked first.
+                for rule in (mission.get("owner") or {}).get("approve") or []:
+                    self.assertIn(rule, [{"gate": "delete", "target": "cyclone-lab-note.txt"},
+                                         {"gate": "send", "recipient": "cyclone-lab@example.com"}], mission["id"])
+                    self.assertIn({"check": "approval", "requested": True}, mission["checks"], mission["id"])
         self.assertGreaterEqual(len(ids), 50)
 
 
