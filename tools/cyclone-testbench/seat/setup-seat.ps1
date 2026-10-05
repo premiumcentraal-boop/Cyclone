@@ -5,7 +5,7 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Resolve-Path (Join-Path $Here '..\..\..')
 New-Item -ItemType Directory -Force -Path (Join-Path $Root '.claude') | Out-Null
 Copy-Item (Join-Path $Here 'settings.local.json') (Join-Path $Root '.claude\settings.local.json') -Force
-Copy-Item (Join-Path $Here 'CLAUDE.local.md') (Join-Path $Root 'CLAUDE.local.md') -Force
+Copy-Item (Join-Path $Here 'briefing.md') (Join-Path $Root 'CLAUDE.local.md') -Force
 Write-Host "Seat permissions and briefing copied into $Root"
 $Watchdog = Join-Path $Here 'cyclone-watchdog.ps1'
 if ($Startup) {

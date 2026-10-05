@@ -14,7 +14,7 @@ powershell -ExecutionPolicy Bypass -File tools\cyclone-testbench\seat\setup-seat
 claude remote-control
 ```
 
-`setup-seat.ps1` copies this seat's permission set to `.claude\settings.local.json` and `CLAUDE.local.md` (both local,
+`setup-seat.ps1` copies this seat's permission set to `.claude\settings.local.json` and `briefing.md` to `CLAUDE.local.md` (both local,
 never committed), then starts the watchdog. Add `-Startup` to also start the watchdog at every login.
 On first start, type `/permissions` in the seat and check the allow and deny lists loaded. If your Claude Code runs
 commands through its PowerShell tool, add the same rules with `PowerShell(...)` in place of `Bash(...)`.
