@@ -2,8 +2,8 @@
 export type AppTab = "map" | "coverage" | "skills" | "screens" | "scenarios" | "versions" | "runs" | "issues" | "dictionary" | "abilities";
 const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios", "versions", "runs", "issues", "dictionary", "abilities"];
 /** Plan 33 (C0): the Command Center's sections. */
-export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts" | "numbers" | "vault" | "connections";
-const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts", "numbers", "vault", "connections"];
+export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts" | "numbers" | "vault" | "connections" | "fleet";
+const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts", "numbers", "vault", "connections", "fleet"];
 /** Plan 33 (C5): the workspace's own screens: its home, one page, and the trash. */
 export type WorkspaceTab = "home" | "page" | "trash" | "ai" | "ports";
 const PAGE_ID = /^pg_[A-Za-z0-9_-]{8,40}$/;

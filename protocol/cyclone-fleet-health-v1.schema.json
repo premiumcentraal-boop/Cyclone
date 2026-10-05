@@ -1,0 +1,28 @@
+{
+  "$id": "cyclone-fleet-health-v1",
+  "version": 1,
+  "description": "Device facts for fleet preflight. No messages, contacts, or secrets.",
+  "properties": [
+    "batteryPercent",
+    "charging",
+    "network",
+    "freeStorageMb",
+    "os",
+    "model",
+    "manufacturer",
+    "root",
+    "permissions"
+  ],
+  "root": {
+    "rooted": "boolean",
+    "verified": "boolean: confirmed by the owner's own root check",
+    "signals": [
+      "su",
+      "magisk",
+      "kernelsu",
+      "apatch",
+      "superuser",
+      "test-keys"
+    ]
+  }
+}

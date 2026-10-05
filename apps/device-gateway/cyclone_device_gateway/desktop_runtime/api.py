@@ -213,6 +213,16 @@ class DesktopRuntime:
         # Plan 33 (C0): the Command Center's accounts, tasks, routines, results and approvals, in one local SQLite file.
         from ..command.center import CommandCenter
         self.command = CommandCenter(settings.runtime_dir / "command" / "command.db", share_contract, self.fleet.list_public)
+        from .scenes import SceneStore
+        from .fleet_orchestrator import FleetOrchestrator
+        self.scenes = SceneStore(settings.runtime_dir / "fleet-scenes.json")
+        self.fleet_orchestrator = FleetOrchestrator(
+            self.command, self.fleet.list_public, self.workspace.nickname_map, settings.runtime_dir / "fleet" / "missions.json",
+            groups=lambda: list(self.workspace.public().get("groups") or []),
+            events=getattr(self.fleet, "events", None),
+            colors=self.workspace.color_map,
+        )
+        self.command.set_task_listener(self.fleet_orchestrator.enqueue_task_change)
         # Plan 48: the Port Hub (Cyclone Ports). Absent only when the ports kit isn't installed.
         from ..ports.hub import PortHub
         try:
@@ -302,6 +312,9 @@ class DesktopRuntime:
         self.cloud.start()
 
     def stop(self) -> None:
+        closer = getattr(self, "fleet_orchestrator", None)
+        if closer is not None:
+            closer.close()
         self.cloud.stop()
         self.medic.stop()
         self.care.stop()
@@ -890,6 +903,8 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
         app.include_router(create_cloud_fleet_router(desktop.cloud, settings.token))
     # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
     app.state.glass_codes = LaunchCodes()
+    from .fleet_api import create_fleet_router
+    app.include_router(create_fleet_router(desktop, settings.token))
     app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))
     app.add_event_handler("startup", desktop.start)
     app.add_event_handler("shutdown", desktop.stop)

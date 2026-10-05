@@ -67,6 +67,10 @@ class FleetEventType(StrEnum):
     SCREEN_STATE_CHANGED = "SCREEN_STATE_CHANGED"
     SESSION_ADDED = "session.added"
     SESSION_REMOVED = "session.removed"
+    MISSION_CREATED = "MISSION_CREATED"
+    TASK_UPDATED = "TASK_UPDATED"
+    NEEDS_YOU = "NEEDS_YOU"
+    MISSION_DONE = "MISSION_DONE"
 
 
 class RuntimeErrorCode(StrEnum):

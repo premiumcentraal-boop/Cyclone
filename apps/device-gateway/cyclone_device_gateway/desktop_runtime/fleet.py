@@ -39,6 +39,18 @@ class RememberedSession:
     local_port: int | None = None
 
 
+_ROOT_SIGNALS = {"su", "magisk", "kernelsu", "apatch", "superuser", "test-keys"}
+
+
+def _root_of(raw: Any) -> dict[str, Any] | None:
+    """The phone's root report, reduced to known words. Anything else from the phone is dropped."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("rooted"), bool):
+        return None
+    signals = raw.get("signals") if isinstance(raw.get("signals"), list) else []
+    return {"rooted": raw["rooted"], "verified": raw.get("verified") is True,
+            "signals": [s for s in signals if isinstance(s, str) and s in _ROOT_SIGNALS][:8]}
+
+
 @dataclass
 class DeviceSession:
     device_id: str
@@ -73,6 +85,7 @@ class DeviceSession:
     # Alpha 88: the phone's own control owner (AGENT/HUMAN) from its last status, and whether Cyclone's process runs.
     phone_controller: str | None = None
     app_running: bool | None = None
+    fleet_health: dict[str, Any] | None = None
 
     def public(self) -> dict[str, Any]:
         suffix = self.serial[-4:] if len(self.serial) >= 4 else self.serial
@@ -124,6 +137,8 @@ class DeviceSession:
                 "endpoint": "loopback" if self.source == "VIRTUAL" else {"LAN": "lan", "CLOUD": "cloud"}.get(self.source, "usb"),
             },
             "connectionLabel": connection_label,
+            "appRunning": self.app_running,
+            "health": self.fleet_health,
             "inputOwner": self.input_owner,
             "connectionHealth": {
                 "bridgeReachable": self.bridge_ok,
@@ -622,6 +637,26 @@ class DeviceFleetManager:
                     session.input_owner = "HUMAN"
             if value:
                 session.app_running = True
+            health = value.get("fleetHealth")
+            if isinstance(health, dict):
+                permissions = health.get("permissions") if isinstance(health.get("permissions"), dict) else {}
+                session.fleet_health = {
+                    "version": 1,
+                    "batteryPercent": health.get("batteryPercent") if isinstance(health.get("batteryPercent"), int) else None,
+                    "charging": bool(health.get("charging")),
+                    "network": str(health.get("network") or "unknown")[:24],
+                    "freeStorageMb": health.get("freeStorageMb") if isinstance(health.get("freeStorageMb"), int) else None,
+                    "os": str(health.get("os") or "")[:40],
+                    "model": str(health.get("model") or "")[:40],
+                    "manufacturer": str(health.get("manufacturer") or "")[:40] or None,
+                    # Alpha 107: rooted or not, from files a root manager leaves (the phone never runs su for this).
+                    "root": _root_of(health.get("root")),
+                    "permissions": {
+                        key: bool(permissions.get(key))
+                        for key in ("accessibility", "camera", "notifications")
+                        if key in permissions
+                    },
+                }
             version = value.get("appVersion")
             session.mobile_version = (
                 version if isinstance(version, str) and len(version) <= 64 and _MOBILE_VERSION_RE.fullmatch(version) else None
