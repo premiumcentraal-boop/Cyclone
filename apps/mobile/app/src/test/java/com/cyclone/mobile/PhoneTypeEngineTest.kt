@@ -12,6 +12,20 @@ class PhoneTypeEngineTest {
     private val taskValue = "task-one"
     private val secretAttempt = "x"
 
+    @Test fun secretFillVerifiesDelayedReadbackWithoutASecondWriteOrClipboard() {
+        val screen = phoneTaskScreen(observationId = "obs-late-secret", focused = true, rawNodeId = "raw-late-secret", password = true)
+        val node = screen.snapshot.nodes.first { it.id == "raw-late-secret" }
+        val plan = PhoneTypeEngine.ExecutePlan(screen.taskElementId, node.id, node.path, false,
+            taskValue.length, PhoneTypeEngine.digest(taskValue))
+        val host = FakeLiveHost.from(screen, initialText = "", lateSetText = true, pasteWorks = true)
+        val result = PhoneTypeEngine.perform(plan, taskValue, host, redactObservedText = true)
+        assertTrue(result.ok)
+        assertTrue(result.afterStateVerified)
+        assertEquals(1, host.setTexts)
+        assertEquals("set_text", result.method)
+        assertFalse(result.toPayload().toString().contains(taskValue))
+    }
+
     @Test
     fun locateClickRelocateAuthorizedTypeFailsWhenSelectorDropsObservationId() {
         val before = phoneTaskScreen(observationId = "obs-before", focused = false, rawNodeId = "raw-task-a")

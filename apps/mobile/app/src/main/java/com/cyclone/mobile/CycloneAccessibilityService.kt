@@ -629,7 +629,12 @@ class CycloneAccessibilityService : AccessibilityService() {
 
         override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
             val node = nodeAtTaskPath(plan.path, displayId, targetPackage) ?: return null
-            return if (node.isEditable) AccessibilityTypeHandle(plan.path, node, plan.rawNodeId) else null
+            if (!node.isEditable ||
+                (plan.expectedPackageName != null && node.packageName?.toString() != plan.expectedPackageName) ||
+                (plan.expectedClassName != null && node.className?.toString() != plan.expectedClassName) ||
+                (plan.expectedResourceId != null && node.viewIdResourceName.orEmpty() != plan.expectedResourceId) ||
+                (plan.expectedPassword != null && node.isPassword != plan.expectedPassword)) return null
+            return AccessibilityTypeHandle(plan.path, node, plan.rawNodeId, plan)
         }
 
         override fun view(handle: Any, redactText: Boolean): PhoneTypeEngine.LiveView? {
@@ -684,6 +689,7 @@ class CycloneAccessibilityService : AccessibilityService() {
 
         override fun refresh(handle: Any): Any? {
             val target = handle as? AccessibilityTypeHandle ?: return null
+            target.plan?.let { return resolve(it) }
             val node = nodeAtTaskPath(target.path, displayId, targetPackage) ?: return null
             return if (node.isEditable) AccessibilityTypeHandle(target.path, node, target.rawNodeId) else null
         }
@@ -1139,4 +1145,5 @@ private data class AccessibilityTypeHandle(
     val path: String,
     val node: AccessibilityNodeInfo,
     val rawNodeId: String,
+    val plan: PhoneTypeEngine.ExecutePlan? = null,
 )

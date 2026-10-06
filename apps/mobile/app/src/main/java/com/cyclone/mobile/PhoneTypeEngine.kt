@@ -62,6 +62,10 @@ object PhoneTypeEngine {
         val needsFocus: Boolean,
         val valueLength: Int,
         val valueDigest: String,
+        val expectedPackageName: String? = null,
+        val expectedClassName: String? = null,
+        val expectedResourceId: String? = null,
+        val expectedPassword: Boolean? = null,
     )
 
     data class Deny(
@@ -312,17 +316,23 @@ object PhoneTypeEngine {
             }
             if (strict) break
         }
-        val stillEditableFocused = after != null && after.editable && after.focused
         val textChanged = after != null && (after.textDigest != beforeDigest || after.textLength != beforeLength)
         val unchangedAsLabel = after != null && after.textDigest == beforeDigest && after.textLength == beforeLength
-        val exactRedactedMatch = redactObservedText && after != null && host.matchesText(afterHandle, value)
+        var exactRedactedMatch = redactObservedText && after != null && host.matchesText(afterHandle, value)
+        if (redactObservedText && set && !exactRedactedMatch) {
+            // A Secrets Card fill can land a frame late too. Read again without writing again.
+            host.settle()
+            afterHandle = host.refresh(afterHandle) ?: afterHandle
+            after = host.view(afterHandle, true) ?: after
+            exactRedactedMatch = after != null && host.matchesText(afterHandle, value)
+        }
         val maskedPasswordFilled = redactObservedText &&
             after?.password == true &&
             beforeLength != after.textLength &&
             after.textLength == value.length
         // Legacy acceptance (a field whose accessibility text never reflects its content) stays possible, but it is
         // reported as unverified text, never as proof that the text is in.
-        val verified = strict || stillEditableFocused && if (redactObservedText) {
+        val verified = strict || (after != null && after.editable && after.focused) && if (redactObservedText) {
             exactRedactedMatch || maskedPasswordFilled
         } else {
             textChanged || unchangedAsLabel

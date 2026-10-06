@@ -56,6 +56,7 @@ fun uiSnapshotFromJson(json: JSONObject): UiSnapshot {
                 focusable = n.optBoolean("focusable"),
                 visibleToUser = n.optBoolean("visibleToUser", true),
                 actions = actions,
+                password = n.optBoolean("password"),
             )
         } }
     }.orEmpty()
