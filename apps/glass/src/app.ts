@@ -30,6 +30,7 @@ import { createWorkspaceSidebar, type WorkspaceSidebar } from "./workspace/sideb
 import { createWorkspaceHome } from "./workspace/home.js";
 import { createPageView } from "./workspace/pageView.js";
 import { createTrashPage } from "./workspace/trash.js";
+import type { SocketLike } from "./services/aiStream.js";
 import { createAiPanel, type AiPanel } from "./workspace/aiPanel.js";
 import { createAiSettings } from "./workspace/aiSettings.js";
 import { workspaceBus } from "./workspace/directory.js";
@@ -291,7 +292,10 @@ export class GlassApp {
   /** Ask AI: the panel beside the workspace, about one page or the whole workspace. */
   private showAi(pageId: string | null): void {
     if (this.mode !== "command") return;
-    this.aiPanel ??= createAiPanel(() => this.context());
+    // Plan 53 R2: Cyber's live events over the same local socket auth as the fleet view; without WebSocket it polls.
+    this.aiPanel ??= createAiPanel(() => this.context(), typeof WebSocket === "undefined" ? {} : {
+      socket: (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike,
+    });
     if (!this.aiPanel.element.parentNode) this.options.root.append(this.aiPanel.element);
     this.aiPanel.open(pageId);
   }

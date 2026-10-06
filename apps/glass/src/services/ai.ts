@@ -53,6 +53,8 @@ export interface AiMessage {
   model?: string | null;
   costUsd?: number | null;
   activity: Activity[];
+  /** Plan 53 R2: sent while Cyber was answering; it is answered next. */
+  queued?: boolean;
 }
 
 export interface Proposal {
@@ -137,6 +139,7 @@ function parseMessage(raw: unknown): AiMessage | null {
   if (!("role" in r)) return null;
   return {
     seq: num(r.seq), role, text: str(r.text), at: num(r.at), model: strOrNull(r.model), costUsd: numOrNull(r.costUsd),
+    ...(r.queued === true ? { queued: true } : {}),
     activity: list(r.activity).map((a) => {
       const o = obj(a);
       return { label: str(o.label), outcome: oneOf(o.outcome, ["done", "proposed", "error"] as const, "done"), proposalId: strOrNull(o.proposalId), error: strOrNull(o.error) };

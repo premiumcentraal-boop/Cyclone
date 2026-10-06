@@ -17,6 +17,7 @@ from .. import schedule as schedules
 from ..center import CommandError
 from .common import (AUTONOMY, BASE, CATALOGUE_TTL_MS, CONVERSATION_ID, DEFAULTS, GRANT, KEY, MAX_CONVERSATIONS,
                      MAX_INSTRUCTIONS, MODEL_ID, PROPOSAL_ID, PROVIDER, AiError, _money, _new, _only, _price, _text_arg)
+from .events import EventHub
 from .registry import REGISTRY
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -45,17 +46,24 @@ class StoreMixin:
     """Settings, key, spending, models, conversations and proposals. ``AiStore`` mixes this with the loop."""
 
     def __init__(self, center: "CommandCenter", *, send: Callable[..., mcp.Response] | None = None,
-                 spawn: Callable[[Callable[[], None]], None] | None = None) -> None:
+                 spawn: Callable[[Callable[[], None]], None] | None = None,
+                 stream: Callable[..., Any] | None = None) -> None:
         self._c = center
         self._send = send or openapi.request
+        # Plan 53 R2: answers stream from the provider. A caller that brings its own ``send`` (tests, scripted
+        # providers) and no ``stream`` gets whole answers, published as one piece.
+        self._stream = stream if stream is not None else (None if send is not None else openapi.stream)
         self._spawn = spawn or (lambda fn: threading.Thread(target=fn, name="cyclone-ai-turn", daemon=True).start())
         self._stops: set[str] = set()
         self._catalogue: tuple[int, list[dict[str, Any]]] | None = None
         self._catalogue_lock = threading.Lock()
         self._toolsets = REGISTRY.bind(center)
+        self.events = EventHub(center._clock)
         with center._lock:
             center._db.executescript(AI_SCHEMA)
             center._db.execute("UPDATE ai_conversation SET state = 'failed', detail = 'Cyclone restarted while this ran.' WHERE state = 'working'")
+            # A message that waited for a turn when Cyclone stopped becomes an ordinary (unanswered) owner message.
+            center._db.execute("UPDATE ai_message SET role = 'user' WHERE role = 'queued'")
 
     @property
     def _grants(self) -> Any:
@@ -323,11 +331,34 @@ class StoreMixin:
         self._c._db.execute("INSERT INTO ai_message(conversation_id, seq, role, body, at) VALUES (?,?,?,?,?)",
                             (cid, seq, role, json.dumps(body, ensure_ascii=False), now))
         self._c._db.execute("UPDATE ai_conversation SET updated_at = ? WHERE id = ?", (now, cid))
+        self.events.publish("message.added", cid, messageSeq=seq, role=role)
         return seq
 
     def _set_state(self, cid: str, state: str, detail: str = "") -> None:
         self._c._db.execute("UPDATE ai_conversation SET state = ?, detail = ?, updated_at = ? WHERE id = ?",
                             (state, detail[:300], self._c._clock(), cid))
+        self.events.publish("state", cid, state=state, detail=detail[:300])
+
+    # --- the queue (plan 53 R2): a message sent while Cyber answers waits for the next turn
+
+    def _queued(self, cid: str) -> list[Any]:
+        return self._c._db.execute("SELECT seq, body FROM ai_message WHERE conversation_id = ? AND role = 'queued' ORDER BY seq",
+                                   (cid,)).fetchall()
+
+    def _promote_queued(self, cid: str) -> int:
+        """Waiting messages become owner messages at the end of the conversation, in the order they were sent, so the
+        conversation stays a clean sequence of turns (never an owner message between a tool call and its result)."""
+        rows = self._queued(cid)
+        for r in rows:
+            self._c._db.execute("DELETE FROM ai_message WHERE conversation_id = ? AND seq = ?", (cid, r["seq"]))
+            self._add(cid, "user", json.loads(r["body"]))
+        return len(rows)
+
+    def _drop_queued(self, cid: str) -> int:
+        count = self._c._db.execute("DELETE FROM ai_message WHERE conversation_id = ? AND role = 'queued'", (cid,)).rowcount
+        if count:
+            self.events.publish("message.added", cid, messageSeq=None, role="queued")
+        return count
 
     # ------------------------------------------------------------------ tools, through the registry
 
@@ -389,7 +420,9 @@ class StoreMixin:
             # For the model's next turn; the owner sees the outcome on the proposal's card.
             self._add(row["conversation_id"], "note", {"text": note, "quiet": True})
             self._c._audit("owner", "ai.proposal.apply", row["id"], {"tool": row["tool"], "state": state})
-            return self._proposal_public(self._proposal(row["id"]))
+            public = self._proposal_public(self._proposal(row["id"]))
+            self.events.publish("proposal.resolved", row["conversation_id"], proposal=public)
+            return public
 
     def discard(self, proposal_id: str) -> dict[str, Any]:
         with self._c._lock:
@@ -399,7 +432,9 @@ class StoreMixin:
             self._c._db.execute("UPDATE ai_proposal SET state = 'discarded', decided_at = ? WHERE id = ?", (self._c._clock(), row["id"]))
             self._add(row["conversation_id"], "note", {"text": f"The owner discarded: {row['summary']}.", "quiet": True})
             self._c._audit("owner", "ai.proposal.discard", row["id"], {"tool": row["tool"]})
-            return self._proposal_public(self._proposal(row["id"]))
+            public = self._proposal_public(self._proposal(row["id"]))
+            self.events.publish("proposal.resolved", row["conversation_id"], proposal=public)
+            return public
 
     def open_proposals(self) -> list[dict[str, Any]]:
         with self._c._lock:
@@ -410,9 +445,17 @@ class StoreMixin:
 
     def _public_messages(self, rows: list[Any]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
+        waiting: list[dict[str, Any]] = []
         for r in rows:
             body = json.loads(r["body"])
+            if r["role"] == "queued":
+                # Plan 53 R2: shown after the answer in progress, marked as waiting for the next turn.
+                waiting.append({"seq": r["seq"], "role": "user", "text": body.get("text", ""), "at": r["at"], "queued": True})
+                continue
             if r["role"] == "note" and body.get("quiet"):
+                continue
+            if r["role"] == "summary":
+                # Plan 53 R2: older turns were summarized for the model; the owner still sees every message.
                 continue
             if r["role"] == "tool":
                 for item in reversed(out):
@@ -437,4 +480,4 @@ class StoreMixin:
                 prev["model"] = item["model"] or prev["model"]
                 continue
             merged.append(item)
-        return merged
+        return merged + waiting

@@ -47,6 +47,13 @@
 .ai-act-mark { width: 16px; text-align: center; }
 .ai-act-error .ai-act-mark, .ai-act-error { color: var(--warning); }
 .ai-act-error { flex-basis: 100%; padding-left: 22px; font-size: 12px; }
+/* Plan 53 R2: Cyber's answer as it is written, its tools as they run, and messages waiting for the next turn. */
+.ai-live .ai-md > :last-child::after { content: "▍"; color: var(--accent); margin-left: 1px; animation: ai-pulse 1s steps(2, start) infinite; }
+.ai-act-running .ai-act-mark { color: var(--accent); animation: ai-pulse 1.2s ease-in-out infinite; }
+.ai-act-running { color: var(--text); }
+.ai-queued { opacity: 0.72; border: 1px dashed var(--border-strong); background: transparent; }
+.ai-queued-label { display: block; margin-top: 4px; font-size: 11px; color: var(--ws-muted); }
+@media (prefers-reduced-motion: reduce) { .ai-live .ai-md > :last-child::after, .ai-act-running .ai-act-mark { animation: none; } }
 .ai-md > * { margin: 0 0 6px; }
 .ai-md > :last-child { margin-bottom: 0; }
 .ai-md h3, .ai-md h4, .ai-md h5 { margin: 10px 0 4px; font-weight: 600; }
