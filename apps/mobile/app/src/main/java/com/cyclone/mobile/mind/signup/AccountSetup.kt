@@ -34,9 +34,12 @@ class AccountSetupPlan(val map: SignupMap, val values: Map<String, String>) {
                 val value = when {
                     field.kind == SignupFieldKind.PASSWORD -> "use vault_fill what=password"
                     field.kind == SignupFieldKind.PHOTO -> "skip unless required; then ask the owner"
+                    page.check == SignupCheck.SMS_CODE -> "use setup_page check=sms_code for native code autofill on this phone; ask the owner only if it cannot retrieve the code"
                     else -> values[field.key]?.let { "\"$it\"" } ?: if (field.required) "not given: ask the owner" else "leave empty"
                 }
                 append("  - ${field.label} (${field.kind.wire}${if (field.required) "" else ", optional"}): $value\n")
+                if (field.hint.isNotBlank()) append("    Format hint: \"${field.hint}\"\n")
+                if (field.choices.isNotEmpty()) append("    Choices: ${field.choices.joinToString { "\"$it\"" }}\n")
             }
             append("  then press \"${page.continueLabel}\"\n")
         }

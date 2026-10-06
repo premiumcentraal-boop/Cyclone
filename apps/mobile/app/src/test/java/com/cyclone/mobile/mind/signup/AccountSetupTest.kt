@@ -47,4 +47,27 @@ class AccountSetupTest {
         assertTrue(json.isNull("handle"))
         assertFalse(json.isNull("drift"))
     }
+
+    @Test fun mappedFormatsAndChoicesReachTheAccountRunner() {
+        val recorder = SignupRecorder("com.instagram.android", "Instagram", "350.0") { 1L }
+        recorder.page("Birthday", listOf(mapOf("label" to "Date of birth", "kind" to "birthday",
+            "hint" to "YYYY-MM-DD; picker uses abbreviated month, day, year")), "Next", null)
+        recorder.page("Gender", listOf(mapOf("label" to "Gender", "kind" to "gender",
+            "choices" to listOf("Female", "Male", "Prefer not to say"))), "Next", null)
+        recorder.final("Create")
+        val text = AccountSetupPlan(recorder.finish(true), mapOf("birthday" to "1999-01-23", "gender" to "Prefer not to say")).promptText()
+        assertTrue(text.contains("Date of birth (birthday): \"1999-01-23\""))
+        assertTrue(text.contains("Format hint: \"YYYY-MM-DD; picker uses abbreviated month, day, year\""))
+        assertTrue(text.contains("Choices: \"Female\", \"Male\", \"Prefer not to say\""))
+    }
+
+    @Test fun aMappedSmsFieldUsesNativeRetrievalRatherThanAMissingRowValue() {
+        val recorder = SignupRecorder("com.instagram.android", "Instagram", "350.0") { 1L }
+        recorder.page("Enter the confirmation code", listOf(mapOf("label" to "Confirmation code", "kind" to "number")), "Next", "sms_code")
+        recorder.final("Create")
+        val text = AccountSetupPlan(recorder.finish(true), emptyMap()).promptText()
+        assertTrue(text.contains("Confirmation code (number): use setup_page check=sms_code for native code autofill on this phone"))
+        assertFalse(text.contains("not given: ask the owner"))
+        assertTrue(text.contains("ask the owner only if it cannot retrieve the code"))
+    }
 }
