@@ -59,7 +59,10 @@ a = Analysis(
                    # Plan 33 C5: pages (imported inside CommandCenter.__init__), and the step chain.
                    "cyclone_device_gateway.command.pages", "cyclone_device_gateway.command.steps",
                    # Plan 33 §7: the AI project manager and the page Markdown it reads and writes.
-                   "cyclone_device_gateway.command.ai", "cyclone_device_gateway.command.pagetext"],
+                   "cyclone_device_gateway.command.ai", "cyclone_device_gateway.command.pagetext",
+                   # Plan 53 R1: the Manager's agent package (registry, toolsets, prompt, store, loop).
+                   "cyclone_device_gateway.command.agent", "cyclone_device_gateway.command.agent.toolsets",
+                   "cyclone_device_gateway.command.agent.toolsets.workspace"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -243,16 +243,22 @@ class CommandCenterGuard(unittest.TestCase):
             assert "cc.start" not in text and "/v1/devices/" not in text, f"{name}: the workspace never commands a phone directly"
 
     def test_the_ai_holds_a_write_only_key_fixed_tools_and_the_owner_decides(self):
-        ai = (COMMAND / "ai.py").read_text(encoding="utf-8")
-        tools = ai[ai.index("TOOLS: dict["):ai.index("class AiStore")]
+        # Plan 53 R1: the Manager lives in command/agent/ (ai.py is its facade); each toolset is one module.
+        agent = COMMAND / "agent"
+        ai = "\n".join(p.read_text(encoding="utf-8") for p in [COMMAND / "ai.py", *sorted(agent.rglob("*.py"))])
+        tools = "\n".join(p.read_text(encoding="utf-8") for p in sorted((agent / "toolsets").glob("*.py")))
         names = re.findall(r'^    "([a-z_]+)": \("(read|workspace|phone)"', tools, re.M)
         assert len(names) >= 15, "the AI's toolset is a fixed table"
         for name, _ in names:
             for word in ("delete", "approve", "answer", "vault", "secret", "shell", "exec", "command", "account_", "connection_add", "trash"):
                 assert word not in name, f"the AI has no {word} tool ({name})"
+        assert "REGISTRY.register(" in tools and "must not have" in (agent / "registry.py").read_text(encoding="utf-8")
         # Only two places make a change: the owner's apply, and a workspace edit the owner allowed. Phone work is always a proposal.
-        assert ai.count("self._execute(") == 2
-        assert 'if kind == "workspace" and self._setting("autonomy") == "workspace":' in ai
+        loop = (agent / "loop.py").read_text(encoding="utf-8")
+        store = (agent / "store.py").read_text(encoding="utf-8")
+        assert loop.count("toolset.execute(") == 1 and "self._execute(" not in loop and 'result = toolset.execute(name, args, actor="ai")' in loop
+        assert 'if kind == "workspace" and self._setting("autonomy") == "workspace":' in loop
+        assert store.count("self._execute(") == 1 and 'self._execute(row["tool"], json.loads(row["arguments"]), actor="owner")' in store
         # The key is write-only: stored once, read only to call the provider, never returned or audited.
         assert ai.count('self._grants.put(GRANT, {"key": key') == 1
         assert '"keySaved": bool(grant)' in ai and '"key": ' not in ai[ai.index("def status("):ai.index("def update_settings(")]

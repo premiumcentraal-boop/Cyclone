@@ -21,3 +21,14 @@ Mobilerun Portal remains independently installed/run on the Android device. Cycl
 Do not copy Portal source into Cyclone or distribute a modified Portal binary as part of Cyclone without first making an explicit AGPL compliance/distribution decision and preserving all required notices/source availability obligations.
 
 See `docs/MOBILERUN_PORTAL_BACKEND.md` for architecture and configuration.
+
+## Hermes Agent
+
+- Project: `NousResearch/hermes-agent`
+- License: **MIT** (checked 2026-10-06 on the project page)
+- Cyclone usage (plan 52/53): **structure only** — the Manager's layout (self-registering tool registry, tiered
+  system prompt, store/loop split; later capped memory files, playbooks in `SKILL.md` form, session search,
+  heartbeat) follows Hermes' design.
+- Source copied into Cyclone: **No** (as of plan 53 R1). If a later run copies code (for example the context
+  compressor), record the upstream commit here and keep the MIT notice in the copied file's header.
+

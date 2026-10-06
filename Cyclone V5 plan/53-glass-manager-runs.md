@@ -1,6 +1,6 @@
 # Plan 53: The Glass Manager — build runs
 
-Status: **Planned.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [52](52-glass-manager-design.md).
+Status: **R1 built (2026-10-06, unreleased: no visible change, so it ships with R2's alpha.111); R2–R10 planned.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [52](52-glass-manager-design.md).
 Ten runs, about 6–7 weeks at one run per 2–4 days. Each run is one PR, one alpha, green CI, and states physical
 verification honestly.
 
@@ -17,7 +17,7 @@ verification honestly.
 - **Checks (every run).** `python -m pytest apps/device-gateway/tests -q`, Glass `npm test` and `npm run build`,
   `python scripts/ci/glass_guard.py`, `python scripts/ci/release_versions.py --check`.
 
-## R1 — The agent package (no visible change) · alpha.111
+## R1 — The agent package (no visible change) · built, ships with alpha.111
 
 **Goal:** Hermes' layout under the existing behaviour.
 
@@ -29,6 +29,12 @@ verification honestly.
 - Tests: every existing `test_*ai*` passes unchanged; new `test_agent_registry.py` (registration, kinds, unknown tool,
   schema shape); a guard test that no registered tool name matches shell/file/http patterns.
 - Accept: diff in behaviour is zero; route snapshots equal.
+- **Built:** `command/agent/` = `common.py`, `registry.py` (kinds `read` / `workspace` / `phone` as before; forbidden
+  powers refused at registration), `toolsets/workspace.py` (the 25 tools, order and text unchanged), `prompt.py`
+  (tiers; text byte-for-byte as before), `store.py`, `loop.py`, `service.py` (`AiStore` = store + loop). `ai.py` is
+  the facade; `TOOLS` is built from the registry. The four CI guards that read `ai.py` now read the package, with the
+  same rules (one owner-apply path, one allowed workspace-edit path). PyInstaller lists the new modules.
+  Tests: `test_agent_registry.py` (22) + the existing suites unchanged. The ``ui`` kind arrives with R5.
 
 ## R2 — Streaming, queue and compression · alpha.112
 
