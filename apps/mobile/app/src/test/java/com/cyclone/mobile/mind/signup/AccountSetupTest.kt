@@ -55,8 +55,8 @@ class AccountSetupTest {
         recorder.page("Gender", listOf(mapOf("label" to "Gender", "kind" to "gender",
             "choices" to listOf("Female", "Male", "Prefer not to say"))), "Next", null)
         recorder.final("Create")
-        val text = AccountSetupPlan(recorder.finish(true), mapOf("birthday" to "1999-01-23", "gender" to "Prefer not to say")).promptText()
-        assertTrue(text.contains("Date of birth (birthday): \"1999-01-23\""))
+        val text = AccountSetupPlan(recorder.finish(true), mapOf("birthday" to "1990-05-17", "gender" to "Prefer not to say")).promptText()
+        assertTrue(text.contains("Date of birth (birthday): \"1990-05-17\""))
         assertTrue(text.contains("Format hint: \"YYYY-MM-DD; picker uses abbreviated month, day, year\""))
         assertTrue(text.contains("Choices: \"Female\", \"Male\", \"Prefer not to say\""))
     }
