@@ -6,4 +6,6 @@ Recovery requires the original app or browser origin, form labels, input identit
 
 Android password-control flags survive observation sanitization, while password values and editable text remain redacted. Secret input waits for delayed readback without using the clipboard or writing twice. Native field resolution checks package, class, resource and password state before dispatch and after focus changes.
 
+Ordinary text replacement also separates field identity from tap clearance. A uniquely identified editable node may receive ACTION_SET_TEXT while a selection toolbar overlaps its screen rectangle. Taps, submission, non-editable controls, ambiguity and changed execution scopes retain their existing checks.
+
 Validation: mobile JVM tests cover refresh recovery, scope and origin changes, ambiguity, privacy, bounded retries and delayed verification. Physical Pixel 8 validation is pending installation of the signed candidate. This change does not claim guaranteed delivery across arbitrary app navigation or unavailable accessibility input.

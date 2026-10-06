@@ -57,6 +57,28 @@ class HandsRevalidationTest {
         assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer").status)
     }
 
+    @Test fun directTextReplacementIsNotInterceptedByASelectionToolbar() {
+        val before = screen("a", composer(label = "Month", obs = "a"))
+        val toolbar = element("semantic:b:popup", "Cut", "button", "/9/0", "n90", composerBox, clickable = true)
+        val after = screen("b", composer(label = "Month", obs = "b"), toolbar)
+        assertEquals(TargetDrift.MATCHED, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer",
+            requiresTouchClearance = false).status)
+        assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer").status)
+    }
+
+    @Test fun directTextReplacementStillRequiresUniqueIdentityAndScope() {
+        val before = screen("a", composer(label = "Month", obs = "a", path = "/0/2", node = "a1"))
+        val after = screen("b",
+            composer(label = "Month", obs = "b", path = "/0/3", node = "b1"),
+            composer(label = "Month", obs = "b", path = "/0/4", node = "b2", id = "semantic:b:second"))
+        assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer",
+            requiresTouchClearance = false).status)
+        val otherApp = screen("b", composer(label = "Month", obs = "b")).let {
+            it.copy(page = it.page.copy(packageName = "com.other.app")) }
+        assertEquals(TargetDrift.SCOPE_MISMATCH, CurrentTargetRevalidation.resolve(before, otherApp, "semantic:a:composer",
+            requiresTouchClearance = false).status)
+    }
+
     @Test fun aSettingsRowAndItsSwitchAreOneControlNotAmbiguous() {
         // Alpha 91: Settings › Display › Auto-rotate screen: a clickable row with a Switch inside. Either one does the same.
         fun row(obs: String) = element("semantic:$obs:row", "Auto-rotate screen", "button", "/0/7", "n70", box(0, 1800, 1080, 1960), clickable = true)

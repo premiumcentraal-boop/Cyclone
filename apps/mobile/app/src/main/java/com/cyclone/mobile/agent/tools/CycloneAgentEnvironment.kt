@@ -277,7 +277,8 @@ class CycloneAgentEnvironment internal constructor(
                 return@synchronized failureEnvelope(tool, effectiveGoal,
                     failureFromThrowable(it, AgentFailureLayer.OBSERVATION), before, visibleGeneration)
             }
-            val report = CurrentTargetRevalidation.resolve(before, fresh, rawElementId)
+            val report = CurrentTargetRevalidation.resolve(before, fresh, rawElementId,
+                requiresTouchClearance = tool !in setOf("phone.type", "phone.replace_text"))
             scope.expire()
             if (report.elementId == null) return@synchronized failureEnvelope(tool, effectiveGoal,
                 AgentFailure(AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
