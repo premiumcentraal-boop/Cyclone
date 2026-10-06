@@ -1,6 +1,5 @@
 """A real process kill. The phone RPC is not involved. The child is the gateway stand-in."""
 import os
-import signal
 import subprocess
 import sys
 import tempfile
@@ -35,13 +34,16 @@ class KillRestartTests(unittest.TestCase):
                 cwd=str(Path(__file__).resolve().parents[1]),
                 env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
             )
-            for _ in range(50):
-                if ready.is_file():
-                    break
-                time.sleep(0.05)
-            self.assertTrue(ready.is_file())
-            os.kill(child.pid, signal.SIGKILL)
-            child.wait(timeout=5)
+            try:
+                for _ in range(50):
+                    if ready.is_file():
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(ready.is_file())
+            finally:
+                # SIGKILL on POSIX and TerminateProcess on Windows; neither permits a graceful save.
+                child.kill()
+                child.wait(timeout=5)
             from cyclone_device_gateway.desktop_runtime.fleet_store import FleetStore
             store = FleetStore(db, clock=lambda: 2)
             mission = store.get("flt_kill")

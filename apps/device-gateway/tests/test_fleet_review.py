@@ -26,13 +26,16 @@ def test_nickname_round_trip_and_unique():
 def test_store_pages_and_task_index():
     with tempfile.TemporaryDirectory() as folder:
         store = FleetStore(Path(folder) / "fleet.db", clock=lambda: 1_000)
-        store.save({"missionId": "flt_a", "command": "a", "createdAt": 2, "notes": [], "assignments": []})
-        store.save({"missionId": "flt_b", "command": "b", "createdAt": 2, "notes": [], "assignments": []})
-        store.bind_task("task-9", "flt_b")
-        assert store.mission_of_task("task-9") == "flt_b"
-        page, cursor = store.page(1)
-        assert len(page) == 1
-        assert cursor
+        try:
+            store.save({"missionId": "flt_a", "command": "a", "createdAt": 2, "notes": [], "assignments": []})
+            store.save({"missionId": "flt_b", "command": "b", "createdAt": 2, "notes": [], "assignments": []})
+            store.bind_task("task-9", "flt_b")
+            assert store.mission_of_task("task-9") == "flt_b"
+            page, cursor = store.page(1)
+            assert len(page) == 1
+            assert cursor
+        finally:
+            store.close()
 
 
 def test_split_does_not_guess():

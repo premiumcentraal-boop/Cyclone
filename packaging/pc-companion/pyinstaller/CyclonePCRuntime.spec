@@ -24,6 +24,7 @@ a = Analysis(
         # Served by cyclone_device_gateway.glass.resolve_glass_dist() from the package-relative static/ folder.
         (str(glass_dist), "cyclone_device_gateway/glass/static"),
         (str(version_file), "cyclone_device_gateway/terminal"),
+        (str(repo / "apps/device-gateway/cyclone_device_gateway/command/resources"), "cyclone_device_gateway/command/resources"),
     ],
     hiddenimports=["cyclone_phone_mcp.live_phone_ipc", "secure_gateway_token", "cyclone_device_gateway.tooling_seam", "cyclone_device_gateway.glass.launcher",
                    "cyclone_device_gateway.terminal.app", "cyclone_device_gateway.terminal.install",
@@ -49,6 +50,7 @@ a = Analysis(
                    "cyclone_device_gateway.plugins.store", "cyclone_device_gateway.terminal.plugins",
                    # Plan 33: the Command Center (some modules are imported inside CommandCenter.__init__).
                    "cyclone_device_gateway.command.api", "cyclone_device_gateway.command.center", "cyclone_device_gateway.command.schedule",
+                   "cyclone_device_gateway.command.signup", "cyclone_device_gateway.command.signup_starters",
                    "cyclone_device_gateway.command.vault", "cyclone_device_gateway.command.delivery",
                    "cyclone_device_gateway.command.connections", "cyclone_device_gateway.command.mcp",
                    "cyclone_device_gateway.command.local",

@@ -9,7 +9,7 @@ import { loadApps, type PhoneApp } from "../services/apps.js";
 import { basisLabel, command, type CcAccount, type CcTask, type OwnerBasis } from "../services/command.js";
 import {
   BASIS_CHOICES, CHECK_LABEL, KIND_LABEL, RECIPE, lastMappingTry, mappingDetail, SIGNUP_STATE_LABEL, SIGNUP_STATE_TONE, accountAppRows, mapSummary, signupApi, tableColumns,
-  type AccountAppRow, type SignupMap,
+  type AccountAppRow, type SignupMap, type SignupStarter,
 } from "../services/signup.js";
 import { el, setChildren } from "../ui/dom.js";
 import { actionButton, card, chip, emptyState, errorState, loadingState, searchInput } from "../ui/components.js";
@@ -30,6 +30,10 @@ export interface AccountsView {
 
 export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[], say: (text: string, tone?: "ok" | "error") => void): AccountsView {
   const element = el("div", "ac");
+  const starterHost = el("div", "ac-starters");
+  let starters: SignupStarter[] = [];
+  let starterBlock: TableBlockView | null = null;
+  let selectedStarter: string | null = null;
   const phones = el("div", "ac-phones");
   phones.setAttribute("role", "tablist");
   const note = el("p", "ac-note");
@@ -72,7 +76,39 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
     renderList();
   }), results);
   layout.append(list, detail);
-  element.append(phones, profileBar.element, note, layout);
+  element.append(starterHost, phones, profileBar.element, note, layout);
+
+  function renderStarters(): void {
+    starterHost.replaceChildren();
+    for (const starter of starters) {
+      const box = card('ac-card');
+      box.append(el('h3', 'card-title', `${starter.app} account creation`), chip('Starter', 'accent'),
+        el('p', 'cc-hint', 'Already installed: add your details in a new row, choose one phone and set Ready. Set up your private vault once, then review the rows with Create accounts.'));
+      const openTable = actionButton(selectedStarter === starter.id ? 'Close starter table' : 'Open starter table', { variant: 'primary' });
+      openTable.addEventListener('click', () => {
+        starterBlock?.destroy();
+        starterBlock = null;
+        selectedStarter = selectedStarter === starter.id ? null : starter.id;
+        renderStarters();
+      });
+      box.append(openTable);
+      if (starter.pageId) {
+        const guide = actionButton('Signup guide', { variant: 'secondary' });
+        guide.addEventListener('click', () => ctx.navigate({ name: 'command', tab: 'page', pageId: starter.pageId }));
+        box.append(guide);
+      }
+      if (selectedStarter === starter.id) {
+        starterBlock ??= createTableBlock(ctx, { id: 'b_starter', type: 'table', tableId: starter.tableId, viewId: null }, () => undefined);
+        let panel = panels.get(starter.tableId);
+        if (!panel) {
+          panel = createAccountsPanel(ctx, starter.tableId, say);
+          panels.set(starter.tableId, panel);
+        }
+        box.append(panel.element, starterBlock.element);
+      }
+      starterHost.append(box);
+    }
+  }
 
   /** The phone's apps, or the chosen profile's (apps the catalog doesn't know yet are listed by package). */
   const visibleApps = (): PhoneApp[] => {
@@ -387,6 +423,11 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
   }
 
   renderPhones();
+  void signupApi.starters(ctx.client).then((items) => {
+    if (destroyed) return;
+    starters = items;
+    renderStarters();
+  }).catch(() => { /* Older gateways have no starter catalog; phone maps remain usable. */ });
   void load(true);
   const timer = setInterval(() => {
     if (tasks.some((t) => t.recipe?.startsWith(RECIPE))) void load(false);
@@ -414,6 +455,7 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
       destroyed = true;
       clearInterval(timer);
       closeTable();
+      starterBlock?.destroy();
       profileBar.destroy();
       for (const panel of panels.values()) panel.destroy();
     },

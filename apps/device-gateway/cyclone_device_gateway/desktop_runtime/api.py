@@ -213,6 +213,7 @@ class DesktopRuntime:
         # Plan 33 (C0): the Command Center's accounts, tasks, routines, results and approvals, in one local SQLite file.
         from ..command.center import CommandCenter
         self.command = CommandCenter(settings.runtime_dir / "command" / "command.db", share_contract, self.fleet.list_public)
+        self.command.signup.install_starters()
         from .scenes import SceneStore
         from .fleet_orchestrator import FleetOrchestrator
         self.scenes = SceneStore(settings.runtime_dir / "fleet-scenes.json")

@@ -170,6 +170,21 @@ try {
 
         # Plan 50: install a plugin package, see it run and pass the hub's signed checks, update it, roll it back.
         $auth = @{ Authorization = "Bearer $token" }
+        # Prove the shipped first-run starter, including the frozen runtime's JSON resource.
+        $starters = Invoke-RestMethod -TimeoutSec 120 -Headers $auth 'http://127.0.0.1:8799/v1/cc/signup/starters'
+        if (@($starters.starters).Count -ne 1) { throw 'The fresh install did not contain one signup starter.' }
+        $starter = $starters.starters[0]
+        if ($starter.id -ne 'instagram-phone-v1' -or @($starter.map.pages).Count -ne 12) { throw 'The installed Instagram starter schema is incomplete.' }
+        $starterTable = Invoke-RestMethod -TimeoutSec 120 -Headers $auth "http://127.0.0.1:8799/v1/cc/tables/$($starter.tableId)"
+        $starterRows = Invoke-RestMethod -TimeoutSec 120 -Headers $auth "http://127.0.0.1:8799/v1/cc/tables/$($starter.tableId)/rows"
+        if (@($starterRows.rows).Count -ne 0) { throw 'A fresh starter must contain no personal account rows.' }
+        foreach ($column in @('Mobile number', 'Date of birth', 'Full name', 'Username', 'Phone')) {
+            if ($column -notin @($starterTable.properties.name)) { throw "Starter table is missing $column." }
+        }
+        if ('Password' -in @($starterTable.properties.name) -or 'Confirmation code' -in @($starterTable.properties.name)) { throw 'Secrets must not become starter columns.' }
+        $starterGuide = Invoke-RestMethod -TimeoutSec 120 -Headers $auth "http://127.0.0.1:8799/v1/cc/pages/$($starter.pageId)"
+        if (@($starterGuide.blocks).Count -lt 12) { throw 'The installed signup guide is incomplete.' }
+        Write-Host 'The fresh Windows install contains the empty Instagram signup table, guide and packaged schema.'
         Install-PluginFile $pluginBuilds[0] $auth
         $plugin = Invoke-RestMethod -TimeoutSec 120 -Headers $auth 'http://127.0.0.1:8799/v1/plugins/run-logger'
         if ($plugin.state -ne 'running' -or $plugin.version -ne '0.1.0') { throw "The plugin didn't start: $($plugin | ConvertTo-Json -Compress)" }

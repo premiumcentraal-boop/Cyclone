@@ -292,6 +292,10 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
 
     # Plan 43 (T1): tables. Typed cells only, no secrets, views computed here, every change kept, trash first.
     # Plan 43 (T5 + T6): accounts by phone and app, and the sign-ups each phone mapped.
+    @router.get("/v1/cc/signup/starters", dependencies=[Depends(auth)])
+    def signup_starters():
+        return call(lambda: cc().signup.starters())
+
     @router.get("/v1/cc/signup/maps", dependencies=[Depends(auth)])
     def signup_maps(deviceId: str = Query(max_length=120)):
         return call(lambda: cc().signup.maps(deviceId))

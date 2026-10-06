@@ -51,7 +51,10 @@ internal object GatewayV5CommandAdapter {
     /** Plan 43 T7: an Account Setup run (one account from a sign-up table row), and the phone's sign-up maps. */
     internal var startSetup: (String, com.cyclone.mobile.mind.signup.AccountSetupPlan) -> String? =
         { goal, plan -> MindMissions.startAssigned(app(), goal, setup = plan) }
-    internal var signupMap: (String) -> com.cyclone.mobile.mind.signup.SignupMap? = { pkg -> com.cyclone.mobile.mind.signup.SignupMapStore.load(app(), pkg) }
+    internal var signupMap: (String) -> com.cyclone.mobile.mind.signup.SignupMap? = { pkg ->
+        com.cyclone.mobile.mind.signup.SignupMapStore.load(app(), pkg)
+            ?: com.cyclone.mobile.mind.signup.StarterSignupMaps.load(app(), pkg)
+    }
     internal var installed: (String) -> Boolean = { pkg -> runCatching { app().packageManager.getPackageInfo(pkg, 0) }.isSuccess }
     /** The running mission [id], front or behind. */
     internal var running: (String) -> Mission? = { id -> MindMissions.find(id) }
