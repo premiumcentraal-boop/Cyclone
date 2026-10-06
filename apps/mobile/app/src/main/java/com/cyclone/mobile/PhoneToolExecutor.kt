@@ -1075,6 +1075,18 @@ object PhoneToolExecutor {
         request: PhoneToolRequest,
         before: String?,
         action: () -> Boolean,
+    ): Outcome = com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostPassthrough {
+        // Keep host focus through dispatch AND result settling. Restoring Ask immediately at the
+        // gesture callback can steal focus from a newly opened Android permission dialog. This also
+        // lets global Back reach the host rather than Cyclone's focused composer.
+        actionWithConfirmationYielded(service, request, before, action)
+    }
+
+    private fun actionWithConfirmationYielded(
+        service: CycloneAccessibilityService?,
+        request: PhoneToolRequest,
+        before: String?,
+        action: () -> Boolean,
     ): Outcome {
         if (service == null) return errorResult(PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED, "Accessibility service is not connected")
         val epoch = DeviceState.controllerEpoch()

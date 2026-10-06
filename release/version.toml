@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.109 dev3: recover the intended secret field after harmless screen refreshes; preserve password-control metadata and verify delayed fills. Glass 1.0.0-alpha.60.
+# Cyclone V5 alpha.109 dev4: retain secret-field recovery and yield overlays through host action verification. Glass 1.0.0-alpha.60.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.109.dev3"
+product_version = "5.0.0-alpha.109.dev4"
 channel = "development"
-android_version_code = 256
+android_version_code = 257
 python_version = "5.0.0-alpha.109.dev2"
 
 [components]
-mobile = "5.0.0-alpha.109.dev3"
+mobile = "5.0.0-alpha.109.dev4"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha109-dev3-secret-field-recovery"
+candidate_generation = "cyclone-v5-alpha109-dev4-host-action-yield"

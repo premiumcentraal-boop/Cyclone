@@ -460,7 +460,7 @@ class OverlayChromeController(
             !yieldHost && !driverIdle
 
         view.importantForAccessibility =
-            if (yieldHost) View.IMPORTANT_FOR_ACCESSIBILITY_NO else View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            if (yieldHost) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_YES
         view.contentDescription = when {
             secretVisible -> "Secret needed"
             snapshot.state == OverlayChromeState.GATE && !snapshot.minimized -> OverlayCopy.GATE

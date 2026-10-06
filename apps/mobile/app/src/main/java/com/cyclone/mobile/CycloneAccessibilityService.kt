@@ -280,6 +280,15 @@ class CycloneAccessibilityService : AccessibilityService() {
     fun observe(markFresh: Boolean = true): UiSnapshot {
         if (markFresh) waitForUiQuiet()
         val root = preferredForegroundRoot()
+        // A focused Ask window can make Android's permission-dialog root unreadable. Yield only
+        // when the ordinary host read is empty; never hide the owner's secure input card.
+        if (root == null && !com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.active() &&
+            DeviceState.controller == DeviceState.Controller.AGENT &&
+            com.cyclone.mobile.secrets.SecretsCardRuntime.state.value?.visible != true) {
+            return com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostPassthrough {
+                observe(markFresh)
+            }
+        }
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
         val consumedWindows = mutableSetOf<Int>()
