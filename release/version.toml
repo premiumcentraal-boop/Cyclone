@@ -1,20 +1,20 @@
-# Cyclone V5 alpha.109 dev2: screen reads that hold, and the approval review judges only what a tap does on the page it lands on (the control that takes the touch, in the window on top). Status-bar ticks no longer throw away screen reads, a changed read is retried in place, and a declined approval no longer ends the whole task. Glass 1.0.0-alpha.60.
+# Cyclone V5 alpha.110 dev1: packaged Instagram signup starter and input recovery. Glass 1.0.0-alpha.61.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.109.dev2"
+product_version = "5.0.0-alpha.110.dev1"
 channel = "development"
-android_version_code = 255
-python_version = "5.0.0-alpha.109.dev2"
+android_version_code = 258
+python_version = "5.0.0-alpha.110.dev1"
 
 [components]
-mobile = "5.0.0-alpha.109.dev2"
+mobile = "5.0.0-alpha.110.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.60"
-device_gateway = "5.0.0-alpha.109.dev2"
-mcp = "5.0.0-alpha.109.dev2"
+glass = "1.0.0-alpha.61"
+device_gateway = "5.0.0-alpha.110.dev1"
+mcp = "5.0.0-alpha.110.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha109-dev2-current-page-review"
+candidate_generation = "cyclone-v5-alpha110-instagram-starter"

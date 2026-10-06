@@ -4,7 +4,7 @@
 .cc-notice { min-height: 1.4em; margin: 0; font-size: var(--text-sm); color: var(--text-muted); }
 .cc-notice-error { color: var(--danger); }
 .cc-form-area:empty { display: none; }
-.cc-body { display: grid; gap: var(--space-3); }
+.cc-body { display: grid; gap: var(--space-3); min-width: 0; }
 .cc-card { display: grid; gap: var(--space-3); }
 .cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); }
 .cc-field { display: flex; flex-direction: column; gap: var(--space-1); }
@@ -113,7 +113,8 @@
 .page-command .segmented .segment { flex: 0 0 auto; }
 
 /* Plan 43 (T5 + T6): Accounts. A phone strip, the phone's apps on the left, the open app on the right. */
-.ac { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+.ac { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; min-width: 0; }
+.ac-starters { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .ac-phones { display: flex; flex-wrap: wrap; gap: 8px; }
 .ac-phone {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 14px; border: 1px solid var(--border);

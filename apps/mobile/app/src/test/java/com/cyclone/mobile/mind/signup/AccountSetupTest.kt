@@ -27,7 +27,7 @@ class AccountSetupTest {
         assertTrue(text.contains("Password (password): use vault_fill what=password"))
         assertTrue(text.contains("Gender (gender, optional): leave empty"))
         assertTrue(text.contains("Confirmation code (text): not given: ask the owner"))
-        assertTrue(text.contains("Finally press \"Sign up\""))
+        assertTrue(text.contains("The account-creation control is \"Sign up\""))
         assertTrue(text.contains("without asking again"))
     }
 
@@ -46,5 +46,39 @@ class AccountSetupTest {
         assertEquals("verification", json.getString("state"))
         assertTrue(json.isNull("handle"))
         assertFalse(json.isNull("drift"))
+    }
+
+    @Test fun mappedFormatsAndChoicesReachTheAccountRunner() {
+        val recorder = SignupRecorder("com.instagram.android", "Instagram", "350.0") { 1L }
+        recorder.page("Birthday", listOf(mapOf("label" to "Date of birth", "kind" to "birthday",
+            "hint" to "YYYY-MM-DD; picker uses abbreviated month, day, year")), "Next", null)
+        recorder.page("Gender", listOf(mapOf("label" to "Gender", "kind" to "gender",
+            "choices" to listOf("Female", "Male", "Prefer not to say"))), "Next", null)
+        recorder.final("Create")
+        val text = AccountSetupPlan(recorder.finish(true), mapOf("birthday" to "1990-05-17", "gender" to "Prefer not to say")).promptText()
+        assertTrue(text.contains("Date of birth (birthday): \"1990-05-17\""))
+        assertTrue(text.contains("Format hint: \"YYYY-MM-DD; picker uses abbreviated month, day, year\""))
+        assertTrue(text.contains("Choices: \"Female\", \"Male\", \"Prefer not to say\""))
+    }
+
+    @Test fun aMappedSmsFieldUsesNativeRetrievalRatherThanAMissingRowValue() {
+        val recorder = SignupRecorder("com.instagram.android", "Instagram", "350.0") { 1L }
+        recorder.page("Enter the confirmation code", listOf(mapOf("label" to "Confirmation code", "kind" to "number")), "Next", "sms_code")
+        recorder.final("Create")
+        val text = AccountSetupPlan(recorder.finish(true), emptyMap()).promptText()
+        assertTrue(text.contains("Confirmation code (number): use setup_page check=sms_code for native code autofill on this phone"))
+        assertFalse(text.contains("not given: ask the owner"))
+        assertTrue(text.contains("ask the owner only if it cannot retrieve the code"))
+    }
+
+    @Test fun verificationAfterCreationDoesNotAskForAnotherFinalClick() {
+        val recorder = SignupRecorder("com.instagram.android", "Instagram", "350.0") { 1L }
+        recorder.page("Terms", emptyList(), "I agree", null)
+        recorder.page("Confirm profile", listOf(mapOf("label" to "Confirmation code", "kind" to "number")), "Next", "sms_code")
+        recorder.final("I agree")
+        val text = AccountSetupPlan(recorder.finish(true), emptyMap()).promptText()
+        assertTrue(text.contains("Page 2: \"Confirm profile\""))
+        assertTrue(text.contains("Complete any subsequent verification or onboarding"))
+        assertFalse(text.contains("Finally press"))
     }
 }

@@ -105,6 +105,7 @@ data class SecretFillTarget(
     val observationId: String,
     val sessionId: String = "default-foreground",
     val displayId: Int = 0,
+    val anchor: SecretFieldAnchor? = null,
 ) {
     init {
         require(elementId.isNotBlank() && elementId.length <= 256) { "invalid elementId" }

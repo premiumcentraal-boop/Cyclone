@@ -18,7 +18,8 @@ class AndroidMindCodes(private val context: Context) : MindCodes {
     override fun fill(page: AgentPageCard, target: MindRef, code: String): Boolean {
         val chars = code.toCharArray()
         return try {
-            val fillTarget = SecretFillTarget(target.elementId, target.observationId, page.sessionId, page.displayId)
+            val fillTarget = com.cyclone.mobile.secrets.SecretTargetBinding.bind(
+                SecretFillTarget(target.elementId, target.observationId, page.sessionId, page.displayId))
             val execution = PhoneToolSecretFillExecutor(context).fill(fillTarget, chars)
             execution.performed && execution.verified
         } catch (_: Exception) {

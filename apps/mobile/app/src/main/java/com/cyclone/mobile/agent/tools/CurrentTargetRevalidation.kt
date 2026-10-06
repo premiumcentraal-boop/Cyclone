@@ -15,7 +15,8 @@ data class TargetRevalidation(val status: TargetDrift, val elementId: String? = 
  * remain fail-closed.
  */
 internal object CurrentTargetRevalidation {
-    fun resolve(before: GatewayObservation, after: GatewayObservation, id: String): TargetRevalidation {
+    fun resolve(before: GatewayObservation, after: GatewayObservation, id: String,
+        requiresTouchClearance: Boolean = true): TargetRevalidation {
         if (before.execution.sessionId != after.execution.sessionId || before.execution.displayId != after.execution.displayId ||
             before.payload.optLong("executionGeneration") != after.payload.optLong("executionGeneration") || before.page.packageName != after.page.packageName ||
             before.payload.optString("activity") != after.payload.optString("activity")) return TargetRevalidation(TargetDrift.SCOPE_MISMATCH)
@@ -72,7 +73,10 @@ internal object CurrentTargetRevalidation {
             b.optInt("left") < rect.optInt("right") && b.optInt("right") > rect.optInt("left") &&
                 b.optInt("top") < rect.optInt("bottom") && b.optInt("bottom") > rect.optInt("top")
         }
-        if (overlapsDistinctTarget) return TargetRevalidation(TargetDrift.AMBIGUOUS)
+        // ACTION_SET_TEXT addresses the uniquely rebound editable node, not a point under the finger.
+        // A floating selection toolbar can intercept a tap, but cannot receive this text replacement.
+        if (overlapsDistinctTarget && (requiresTouchClearance || !isEditable(target)))
+            return TargetRevalidation(TargetDrift.AMBIGUOUS)
 
         return TargetRevalidation(
             if (old.evidence.optJSONObject("bounds")?.toString() == rect.toString()) TargetDrift.MATCHED

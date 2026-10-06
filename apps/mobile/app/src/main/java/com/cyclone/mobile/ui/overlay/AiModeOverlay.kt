@@ -239,9 +239,9 @@ object DriverOverlay {
         private var dimShown = false
         private var panelShown = false
         /** A gesture Cyclone injects is in progress: the voice windows let touches through (alpha.78). */
-        private var yielding = false
+        private val visibility = DriverOverlayVisibility()
         private val main = android.os.Handler(android.os.Looper.getMainLooper())
-        private val unfollow = OverlayGesturePassthrough.follow { yieldNow -> onMainAndWait { yielding = yieldNow; applyTouch() } }
+        private val unfollow = OverlayGesturePassthrough.follow { yieldNow -> onMainAndWait { visibility.yielding = yieldNow; applyTouch() } }
 
         init {
             place()
@@ -250,11 +250,19 @@ object DriverOverlay {
 
         /** Touchable unless hidden or yielding to a gesture Cyclone is making. */
         private fun applyTouch() {
-            val buttonOff = yielding || button.visibility == View.GONE
+            // Accessibility overlays can receive injected gestures despite NOT_TOUCHABLE. Remove all voice
+            // windows from the visible/accessibility hit tree for the stroke, as the main Ask overlay does.
+            button.visibility = if (visibility.buttonVisible) View.VISIBLE else View.GONE
+            panel.visibility = if (visibility.panelVisible) View.VISIBLE else View.GONE
+            dim.visibility = if (visibility.dimVisible) View.VISIBLE else View.GONE
+            button.importantForAccessibility = if (visibility.yielding) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            panel.importantForAccessibility = if (visibility.yielding) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            dim.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            val buttonOff = !visibility.buttonVisible
             val buttonFlags = if (buttonOff) buttonParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 else buttonParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
             if (buttonFlags != buttonParams.flags) { buttonParams.flags = buttonFlags; runCatching { wm.updateViewLayout(button, buttonParams) } }
-            val panelFlags = if (yielding) panelParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            val panelFlags = if (visibility.yielding) panelParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 else panelParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
             if (panelFlags != panelParams.flags) { panelParams.flags = panelFlags; if (panelShown) runCatching { wm.updateViewLayout(panel, panelParams) } }
         }
@@ -264,14 +272,19 @@ object DriverOverlay {
             if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) { block(); return }
             val latch = java.util.concurrent.CountDownLatch(1)
             val posted = main.post {
-                try { block() } finally { android.view.Choreographer.getInstance().postFrameCallback { latch.countDown() } }
+                try { block() } finally {
+                    // Frame callbacks precede traversal. Wait until the following frame so WindowManager
+                    // has processed the hidden views and input flags before dispatchGesture starts.
+                    android.view.Choreographer.getInstance().postFrameCallback {
+                        android.view.Choreographer.getInstance().postFrameCallback { latch.countDown() }
+                    }
+                }
             }
             if (posted) latch.await(300, java.util.concurrent.TimeUnit.MILLISECONDS)
         }
 
         /** The last face shown: whether AI mode (the panel) is meant to be open. */
-        var panelWanted = false
-            private set
+        val panelWanted get() = visibility.panelWanted
         val buttonAttached: Boolean get() = button.isAttachedToWindow
         val buttonVisible: Boolean get() = button.visibility == View.VISIBLE
         val panelAttached: Boolean get() = panelShown && panel.isAttachedToWindow
@@ -283,19 +296,12 @@ object DriverOverlay {
 
         /** The keeper found the button hidden while AI mode is closed. */
         fun showButton() {
-            button.visibility = View.VISIBLE
+            visibility.showButton()
             applyTouch()
         }
 
         fun show(face: VoiceFace) {
-            panelWanted = face.panel
-            // The orb moves into AI mode while it is up; the button comes back when it collapses.
-            val hidden = face.panel
-            if ((button.visibility == View.GONE) != hidden) {
-                button.visibility = if (hidden) View.GONE else View.VISIBLE
-                // A hidden button must not take touches meant for the app underneath.
-                applyTouch()
-            }
+            visibility.show(face.panel, face.dim)
             button.contentDescription = face.description
             button.state = face.stateDescription
             if (face.dim != dimShown) {
@@ -307,6 +313,7 @@ object DriverOverlay {
                 panelShown = if (face.panel) runCatching { wm.addView(panel, panelParams) }.isSuccess
                     else { runCatching { wm.removeView(panel) }; false }
             }
+            applyTouch()
         }
 
         fun remove() {

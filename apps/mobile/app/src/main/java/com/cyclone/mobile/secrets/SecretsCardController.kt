@@ -149,7 +149,7 @@ object SecretsCardRuntime {
         target: SecretFillTarget? = null,
         onResolution: (SecretUseResult) -> Unit = {},
     ) {
-        controller(context).request(request, target, onResolution)
+        controller(context).request(request, target?.let(SecretTargetBinding::bind), onResolution)
         com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.refreshExternalSurface()
     }
 
@@ -212,6 +212,7 @@ internal object SecretsCardCopy {
         null -> null
         "SLOT_MISSING" -> "No saved value is available for this slot."
         "STALE_OBSERVATION", "STALE_ELEMENT" -> "The field changed. Cyclone needs a fresh target."
+        "SECRET_TARGET_CHANGED" -> "The original field is no longer clear. Your value is saved; Cyclone needs to locate the field again."
         "FILL_NOT_VERIFIED", "ASSERTION_FAILED" -> "Cyclone could not verify that the field was filled."
         "VAULT_OPEN_FAILED" -> "The saved slot could not be opened."
         "VAULT_WRITE_FAILED" -> "The value could not be saved."

@@ -148,6 +148,26 @@ class HumanGestureSemanticSafetyContractTest {
         assertFalse("durationMs + SETTLE_MS" in loop)
     }
 
+    @Test
+    fun `host actions keep overlays yielded through result verification`() {
+        val wrapper = slice(executor, "private fun actionWithConfirmation(", "private fun actionWithConfirmationYielded(")
+        assertOrdered(wrapper, "OverlayGesturePassthrough.withHostPassthrough", "actionWithConfirmationYielded(service")
+        val body = slice(executor, "private fun actionWithConfirmationYielded(", "private fun launchedOutcome")
+        assertOrdered(body, "foregroundInputAllowed()", "if (action())")
+        assertOrdered(body, "if (action())", "settleAfterMutation")
+        assertTrue("ClickGateIntercept.decide" in service)
+    }
+
+    @Test
+    fun `empty host read may yield but secure cards and human control are excluded`() {
+        val observation = slice(service, "fun observe(markFresh", "fun observeDisplay(")
+        assertTrue("root == null" in observation)
+        assertTrue("!com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.active()" in observation)
+        assertTrue("DeviceState.controller == DeviceState.Controller.AGENT" in observation)
+        assertTrue("SecretsCardRuntime.state.value?.visible != true" in observation)
+        assertTrue("OverlayGesturePassthrough.withHostPassthrough" in observation)
+    }
+
     private fun assertOrdered(source: String, first: String, second: String) {
         val firstIndex = source.indexOf(first)
         val secondIndex = source.indexOf(second)

@@ -263,7 +263,8 @@ internal class AndroidMindOwner(
         val metadata = runCatching { SecretRequestMetadata(place.id, SecretPersona.LIVE, slot, reason) }.getOrElse {
             return MindSecretReply(MindSecretOutcome.UNAVAILABLE, detail = "the request could not be described safely")
         }
-        val fillTarget = runCatching { SecretFillTarget(target.elementId, target.observationId, page.sessionId, page.displayId) }.getOrElse {
+        val fillTarget = runCatching { com.cyclone.mobile.secrets.SecretTargetBinding.bind(
+            SecretFillTarget(target.elementId, target.observationId, page.sessionId, page.displayId)) }.getOrElse {
             return MindSecretReply(MindSecretOutcome.FAILED, detail = "the field is not addressable")
         }
         // Plan 33 C2: a secret the owner sealed to this phone for this task and this app or site fills once, without
