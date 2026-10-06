@@ -82,8 +82,10 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
     starterHost.replaceChildren();
     for (const starter of starters) {
       const box = card('ac-card');
-      box.append(el('h3', 'card-title', `${starter.app} account creation`), chip('Starter', 'accent'),
-        el('p', 'cc-hint', 'Already installed: add your details in a new row, choose one phone and set Ready. Set up your private vault once, then review the rows with Create accounts.'));
+      const heading = el('div', 'ac-page-top');
+      heading.append(el('h3', 'card-title', `${starter.app} account creation`), chip('Starter', 'accent'));
+      box.append(heading, el('p', 'cc-hint', 'Already installed: add your details in a new row, choose one phone and set Ready. Set up your private vault once, then review the rows with Create accounts.'));
+      const actions = el('div', 'ac-map');
       const openTable = actionButton(selectedStarter === starter.id ? 'Close starter table' : 'Open starter table', { variant: 'primary' });
       openTable.addEventListener('click', () => {
         starterBlock?.destroy();
@@ -91,12 +93,13 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
         selectedStarter = selectedStarter === starter.id ? null : starter.id;
         renderStarters();
       });
-      box.append(openTable);
+      actions.append(openTable);
       if (starter.pageId) {
         const guide = actionButton('Signup guide', { variant: 'secondary' });
         guide.addEventListener('click', () => ctx.navigate({ name: 'command', tab: 'page', pageId: starter.pageId }));
-        box.append(guide);
+        actions.append(guide);
       }
+      box.append(actions);
       if (selectedStarter === starter.id) {
         starterBlock ??= createTableBlock(ctx, { id: 'b_starter', type: 'table', tableId: starter.tableId, viewId: null }, () => undefined);
         let panel = panels.get(starter.tableId);
@@ -104,7 +107,9 @@ export function createAccountsView(ctx: GlassContext, accounts: () => CcAccount[
           panel = createAccountsPanel(ctx, starter.tableId, say);
           panels.set(starter.tableId, panel);
         }
-        box.append(panel.element, starterBlock.element);
+        const tableHost = el('div', 'ac-table');
+        tableHost.append(starterBlock.element);
+        box.append(panel.element, tableHost);
       }
       starterHost.append(box);
     }
