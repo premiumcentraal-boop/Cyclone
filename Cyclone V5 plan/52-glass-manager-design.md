@@ -1,7 +1,7 @@
 # Plan 52: The Glass Manager — design
 
 Status: **Design, not built.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Build runs: [53](53-glass-manager-runs.md).
-"Manager" is a working name; the owner picks the final one (§11).
+The owner named it **Cyber** (2026-10-06, §11). "Manager" below means Cyber; code keeps the package name `agent`.
 
 ## 0. The idea in one paragraph
 
@@ -250,8 +250,15 @@ Manager process.
 
 ## 11. Owner decisions
 
-1. **Name** of the Manager (dock, brief, phone).
-2. **Loop:** own it (recommended) or adopt Pydantic AI.
-3. **Check model** for the heartbeat (cheap) separate from the chat model, under the same caps (recommended).
-4. **GitHub read access** (PRs, CI) through a token in the encrypted store.
-5. **Timing:** alongside the V5 reliability sprint (no shared paths) or after it.
+Decided by the owner on 2026-10-06:
+
+1. **Name: Cyber.** Shown on the dock, the brief, alerts and (M5) the phone.
+2. **Loop: our own** (no Pydantic AI); the Hermes structure stays.
+3. **Check model: `openai/gpt-6-luna`** ("GPT-6 Luna" on OpenRouter: tools, 1M context, $0.10 / $0.50 per million
+   tokens, about $0.05 a day at one check every 30 minutes) as the default heartbeat and nightly model, separate from
+   the chat model and under the same caps. The owner can change it in Settings.
+4. **GitHub: granted.** The owner gives Cyber access to the repository. Cyber's GitHub tools stay **read-only**
+   (PRs, checks, releases, issues) by the laws in §1; anything that would write to GitHub is out of scope until a
+   later plan adds it as owner-applied proposals.
+5. **Timing: now, as part of V5.** Built alongside the reliability sprint (no shared paths); each run ships in the
+   next V5 alpha.
