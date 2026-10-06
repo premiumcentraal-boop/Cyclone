@@ -27,7 +27,7 @@ class AccountSetupTest {
         assertTrue(text.contains("Password (password): use vault_fill what=password"))
         assertTrue(text.contains("Gender (gender, optional): leave empty"))
         assertTrue(text.contains("Confirmation code (text): not given: ask the owner"))
-        assertTrue(text.contains("Finally press \"Sign up\""))
+        assertTrue(text.contains("The account-creation control is \"Sign up\""))
         assertTrue(text.contains("without asking again"))
     }
 
@@ -69,5 +69,16 @@ class AccountSetupTest {
         assertTrue(text.contains("Confirmation code (number): use setup_page check=sms_code for native code autofill on this phone"))
         assertFalse(text.contains("not given: ask the owner"))
         assertTrue(text.contains("ask the owner only if it cannot retrieve the code"))
+    }
+
+    @Test fun verificationAfterCreationDoesNotAskForAnotherFinalClick() {
+        val recorder = SignupRecorder("com.instagram.android", "Instagram", "350.0") { 1L }
+        recorder.page("Terms", emptyList(), "I agree", null)
+        recorder.page("Confirm profile", listOf(mapOf("label" to "Confirmation code", "kind" to "number")), "Next", "sms_code")
+        recorder.final("I agree")
+        val text = AccountSetupPlan(recorder.finish(true), emptyMap()).promptText()
+        assertTrue(text.contains("Page 2: \"Confirm profile\""))
+        assertTrue(text.contains("Complete any subsequent verification or onboarding"))
+        assertFalse(text.contains("Finally press"))
     }
 }

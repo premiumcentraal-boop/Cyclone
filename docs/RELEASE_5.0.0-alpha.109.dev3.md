@@ -10,4 +10,6 @@ Ordinary text replacement also separates field identity from tap clearance. A un
 
 Account Setup now carries recorded format hints and picker choices into its runner prompt. SMS verification fields explicitly use native retrieval instead of treating the deliberately absent table code as a missing owner value.
 
+Voice-mode overlay windows now leave the visible accessibility hit tree during host gestures and restore the current requested face afterwards. Overlay yield waits beyond the first frame callback so traversal can commit the input-window changes. Account Setup also treats post-creation verification as part of completion instead of appending another final create click.
+
 Validation: mobile JVM tests cover refresh recovery, scope and origin changes, ambiguity, privacy, bounded retries and delayed verification. Physical Pixel 8 validation is pending installation of the signed candidate. This change does not claim guaranteed delivery across arbitrary app navigation or unavailable accessibility input.

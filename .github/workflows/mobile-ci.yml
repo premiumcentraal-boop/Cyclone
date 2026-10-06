@@ -12,6 +12,7 @@ on:
       - 'scripts/phone-gateway/**'
       - 'release/version.toml'
       - '.github/workflows/_mobile-build.yml'
+      - '.github/workflows/_sign-owner-test.yml'
       - '.github/workflows/mobile-ci.yml'
       - '.github/workflows/mobile-dev-publish-v395.yml'
       - '.github/workflows/mobile-dev-publish-v396.yml'
@@ -28,6 +29,7 @@ on:
       - 'scripts/phone-gateway/**'
       - 'release/version.toml'
       - '.github/workflows/_mobile-build.yml'
+      - '.github/workflows/_sign-owner-test.yml'
       - '.github/workflows/mobile-ci.yml'
       - '.github/workflows/mobile-dev-publish-v395.yml'
       - '.github/workflows/mobile-dev-publish-v396.yml'
@@ -35,6 +37,11 @@ on:
       - '.github/workflows/mobile-publish-v398.yml'
       - '.github/workflows/mobile-publish-v3910.yml'
   workflow_dispatch:
+    inputs:
+      sign_owner_test:
+        description: 'Sign the tested phone candidate as an access-controlled artifact; never publish a release'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,3 +55,12 @@ jobs:
     uses: ./.github/workflows/_mobile-build.yml
     permissions:
       contents: read
+
+  signed-owner-test:
+    if: github.event_name == 'workflow_dispatch' && inputs.sign_owner_test
+    needs: mobile
+    uses: ./.github/workflows/_sign-owner-test.yml
+    permissions:
+      contents: read
+      actions: read
+    secrets: inherit

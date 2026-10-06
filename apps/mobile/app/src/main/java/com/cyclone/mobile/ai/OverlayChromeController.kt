@@ -767,7 +767,9 @@ class OverlayChromeController(
                 if (root != null) applyLayout(latest)
                 val attached = sequenceOf(root, haloRoot, shareRoot).firstOrNull { it?.isAttachedToWindow == true }
                 if (attached != null) {
-                    Choreographer.getInstance().postFrameCallback { latch.countDown() }
+                    Choreographer.getInstance().postFrameCallback {
+                        Choreographer.getInstance().postFrameCallback { latch.countDown() }
+                    }
                 } else {
                     latch.countDown()
                 }

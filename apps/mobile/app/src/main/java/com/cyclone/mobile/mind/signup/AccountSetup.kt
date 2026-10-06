@@ -43,7 +43,8 @@ class AccountSetupPlan(val map: SignupMap, val values: Map<String, String>) {
             }
             append("  then press \"${page.continueLabel}\"\n")
         }
-        map.finalLabel?.let { append("Finally press \"$it\".\n") }
+        map.finalLabel?.let { append("The account-creation control is \"$it\"; use it where indicated in the mapped flow. ")
+            append("Complete any subsequent verification or onboarding, then verify the signed-in profile. Never restart the sign-up or create a duplicate.\n") }
     }
 
     companion object {
