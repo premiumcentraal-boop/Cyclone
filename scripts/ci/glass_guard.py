@@ -7,6 +7,8 @@ Fails when apps/glass/src grows intelligence or unsafe habits:
 - Tauri or other desktop-only runtimes (Glass is a local website)
 - innerHTML / eval / new Function (all UI is built with DOM APIs)
 - runtime npm dependencies (Glass ships as static files; dev tooling only)
+- a Cyber component (src/ui/cyber/*) without an "Origin:" line in its header comment (plan 53 R3: where its code and
+  design come from, so a port of outside code always carries its source and licence)
 """
 
 from __future__ import annotations
@@ -29,6 +31,9 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 COMMENT = re.compile(r"^\s*(//|/\*|\*)")
+#: Folders whose files must say where they come from, in the header comment before any code.
+ORIGIN_DIRS = ("ui/cyber",)
+ORIGIN = re.compile(r"^\s*(?://|/?\*)\s*Origin:\s*\S")
 
 
 def scan(root: Path = GLASS) -> list[str]:
@@ -46,6 +51,15 @@ def scan(root: Path = GLASS) -> list[str]:
             for label, pattern in RULES:
                 if pattern.search(line):
                     errors.append(f"{path.relative_to(root)}:{line_no}: {label}: {line.strip()[:120]}")
+        relative = path.relative_to(src).as_posix()
+        if path.suffix == ".ts" and any(relative.startswith(d + "/") for d in ORIGIN_DIRS):
+            header = []
+            for line in text.splitlines():
+                if not COMMENT.match(line) and line.strip():
+                    break
+                header.append(line)
+            if not any(ORIGIN.match(line) for line in header):
+                errors.append(f"{path.relative_to(root)}:1: origin header: say where this component comes from (an 'Origin:' line)")
     package = json.loads((root / "package.json").read_text(encoding="utf-8"))
     if package.get("dependencies"):
         errors.append(f"package.json: runtime dependencies are not allowed in Glass: {sorted(package['dependencies'])}")

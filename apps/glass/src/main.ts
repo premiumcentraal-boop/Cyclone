@@ -8,6 +8,7 @@ import "./styles/phone.css";
 import "./styles/runs.css";
 import "./styles/devices.css";
 import "./styles/knowledge.css";
+import "./styles/cyber.css";
 import "./styles/lab.css";
 import "./styles/market.css";
 import "./styles/home.css";

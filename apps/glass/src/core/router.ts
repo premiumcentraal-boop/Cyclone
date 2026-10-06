@@ -22,7 +22,9 @@ export type Route =
   | { name: "market" }
   | { name: "remote" }
   | { name: "attach" }
-  | { name: "settings" };
+  | { name: "settings" }
+  /** Plan 53 R3: developer previews, not in the sidebar (#/dev/cyber). */
+  | { name: "dev"; view: "cyber" };
 
 export const DEFAULT_ROUTE: Route = { name: "home" };
 
@@ -77,6 +79,7 @@ export function parseRoute(hash: string): Route {
   if (parts[0] === "runs") return { name: "runs" };
   if (parts[0] === "phone") return { name: "phone" };
   if (parts[0] === "settings") return { name: "settings" };
+  if (parts[0] === "dev" && parts[1] === "cyber") return { name: "dev", view: "cyber" };
   if (parts[0] === "devices") return { name: "devices" };
   if (parts[0] === "knowledge") return { name: "knowledge" };
   return DEFAULT_ROUTE;
@@ -120,6 +123,8 @@ export function routeHref(route: Route): string {
       return "#/attach";
     case "settings":
       return "#/settings";
+    case "dev":
+      return `#/dev/${route.view}`;
   }
 }
 
@@ -138,6 +143,7 @@ export function isCommandTab(tab: string): tab is CommandTab {
 export function sectionOf(route: Route): "home" | "command" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market" | "remote" | "attach" | "settings" {
   if (route.name === "app") return "apps";
   if (route.name === "run") return "runs";
+  if (route.name === "dev") return "settings";
   return route.name;
 }
 

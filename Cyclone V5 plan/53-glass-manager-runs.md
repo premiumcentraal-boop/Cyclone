@@ -1,6 +1,6 @@
 # Plan 53: The Glass Manager — build runs
 
-Status: **R1 and R2 built (2026-10-06, alpha.111 / Glass alpha.62); R3–R10 planned. Owner decisions taken (design §11): Cyber, own loop, `openai/gpt-6-luna` for checks, GitHub read access, build now as part of V5.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [52](52-glass-manager-design.md).
+Status: **R1, R2 and R3 built (2026-10-06, alpha.111 / Glass alpha.62, unreleased); R4–R10 planned. Owner decisions taken (design §11): Cyber, own loop, `openai/gpt-6-luna` for checks, GitHub read access, build now as part of V5.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [52](52-glass-manager-design.md).
 Ten runs, about 6–7 weeks at one run per 2–4 days. Each run is one PR, one alpha, green CI, and states physical
 verification honestly.
 
@@ -59,7 +59,7 @@ verification honestly.
   bubbles, polling only while the socket is down. Tests: `test_agent_stream.py` (8), `ai-stream.test.mjs` (3).
   Physical acceptance against a real key: UNVERIFIED.
 
-## R3 — Design foundation · alpha.112 (Glass 1.0.0-alpha.63)
+## R3 — Design foundation · built, rides in alpha.111 (unreleased)
 
 **Goal:** the components exist and look right before they are wired in.
 
@@ -68,14 +68,22 @@ verification honestly.
   (Canvas 2D), static SVG; visibility- and reduced-motion-aware loop.
 - `ui/reel.ts` (Handle Reel), `ui/trail.ts` (Timeline), `ui/heatgrid.ts` (GitHub Activity), `ui/statusDot.ts`,
   `ui/alertList.ts` (Notification List), `ui/checklist.ts` (Interactive Checklist), `ui/phoneAvatar.ts`.
-- A developer gallery at `#/dev/manager` (hidden from the sidebar) showing every component in every state, light and
+- A developer gallery at `#/dev/cyber` (hidden from the sidebar) showing every component in every state, light and
   dark, for visual review.
 - Licence: pin the Space UI commit, add the MIT entry to `docs/OPEN_SOURCE_COMPONENTS.md`, origin headers on ports;
   `glass_guard.py` gains the origin-header rule.
 - Tests: each component's states, keyboard, reduced motion (no rAF scheduled), orb stops when `document.hidden`.
 - Accept: owner reviews the gallery screenshots (light/dark, 1440 and 400 px wide).
+- **Built:** `apps/glass/src/ui/cyber/` — `orb.ts` (seven poses; WebGL2 shader, Canvas 2D, still CSS orb; springs
+  k 170 / d 22; idle 20 fps, offline draws once, nothing while hidden), `reel.ts`, `trail.ts`, `heatgrid.ts`,
+  `statusDot.ts`, `alertList.ts` (swipe or ✕; "stop telling me" after three of a kind), `checklist.ts` (the six
+  defaults), `phoneAvatar.ts` (alpha 107 colours). `--mgr-*` and motion tokens in `tokens.css`, `styles/cyber.css`.
+  Gallery at `#/dev/cyber` (not in the sidebar). Space UI is a design reference only: no source copied; every file
+  carries an `Origin:` line and `glass_guard.py` requires it. Tests: `cyber-components.test.mjs` (9), guard test (+1).
+  Checked in Chromium (WebGL2 renderer) at 1280 px light and dark and at 400 px: no console errors, no sideways scroll.
+  Since alpha.111 was not merged yet, R3 rides in it instead of taking alpha.112; later runs move up one.
 
-## R4 — Presence everywhere · alpha.113 (Glass alpha.64)
+## R4 — Presence everywhere · alpha.112 (Glass alpha.63)
 
 **Goal:** one Manager on every page.
 
@@ -88,7 +96,7 @@ verification honestly.
 - Tests: panel open ≤ 100 ms with cached state (timed in jsdom as a regression bound), palette keyboard flow,
   page-context injection, proposal apply/discard from the panel.
 
-## R5 — The Manager can move Glass · alpha.114 (Glass alpha.65)
+## R5 — The Manager can move Glass · alpha.113 (Glass alpha.64)
 
 **Goal:** it points at what it talks about.
 
@@ -100,7 +108,7 @@ verification honestly.
 - Tests: every route in the list resolves; unknown targets fail quietly; ring removed after 2.4 s; reduced motion
   shows the ring without animation.
 
-## R6 — Project sight · alpha.115
+## R6 — Project sight · alpha.114
 
 **Goal:** it can answer "how close are we to V5?" with numbers.
 
@@ -112,7 +120,7 @@ verification honestly.
 - Outside text (run summaries, PR bodies, notes) reaches the model as tool results marked as information.
 - Tests per toolset with fixtures; GitHub tool refuses any repo but the configured one and any write verb.
 
-## R7 — Proactive: heartbeat, alerts, brief, pulse · alpha.116 (Glass alpha.66)
+## R7 — Proactive: heartbeat, alerts, brief, pulse · alpha.115 (Glass alpha.65)
 
 **Goal:** it speaks up only when it should.
 
@@ -124,7 +132,7 @@ verification honestly.
 - Glass: alerts tab (§5.7), brief card, pulse on Home, orb `attention`.
 - Tests: silence on nothing, dedup, quiet hours, caps cover heartbeat spend, brief shown once per day.
 
-## R8 — Memory and session search · alpha.117 (Glass alpha.67)
+## R8 — Memory and session search · alpha.116 (Glass alpha.66)
 
 **Goal:** it remembers you and the project.
 
@@ -135,7 +143,7 @@ verification honestly.
 - Glass: memory chips with undo; Settings → Manager → Memory (view, edit, clear).
 - Tests: caps enforced, secret-shaped text refused, undo restores, snapshot frozen mid-conversation, search ranking.
 
-## R9 — Playbooks · alpha.118 (Glass alpha.68)
+## R9 — Playbooks · alpha.117 (Glass alpha.67)
 
 **Goal:** it gets better at recurring work.
 
@@ -147,7 +155,7 @@ verification honestly.
 - Glass: playbook chips, Settings → Manager → Playbooks (draft / approved, diff of each patch, approve, delete).
 - Tests: progressive loading, drafts never used, patch diff, Lab gate, secret screen on content.
 
-## R10 — Overnight pass and polish · alpha.119 (Glass alpha.69)
+## R10 — Overnight pass and polish · alpha.118 (Glass alpha.68)
 
 **Goal:** it learns while you sleep and the whole thing feels finished.
 

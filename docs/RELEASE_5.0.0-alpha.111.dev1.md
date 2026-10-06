@@ -1,4 +1,4 @@
-# Cyclone V5 Alpha 111: Cyber starts — answers that stream
+# Cyclone V5 Alpha 111: Cyber starts — answers that stream, and its look
 
 This developer alpha is the first step of **Cyber**, the Glass Manager (plans 52 and 53): the AI in Glass's workspace
 panel now answers live. You see its words as they are written and every tool as it runs, you can write your next
@@ -18,6 +18,25 @@ model in Command Center → AI.
   forgetting them. You still see every message. If a summary cannot be made, older turns fall away as before.
 - **Fallback.** If the live connection drops, the panel reconnects (1 s, 2 s, 4 s … up to 15 s) without missing
   anything, and checks every second in the meantime, as before.
+
+## Cyber's look, ready for review
+
+The pieces Cyber will be made of are built and can be previewed at **`#/dev/cyber`** in Glass (not in the sidebar;
+everything there is example data):
+
+- **The orb**, Cyber's face, in seven poses: ready, listening, thinking, tool running, answering, needs you
+  (an amber halo) and offline. It draws with WebGL2 when it can, falls back to a simpler drawing, and is a still
+  picture when your system asks for reduced motion. It only animates while something happens and the tab is visible.
+- **The status line** next to the orb, rolling through short lines every 4 seconds ("Needs you: 1 approval",
+  "3 phones online"); it stops while you point at it.
+- **The work trail**: what Cyber read and did for one answer, collapsed to one line or open with every step's time.
+- **The project pulse**: 26 weeks of daily pass rates as coloured squares; releases outlined, safety failures marked,
+  days without runs left empty.
+- **Status dots, the alerts list** (swipe or ✕ to dismiss), **the watch list** with its six defaults, and **phone
+  avatars** in each phone's own colour.
+
+They are wired into Glass in the next run. The designs follow Space UI's free components (MIT) as a reference; no
+Space UI code is copied.
 
 ## Under the hood
 
@@ -42,7 +61,7 @@ proposals unless you allowed direct edits, and phones still ask before sending, 
   code change in this alpha.
 - Glass: **1.0.0-alpha.62**. The retired desktop-window component remains unchanged.
 - Validation for this exact source: gateway tests (including `test_agent_registry.py` and `test_agent_stream.py`),
-  Glass tests (including `ai-stream.test.mjs`), CI guards, release-version and product guards; recorded in the release
+  Glass tests (including `ai-stream.test.mjs` and `cyber-components.test.mjs`), CI guards, release-version and product guards; recorded in the release
   PR and its CI runs.
 - Physical acceptance: **UNVERIFIED.** Streaming has not yet been watched in Glass against a real OpenRouter key on the
   owner's PC; the scripted provider in the tests stands in for it.

@@ -17,6 +17,7 @@ import { createHomePage } from "./pages/homePage.js";
 import { createDevicesPage } from "./pages/devicesPage.js";
 import { createAppKnowledgePage } from "./pages/appKnowledgePage.js";
 import { createKnowledgePage } from "./pages/knowledgePage.js";
+import { createCyberGallery } from "./pages/cyberGallery.js";
 import { createLabPage } from "./pages/labPage.js";
 import { createMarketPage } from "./pages/marketPage.js";
 import { createRemotePage } from "./pages/remotePage.js";
@@ -90,6 +91,7 @@ const PAGES: Record<Route["name"], PageFactory> = {
   remote: (ctx) => createRemotePage(ctx),
   attach: (ctx) => createAttachPage(ctx),
   settings: (ctx) => createSettingsPage(ctx),
+  dev: (ctx) => createCyberGallery(ctx),
 };
 
 const NAV: Array<{ section: "home" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market"; label: string; icon: IconName; route: Route }> = [

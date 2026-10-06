@@ -32,3 +32,14 @@ See `docs/MOBILERUN_PORTAL_BACKEND.md` for architecture and configuration.
 - Source copied into Cyclone: **No** (as of plan 53 R1). If a later run copies code (for example the context
   compressor), record the upstream commit here and keep the MIT notice in the copied file's header.
 
+## Space UI
+
+- Project: `adrielzimbril/space-ui` (https://spaceui.one)
+- License: **MIT** for the free components (checked 2026-10-06); some components are "Pro" and were never opened.
+- Cyclone usage (plan 52/53 R3): **design reference only** for Cyber's components in `apps/glass/src/ui/cyber/`
+  (orb after Bloop Orb, status reel after Handle Reel, work trail after Timeline, project pulse after GitHub Activity,
+  status dot, alert list, watch list, phone avatars).
+- Source copied into Cyclone: **No.** Each file in `apps/glass/src/ui/cyber/` says so in its `Origin:` header line,
+  which `scripts/ci/glass_guard.py` requires. If a later change copies Space UI code, record the upstream commit here
+  and keep the MIT notice in that file's header.
+

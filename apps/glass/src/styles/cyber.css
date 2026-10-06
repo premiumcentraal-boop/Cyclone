@@ -1,0 +1,154 @@
+/* Cyber, the Glass Manager (plan 52): orb, status reel, work trail, project pulse, status dots, alerts, the watch list
+   and phone avatars. Colours and motion come from tokens.css (--mgr-*); everything moving stops under
+   prefers-reduced-motion. Classes are cyber-*. */
+
+/* ---------------------------------------------------------------- orb */
+.cyber-orb { position: relative; display: inline-grid; place-items: center; flex: none; border-radius: 50%; }
+.cyber-orb-canvas { width: 100%; height: 100%; display: block; }
+.cyber-orb-still {
+  width: 76%; height: 76%; border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 30%, color-mix(in srgb, var(--mgr-orb-b) 70%, white) 0 12%, transparent 46%),
+    radial-gradient(circle at 70% 72%, var(--mgr-orb-c), transparent 58%),
+    radial-gradient(circle at 50% 50%, var(--mgr-orb-b), var(--mgr-orb-a) 78%);
+  box-shadow: 0 0 0 0 transparent;
+  transition: box-shadow var(--mgr-ease), filter var(--mgr-ease);
+}
+.cyber-orb-listen .cyber-orb-still { box-shadow: 0 0 0 3px var(--mgr-ring-glow); filter: brightness(1.12); }
+.cyber-orb-working .cyber-orb-still { box-shadow: 0 0 0 2px var(--mgr-working); }
+.cyber-orb-attention .cyber-orb-still { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mgr-attention) 70%, transparent); }
+.cyber-orb-offline .cyber-orb-still { filter: grayscale(0.85) brightness(0.8); }
+
+/* ---------------------------------------------------------------- status reel */
+.cyber-reel { position: relative; display: inline-block; overflow: hidden; height: 1.4em; line-height: 1.4em; min-width: 0;
+  font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; vertical-align: middle; }
+.cyber-reel-track { position: relative; display: block; height: 100%; }
+.cyber-reel-line { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cyber-reel-line + .cyber-reel-line { position: absolute; inset: 0; }
+.cyber-reel-in { animation: cyber-reel-in var(--mgr-reel) both; }
+.cyber-reel-out { animation: cyber-reel-out var(--mgr-reel) both; }
+@keyframes cyber-reel-in { from { transform: translateY(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes cyber-reel-out { from { transform: none; opacity: 1; } to { transform: translateY(-100%); opacity: 0; } }
+.cyber-tone-good { color: var(--success); }
+.cyber-tone-warn { color: var(--warning); }
+.cyber-tone-bad { color: var(--danger); }
+
+/* ---------------------------------------------------------------- work trail */
+.cyber-trail { font-size: var(--text-sm); color: var(--text-muted); }
+.cyber-trail-head { display: inline-flex; gap: 6px; align-items: center; padding: 2px 6px 2px 2px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.cyber-trail-head:hover { background: var(--surface-hover); color: var(--text); }
+.cyber-trail-head:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cyber-trail-caret { width: 12px; color: var(--text-faint); }
+.cyber-trail-live .cyber-trail-summary { color: var(--text); }
+.cyber-trail-steps { list-style: none; margin: 6px 0 0 7px; padding: 0 0 0 14px; border-left: 2px solid var(--mgr-trail-line); display: grid; gap: 8px; }
+.cyber-step { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; }
+.cyber-step-dot { position: absolute; left: -23px; top: 1px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; color: #fff; background: var(--text-faint); box-shadow: 0 0 0 3px var(--surface); }
+.cyber-step-done .cyber-step-dot { background: var(--success); }
+.cyber-step-failed .cyber-step-dot { background: var(--danger); }
+.cyber-step-waiting .cyber-step-dot { background: var(--mgr-attention); }
+.cyber-step-running .cyber-step-dot { background: var(--surface); border: 2px solid var(--mgr-working); border-right-color: transparent;
+  animation: cyber-spin 0.9s linear infinite; }
+@keyframes cyber-spin { to { transform: rotate(360deg); } }
+.cyber-step-body { display: grid; gap: 2px; min-width: 0; }
+.cyber-step-label { color: var(--text); overflow-wrap: anywhere; }
+.cyber-step-detail { font-size: var(--text-xs); color: var(--text-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.cyber-step-failed .cyber-step-detail { color: var(--danger); }
+.cyber-step-time { font-size: var(--text-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cyber-step-waiting .cyber-step-time { color: var(--mgr-attention); }
+.cyber-step-link { cursor: pointer; border-radius: var(--radius-sm); }
+.cyber-step-link:hover .cyber-step-label { text-decoration: underline; }
+.cyber-step-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ---------------------------------------------------------------- project pulse */
+.cyber-heat { display: grid; gap: 8px; min-width: 0; }
+.cyber-heat-grid { display: grid; grid-auto-flow: column; grid-auto-columns: 14px; justify-content: start; gap: 3px; overflow-x: auto; padding: 2px; }
+.cyber-heat-col { display: grid; grid-template-rows: repeat(7, auto); gap: 3px; }
+.cyber-heat-cell { display: block; width: 100%; aspect-ratio: 1; min-width: 8px; max-width: 14px; border-radius: 3px; border: 0; padding: 0;
+  background: var(--mgr-heat-0); cursor: pointer; position: relative; }
+.cyber-heat-cell:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cyber-heat-none { background: transparent; cursor: default; }
+.cyber-heat-lx { background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+.cyber-heat-l0 { background: color-mix(in srgb, var(--danger) 35%, var(--mgr-heat-0)); }
+.cyber-heat-l1 { background: var(--mgr-heat-1); }
+.cyber-heat-l2 { background: var(--mgr-heat-2); }
+.cyber-heat-l3 { background: var(--mgr-heat-3); }
+.cyber-heat-l4 { background: var(--mgr-heat-4); }
+.cyber-heat-release { box-shadow: 0 0 0 1.5px var(--accent); }
+.cyber-heat-safety::after { content: ""; position: absolute; right: -1px; top: -1px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--danger); box-shadow: 0 0 0 1px var(--surface); }
+.cyber-heat-legend { display: flex; gap: 4px; align-items: center; font-size: 11px; color: var(--text-faint); flex-wrap: wrap; }
+.cyber-heat-legend .cyber-heat-cell { width: 10px; min-width: 10px; cursor: default; }
+.cyber-heat-key { margin-left: 8px; }
+
+/* ---------------------------------------------------------------- status dot */
+.cyber-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-faint); vertical-align: middle; }
+.cyber-dot-live { background: var(--success); box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 50%, transparent); animation: cyber-breathe 2.4s ease-out infinite; }
+.cyber-dot-warn { background: var(--warning); }
+.cyber-dot-down { background: var(--danger); }
+@keyframes cyber-breathe { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
+
+/* ---------------------------------------------------------------- alerts */
+.cyber-alerts { display: grid; gap: 4px; }
+.cyber-alerts-day { margin: 10px 0 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
+.cyber-alerts-empty { margin: 8px 0; color: var(--text-muted); font-size: var(--text-sm); }
+.cyber-alert { display: flex; align-items: stretch; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--border);
+  touch-action: pan-y; transition: transform var(--mgr-ease), opacity var(--mgr-ease); }
+.cyber-alert-open { flex: 1; min-width: 0; display: flex; gap: 10px; align-items: center; padding: 10px 4px 10px 12px; border: 0; background: transparent;
+  color: var(--text); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-md) 0 0 var(--radius-md); }
+.cyber-alert-open:focus-visible, .cyber-alert-close:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cyber-alert-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.cyber-alert-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.cyber-alert-title { font-size: var(--text-sm); overflow-wrap: anywhere; }
+.cyber-alert-unread .cyber-alert-title { font-weight: 600; }
+.cyber-alert-detail { font-size: var(--text-xs); color: var(--text-muted); overflow-wrap: anywhere; }
+.cyber-alert-time { font-size: var(--text-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.cyber-alert-close { border: 0; background: transparent; color: var(--text-faint); width: 34px; cursor: pointer; border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+.cyber-alert-close:hover { color: var(--text); background: var(--surface-hover); }
+.cyber-alert-offer { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 12px;
+  border-radius: var(--radius-md); background: var(--accent-soft); color: var(--accent-text); font-size: var(--text-sm); }
+
+/* ---------------------------------------------------------------- watch list */
+.cyber-watch { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.cyber-watch-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 4px; border-bottom: 1px solid var(--border); }
+.cyber-watch-text { display: grid; gap: 2px; font-size: var(--text-sm); color: var(--text-muted); }
+.cyber-watch-on .cyber-watch-text { color: var(--text); }
+.cyber-watch-tag { font-size: 11px; color: var(--mgr-attention); }
+.cyber-watch-time { font-size: var(--text-xs); color: var(--text-faint); white-space: nowrap; }
+.cyber-switch { position: relative; width: 34px; height: 20px; border-radius: var(--radius-pill); border: 0; padding: 0; background: var(--border-strong);
+  cursor: pointer; transition: background var(--mgr-ease); }
+.cyber-switch[aria-checked="true"] { background: var(--success); }
+.cyber-switch:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cyber-switch-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm);
+  transition: transform var(--mgr-spring); }
+.cyber-switch[aria-checked="true"] .cyber-switch-knob { transform: translateX(14px); }
+
+/* ---------------------------------------------------------------- phone avatar */
+.cyber-avatar { display: inline-grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-weight: 600; letter-spacing: 0.02em;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25); user-select: none; }
+
+/* ---------------------------------------------------------------- the developer gallery (#/dev/cyber) */
+.cyber-gallery { display: grid; gap: var(--space-6); }
+.cyber-gallery-section { display: grid; gap: var(--space-3); padding: var(--space-5); border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); min-width: 0; }
+.cyber-gallery-section h2 { margin: 0; font-size: var(--text-lg); }
+.cyber-gallery-note { margin: 0; color: var(--text-muted); font-size: var(--text-sm); max-width: 70ch; }
+.cyber-gallery-row { display: flex; flex-wrap: wrap; gap: var(--space-5); align-items: center; }
+.cyber-gallery-cell { display: grid; justify-items: center; gap: 6px; font-size: var(--text-xs); color: var(--text-muted); }
+.cyber-gallery-dock { justify-self: start; display: inline-flex; gap: 10px; align-items: center; padding: 6px 12px 6px 6px; border-radius: var(--radius-pill);
+  background: var(--mgr-glass); border: 1px solid var(--border); box-shadow: var(--shadow-sm); max-width: 100%; }
+.cyber-gallery-dock .cyber-reel { width: 200px; max-width: 100%; flex: 0 1 auto; }
+.cyber-gallery-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-5); }
+.cyber-gallery-cols > * { min-width: 0; }
+
+@media (max-width: 560px) {
+  .cyber-watch-item { grid-template-columns: auto minmax(0, 1fr); }
+  .cyber-watch-time { grid-column: 2; }
+  .cyber-gallery-dock { max-width: 100%; min-width: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cyber-reel-in, .cyber-reel-out, .cyber-dot-live, .cyber-step-running .cyber-step-dot { animation: none; }
+  .cyber-reel-out { display: none; }
+  .cyber-switch, .cyber-switch-knob, .cyber-alert, .cyber-orb-still { transition: none; }
+}
