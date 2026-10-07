@@ -170,6 +170,24 @@ internal object SealedDelivery {
         trim()
     }
 
+    /** Local phone form only: same one-shot path, no disk write or existing account-slot overwrite. */
+    fun holdLocalPassword(missionId: String, place: String, password: CharArray) {
+        try {
+            require(RUN_ID.matches(missionId) && validPlace(place))
+            require(password.size in 6..4_096)
+            synchronized(lock) {
+                val slots = held.getOrPut(missionId) { mutableMapOf() }
+                require("password" !in slots)
+                val leaseId = "ls_" + java.util.UUID.randomUUID().toString().replace("-", "")
+                slots["password"] = Held(leaseId, place, password.copyOf(), clock() + 30 * 60_000L)
+                outcomes[leaseId] = "delivered"
+                trim()
+            }
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
     fun wipe(opened: Map<String, Pair<Envelope, CharArray>>) {
         opened.values.forEach { it.second.fill('\u0000') }
     }

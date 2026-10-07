@@ -401,7 +401,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             val node = liveNodeAtSnapshotPath(snapshotNode) ?: return@repeat
             if (!sameNode(snapshotNode, node)) return@repeat
             val activation = AccessibilityRoles.resolveActivationTarget(snapshot.nodes, snapshotNode)
-            val labels = ClickGateIntercept.labelsFor(snapshotNode, activation, selector)
+            val labels = ClickGateIntercept.labelsFor(snapshotNode, activation, selector, packageName = snapshot.packageName)
             val decision = ClickGateIntercept.decide("phone.click", labels, OverlayChromeRuntime.snapshot().state)
             if (!decision.performClick) {
                 if (decision.enterGate && decision.gateClass != null) {

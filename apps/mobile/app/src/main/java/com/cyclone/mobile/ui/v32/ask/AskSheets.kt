@@ -306,7 +306,7 @@ internal fun AskMenuDrawer(
             }
         }
         AskDivider(Modifier.padding(horizontal = 18.dp, vertical = 6.dp))
-        AskMenuLink(Icons.Rounded.Bolt, "Routines", onRoutines)
+        AskMenuLink(Icons.Rounded.Bolt, "Skills", onRoutines)
         AskMenuLink(Icons.Rounded.Psychology, "Brain", onBrain)
         AskMenuLink(Icons.Rounded.Settings, "Settings", onSettings)
     }

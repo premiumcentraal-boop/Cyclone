@@ -85,7 +85,7 @@ object MarketCatalog {
             "Turn on Do Not Disturb until {time}.",
             does = listOf("Changes a phone setting"), apps = listOf(SETTINGS),
             inputs = listOf(MarketInput("time", "Until (for example 15:30)")), suggestFor = emptyList()),
-    )
+    ) + InstagramSkills.all.map { it.listing }
 
     fun byId(id: String): MarketListing? = LISTINGS.firstOrNull { it.id == id }
 }

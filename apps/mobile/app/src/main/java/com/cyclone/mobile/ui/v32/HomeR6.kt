@@ -244,7 +244,7 @@ private fun PageDots(count: Int, current: Int) {
 internal fun HomeActions(onAi: () -> Unit, onRoutines: () -> Unit, onBrain: () -> Unit, onMore: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
         HomeAction(Icons.Rounded.AutoAwesome, "Ask", onAi)
-        HomeAction(Icons.Rounded.Bolt, "Routines", onRoutines)
+        HomeAction(Icons.Rounded.Bolt, "Skills", onRoutines)
         HomeAction(Icons.Rounded.Psychology, "Brain", onBrain)
         HomeAction(Icons.Rounded.MoreHoriz, "More", onMore)
     }

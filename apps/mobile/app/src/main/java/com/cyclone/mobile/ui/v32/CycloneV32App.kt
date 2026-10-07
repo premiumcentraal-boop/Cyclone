@@ -348,7 +348,12 @@ private fun openSearchResult(
             RoutinesNav.pending = item.target
             onDestination(V32Destination.ROUTINES)
         }
-        com.cyclone.mobile.ui.v32.search.SearchCategory.SKILLS -> onDestination(V32Destination.BRAIN)
+        com.cyclone.mobile.ui.v32.search.SearchCategory.SKILLS -> {
+            if (com.cyclone.mobile.market.InstagramSkills.byId(item.target) != null) {
+                SkillsNav.pending = item.target
+                onDestination(V32Destination.ROUTINES)
+            } else onDestination(V32Destination.BRAIN)
+        }
         com.cyclone.mobile.ui.v32.search.SearchCategory.PROFILES -> onDestination(V32Destination.PROFILES)
         com.cyclone.mobile.ui.v32.search.SearchCategory.APPS -> {
             val launch = context.packageManager.getLaunchIntentForPackage(item.target)

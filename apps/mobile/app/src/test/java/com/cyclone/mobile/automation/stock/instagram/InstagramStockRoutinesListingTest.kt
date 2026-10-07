@@ -44,6 +44,12 @@ class InstagramStockRoutinesListingTest {
         assertTrue(runtime.contains("InstagramStockSkillCollectionGateway.routines()"))
         assertTrue(runtime.contains("store.saveAutomation(routine)"))
         assertTrue(page.contains("AutomationRuntime.store.listAutomations()"))
-        assertTrue(page.contains("AutomationRuntime.router.runManual"))
+        assertTrue(page.contains("CycloneSkillsLibraryPage(context, refreshTick, all,"))
+        val library = sequenceOf(
+            File("src/main/java/com/cyclone/mobile/ui/v32/CycloneSkillsLibraryPage.kt"),
+            File("apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneSkillsLibraryPage.kt"),
+        ).first { it.isFile }.readText()
+        assertTrue(library.contains("AutomationRuntime.router.runManual"))
+        assertTrue(library.contains("listOf(\"Apps\", \"Skills\", \"Routines\")"))
     }
 }

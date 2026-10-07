@@ -102,4 +102,15 @@ class MarketplaceTest {
         folder.root.resolve("broken.json").writeText("{nope")
         assertTrue(MarketInstalls(folder.root.resolve("broken.json")).list().isEmpty())
     }
+
+    @Test fun nativeSkillsRunWithoutInstallationButKeepPcControlAndSetupBoundaries() {
+        human = true
+        assertEquals("HUMAN_HAS_CONTROL", Marketplace.run(store, "cyclone.instagram-profile", emptyMap())!!.code)
+        human = false
+        assertNull(Marketplace.run(store, "cyclone.instagram-profile", emptyMap()))
+        assertTrue(submitted.single().startsWith("Instagram skill: Open my Instagram profile."))
+        assertTrue("included starters do not populate the owner's install file", store.list().isEmpty())
+        assertEquals("SETUP_REQUIRED", Marketplace.run(store, InstagramSkills.ACCOUNT_SETUP, emptyMap())!!.code)
+        assertEquals(1, submitted.size)
+    }
 }

@@ -60,6 +60,22 @@ object Marketplace {
     fun catalog(): List<MarketListing> =
         MarketCatalog.LISTINGS.filter { runCatching { MarketRules.validate(it) }.isSuccess } + owner?.list().orEmpty()
 
+    /** Phone-sheet Run entry; gateway callers must pass the takeover check in run(context, …) first. */
+    fun runNative(context: Context, id: String, values: Map<String, String>): RunRefusal? {
+        val skill = InstagramSkills.byId(id) ?: return RunRefusal("NOT_FOUND", "That built-in skill is unavailable.")
+        if (id == InstagramSkills.ACCOUNT_SETUP) return RunRefusal("SETUP_REQUIRED", "Complete the account setup form first.")
+        if (!overlayReady()) return RunRefusal("OVERLAY_UNAVAILABLE", "Turn on Cyclone's accessibility service.")
+        if (busy()) return RunRefusal("ASK_BUSY", "Finish or stop the current task first.")
+        if (runCatching { context.packageManager.getLaunchIntentForPackage(InstagramSkills.PACKAGE) }.getOrNull() == null)
+            return RunRefusal("APP_MISSING", "Install Instagram before running this skill.")
+        val goal = try { MarketRules.fill(skill.listing, values) } catch (error: MarketError) {
+            return RunRefusal("INVALID_REQUEST", error.message ?: "Check your inputs.")
+        }
+        if (MindMissions.startAssigned(context, goal, frontOnly = true) == null) return RunRefusal("ASK_BUSY", "The phone cannot start this skill yet.")
+        changes.value++
+        return null
+    }
+
     /**
      * "Save skill" on a run: the run's goal becomes the owner's own recipe, added and ready to Run. Throws
      * [MarketError] when the goal cannot be a skill.
@@ -89,6 +105,11 @@ object Marketplace {
      * skill follows the app as it changes. Runs of goals that are not saved skills are left alone.
      */
     fun regroundAfterRun(context: Context, missionId: String, goal: String) {
+        if (InstagramSkills.forGoal(goal) != null) {
+            runCatching { com.cyclone.mobile.mind.learn.MissionLearning.learn(context.applicationContext, missionId) }
+            changes.value++
+            return
+        }
         val skill = savedSkillFor(context, goal) ?: return
         val app = context.applicationContext
         val trail = MindMissions.store(app).loadTrail(missionId) ?: return
@@ -124,6 +145,12 @@ object Marketplace {
 
     fun listing(id: String): MarketListing? = catalog().firstOrNull { it.id == id }
 
+    /** Packaged skills are available immediately; saved input overrides remain in the existing install store. */
+    fun available(context: Context): List<MarketListing> {
+        val added = installs(context).list().map { it.id }.toSet()
+        return catalog().filter { InstagramSkills.byId(it.id) != null || it.id in added }
+    }
+
     /** Launchable apps on this phone, package → label, for "Because you use …". */
     fun installedApps(context: Context): Map<String, String> = runCatching {
         val pm = context.packageManager
@@ -153,12 +180,19 @@ object Marketplace {
      * Runs an added recipe as a Mind mission, through the same entry as a typed Ask: same GATE, approvals, Secrets Card
      * and run trace. Refuses (never queues, never joins a running mission) when the phone is not free.
      */
-    fun run(context: Context, id: String, overrides: Map<String, String> = emptyMap()): RunRefusal? =
-        run(installs(context), id, overrides)
+    fun run(context: Context, id: String, overrides: Map<String, String> = emptyMap()): RunRefusal? {
+        if (InstagramSkills.byId(id) == null) return run(installs(context), id, overrides)
+        // PC callers keep the takeover boundary; an explicit native-sheet press uses runNative directly.
+        if (humanHasControl()) return RunRefusal("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
+        return runNative(context, id, installs(context).get(id)?.inputs.orEmpty() + overrides)
+    }
 
     internal fun run(store: MarketInstalls, id: String, overrides: Map<String, String>): RunRefusal? {
         val listing = listing(id) ?: return RunRefusal("NOT_FOUND", "That listing is not in the marketplace.")
-        val added = store.get(id) ?: return RunRefusal("NOT_ADDED", "Add ${listing.name} first.")
+        if (id == InstagramSkills.ACCOUNT_SETUP) return RunRefusal("SETUP_REQUIRED", "Open this skill's account setup form and complete your details first.")
+        val added = store.get(id) ?: if (InstagramSkills.byId(id) != null)
+            InstalledListing(id, listing.version, emptyMap(), 0, "built-in")
+        else return RunRefusal("NOT_ADDED", "Add ${listing.name} first.")
         if (!overlayReady()) return RunRefusal("OVERLAY_UNAVAILABLE", "Turn on Cyclone's accessibility service on the phone.")
         if (humanHasControl()) return RunRefusal("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
         if (busy()) return RunRefusal("ASK_BUSY", "Cyclone is busy with another task. Try again when it is done.")

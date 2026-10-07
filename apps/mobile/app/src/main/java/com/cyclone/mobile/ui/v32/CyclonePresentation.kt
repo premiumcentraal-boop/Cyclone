@@ -1,7 +1,7 @@
 package com.cyclone.mobile.ui.v32
 
 import android.content.Context
-import android.widget.ImageView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -9,7 +9,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.core.graphics.drawable.toBitmap
 import com.cyclone.mobile.runtime.background.*
 
 /** Read-only projection: retain the canonical task, including every execution-plane identifier. */
@@ -32,12 +34,14 @@ data class UiTask(val source: WorkspaceTaskUi) {
 @Composable
 fun CycloneAppIcon(packageName: String?, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val drawable = remember(packageName) {
-        runCatching { context.packageManager.getApplicationIcon(packageName.orEmpty()) }.getOrNull()
-            ?: context.getDrawable(com.cyclone.mobile.R.drawable.ic_cyclone_mark_42)
+    val bitmap = remember(packageName) {
+        val drawable = runCatching { context.packageManager.getApplicationIcon(packageName.orEmpty()) }.getOrNull()
+            ?: requireNotNull(context.getDrawable(com.cyclone.mobile.R.drawable.ic_cyclone_mark_42))
+        drawable.toBitmap(width = 128, height = 128).asImageBitmap()
     }
-    AndroidView(factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.FIT_CENTER } },
-        update = { it.setImageDrawable(drawable) }, modifier = modifier.size(38.dp))
+    // App icons decorate their containing card. A native ViewFactoryHolder can advertise a separate
+    // click action and steal that card's labels during accessibility host folding.
+    Image(bitmap = bitmap, contentDescription = null, contentScale = ContentScale.Fit, modifier = modifier.size(38.dp))
 }
 fun appLabel(context: Context, pkg: String): String = runCatching {
     context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString()
