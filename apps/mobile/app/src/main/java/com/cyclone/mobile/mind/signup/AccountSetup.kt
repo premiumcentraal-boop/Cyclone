@@ -5,18 +5,22 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Plan 43 (T7): Account Setup mode. One run creates one account with an app's [SignupMap] as the plan and one table
- * row's values. The owner approved creating it when they pressed Create accounts in Glass, so the run does not ask
- * again before the final control. The password never comes as a value: it arrives sealed from the vault and is filled
+ * row's values. Glass can carry an existing final approval; the native phone form asks at the actual terms screen.
+ * The password never comes as a value: it arrives through secure delivery and is filled
  * with vault_fill. A step only a person can do still pauses the run for that person. Pure.
  */
-class AccountSetupPlan(val map: SignupMap, val values: Map<String, String>) {
+class AccountSetupPlan(val map: SignupMap, val values: Map<String, String>, val finalApproved: Boolean = true) {
 
     /** The plan in the system prompt: every page, its fields and the value for each. */
     fun promptText(): String = buildString {
-        append("This mission is Account Setup: create one new ${map.appLabel} account on this phone. The owner already approved ")
-        append("creating it (in Cyclone Glass), so press the final control \"${map.finalLabel ?: "the one that creates the account"}\" ")
-        append("without asking again. Follow the sign-up map below page by page with exactly these values; never make one up. ")
-        append("For a password field use vault_fill what=password (the owner's vault sent it sealed; you never see it). ")
+        append("This mission is Account Setup: create one new ${map.appLabel} account on this phone. ")
+        if (finalApproved) {
+            append("The owner already approved creating it (in Cyclone Glass), so press the final control \"${map.finalLabel ?: "the one that creates the account"}\" without asking again. ")
+        } else {
+            append("The owner reviewed the details in Cyclone's phone form. Before accepting terms or pressing \"${map.finalLabel ?: "the one that creates the account"}\", show the actual terms and ask the owner with owner_ask, or owner_takeover; wait for their answer. Never treat Start setup as accepting Instagram's terms. ")
+        }
+        append("Follow the sign-up map below page by page with exactly these values; never make one up. ")
+        append("For a password field use vault_fill what=password (secure delivery holds it for this run; you never see it). ")
         append("Before you continue from each page, call setup_page with its number, changed=true when the page differs from ")
         append("the map (then work that page out yourself), and check=… when it is a step only a person can do: then ask the ")
         append("owner with owner_ask or hand over, and wait; never try to solve it. When the account exists, call setup_done ")

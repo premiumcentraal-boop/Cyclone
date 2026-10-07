@@ -295,6 +295,23 @@ object MindMissions {
      * owner types. In front when nothing runs, behind the front one when the phone can (plan 26 §6); returns the
      * mission id so the PC can follow it, or null when the phone cannot take it now.
      */
+    /** Owner's phone form starts the foreground Account Setup engine, with a memory-only password lease. */
+    fun startLocalSetup(context: Context, plan: com.cyclone.mobile.mind.signup.AccountSetupPlan, password: CharArray): String? {
+        val app = context.applicationContext
+        val goal = "Create one new ${plan.map.appLabel} account from the details I reviewed in Cyclone's account setup form."
+        val mission = Mission(newId(), goal, MissionStatus.RUNNING, System.currentTimeMillis(), System.currentTimeMillis(), "", "")
+        var launched = false
+        try {
+            if (admission(app, goal) != Crew.Admit.Front) return null
+            com.cyclone.mobile.secrets.SealedDelivery.holdLocalPassword(mission.id, "package:${plan.map.packageName}", password)
+            launched = launch(app, mission, null, null, front = true, setup = plan)
+            return mission.id.takeIf { launched }
+        } finally {
+            if (!launched) com.cyclone.mobile.secrets.SealedDelivery.finish(mission.id)
+            password.fill('\u0000')
+        }
+    }
+
     fun startAssigned(context: Context, goal: String, signup: String? = null,
                       setup: com.cyclone.mobile.mind.signup.AccountSetupPlan? = null): String? {
         val app = context.applicationContext
@@ -518,6 +535,9 @@ object MindMissions {
             run.flash = flash
             run.signup = signup
             run.setup = setup
+            com.cyclone.mobile.policy.PublishGate.running = { id -> find(id) != null }
+            if (com.cyclone.mobile.market.InstagramSkills.forGoal(initial.goal)?.listing?.id == com.cyclone.mobile.market.InstagramSkills.POST)
+                com.cyclone.mobile.policy.PublishGate.mark(initial.id, true)
             runs[run.id] = run
             if (front) {
                 liveState.value = initial
@@ -707,6 +727,7 @@ object MindMissions {
                 (if (toolbox.specs().any { it.name == "port_wait" }) "\n\n" + MindPrompt.PORTS_RULES else "") +
                 (run.signup?.let { "\n\n" + MindPrompt.signupRules(appLabel(context, it)) }.orEmpty()) +
                 (run.setup?.let { "\n\n" + it.promptText() }.orEmpty()) +
+                (com.cyclone.mobile.market.InstagramSkills.forGoal(run.mission.goal)?.let { "\n\n" + it.guidance() }.orEmpty()) +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
             // A behind mission never reads the owner's screen, not even to begin.
             val situation = if (run.front) toolbox.situation() else Crew.BEHIND_SITUATION.format(device.now())

@@ -56,7 +56,11 @@ object SearchSources {
         )
     }
 
-    private fun skills(): List<SearchItem> = AdaptiveBrainRuntime.store.listMicroSkills(160)
+    private fun skills(): List<SearchItem> = com.cyclone.mobile.market.InstagramSkills.all.map { skill ->
+        SearchItem(category = SearchCategory.SKILLS, target = skill.listing.id, title = skill.listing.name,
+            subtitle = "Included · Tested Android route", keywords = listOf("Instagram") + skill.route,
+            packageName = com.cyclone.mobile.market.InstagramSkills.PACKAGE)
+    } + runCatching { AdaptiveBrainRuntime.store.listMicroSkills(160) }.getOrDefault(emptyList())
         .filter { it.successCount > 0 }
         .map { skill ->
             SearchItem(

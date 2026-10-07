@@ -94,7 +94,7 @@ fun CycloneMarketplacePage(context: Context, onBack: () -> Unit, onModelSettings
     }
 
     LazyColumn(contentPadding = cyclonePageInsets(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { CycloneBackRow(if (showInstalled) "Marketplace" else "Routines") { if (showInstalled) showInstalled = false else onBack() } }
+        item { CycloneBackRow(if (showInstalled) "Marketplace" else "Skills") { if (showInstalled) showInstalled = false else onBack() } }
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (showInstalled) "Installed" else "Marketplace", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f))
@@ -104,7 +104,7 @@ fun CycloneMarketplacePage(context: Context, onBack: () -> Unit, onModelSettings
         if (showInstalled) {
             val mine = catalog.filter { it.id in installed }
             if (mine.isEmpty()) item {
-                Text("Nothing added yet. Add a recipe from the Marketplace and it appears here.",
+                Text("Nothing added yet. Get more skills from the Marketplace. Included Instagram skills are already in your Skills library.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(mine, key = { it.id }) { listing ->
@@ -116,7 +116,7 @@ fun CycloneMarketplacePage(context: Context, onBack: () -> Unit, onModelSettings
             OutlinedTextField(
                 value = query, onValueChange = { query = it.take(60) }, singleLine = true,
                 leadingIcon = { Icon(Icons.Rounded.Search, null) },
-                placeholder = { Text("Search recipes and connections") },
+                placeholder = { Text("Search") },
                 shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -156,7 +156,7 @@ fun CycloneMarketplacePage(context: Context, onBack: () -> Unit, onModelSettings
             }
         }
         item {
-            Text("Recipes run as Cyclone missions: Cyclone still asks before sending, deleting or paying, and passwords only go through the Secrets Card.",
+            Text("Skills run as Cyclone missions. Cyclone asks before sending, deleting or paying. Passwords use secure delivery or the Secrets Card.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -219,7 +219,7 @@ private fun ListingRow(listing: MarketListing, entry: InstalledListing?, reason:
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         OutlinedButton(onClick = onClick, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 14.dp)) {
-            Text(if (entry != null) "Open" else "Add")
+            Text(if (entry != null || com.cyclone.mobile.market.InstagramSkills.byId(listing.id) != null) "Open" else "Add")
         }
     }
 }
@@ -247,13 +247,18 @@ private fun ConnectionRow(connection: MarketConnection, onAction: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ListingSheet(
+internal fun ListingSheet(
     context: Context,
     listing: MarketListing,
     entry: InstalledListing?,
     apps: Map<String, String>,
     onDismiss: () -> Unit,
 ) {
+    if (listing.id == com.cyclone.mobile.market.InstagramSkills.ACCOUNT_SETUP) {
+        InstagramAccountSetupSheet(context, onDismiss)
+        return
+    }
+    val native = com.cyclone.mobile.market.InstagramSkills.byId(listing.id)
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val values = remember(listing.id, entry) {
         mutableStateMapOf<String, String>().apply { listing.inputs.forEach { put(it.name, entry?.inputs?.get(it.name) ?: it.default) } }
@@ -277,6 +282,11 @@ private fun ListingSheet(
                 }
             }
             Text(listing.summary, style = MaterialTheme.typography.bodyLarge)
+            native?.let {
+                Text("Included · Tested Android route", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                Disclosure("The tested route", it.route)
+                Text(it.limitation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Disclosure("What it does", listing.does)
             if (listing.apps.isNotEmpty()) Disclosure("Apps it uses", listing.apps.map { apps[it] ?: it })
             Disclosure("Asks you first", listing.asksFirst.ifEmpty { listOf("Nothing: it does not send, delete or pay.") })
@@ -304,7 +314,12 @@ private fun ListingSheet(
                         Marketplace.add(context, listing.id, values.toMap(), "phone"); null
                     } catch (error: MarketError) { error.message }
                 }
-                if (entry == null) {
+                if (native != null) {
+                    Button(onClick = {
+                        val refusal = Marketplace.runNative(context, listing.id, values.toMap())
+                        if (refusal == null) onDismiss() else message = refusal.message
+                    }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Run skill") }
+                } else if (entry == null) {
                     Button(onClick = { save() }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Add") }
                 } else {
                     OutlinedButton(onClick = {

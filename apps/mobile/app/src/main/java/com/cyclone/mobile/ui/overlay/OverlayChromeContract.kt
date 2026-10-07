@@ -35,7 +35,7 @@ object OverlayChromeContract {
     val overlayLauncherActivity: String? = null
 
     val homeDestinationNames: List<String> = listOf("HOME", "PROFILES", "AI", "ROUTINES", "BRAIN")
-    val homeDestinationLabels: List<String> = listOf("Home", "Profiles", "AI", "Routines", "Brain")
+    val homeDestinationLabels: List<String> = listOf("Home", "Profiles", "AI", "Skills", "Brain")
 
     val overlayStates: List<String> = listOf("IDLE", "ANALYSIS", "WORKING", "LIVE", "GATE", "DONE")
 

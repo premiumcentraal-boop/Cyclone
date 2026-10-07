@@ -56,7 +56,7 @@ enum class V32Destination(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Rounded.Home),
     PROFILES("Profiles", Icons.Rounded.Person),
     AI("AI", Icons.Rounded.AutoAwesome),
-    ROUTINES("Routines", Icons.Rounded.Bolt),
+    ROUTINES("Skills", Icons.Rounded.Bolt),
     BRAIN("Brain", Icons.Rounded.AccountTree),
 }
 

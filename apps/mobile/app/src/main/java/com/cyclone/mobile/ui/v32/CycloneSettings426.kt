@@ -409,7 +409,7 @@ internal fun CycloneSettingsPage426(
                     Settings426InfoRow(
                         Icons.Rounded.Memory,
                         "Stored on this phone",
-                        "Routines and learned app knowledge stay in Cyclone's local app storage. Manage routines in Routines and learned knowledge in Brain.",
+                        "Routines and learned app knowledge stay in Cyclone's local app storage. Manage routines in Skills → Routines and learned knowledge in Brain.",
                     )
                 }
             }

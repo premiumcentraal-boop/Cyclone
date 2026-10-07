@@ -440,12 +440,14 @@ class PhoneMindToolbox(
 
     private fun abilitiesFind(goalText: String, app: String): MindToolResult {
         if (goalText.isBlank()) return MindToolResult.error("goal is required: what you want to do in the app, in plain words.")
+        val nativeAdvice = if ((app.takeIf { it.isNotBlank() }?.let(::resolvePackage) ?: currentPackage()) == com.cyclone.mobile.market.InstagramSkills.PACKAGE)
+            com.cyclone.mobile.market.InstagramSkills.advice(goalText) else null
         val (packageName, view) = manualFor(app)
             // Alpha 109: a missing manual is a fact, not a failed action (it counted toward the lab's early stop).
-            ?: return MindToolResult("There is no manual for ${app.ifBlank { "this app" }} yet. Find the way yourself.",
+            ?: return MindToolResult(nativeAdvice ?: "There is no manual for ${app.ifBlank { "this app" }} yet. Find the way yourself.",
                 "abilities_find: no manual", ok = true)
         val hits = view.index.search(goalText, 6)
-        if (hits.isEmpty()) return MindToolResult("The manual of ${view.appLabel} has nothing that fits \"$goalText\". Find the way yourself.",
+        if (hits.isEmpty()) return MindToolResult(nativeAdvice ?: "The manual of ${view.appLabel} has nothing that fits \"$goalText\". Find the way yourself.",
             "abilities_find: nothing", ok = true)
         return MindToolResult(ManualTexts.excerpt(view, hits) { handle(packageName, it.id) }!!, "abilities_find \"${goalText.take(60)}\": ${hits.size}")
     }

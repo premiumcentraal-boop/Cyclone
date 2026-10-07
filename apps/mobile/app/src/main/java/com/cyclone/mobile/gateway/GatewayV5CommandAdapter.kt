@@ -145,7 +145,7 @@ internal object GatewayV5CommandAdapter {
             else "The phone is already running a mission.")
         }
         // C3: a task that posts a file gates its final Share/Post as a send, for this mission only.
-        PublishGate.mark(id, publish == true)
+        PublishGate.mark(id, publish == true || com.cyclone.mobile.market.InstagramSkills.forGoal(goal)?.listing?.id == com.cyclone.mobile.market.InstagramSkills.POST)
         if (opened.isNotEmpty()) {
             SealedDelivery.hold(id, opened)
             synchronized(missionLeases) { missionLeases[id] = opened.values.map { it.first.leaseId } }
