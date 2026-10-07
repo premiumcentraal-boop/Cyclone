@@ -493,6 +493,10 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def ai_status():
         return call(lambda: cc().ai.status())
 
+    @router.get("/v1/cc/ai/presence", dependencies=[Depends(auth)])
+    def ai_presence():
+        return call(lambda: cc().ai.presence())
+
     @router.post("/v1/cc/ai/settings", dependencies=[Depends(auth)])
     def ai_settings(body: dict[str, Any]):
         return call(lambda: cc().ai.update_settings(body_of(body)))

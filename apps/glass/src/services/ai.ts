@@ -175,6 +175,32 @@ export function parseConversation(raw: unknown): Conversation {
   };
 }
 
+/** Plan 53 R4: what the dock shows beside Cyber. Counts only. */
+export interface CyberPresence {
+  ready: boolean;
+  reason: string;
+  items: Array<{ text: string; tone: "plain" | "good" | "warn" | "bad" }>;
+  approvals: number;
+  openProposals: number;
+  working: number;
+  phonesReady: number;
+  phonesTotal: number;
+  tasksRunning: number;
+}
+
+export function parsePresence(raw: unknown): CyberPresence {
+  const r = obj(raw);
+  return {
+    ready: r.ready === true, reason: str(r.reason),
+    items: list(r.items).map((i) => {
+      const o = obj(i);
+      return { text: str(o.text), tone: oneOf(o.tone, ["plain", "good", "warn", "bad"] as const, "plain") };
+    }).filter((i) => i.text).slice(0, 8),
+    approvals: num(r.approvals), openProposals: num(r.openProposals), working: num(r.working), phonesReady: num(r.phonesReady),
+    phonesTotal: num(r.phonesTotal), tasksRunning: num(r.tasksRunning),
+  };
+}
+
 // ------------------------------------------------------------------------------------------------ the API
 
 const enc = encodeURIComponent;
@@ -200,7 +226,10 @@ export const aiApi = {
   get: async (client: GatewayClient, id: string) => parseConversation(await client.get(`/v1/cc/ai/conversations/${enc(id)}`)),
   update: async (client: GatewayClient, id: string, body: { model?: string | null; title?: string }) =>
     parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}`, body)),
-  send: async (client: GatewayClient, id: string, text: string) => parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/messages`, { text })),
+  /** `where` (plan 53 R4): the Glass page the owner writes from, so Cyber knows what they look at. */
+  send: async (client: GatewayClient, id: string, text: string, where?: string) =>
+    parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/messages`, where ? { text, where: where.slice(0, 160) } : { text })),
+  presence: async (client: GatewayClient) => parsePresence(await client.get("/v1/cc/ai/presence")),
   stop: async (client: GatewayClient, id: string) => parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/stop`)),
   remove: (client: GatewayClient, id: string) => client.post(`/v1/cc/ai/conversations/${enc(id)}/delete`),
   apply: async (client: GatewayClient, id: string) => parseProposal(await client.post(`/v1/cc/ai/proposals/${enc(id)}/apply`)),

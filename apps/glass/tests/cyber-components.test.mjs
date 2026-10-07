@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { installMiniDom } from "./helpers/mini-dom.mjs";
 import { parseRoute, routeHref } from "../.test-dist/core/router.js";
-import { chooseRenderer, createOrb, ORB_POSES, parseColor, poseFps, poseParams, settled, springStep } from "../.test-dist/ui/cyber/orb.js";
+import { createCharacter, CYBER_MOODS, MOOD_WORDS } from "../.test-dist/ui/cyber/character.js";
 import { cleanItems, createReel, REEL_DWELL_MS } from "../.test-dist/ui/cyber/reel.js";
 import { formatDuration, renderTrail, trailSummary } from "../.test-dist/ui/cyber/trail.js";
 import { dayTitle, gridDays, heatLevel, renderHeatgrid } from "../.test-dist/ui/cyber/heatgrid.js";
@@ -21,120 +21,93 @@ function manualTimers() {
   };
 }
 
-/** A fake 2D canvas context that records draws; WebGL2 is not offered, so the orb uses Canvas 2D. */
-function fakeCanvasDom() {
-  const document = installMiniDom();
-  const original = document.createElement;
-  const calls = { arc: 0, clearRect: 0 };
-  const gradient = { addColorStop() {} };
-  document.createElement = (tag) => {
-    const node = original(tag);
-    if (tag === "canvas") {
-      node.getContext = (kind) => kind !== "2d" ? null : new Proxy({}, {
-        get: (_t, key) => key === "createRadialGradient" ? () => gradient : key in calls ? () => { calls[key] += 1; } : key === "filter" ? "none" : () => {},
-        set: () => true,
-        has: (_t, key) => key === "filter",
-      });
-    }
-    return node;
-  };
-  return calls;
-}
-
-function frames() {
-  const queue = [];
-  let t = 0;
+function manualClock() {
+  const pending = [];
   return {
-    queue,
-    raf: (fn) => { queue.push(fn); return fn; },
-    cancelRaf: (fn) => { const i = queue.indexOf(fn); if (i >= 0) queue.splice(i, 1); },
-    /** Run one animation frame `ms` after the previous one. */
-    step(ms = 16) { t += ms; const fn = queue.shift(); if (fn) fn(t); return Boolean(fn); },
+    pending,
+    setTimer: (fn, ms) => { const h = { fn, ms }; pending.push(h); return h; },
+    clearTimer: (h) => { const i = pending.indexOf(h); if (i >= 0) pending.splice(i, 1); },
+    run() { const h = pending.shift(); h?.fn(); return h; },
   };
 }
 
-// ------------------------------------------------------------------------------------------------ orb
+// ------------------------------------------------------------------------------------------------ character
 
-test("orb poses, springs, colours and the renderer choice are pure and sensible", () => {
-  assert.equal(ORB_POSES.length, 7);
-  assert.equal(chooseRenderer({ webgl2: true, canvas: true, reducedMotion: false }), "webgl2");
-  assert.equal(chooseRenderer({ webgl2: false, canvas: true, reducedMotion: false }), "canvas");
-  assert.equal(chooseRenderer({ webgl2: true, canvas: true, reducedMotion: true }), "still", "reduced motion always gets the still orb");
-  assert.equal(chooseRenderer({ webgl2: false, canvas: false, reducedMotion: false }), "still");
-  assert.deepEqual([poseFps("idle"), poseFps("think"), poseFps("offline")], [20, 60, 0]);
-  assert.ok(poseParams("think").swirl > poseParams("idle").swirl, "thinking swirls faster than ready");
-  assert.equal(poseParams("working").ring, 1);
-  assert.equal(poseParams("attention").halo, 1);
-  assert.ok(poseParams("offline").sat < 0.3);
-  const x = poseParams("idle");
-  const v = { swirl: 0, glow: 0, amp: 0, sat: 0, ring: 0, halo: 0, bright: 0 };
-  const target = poseParams("think");
-  springStep(x, v, target, 5);  // a long pause is clamped, so it never jumps
-  assert.ok(x.swirl < target.swirl);
-  for (let i = 0; i < 120; i += 1) springStep(x, v, target, 1 / 60);
-  assert.ok(settled(x, v, target), "the spring settles within two seconds");
-  assert.deepEqual(parseColor("#fff"), [1, 1, 1]);
-  assert.deepEqual(parseColor(" #5b5bd6 ").map((c) => Math.round(c * 255)), [91, 91, 214]);
-  assert.deepEqual(parseColor("rgba(144, 144, 244, 0.95)").map((c) => Math.round(c * 255)), [144, 144, 244]);
-  assert.equal(parseColor("var(--x)"), null);
-});
-
-test("without canvas or with reduced motion the orb is still, and still says what it is doing", () => {
+test("the character has nine moods, each says what Cyber is doing, and unknown moods are ignored", () => {
   installMiniDom();
-  const orb = createOrb({ size: 40, pose: "idle", label: "Cyber" });
-  assert.equal(orb.renderer, "still");
-  assert.ok(orb.element.querySelector(".cyber-orb-still"));
-  assert.equal(orb.element.getAttribute("aria-label"), "Cyber: ready");
-  orb.setPose("attention");
-  assert.equal(orb.element.getAttribute("aria-label"), "Cyber: needs you");
-  assert.ok(orb.element.classList.contains("cyber-orb-attention"));
-  orb.setPose("nonsense");
-  assert.equal(orb.pose(), "attention", "unknown poses are ignored");
-  assert.equal(orb.frames(), 0, "a still orb never animates");
-  calls: {
-    const canvasCalls = fakeCanvasDom();
-    const quiet = createOrb({ size: 40 }, { reducedMotion: () => true, raf: () => assert.fail("no frames under reduced motion") });
-    assert.equal(quiet.renderer, "still");
-    assert.equal(canvasCalls.arc, 0);
-    quiet.destroy();
+  assert.deepEqual(CYBER_MOODS, ["idle", "listen", "think", "working", "speak", "attention", "success", "error", "offline"]);
+  const c = createCharacter({ size: 40, label: "Cyber" });
+  const svg = c.element.querySelector("svg");
+  assert.ok(svg, "an SVG built with DOM APIs");
+  assert.equal(c.element.getAttribute("aria-label"), "Cyber: ready");
+  for (const mood of CYBER_MOODS) {
+    c.setMood(mood);
+    assert.equal(svg.getAttribute("data-mood"), mood);
+    assert.equal(c.element.getAttribute("aria-label"), `Cyber: ${MOOD_WORDS[mood]}`);
   }
-  orb.destroy();
+  c.setMood("dance");
+  assert.equal(c.mood(), "offline");
+  // Every visual piece a mood needs is there: waves, dots, code, gear, badge, z's, confetti, the extra eyes.
+  for (const cls of ["cy-waves", "cy-dots", "cy-code", "cy-tool", "cy-badge", "cy-zzz", "cy-confetti", "cy-happy", "cy-closed", "cy-xeyes", "cy-mouth"]) {
+    assert.ok(svg.querySelector(`.${cls}`), cls);
+  }
+  c.destroy();
 });
 
-test("the orb only draws while it moves and the page is visible; idle is 20 fps and offline draws then stops", () => {
-  const calls = fakeCanvasDom();
-  const f = frames();
-  let hidden = false;
-  let wake = null;
-  const orb = createOrb({ size: 48, pose: "idle" }, {
-    raf: f.raf, cancelRaf: f.cancelRaf, hidden: () => hidden, onVisibility: (fn) => { wake = fn; return () => { wake = null; }; },
-    cssVar: (name) => (name === "--mgr-orb-a" ? "#5b5bd6" : ""),
-  });
-  assert.equal(orb.renderer, "canvas");
-  for (let i = 0; i < 60; i += 1) f.step(16);  // about one second at 60 Hz
-  const idleFrames = orb.frames();
-  assert.ok(idleFrames >= 15 && idleFrames <= 22, `idle draws about 20 frames a second (drew ${idleFrames})`);
-  assert.ok(calls.arc > 0);
-  orb.setPose("think");
-  const before = orb.frames();
-  for (let i = 0; i < 60; i += 1) f.step(16);
-  assert.ok(orb.frames() - before >= 55, "thinking draws every frame");
-  hidden = true;
-  f.step(16);
-  assert.equal(f.queue.length, 0, "a hidden tab schedules no frames");
-  hidden = false;
-  wake();
-  assert.equal(f.queue.length, 1, "coming back resumes");
-  orb.setPose("offline");
-  let guard = 0;
-  while (f.step(16) && guard < 1000) guard += 1;
-  assert.ok(guard < 1000 && f.queue.length === 0, "offline settles and stops scheduling frames");
-  const stopped = orb.frames();
-  orb.setPose("idle");
-  orb.destroy();
-  assert.equal(f.queue.length, 0, "destroy cancels the pending frame");
-  assert.equal(wake, null, "destroy stops listening for visibility");
-  assert.ok(stopped > 0);
+test("two characters never share gradient, clip or glow ids", () => {
+  installMiniDom();
+  const a = createCharacter({ size: 30 });
+  const b = createCharacter({ size: 30 });
+  const ids = (c) => c.element.querySelectorAll("[id]").map((n) => n.id);
+  assert.equal(ids(a).length, 4);
+  assert.equal(ids(a).filter((id) => ids(b).includes(id)).length, 0);
+  assert.ok(a.element.querySelector(".cy-shell").getAttribute("fill").includes(ids(a).find((id) => id.startsWith("cy-shell"))));
+  a.destroy();
+  b.destroy();
+});
+
+test("the character blinks and talks only when motion is allowed, and stops its timers when destroyed", () => {
+  installMiniDom();
+  const still = manualClock();
+  const quiet = createCharacter({ size: 30 }, { ...still, reducedMotion: () => true });
+  quiet.setMood("speak");
+  quiet.talk();
+  assert.equal(still.pending.length, 0, "reduced motion: no blink, no mouth timers");
+  quiet.destroy();
+  const clock = manualClock();
+  const c = createCharacter({ size: 30 }, { ...clock, reducedMotion: () => false, random: () => 0.5 });
+  const svg = c.element.querySelector("svg");
+  assert.equal(clock.pending.length, 1, "one blink is scheduled");
+  clock.run();
+  assert.equal(svg.style["--blink"], "0.08");
+  clock.pending.find((p) => p.ms === 130).fn();
+  assert.equal(svg.style["--blink"], "1");
+  c.talk();
+  assert.equal(svg.style["--m"], undefined, "only answering moves the mouth");
+  c.setMood("speak");
+  c.talk();
+  assert.equal(svg.style["--m"], "1.50");
+  c.setMood("idle");
+  assert.equal(svg.style["--m"], "1", "the mouth closes when the answer is done");
+  c.destroy();
+  assert.equal(clock.pending.filter((p) => p.ms > 1000).length, 0, "no blink waits after destroy");
+});
+
+test("the eyes follow the pointer, except while Cyber is busy with something else", () => {
+  installMiniDom();
+  const listeners = {};
+  const target = { addEventListener: (t, fn) => { listeners[t] = fn; }, removeEventListener: (t) => { delete listeners[t]; } };
+  const c = createCharacter({ size: 100, follow: true }, { pointerTarget: target, viewport: () => ({ width: 1000, height: 800 }), reducedMotion: () => true });
+  c.element.getBoundingClientRect = () => ({ left: 450, top: 350, width: 100, height: 100 });
+  const svg = c.element.querySelector("svg");
+  listeners.pointermove({ clientX: 1000, clientY: 400 });
+  assert.equal(svg.style["--px"], "9.0px");
+  c.setMood("think");
+  assert.equal(svg.style["--px"], "0px", "thinking looks away on its own");
+  listeners.pointermove({ clientX: 0, clientY: 400 });
+  assert.equal(svg.style["--px"], "0px");
+  c.destroy();
+  assert.equal(listeners.pointermove, undefined, "destroy stops following");
 });
 
 // ------------------------------------------------------------------------------------------------ reel
@@ -296,10 +269,10 @@ test("the developer gallery has its own route, shows every component and cleans 
   assert.deepEqual(parseRoute("#/dev/other"), { name: "home" });
   const page = createCyberGallery({});
   const text = page.element.textContent;
-  for (const title of ["Orb", "Dock", "Work trail", "Project pulse", "Status dots", "Alerts", "What Cyber watches", "Phone avatars"]) {
+  for (const title of ["Character", "Dock", "Work trail", "Project pulse", "Status dots", "Alerts", "What Cyber watches", "Phone avatars"]) {
     assert.match(text, new RegExp(title), title);
   }
   assert.match(text, /Example data only/);
-  assert.equal(page.element.querySelectorAll(".cyber-orb").length, 7 + 1 + 2);
+  assert.equal(page.element.querySelectorAll(".cy-wrap").length, 9 + 1 + 2);
   page.destroy();
 });

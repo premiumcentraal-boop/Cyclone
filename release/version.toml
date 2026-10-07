@@ -1,4 +1,4 @@
-# Cyclone V5 alpha.111 dev1: Cyber, the Glass Manager, R1-R3: agent package, streamed answers, message queue, components. Glass 1.0.0-alpha.62.
+# Cyclone V5 alpha.111 dev1: Cyber, the Glass Manager, R1-R4: streamed answers, queue, character, Cyber on every Glass page. Glass 1.0.0-alpha.62.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
 product_version = "5.0.0-alpha.111.dev1"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha111-cyber-stream"
+candidate_generation = "cyclone-v5-alpha111-cyber-everywhere"

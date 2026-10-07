@@ -20,7 +20,7 @@ from .. import schedule as schedules
 from ..center import CommandError
 from . import prompt
 from .common import (BASE, MAX_ANSWER_TOKENS, MAX_CALLS_PER_STEP, MAX_CONTEXT_CHARS, MAX_OWNER_TEXT, MAX_QUEUED,
-                     MAX_STEPS, MAX_TOOL_RESULT, AiError, _new, _only)
+                     MAX_STEPS, MAX_TOOL_RESULT, MAX_WHERE, AiError, _new, _only)
 
 #: Streaming: how often text goes to Glass, how many of the newest characters wait until they cannot be part of a
 #: secret any more (they are masked like the stored answer), and the most text one answer may stream.
@@ -44,7 +44,7 @@ class LoopMixin:
     def send(self, conversation_id: str, body: Any) -> dict[str, Any]:
         if not isinstance(body, dict):
             raise CommandError("Send {text}.")
-        _only(body, {"text"}, "message")
+        _only(body, {"text", "where"}, "message")
         text = body.get("text")
         if not isinstance(text, str) or not text.strip():
             raise CommandError("Write a message.")
@@ -53,6 +53,13 @@ class LoopMixin:
             raise CommandError(f"A message is at most {MAX_OWNER_TEXT} characters.")
         if INLINE_SECRET.search(text):
             raise CommandError("Leave passwords, codes and keys out of messages; the vault keeps them.")
+        # Plan 53 R4: the Glass page the owner writes from ("Runs", "Lab · exp-…"), so Cyber knows what they look at.
+        where = body.get("where")
+        if where is not None:
+            if not isinstance(where, str) or len(where.strip()) > MAX_WHERE or INLINE_SECRET.search(where):
+                raise CommandError(f"where is a short page name, at most {MAX_WHERE} characters.")
+            where = " ".join(where.split()) or None
+        message: dict[str, Any] = {"text": text, **({"where": where} if where else {})}
         self._key()  # a clear message before anything is stored
         with self._c._lock:
             row = self._row(conversation_id)
@@ -64,10 +71,10 @@ class LoopMixin:
                 # Plan 53 R2: the owner may write while Cyber answers; the message waits for the next turn.
                 if len(self._queued(row["id"])) >= MAX_QUEUED:
                     raise CommandError(f"{MAX_QUEUED} messages are already waiting. Wait for the answer, or stop it.")
-                self._add(row["id"], "queued", {"text": text})
+                self._add(row["id"], "queued", message)
             else:
                 self._promote_queued(row["id"])
-                self._add(row["id"], "user", {"text": text})
+                self._add(row["id"], "user", message)
                 if row["title"] == "New conversation":
                     self._c._db.execute("UPDATE ai_conversation SET title = ? WHERE id = ?", (text.replace("\n", " ")[:60], row["id"]))
                 self._set_state(row["id"], "working", "Thinking…")
@@ -223,6 +230,8 @@ class LoopMixin:
             elif role == "user":
                 prefix = f"(Cyclone, since your last answer: {' '.join(notes)})\n" if notes else ""
                 notes = []
+                if body.get("where"):
+                    prefix += f"(The owner is looking at {body['where']} in Glass.)\n"
                 out.append({"role": "user", "content": prefix + body["text"]})
                 seqs.append(seq)
             elif role == "assistant":

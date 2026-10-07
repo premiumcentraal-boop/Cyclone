@@ -21,6 +21,7 @@ import "./styles/ports.css";
 import "./styles/fleet.css";
 import { GlassApp } from "./app.js";
 import { establishSession, forgetSession } from "./core/session.js";
+import type { SocketLike } from "./services/aiStream.js";
 import { GatewayClient } from "./services/gateway.js";
 import { routeHref } from "./core/router.js";
 import { shortcutFor, type ShortcutState } from "./core/shortcuts.js";
@@ -69,6 +70,7 @@ async function boot(): Promise<void> {
     },
     setInterval: (fn, ms) => window.setInterval(fn, ms),
     clearInterval: (handle) => window.clearInterval(handle as number),
+    cyberSocket: typeof WebSocket === "undefined" ? undefined : (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike,
   });
   await app.start();
   const keys: ShortcutState = { pendingG: null };

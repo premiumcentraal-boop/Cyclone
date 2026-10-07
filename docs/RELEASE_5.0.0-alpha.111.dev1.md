@@ -1,11 +1,36 @@
-# Cyclone V5 Alpha 111: Cyber starts — answers that stream, and its look
+# Cyclone V5 Alpha 111: Meet Cyber
 
-This developer alpha is the first step of **Cyber**, the Glass Manager (plans 52 and 53): the AI in Glass's workspace
-panel now answers live. You see its words as they are written and every tool as it runs, you can write your next
-message while it is still answering, and long conversations stay sharp. Setup is unchanged: your OpenRouter key and a
-model in Command Center → AI.
+This developer alpha brings **Cyber**, the Glass Manager (plans 52 and 53): the AI that used to sit beside the
+workspace now lives on every Glass page, as a small character that shows what it is doing, and it answers live.
+Setup is unchanged: your OpenRouter key and a model in Command Center → AI.
 
-## What changes in Glass
+## Cyber on every page
+
+- **The dock.** Cyber sits at the foot of the sidebar on every Glass page (a floating pill on narrow windows), with a
+  rolling status line — "Needs you: 1 approval", "1 of 2 phones ready", "2 tasks running", today's spending — and a
+  badge when something waits for you. Press it to open Cyber.
+- **The character.** Cyber has its own pose and motion for each thing it does: ready (floats, blinks, follows your
+  pointer), listening (leans in while you type), thinking (looks away, hand to chin), working (code on its visor, a
+  gear turning), answering (its mouth moves with the words), needs you (hops, waves, amber badge), done (a happy jump),
+  something failed (crossed eyes, a shake) and offline (asleep). With reduced motion on, nothing moves but each pose
+  stays different.
+- **The panel** opens on any page, not just the workspace. Each message tells Cyber which page you are on ("Runs",
+  "Lab · exp-…"), so "why did this fail?" means what you are looking at.
+- **The palette.** From any page, type to go to a page (Glass screens, Command Center tabs, workspace pages by title),
+  do something quick (open Cyber, its settings, search the workspace), or ask Cyber — a question opens the panel and is
+  sent from the page you are on.
+
+### Keys, on Windows and on a Mac
+
+| | Windows | Mac |
+|---|---|---|
+| Palette (ask or go to) | **Ctrl+K** | **⌘K** |
+| Cyber's panel | **Ctrl+.** | **⌘.** |
+
+Glass shows the right label for your computer. Cyber's panel moved off Ctrl+J because Chrome and Edge on Windows use
+Ctrl+J for Downloads; ⌘J / Ctrl+J still work where the browser lets the page have the key. Esc closes either one.
+
+## Answers that stream
 
 - **Live answers.** The answer appears word by word, with a cursor at the end. Each step it takes ("Checked the
   phones", "Read “Weekly plan”") shows as it starts and gets a ✓, ✋ (a proposal for you) or ⚠ when it finishes.
@@ -16,27 +41,15 @@ model in Command Center → AI.
   first.
 - **Long conversations.** When older turns no longer fit, Cyber keeps a short summary of them for itself instead of
   forgetting them. You still see every message. If a summary cannot be made, older turns fall away as before.
-- **Fallback.** If the live connection drops, the panel reconnects (1 s, 2 s, 4 s … up to 15 s) without missing
-  anything, and checks every second in the meantime, as before.
+- **Fallback.** If the live connection drops, Glass reconnects (1 s, 2 s, 4 s … up to 15 s) without missing anything,
+  and checks every second in the meantime.
 
-## Cyber's look, ready for review
+## Preview of the parts still to come
 
-The pieces Cyber will be made of are built and can be previewed at **`#/dev/cyber`** in Glass (not in the sidebar;
-everything there is example data):
-
-- **The orb**, Cyber's face, in seven poses: ready, listening, thinking, tool running, answering, needs you
-  (an amber halo) and offline. It draws with WebGL2 when it can, falls back to a simpler drawing, and is a still
-  picture when your system asks for reduced motion. It only animates while something happens and the tab is visible.
-- **The status line** next to the orb, rolling through short lines every 4 seconds ("Needs you: 1 approval",
-  "3 phones online"); it stops while you point at it.
-- **The work trail**: what Cyber read and did for one answer, collapsed to one line or open with every step's time.
-- **The project pulse**: 26 weeks of daily pass rates as coloured squares; releases outlined, safety failures marked,
-  days without runs left empty.
-- **Status dots, the alerts list** (swipe or ✕ to dismiss), **the watch list** with its six defaults, and **phone
-  avatars** in each phone's own colour.
-
-They are wired into Glass in the next run. The designs follow Space UI's free components (MIT) as a reference; no
-Space UI code is copied.
+`#/dev/cyber` in Glass (not in the sidebar; example data only) shows Cyber's character in all nine moods and the parts
+the next runs wire in: the work trail, the project pulse (26 weeks of daily pass rates), status dots, the alerts list,
+the watch list with its six defaults and phone avatars in each phone's own colour. Their designs follow Space UI's
+free components (MIT) as a reference; no Space UI code is copied.
 
 ## Under the hood
 
@@ -46,6 +59,9 @@ Space UI code is copied.
   order and the instructions the model gets are unchanged.
 - New live event socket `/v1/cc/ai/events` (`cyclone.manager.events/1`): the same local bearer as every route, sent
   like the fleet socket's; resume with `afterSeq`; a `gap` says when events were missed and Glass reloads.
+- New `GET /v1/cc/ai/presence` for the dock: counts only (approvals, proposals, phones ready, tasks running, spending),
+  never task or page text. Messages accept an optional `where` (the Glass page, at most 160 characters, screened for
+  secrets).
 - Answers stream from OpenRouter over the same checked, pinned https connection as every API call. Streamed text is
   masked exactly like the stored answer, and the newest 200 characters wait until they cannot be part of a password,
   code or key. Tool calls are assembled from their streamed pieces. Hidden provider reasoning is never read or kept.
@@ -53,15 +69,17 @@ Space UI code is copied.
   sends no usage).
 
 No approvals, proposals or boundaries changed: tasks and routines are still proposals you apply, page edits are
-proposals unless you allowed direct edits, and phones still ask before sending, paying, deleting or signing in.
+proposals unless you allowed direct edits, and phones still ask before sending, paying, deleting or signing in. Glass
+still makes no model calls and holds no key.
 
 ## Versions and evidence
 
 - Product / Android / gateway / MCP: **5.0.0-alpha.111.dev1**; Android version code **259**. The Android app has no
   code change in this alpha.
 - Glass: **1.0.0-alpha.62**. The retired desktop-window component remains unchanged.
-- Validation for this exact source: gateway tests (including `test_agent_registry.py` and `test_agent_stream.py`),
-  Glass tests (including `ai-stream.test.mjs` and `cyber-components.test.mjs`), CI guards, release-version and product guards; recorded in the release
-  PR and its CI runs.
-- Physical acceptance: **UNVERIFIED.** Streaming has not yet been watched in Glass against a real OpenRouter key on the
-  owner's PC; the scripted provider in the tests stands in for it.
+- Validation for this exact source: gateway tests (including `test_agent_registry.py`, `test_agent_stream.py` and
+  `test_agent_presence.py`), Glass tests (including `ai-stream.test.mjs`, `cyber-components.test.mjs` and
+  `cyber-presence.test.mjs`), CI guards, release-version and product guards; recorded in the release PR and its CI runs.
+  The character, dock and palette were also checked in Chromium in light and dark and at phone width.
+- Physical acceptance: **UNVERIFIED.** Cyber has not yet been used in Glass against a real OpenRouter key on the
+  owner's PC, on Windows or on a Mac; scripted providers in the tests stand in for it.

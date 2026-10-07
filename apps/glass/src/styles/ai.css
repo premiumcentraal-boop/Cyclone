@@ -15,6 +15,7 @@
 }
 .ai-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 12px 14px; border-bottom: 1px solid var(--ws-line); }
 .ai-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 600; }
+.ai-title .cy-wrap { margin: -4px 0; }
 .ai-about { border: 0; background: var(--ws-hover); color: var(--ws-muted); border-radius: 999px; padding: 2px 10px; font: inherit; font-size: var(--text-sm);
   font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .ai-head-tools { display: flex; gap: 2px; flex: none; }

@@ -187,6 +187,59 @@ class StoreMixin:
         if spent_month >= monthly:
             raise AiError(f"This month's AI limit (${monthly:.2f}) is reached. Raise it in AI settings.")
 
+    # ------------------------------------------------------------------ presence (plan 53 R4)
+
+    def presence(self) -> dict[str, Any]:
+        """What the dock shows beside Cyber: whether it can work, and a few short lines, most urgent first. Counts
+        only: no task text, page text or names beyond phones' own names leave this method."""
+        with self._c._lock:
+            grant = self._grants.get(GRANT)
+            model = self._setting("model")
+            daily = float(self._setting("dailyCapUsd"))
+            day, _ = self._today()
+            spent = float(self._c._db.execute("SELECT COALESCE(SUM(cost), 0) FROM ai_usage WHERE day = ?", (day,)).fetchone()[0])
+            proposals = self._c._db.execute("SELECT COUNT(*) FROM ai_proposal WHERE state = 'open'").fetchone()[0]
+            working = self._c._db.execute("SELECT COUNT(*) FROM ai_conversation WHERE state = 'working'").fetchone()[0]
+        try:
+            approvals = len(self._c.list_approvals())
+        except Exception:  # noqa: BLE001 - the dock still shows the rest
+            approvals = 0
+        try:
+            tasks = len(self._c.list_tasks(status="open", limit=200))
+        except Exception:  # noqa: BLE001
+            tasks = 0
+        try:
+            devices = list(self._c._devices())
+        except Exception:  # noqa: BLE001
+            devices = []
+        ready_phones = sum(1 for d in devices if str(d.get("state") or "").upper() == "READY")
+        reason = ""
+        if not grant:
+            reason = "Add your OpenRouter key in AI settings."
+        elif not model:
+            reason = "Pick a model in AI settings."
+        elif spent >= daily:
+            reason = f"Today's AI limit (${daily:.2f}) is reached."
+        items: list[dict[str, str]] = []
+        plural = lambda n, word: f"{n} {word}{'' if n == 1 else 's'}"  # noqa: E731
+        if approvals:
+            items.append({"text": f"Needs you: {plural(approvals, 'approval')}", "tone": "warn"})
+        if proposals:
+            items.append({"text": f"{plural(proposals, 'proposal')} to review", "tone": "warn"})
+        if reason:
+            items.append({"text": reason.rstrip("."), "tone": "bad"})
+        if devices:
+            items.append({"text": f"{ready_phones} of {plural(len(devices), 'phone')} ready", "tone": "good" if ready_phones else "bad"})
+        else:
+            items.append({"text": "No phone connected", "tone": "plain"})
+        if tasks:
+            items.append({"text": f"{plural(tasks, 'task')} running", "tone": "plain"})
+        if grant and daily > 0:
+            items.append({"text": f"Today ${spent:.2f} of ${daily:.2f}", "tone": "warn" if spent >= 0.8 * daily else "plain"})
+        return {"ready": not reason, "reason": reason, "items": items, "approvals": approvals, "openProposals": proposals,
+                "working": working, "phonesReady": ready_phones, "phonesTotal": len(devices), "tasksRunning": tasks,
+                "spentTodayUsd": round(spent, 4), "dailyCapUsd": daily}
+
     # ------------------------------------------------------------------ models
 
     def models(self, *, everything: bool = False, refresh: bool = False) -> dict[str, Any]:

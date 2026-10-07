@@ -1,5 +1,5 @@
 /**
- * Ask AI (plan 33 §7): a panel beside the workspace, like Notion's. The owner writes; the runtime's AI reads the
+ * Cyber's panel (plan 33 §7 "Ask AI", on every Glass page since plan 53 R4): a panel beside the page, like Notion's. The owner writes; the runtime's AI reads the
  * workspace and answers, and every change it wants to make arrives as a card to apply or discard (tasks and routines
  * always; page edits unless the owner let it edit directly). Glass only shows and sends: the runtime holds the key and
  * calls the model.
@@ -10,6 +10,8 @@ import {
   type Conversation, type ConversationMeta, type Proposal,
 } from "../services/ai.js";
 import { connectAiEvents, type AiEvent, type AiStream, type SocketFactory } from "../services/aiStream.js";
+import { applyEvent, emptyActivity, moodOf, type Activity } from "../manager/mood.js";
+import { createCharacter } from "../ui/cyber/character.js";
 import { pagesApi } from "../services/pages.js";
 import { el, setChildren } from "../ui/dom.js";
 import { relativeTime } from "../ui/format.js";
@@ -22,6 +24,14 @@ const LIVE_DRAW_MS = 50;
 export interface AiPanelDeps {
   /** Plan 53 R2: Cyber's live events. Without it the panel polls, as before. */
   socket?: SocketFactory;
+  /** Plan 53 R4: the Glass page the owner is on ("Runs", "Lab"), sent with each message. */
+  where?: () => string;
+  /** The owner is writing to Cyber (the dock listens). */
+  onListening?(on: boolean): void;
+  /** Something changed the dock should show (a proposal applied or discarded). */
+  onChange?(): void;
+  /** The key that toggles the panel, shown in its close button ("Ctrl+." or "⌘."). */
+  panelKey?: string;
 }
 
 /** What Cyber is doing right now in the open conversation, from its live events (cleared when the answer is saved). */
@@ -33,6 +43,8 @@ interface Live {
 export interface AiPanel {
   element: HTMLElement;
   open(pageId: string | null): void;
+  /** Open and send a question (the palette's "Ask Cyber"). */
+  ask(question: string): void;
   close(): void;
   isOpen(): boolean;
   destroy(): void;
@@ -109,7 +121,7 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
   const ctx = new Proxy({} as GlassContext, { get: (_t, key) => context()[key as keyof GlassContext] });
   const element = el("aside", "ai-panel");
   element.setAttribute("role", "dialog");
-  element.setAttribute("aria-label", "Ask AI");
+  element.setAttribute("aria-label", "Cyber");
   element.hidden = true;
   const head = el("header", "ai-head");
   const body = el("div", "ai-body");
@@ -130,6 +142,18 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
   let liveDraw: ReturnType<typeof setTimeout> | null = null;
   let reloading = false;
   let reloadAgain = false;
+  // Plan 53 R4: the character in the header shows what Cyber is doing in this conversation.
+  const face = createCharacter({ size: 30, mood: "idle", label: "Cyber" });
+  let activity: Activity = emptyActivity();
+  let faceCheck: ReturnType<typeof setTimeout> | null = null;
+  function drawFace(): void {
+    const working = conversation?.state === "working" && !Object.keys(activity.running).length ? { running: { [conversation.id]: "think" as const }, flash: activity.flash } : activity;
+    const listening = Boolean(String(input.value ?? "").trim()) && !element.hidden;
+    const waiting = conversation?.proposals.filter((p) => p.state === "open").length ?? 0;
+    face.setMood(moodOf({ activity: working, ready: status ? Boolean(status.keySaved && status.model) : null, needsYou: waiting, listening, now: Date.now() }));
+    if (faceCheck) clearTimeout(faceCheck);
+    faceCheck = activity.flash && activity.flash.until > Date.now() ? setTimeout(drawFace, activity.flash.until - Date.now() + 20) : null;
+  }
   let problem = "";
   let sending = false;
   const openActivity = new Set<number>();
@@ -144,7 +168,7 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
 
   function drawHead(): void {
     const title = el("div", "ai-title");
-    title.append(el("span", "ai-spark", "✨"), el("span", undefined, "Ask AI"));
+    title.append(face.element, el("span", undefined, "Cyber"));
     if (pageId) {
       const about = el("button", "ai-about", `About: ${pageTitle || "this page"}`);
       about.type = "button";
@@ -169,7 +193,7 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
       mk("🕘", "Earlier conversations", () => void showHistory()),
       mk("＋", "New conversation", () => { conversation = null; live = null; history = null; problem = ""; drawAll(); input.focus?.(); }),
       mk("⚙", "AI settings", () => { close(); ctx.navigate({ name: "command", tab: "ai" }); }),
-      mk("✕", "Close", () => close()),
+      mk("✕", deps.panelKey ? `Close (${deps.panelKey})` : "Close", () => close()),
     );
     setChildren(head, title, tools);
   }
@@ -212,10 +236,12 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
             workspaceBus.pageChanged(target);
           }
           if (conversation) conversation = await aiApi.get(ctx.client, conversation.id);
+          deps.onChange?.();
         } catch (err) {
           problem = (err as Error).message;
         }
         drawBody();
+        drawFace();
       };
       yes.addEventListener("click", () => void decide(true));
       no.addEventListener("click", () => void decide(false));
@@ -395,6 +421,7 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
     drawHead();
     drawBody();
     drawFoot();
+    drawFace();
   }
 
   function schedulePoll(): void {
@@ -432,6 +459,9 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
 
   function onEvent(event: AiEvent): void {
     if (!conversation || event.conversationId !== conversation.id) return;
+    activity = applyEvent(activity, event, Date.now());
+    if (event.type === "text.delta") face.talk();
+    drawFace();
     const d = event.data;
     switch (event.type) {
       case "run.started":
@@ -539,7 +569,8 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
         conversation = await aiApi.create(ctx.client, { ...(pageId ? { pageId } : {}), ...(chosenModel ? { model: chosenModel } : {}) });
       }
       input.value = "";
-      conversation = await aiApi.send(ctx.client, conversation.id, message);
+      deps.onListening?.(false);
+      conversation = await aiApi.send(ctx.client, conversation.id, message, deps.where?.());
     } catch (err) {
       problem = (err as Error).message;
     } finally {
@@ -574,6 +605,11 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
     drawBody();
   }
 
+  input.addEventListener("input", () => {
+    const writing = Boolean(String(input.value ?? "").trim());
+    deps.onListening?.(writing);
+    drawFace();
+  });
   input.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -619,15 +655,24 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
     if (poll) clearTimeout(poll);
     poll = null;
     stopStream();
+    deps.onListening?.(false);
+  }
+
+  async function ask(question: string): Promise<void> {
+    await open(pageId);
+    await send(question);
   }
 
   return {
     element,
     open: (target) => void open(target),
+    ask: (question) => void ask(question),
     close,
     isOpen: () => !element.hidden,
     destroy() {
       close();
+      if (faceCheck) clearTimeout(faceCheck);
+      face.destroy();
       element.remove();
     },
   };

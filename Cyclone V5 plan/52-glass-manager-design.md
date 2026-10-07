@@ -78,8 +78,8 @@ packages, tokens from `styles/tokens.css`, `prefers-reduced-motion` honoured.
 | Surface | When it shows | Job |
 |---|---|---|
 | **Dock** (orb + reel) | Always, bottom of the sidebar; bottom-right pill on narrow screens | Presence and one-line status; click opens the panel; a badge when alerts are unread |
-| **Panel** | Opened by the dock, ⌘J, a brief or an alert | Conversation, brief, trails, proposals. Three widths: peek (360), open (420), full (main area) |
-| **⌘K palette** | ⌘K / Ctrl+K anywhere | Ask or jump. Instant answers for navigation; longer questions continue in the panel |
+| **Panel** | Opened by the dock, Ctrl+. on Windows / ⌘. on a Mac (Ctrl+J opens Downloads in Chrome on Windows), a brief or an alert | Conversation, brief, trails, proposals. Three widths: peek (360), open (420), full (main area) |
+| **Palette** | Ctrl+K on Windows, ⌘K on a Mac, anywhere | Ask or jump. Instant answers for navigation; longer questions continue in the panel |
 | **Brief card** | First Glass open of the day, top of the panel and on Home | What changed overnight, what broke, what needs you |
 | **Highlight ring** | When the Manager points at something on the page | Shows exactly which row, card or chart it means |
 | **Alerts inbox** | Panel tab | Heartbeat findings; swipe or click to dismiss |
@@ -116,21 +116,29 @@ in the trail use `--font-mono` at `--text-xs`.
 
 ## 5. Components
 
-### 5.1 The orb
+### 5.1 The character (was the orb)
 
-| Pose | Meaning | Look | Triggered by |
-|---|---|---|---|
-| `idle` | Ready | Slow breathing (6 s), soft watercolor | Default |
-| `listen` | Composer focused / voice later | Brightens, gentle pulse toward the input | Focus, mic (M5) |
-| `think` | Waiting for the model | Inner swirl speeds up | `run.started` until first text or tool |
-| `working` | A tool is running | Teal rim sweeps | `tool.started` |
-| `speak` | Text streaming | Amplitude follows chunk rate | `text.delta` |
-| `attention` | Something needs you | Amber halo, one pulse every 8 s, badge count | Unread alert or open proposal |
-| `offline` | No key, cap reached or gateway down | Desaturated, still | Status |
+Changed 2026-10-06 at the owner's request: R3's orb poses looked too alike, so Cyber is a small glass-and-visor
+character with its own pose and motion per mood (`ui/cyber/character.ts`, SVG built with DOM APIs, animated by
+`styles/cyber.css`). Chosen after comparing open-source assistant characters (Rive mascots, VRM / Live2D companions such
+as Project AIRI); a designer-made Rive character or a 3D "companion mode" can later replace the drawing behind the
+same moods.
 
-Rendering: `ui/orb/orbRenderer.ts` (WebGL2 fragment shader, 96 px dock / 40 px inline, device-pixel-ratio capped at 2),
-`orbFallback.ts` (Canvas 2D radial gradients), static SVG under reduced motion. The render loop runs only when the pose
-is animated **and** the document is visible; `idle` drops to 20 fps; `offline` draws once.
+| Mood | Meaning | Look |
+|---|---|---|
+| `idle` | Ready | Floats, blinks, eyes follow the pointer |
+| `listen` | The owner is writing to Cyber | Leans in, eyes wide, sound waves |
+| `think` | Waiting for the model | Looks up and away, hand to chin, dots circle the antenna |
+| `working` | A tool is running | Focused eyes, code on the visor, a gear turning |
+| `speak` | Text streaming | The mouth moves with each streamed piece |
+| `attention` | An approval or proposal waits | Hops, waves, amber badge |
+| `success` | A turn just finished | Happy eyes, a jump, confetti (2.5 s) |
+| `error` | A turn just failed | Crossed eyes, a shake (3.5 s) |
+| `offline` | No key, no model, the day's limit, or Cyclone not running | Asleep, grey, z's |
+
+The mood comes from `manager/mood.ts` (pure): speak > working > think in any conversation, then offline, then a
+success or error flash, then listen, then attention, then idle. Under `prefers-reduced-motion` nothing moves, but every
+mood keeps its own pose; without `matchMedia` (tests) the character runs no timers.
 
 ### 5.2 The status reel (from Handle Reel)
 
@@ -235,7 +243,7 @@ Reconnects resume with `afterSeq`; the gateway keeps the last 500 events per con
 ## 9. Engineering constraints
 
 - Glass guard (`scripts/ci/glass_guard.py`) unchanged: no provider names, keys, `innerHTML`, `localStorage` or runtime
-  packages. A new rule: files under `ui/orb/` and other ports must start with an origin header.
+  packages. A new rule: files under `ui/cyber/` must start with an origin header.
 - Performance budget: panel JS ≤ 60 KB minified; orb ≤ 2 ms per frame at 96 px on integrated graphics; zero frames
   when hidden; first panel paint ≤ 100 ms from click.
 - Accessibility: panel is a labelled `complementary` region; streamed text is announced per finished sentence via a

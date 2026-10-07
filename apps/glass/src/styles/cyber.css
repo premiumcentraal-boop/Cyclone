@@ -1,23 +1,119 @@
-/* Cyber, the Glass Manager (plan 52): orb, status reel, work trail, project pulse, status dots, alerts, the watch list
+/* Cyber, the Glass Manager (plan 52): the character, status reel, work trail, project pulse, status dots, alerts, the watch list
    and phone avatars. Colours and motion come from tokens.css (--mgr-*); everything moving stops under
    prefers-reduced-motion. Classes are cyber-*. */
 
-/* ---------------------------------------------------------------- orb */
-.cyber-orb { position: relative; display: inline-grid; place-items: center; flex: none; border-radius: 50%; }
-.cyber-orb-canvas { width: 100%; height: 100%; display: block; }
-.cyber-orb-still {
-  width: 76%; height: 76%; border-radius: 50%;
-  background:
-    radial-gradient(circle at 34% 30%, color-mix(in srgb, var(--mgr-orb-b) 70%, white) 0 12%, transparent 46%),
-    radial-gradient(circle at 70% 72%, var(--mgr-orb-c), transparent 58%),
-    radial-gradient(circle at 50% 50%, var(--mgr-orb-b), var(--mgr-orb-a) 78%);
-  box-shadow: 0 0 0 0 transparent;
-  transition: box-shadow var(--mgr-ease), filter var(--mgr-ease);
-}
-.cyber-orb-listen .cyber-orb-still { box-shadow: 0 0 0 3px var(--mgr-ring-glow); filter: brightness(1.12); }
-.cyber-orb-working .cyber-orb-still { box-shadow: 0 0 0 2px var(--mgr-working); }
-.cyber-orb-attention .cyber-orb-still { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mgr-attention) 70%, transparent); }
-.cyber-orb-offline .cyber-orb-still { filter: grayscale(0.85) brightness(0.8); }
+/* ---------------------------------------------------------------- the character (ui/cyber/character.ts) */
+.cy-wrap { position: relative; display: inline-block; flex: none; line-height: 0; }
+.cy-wrap svg { width: 100%; height: 100%; overflow: visible; display: block; }
+.cy { --px: 0px; --py: 0px; --sx: 1; --sy: 1; --blink: 1; --m: 1; --orb: var(--cy-eye); }
+.cy * { transform-box: fill-box; transform-origin: center; }
+.cy .cy-shell { stroke: var(--cy-shell-edge); stroke-width: 1.5; }
+.cy .cy-ear { fill: var(--cy-shell-bottom); stroke: var(--cy-shell-edge); stroke-width: 1.5; }
+.cy .cy-hand { stroke: var(--cy-shell-edge); stroke-width: 1.5; }
+.cy .cy-hand, .cy .cy-hand-l, .cy .cy-hand-r { transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.25, 1.2); }
+.cy .cy-pupil { fill: var(--cy-eye); transform: scale(var(--sx), calc(var(--sy) * var(--blink))); transition: transform 0.12s ease; }
+.cy .cy-eyes { transform: translate(var(--px), var(--py)); transition: transform 0.18s ease-out; }
+.cy .cy-mouth { fill: var(--cy-eye); opacity: 0.85; transform: scaleY(var(--m)); transition: transform 0.08s linear; }
+.cy .cy-stem { stroke: var(--cy-shell-edge); stroke-width: 4; stroke-linecap: round; }
+.cy .cy-ant { fill: var(--orb); transition: fill 0.3s; }
+.cy .cy-shadow { fill: var(--text); opacity: 0.09; }
+.cy .cy-extra { opacity: 0; transition: opacity 0.25s; }
+.cy .cy-happy, .cy .cy-closed, .cy .cy-xeyes, .cy .cy-smile { fill: none; stroke: var(--cy-eye); stroke-width: 5; stroke-linecap: round; opacity: 0; }
+.cy .cy-blush { fill: #ff7aa8; opacity: 0; }
+.cy .cy-code rect { fill: var(--cy-eye); opacity: 0.35; }
+.cy .cy-wave { fill: none; stroke: var(--cy-eye); stroke-width: 4; stroke-linecap: round; }
+.cy .cy-dot { fill: var(--accent); }
+.cy .cy-gear { fill: none; stroke: var(--mgr-working); stroke-width: 7; stroke-dasharray: 4 3.2; }
+.cy .cy-gear-hub { fill: var(--mgr-working); }
+.cy .cy-badge circle { fill: var(--mgr-attention); }
+.cy .cy-badge text, .cy .cy-zzz text { font: 700 18px var(--font-sans); text-anchor: middle; }
+.cy .cy-badge text { fill: #fff; }
+.cy .cy-zzz text { fill: var(--text-muted); }
+.cy .cy-conf { opacity: 0; }
+.cy .cy-bob { animation: cy-bob 3.4s ease-in-out infinite; }
+.cy .cy-shadowg { animation: cy-shadow 3.4s ease-in-out infinite; }
+@keyframes cy-bob { 50% { transform: translateY(-7px); } }
+@keyframes cy-shadow { 50% { transform: scaleX(0.86); opacity: 0.7; } }
+@keyframes cy-pulse { 50% { transform: scale(1.35); } }
+
+/* listen: leans in, eyes wide, sound waves */
+.cy[data-mood="listen"] { --sx: 1.12; --sy: 1.16; }
+.cy[data-mood="listen"] .cy-head { transform: rotate(-7deg); transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.25, 1.2); }
+.cy[data-mood="listen"] .cy-waves { opacity: 1; }
+.cy[data-mood="listen"] .cy-wave { animation: cy-wave 1.1s ease-out infinite; }
+.cy[data-mood="listen"] .cy-wave:nth-child(2), .cy[data-mood="listen"] .cy-wave:nth-child(4) { animation-delay: 0.25s; }
+.cy[data-mood="listen"] .cy-ant { animation: cy-pulse 1.1s ease-in-out infinite; }
+@keyframes cy-wave { 0% { opacity: 0; transform: scale(0.7); } 40% { opacity: 1; } 100% { opacity: 0; transform: scale(1.25); } }
+
+/* think: looks up and away, one eye squints, hand to chin, dots circle the antenna */
+.cy[data-mood="think"] { --orb: var(--accent); }
+.cy[data-mood="think"] .cy-eyes { transform: translate(8px, -7px); }
+.cy[data-mood="think"] .cy-eye-r .cy-pupil { transform: scale(1, 0.62); }
+.cy[data-mood="think"] .cy-hand-r { transform: translate(-50px, -34px); }
+.cy[data-mood="think"] .cy-dots { opacity: 1; animation: cy-orbit 1.4s linear infinite; transform-box: view-box; transform-origin: 130px 36px; }
+.cy[data-mood="think"] .cy-bob { animation-duration: 5s; }
+@keyframes cy-orbit { to { transform: rotate(360deg); } }
+
+/* working: focused eyes, code scrolling on the visor, a gear turning in hand */
+.cy[data-mood="working"] { --sy: 0.5; --sx: 1.1; --orb: var(--mgr-working); }
+.cy[data-mood="working"] .cy-code { opacity: 1; }
+.cy[data-mood="working"] .cy-code g { animation: cy-scroll 1.6s linear infinite; }
+.cy[data-mood="working"] .cy-tool { opacity: 1; }
+.cy[data-mood="working"] .cy-gear { animation: cy-spin 1.2s linear infinite; }
+.cy[data-mood="working"] .cy-hand-r { transform: translate(-6px, -18px); animation: cy-jiggle 0.35s ease-in-out infinite; }
+.cy[data-mood="working"] .cy-eyes { transform: translate(0px, 6px); }
+@keyframes cy-scroll { to { transform: translateY(-36px); } }
+@keyframes cy-spin { to { transform: rotate(360deg); } }
+@keyframes cy-jiggle { 50% { transform: translate(-6px, -21px) rotate(-6deg); } }
+
+/* speak: the mouth moves with the words (character.talk()), a gentle nod */
+.cy[data-mood="speak"] .cy-bob { animation-duration: 2.6s; }
+.cy[data-mood="speak"] .cy-head { animation: cy-nod 1.3s ease-in-out infinite; }
+@keyframes cy-nod { 50% { transform: rotate(2.5deg) translateY(1px); } }
+
+/* attention: hops, waves, amber badge, wide eyes */
+.cy[data-mood="attention"] { --sx: 1.15; --sy: 1.15; --orb: var(--mgr-attention); }
+.cy[data-mood="attention"] .cy-bob { animation: cy-hop 2.4s cubic-bezier(0.3, 0.1, 0.3, 1) infinite; }
+.cy[data-mood="attention"] .cy-shadowg { animation: cy-hopshadow 2.4s cubic-bezier(0.3, 0.1, 0.3, 1) infinite; }
+.cy[data-mood="attention"] .cy-hand-l { transform: translate(6px, -70px); animation: cy-wavehand 0.6s ease-in-out infinite alternate; }
+.cy[data-mood="attention"] .cy-badge { opacity: 1; animation: cy-pulse 1.2s ease-in-out infinite; }
+@keyframes cy-hop { 0%, 30%, 100% { transform: translateY(0); } 10% { transform: translateY(-18px); } 20% { transform: translateY(-4px); } }
+@keyframes cy-hopshadow { 0%, 30%, 100% { transform: scaleX(1); } 10% { transform: scaleX(0.7); opacity: 0.5; } }
+@keyframes cy-wavehand { from { transform: translate(6px, -70px) rotate(-18deg); } to { transform: translate(6px, -70px) rotate(18deg); } }
+
+/* success: happy eyes, blush, a jump, confetti */
+.cy[data-mood="success"] { --orb: var(--success); }
+.cy[data-mood="success"] .cy-pupil, .cy[data-mood="success"] .cy-mouth { opacity: 0; }
+.cy[data-mood="success"] .cy-happy, .cy[data-mood="success"] .cy-smile { opacity: 1; }
+.cy[data-mood="success"] .cy-blush { opacity: 0.55; }
+.cy[data-mood="success"] .cy-bob { animation: cy-jump 2.2s cubic-bezier(0.3, 0.1, 0.3, 1) infinite; }
+.cy[data-mood="success"] .cy-hand-l { transform: translate(14px, -66px); }
+.cy[data-mood="success"] .cy-hand-r { transform: translate(-14px, -66px); }
+.cy[data-mood="success"] .cy-conf { animation: cy-burst 2.2s ease-out infinite; }
+@keyframes cy-jump { 0%, 40%, 100% { transform: translateY(0); } 15% { transform: translateY(-24px) scale(1.02); } }
+@keyframes cy-burst { 0% { opacity: 0; transform: translate(0, 0) rotate(0); } 12% { opacity: 1; } 60% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(220deg); } 100% { opacity: 0; } }
+
+/* error: crossed eyes, a shake, red antenna */
+.cy[data-mood="error"] { --orb: var(--danger); }
+.cy[data-mood="error"] .cy-pupil { opacity: 0; }
+.cy[data-mood="error"] .cy-xeyes { opacity: 1; }
+.cy[data-mood="error"] .cy-head { animation: cy-shake 0.9s ease-in-out infinite; }
+.cy[data-mood="error"] .cy-mouth { transform: scale(1.4, 0.6) translateY(4px); }
+@keyframes cy-shake { 0%, 50%, 100% { transform: translateX(0); } 10%, 30% { transform: translateX(-5px) rotate(-3deg); } 20%, 40% { transform: translateX(5px) rotate(3deg); } }
+
+/* offline: asleep, drooped, grey, floating z's */
+.cy[data-mood="offline"] { --orb: var(--text-faint); }
+.cy[data-mood="offline"] .cy-pupil { opacity: 0; }
+.cy[data-mood="offline"] .cy-closed { opacity: 1; }
+.cy[data-mood="offline"] .cy-head { transform: rotate(9deg) translateY(6px); transition: transform 0.6s ease; }
+.cy[data-mood="offline"] .cy-bob { animation-duration: 6s; }
+.cy[data-mood="offline"] .cy-body { filter: saturate(0.25) brightness(0.92); }
+.cy[data-mood="offline"] .cy-zzz { opacity: 1; }
+.cy[data-mood="offline"] .cy-zzz text { animation: cy-zz 3s ease-in infinite; }
+.cy[data-mood="offline"] .cy-zzz text:nth-child(2) { animation-delay: 1s; }
+.cy[data-mood="offline"] .cy-zzz text:nth-child(3) { animation-delay: 2s; }
+.cy[data-mood="offline"] .cy-hand-l, .cy[data-mood="offline"] .cy-hand-r { transform: translateY(8px); }
+@keyframes cy-zz { 0% { opacity: 0; transform: translate(0, 0) scale(0.6); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(22px, -40px) scale(1.2); } }
 
 /* ---------------------------------------------------------------- status reel */
 .cyber-reel { position: relative; display: inline-block; overflow: hidden; height: 1.4em; line-height: 1.4em; min-width: 0;
@@ -128,6 +224,46 @@
 .cyber-avatar { display: inline-grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-weight: 600; letter-spacing: 0.02em;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25); user-select: none; }
 
+/* ---------------------------------------------------------------- the dock (manager/dock.ts) */
+.cyber-dock { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 6px 10px 6px 6px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--mgr-glass); color: var(--text); font: inherit;
+  text-align: left; cursor: pointer; box-shadow: var(--shadow-sm); transition: border-color var(--mgr-ease), box-shadow var(--mgr-ease);
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); flex: none; }
+.cyber-dock:hover { border-color: var(--accent); }
+.cyber-dock:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cyber-dock[data-mood="attention"] { border-color: color-mix(in srgb, var(--mgr-attention) 60%, var(--border)); }
+.cyber-dock-text { display: grid; min-width: 0; flex: 1; line-height: 1.25; }
+.cyber-dock-name { font-weight: 600; font-size: var(--text-sm); }
+.cyber-dock .cyber-reel { width: 100%; }
+.cyber-dock-badge { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--mgr-attention);
+  color: #fff; font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; font-variant-numeric: tabular-nums; }
+.ws-sidebar .cyber-dock { margin-top: auto; }
+/* Narrow screens: the dock floats as a pill at the bottom right of every page. */
+@media (max-width: 860px) {
+  .cyber-dock { position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); width: auto; max-width: min(320px, calc(100vw - 24px));
+    z-index: 45; box-shadow: var(--shadow-md); }
+  .cyber-dock .cyber-reel { width: 150px; }
+}
+
+/* ---------------------------------------------------------------- the palette (manager/palette.ts) */
+.cyber-palette-scrim { position: fixed; inset: 0; z-index: 60; background: var(--scrim); display: grid; justify-items: center; align-items: start;
+  padding: max(10vh, 24px) 16px 16px; }
+.cyber-palette-scrim[hidden] { display: none; }
+.cyber-palette { width: min(640px, 100%); max-height: min(70vh, 560px); display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  animation: cyber-pop var(--mgr-spring) both; }
+@keyframes cyber-pop { from { transform: translateY(8px) scale(0.98); opacity: 0; } to { transform: none; opacity: 1; } }
+.cyber-palette-input { border: 0; border-bottom: 1px solid var(--border); padding: 16px 18px; font: inherit; font-size: var(--text-lg); background: transparent; color: var(--text); outline: none; }
+.cyber-palette-list { overflow-y: auto; padding: 6px; display: grid; gap: 1px; }
+.cyber-palette-section { padding: 10px 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
+.cyber-palette-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 12px; border: 0; border-radius: var(--radius-md);
+  background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.cyber-palette-on { background: var(--accent-soft); color: var(--accent-text); }
+.cyber-palette-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cyber-palette-hint { flex: none; font-size: var(--text-xs); color: var(--text-faint); }
+.cyber-palette-empty { margin: 12px; color: var(--text-muted); font-size: var(--text-sm); }
+.cyber-palette-foot { display: flex; justify-content: space-between; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--border); font-size: var(--text-xs); color: var(--text-faint); }
+
 /* ---------------------------------------------------------------- the developer gallery (#/dev/cyber) */
 .cyber-gallery { display: grid; gap: var(--space-6); }
 .cyber-gallery-section { display: grid; gap: var(--space-3); padding: var(--space-5); border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); min-width: 0; }
@@ -148,7 +284,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .cyber-palette { animation: none; }
   .cyber-reel-in, .cyber-reel-out, .cyber-dot-live, .cyber-step-running .cyber-step-dot { animation: none; }
   .cyber-reel-out { display: none; }
-  .cyber-switch, .cyber-switch-knob, .cyber-alert, .cyber-orb-still { transition: none; }
+  .cyber-switch, .cyber-switch-knob, .cyber-alert { transition: none; }
+  /* Nothing moves, but every mood keeps its own pose. */
+  .cy *, .cy .cy-bob, .cy .cy-shadowg { animation: none !important; transition: none !important; }
 }

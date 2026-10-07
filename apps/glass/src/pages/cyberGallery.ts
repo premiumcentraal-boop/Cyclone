@@ -7,7 +7,7 @@ import { pageHeader } from "../ui/components.js";
 import { createAlertList, type CyberAlert } from "../ui/cyber/alertList.js";
 import { createChecklist, DEFAULT_WATCH } from "../ui/cyber/checklist.js";
 import { isoDay, renderHeatgrid, type PulseDay } from "../ui/cyber/heatgrid.js";
-import { createOrb, ORB_POSES, type Orb, type OrbPose } from "../ui/cyber/orb.js";
+import { createCharacter, CYBER_MOODS, type Character, type CyberMood } from "../ui/cyber/character.js";
 import { PHONE_COLORS, phoneAvatar, seedOf } from "../ui/cyber/phoneAvatar.js";
 import { createReel, type Reel } from "../ui/cyber/reel.js";
 import { statusDot } from "../ui/cyber/statusDot.js";
@@ -15,8 +15,8 @@ import { renderTrail } from "../ui/cyber/trail.js";
 import { el } from "../ui/dom.js";
 import type { GlassPage } from "./page.js";
 
-const WORDS: Record<OrbPose, string> = { idle: "Ready", listen: "Listening", think: "Thinking", working: "Tool running", speak: "Answering",
-  attention: "Needs you", offline: "Offline" };
+const WORDS: Record<CyberMood, string> = { idle: "Ready", listen: "Listening", think: "Thinking", working: "Tool running", speak: "Answering",
+  attention: "Needs you", success: "Done", error: "Something failed", offline: "Offline" };
 
 /** 26 weeks of example pass rates, the same every time (seeded), with a few releases and one safety failure. */
 export function examplePulse(until: Date, weeks = 26): PulseDay[] {
@@ -45,47 +45,48 @@ function section(title: string, note: string, ...content: Node[]): HTMLElement {
 
 export function createCyberGallery(_ctx: GlassContext): GlassPage {
   const element = el("div", "page cyber-gallery");
-  const orbs: Orb[] = [];
+  const characters: Character[] = [];
   const reels: Reel[] = [];
   const timers: Array<ReturnType<typeof setInterval>> = [];
-  const orb = (size: number, pose: OrbPose) => {
-    const o = createOrb({ size, pose });
-    orbs.push(o);
-    return o;
+  const character = (size: number, mood: CyberMood, follow = false) => {
+    const c = createCharacter({ size, mood, follow });
+    characters.push(c);
+    return c;
   };
 
-  // Orb: every pose, then one large orb that walks through them.
+  // The character: every mood, then a large one that walks through them and follows the pointer.
   const poses = el("div", "cyber-gallery-row");
-  for (const pose of ORB_POSES) {
+  for (const mood of CYBER_MOODS) {
     const cell = el("div", "cyber-gallery-cell");
-    cell.append(orb(72, pose).element, el("span", undefined, WORDS[pose]));
+    cell.append(character(72, mood).element, el("span", undefined, WORDS[mood]));
     poses.append(cell);
   }
-  const big = orb(144, "idle");
-  const bigLabel = el("span", undefined, `${WORDS.idle} · ${big.renderer}`);
-  const walk = el("button", "btn btn-ghost btn-small", "Walk through the poses");
+  const big = character(200, "idle", true);
+  const bigLabel = el("span", undefined, WORDS.idle);
+  const walk = el("button", "btn btn-ghost btn-small", "Walk through the moods");
   walk.type = "button";
   let walking: ReturnType<typeof setInterval> | null = null;
   walk.addEventListener("click", () => {
     if (walking) {
       clearInterval(walking);
       walking = null;
-      walk.textContent = "Walk through the poses";
+      walk.textContent = "Walk through the moods";
       return;
     }
-    let i = ORB_POSES.indexOf(big.pose());
+    let i = CYBER_MOODS.indexOf(big.mood());
     walking = setInterval(() => {
-      i = (i + 1) % ORB_POSES.length;
-      big.setPose(ORB_POSES[i]);
-      bigLabel.textContent = `${WORDS[ORB_POSES[i]]} · ${big.renderer}`;
-    }, 2200);
+      i = (i + 1) % CYBER_MOODS.length;
+      big.setMood(CYBER_MOODS[i]);
+      bigLabel.textContent = WORDS[CYBER_MOODS[i]];
+      if (CYBER_MOODS[i] === "speak") for (let n = 1; n < 14; n += 1) setTimeout(() => big.talk(), n * 120);
+    }, 2600);
     timers.push(walking);
     walk.textContent = "Stop";
   });
   const bigCell = el("div", "cyber-gallery-cell");
   bigCell.append(big.element, bigLabel, walk);
 
-  // Dock: the orb with the status reel, as it will sit at the foot of the sidebar.
+  // Dock: the character with the status reel, as it sits at the foot of the sidebar.
   const reel = createReel([
     { text: "Needs you: 1 approval", tone: "warn" },
     { text: "3 phones online", tone: "good" },
@@ -95,11 +96,11 @@ export function createCyberGallery(_ctx: GlassContext): GlassPage {
   ]);
   reels.push(reel);
   const dock = el("div", "cyber-gallery-dock");
-  dock.append(orb(28, "idle").element, el("strong", undefined, "Cyber"), reel.element);
+  dock.append(character(30, "idle").element, el("strong", undefined, "Cyber"), reel.element);
   const dockAttention = el("div", "cyber-gallery-dock");
   const quietReel = createReel([{ text: "Settings run failed twice", tone: "bad" }]);
   reels.push(quietReel);
-  dockAttention.append(orb(28, "attention").element, el("strong", undefined, "Cyber"), quietReel.element);
+  dockAttention.append(character(30, "attention").element, el("strong", undefined, "Cyber"), quietReel.element);
 
   // Trails: one answer in progress, one finished with a failure and a proposal waiting.
   const live = renderTrail([
@@ -155,8 +156,8 @@ export function createCyberGallery(_ctx: GlassContext): GlassPage {
 
   element.append(
     pageHeader("Cyber components", "Plan 53 R3 · every component in every state. Example data only; nothing here is live."),
-    section("Orb", "Seven poses. The large orb walks through them; its renderer (webgl2, canvas or still) is shown under it.", poses, bigCell),
-    section("Dock", "Orb and status reel at the foot of the sidebar. The reel rolls every 4 s and stops while hovered.", dock, dockAttention),
+    section("Character", "Nine moods, each with its own pose and motion. The large one walks through them and follows your pointer.", poses, bigCell),
+    section("Dock", "Character and status reel at the foot of the sidebar. The reel rolls every 4 s and stops while hovered.", dock, dockAttention),
     section("Work trail", "In progress, finished (open) and finished (collapsed). Click the summary to open or close.", live, finished, collapsed),
     section("Project pulse", "26 weeks of example pass rates. Outlined: a release that day. Red dot: a safety failure. Empty: no runs.",
       renderHeatgrid(examplePulse(new Date(now)), { weeks: 26 })),
@@ -169,7 +170,7 @@ export function createCyberGallery(_ctx: GlassContext): GlassPage {
     element,
     destroy() {
       for (const t of timers) clearInterval(t);
-      for (const o of orbs) o.destroy();
+      for (const c of characters) c.destroy();
       for (const r of reels) r.destroy();
       element.remove();
     },

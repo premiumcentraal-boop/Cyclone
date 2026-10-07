@@ -21,6 +21,7 @@ DEFAULTS: dict[str, Any] = {"model": None, "dailyCapUsd": 2.0, "monthlyCapUsd": 
                             "autonomy": "propose", "instructions": ""}
 MAX_STEPS = 25  # plan 53 R2 (was 10); the spending caps still end a turn first
 MAX_QUEUED = 5
+MAX_WHERE = 160
 MAX_CALLS_PER_STEP = 8
 MAX_OWNER_TEXT = 4_000
 MAX_INSTRUCTIONS = 4_000
