@@ -48,6 +48,13 @@ def create_ports_router(runtime: Any, token: str) -> APIRouter:
     def overview():
         return call(lambda: hub().overview())
 
+    @router.get("/v1/ports/skills", dependencies=[Depends(auth)])
+    def skills(app: str = Query(default="", max_length=120), routine: str = Query(default="", max_length=60)):
+        def approved():
+            hub().resolve(routine, app)  # validate context before advertising
+            return {"skills": hub().skills()}
+        return call(approved)
+
     @router.post("/v1/ports/plugins/preview", dependencies=[Depends(auth)])
     def preview(body: dict[str, Any]):
         b = body_of(body, "endpoint")

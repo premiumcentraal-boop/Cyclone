@@ -59,6 +59,8 @@ V5_OPS = frozenset({
     "models.list",
     "manual.get",
     "signup.maps",
+    "numbers.list",
+    "connectors.list",
     "signup.forget",
     "profiles.list",
     "profiles.apps",
@@ -882,6 +884,12 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op in PORTS_OPS:
         _validate_ports_response(op, value)
         return value
+    if op == "numbers.list":
+        _validate_numbers_list(value)
+        return value
+    if op == "connectors.list":
+        _validate_connectors_list(value)
+        return value
     if op == "atlas.places":
         if set(value) != {"places"} or not isinstance(value.get("places"), list):
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android atlas.places result is malformed.")
@@ -993,8 +1001,20 @@ def _bad_lab(message: str) -> DesktopRuntimeError:
 def _validate_lab_moment(moment: Any) -> None:
     if moment is None:
         return
-    if not isinstance(moment, dict) or set(moment) != {"kind", "text", "choices", "fields", "requestId"}:
+    base = {"kind", "text", "choices", "fields", "requestId"}
+    # Alpha 108: a phone from alpha 108 on also says an approval's gate and a send's exact recipient, so the lab can
+    # tell a test-owned action from anything else. Older phones send the base keys only.
+    if not isinstance(moment, dict) or set(moment) not in (base, base | {"gate", "send"}):
         raise _bad_lab("moment")
+    if "gate" in moment:
+        if not _short_text(moment["gate"], 40, nullable=True):
+            raise _bad_lab("moment gate")
+        send = moment["send"]
+        if send is not None and (
+            not isinstance(send, dict) or set(send) != {"text", "recipient", "app"}
+            or not _short_text(send["text"], 1000) or not _short_text(send["recipient"], 200) or not _short_text(send["app"], 120)
+        ):
+            raise _bad_lab("moment send")
     if moment["kind"] not in LAB_MOMENT_KINDS or not _short_text(moment["text"], 300):
         raise _bad_lab("moment kind")
     if not isinstance(moment["choices"], list) or len(moment["choices"]) > 6 or not all(_short_text(c, 80) for c in moment["choices"]):
@@ -1020,7 +1040,9 @@ def _validate_lab_response(op: str, value: dict[str, Any], args: dict[str, Any])
     if value.get("missionId") != args.get("missionId") and op != "lab.answer":
         raise _bad_lab("mission id")
     if op == "lab.status":
-        if set(value) != {"missionId", "status", "live", "turns", "workingMs", "costUsd", "moment"}:
+        base = {"missionId", "status", "live", "turns", "workingMs", "costUsd", "moment"}
+        # Alpha 108: newer phones add a live count of failed actions, for the lab's early stop.
+        if set(value) not in (base, base | {"errors"}) or ("errors" in value and not _is_int(value["errors"])):
             raise _bad_lab("status")
         if value["status"] not in LAB_STATUSES or not isinstance(value["live"], bool):
             raise _bad_lab("status state")
@@ -1307,7 +1329,7 @@ def _validate_skills_response(value: dict[str, Any]) -> None:
 PORTS_OPS = frozenset({"ports.poll", "ports.blob", "ports.answer", "ports.file"})
 PORTS_ITEM_ID = re.compile(r"^pt_[A-Za-z0-9_-]{6,40}$")
 PORTS_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{4,80}$")
-PORTS_OUT = frozenset({"run.event", "log.line", "screen.shot", "page.text", "account.fields"})
+PORTS_OUT = frozenset({"run.event", "log.line", "screen.shot", "page.text", "account.fields", "file.out"})
 PORTS_IN = frozenset({"code.in", "value.in", "link.in", "file.in"})
 PORTS_ANSWER_STATES = frozenset({"delivered", "timed_out", "cancelled", "failed", "empty", "conflict", "off", "unavailable", "refused"})
 PORTS_PLACE = re.compile(r"^(?:package:[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+|chrome:https://[a-z0-9-]+(?:\.[a-z0-9-]+)+)$")
@@ -1331,7 +1353,10 @@ def _validate_ports_blob(value: dict[str, Any]) -> None:
 def _validate_ports_item(item: Any) -> None:
     if not isinstance(item, dict) or item.get("kind") not in ("emit", "await", "cancel"):
         raise _bad_ports("item kind")
-    common = {"kind", "id", "runId", "at", "app", "routine", "taskId"}
+    common = {"kind", "id", "runId", "at", "app", "routine", "taskId", "plugin"}
+    target = item.get("plugin")
+    if target is not None and (not isinstance(target, str) or not re.fullmatch(r"[a-z][a-z0-9-]{1,40}", target)):
+        raise _bad_ports("plugin target")
     if not isinstance(item.get("id"), str) or not PORTS_ITEM_ID.match(item["id"]) or not isinstance(item.get("runId"), str) \
             or not PORTS_RUN_ID.match(item["runId"]) or not _is_int(item.get("at")):
         raise _bad_ports("item id")
@@ -1339,22 +1364,31 @@ def _validate_ports_item(item: Any) -> None:
         raise _bad_ports("item run")
     kind = item["kind"]
     if kind == "emit":
-        if set(item) - common - {"port", "data", "blob"} or item.get("port") not in PORTS_OUT or not isinstance(item.get("data"), dict):
+        port = item.get("port")
+        extension = isinstance(port, str) and re.fullmatch(r"x\.[a-z][a-z0-9-]{1,40}\.[a-z][a-z0-9-]{0,40}", port)
+        if set(item) - common - {"port", "data", "blob"} or (port not in PORTS_OUT and not extension) or not isinstance(item.get("data"), dict):
             raise _bad_ports("emit")
+        if (port == "file.out" or extension) and not target:
+            raise _bad_ports("private plugin traffic needs a target")
         if len(json.dumps(item["data"])) > 64 * 1024:
             raise _bad_ports("emit size")
         blob = item.get("blob")
         if blob is not None and (not isinstance(blob, dict) or set(blob) != {"bytes", "mime"} or not _is_int(blob["bytes"], minimum=1)
                                  or blob["bytes"] > PORTS_BLOB_MAX or blob["mime"] not in ("image/png", "image/jpeg", "image/webp")):
             raise _bad_ports("emit blob")
-        if (item["port"] == "screen.shot") != (blob is not None):
+        if (item["port"] in ("screen.shot", "file.out")) != (blob is not None):
             raise _bad_ports("screen.shot blob")
     elif kind == "await":
         if set(item) - common - {"port", "timeoutS", "match", "place"} or item.get("port") not in PORTS_IN or not _is_int(item.get("timeoutS"), minimum=1):
             raise _bad_ports("await")
         match = item.get("match")
-        if not isinstance(match, dict) or set(match) - {"ask"} or not _short_text(match.get("ask"), 200, nullable=True):
+        if not isinstance(match, dict) or set(match) - {"ask", "requestId", "output"} or not _short_text(match.get("ask"), 200, nullable=True):
             raise _bad_ports("await match")
+        if set(match) - {"ask"} and (not target or item["port"] not in ("value.in", "file.in")):
+            raise _bad_ports("structured match needs a targeted value/file wait")
+        for key in ("requestId", "output"):
+            if key in match and (not isinstance(match[key], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", match[key])):
+                raise _bad_ports("await correlation")
         place = item.get("place")
         if place is not None and (not isinstance(place, str) or not PORTS_PLACE.match(place)):
             raise _bad_ports("await place")
@@ -1382,6 +1416,58 @@ def _validate_ports_response(op: str, value: dict[str, Any]) -> None:
         if set(value) != {"received", "done", "name", "folder"} or not _is_int(value["received"]) or not isinstance(value["done"], bool):
             raise _bad_ports("file")
         return
+
+
+# Plan 49 (alpha.102): the phone's own numbers for Glass → Numbers. Numbers only: never a text, a sender or a code.
+PHONE_NUMBER = re.compile(r"^\+?[0-9]{6,15}$")
+NUMBERS_MAX = 8
+
+
+def _validate_numbers_list(value: dict[str, Any]) -> None:
+    def bad(what: str) -> DesktopRuntimeError:
+        return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android numbers.list result is malformed: {what}.")
+    if set(value) != {"enabled", "canRead", "numbers"} or not isinstance(value["enabled"], bool) or not isinstance(value["canRead"], bool):
+        raise bad("shape")
+    rows = value["numbers"]
+    if not isinstance(rows, list) or len(rows) > NUMBERS_MAX:
+        raise bad("numbers")
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"number", "source", "slot"}:
+            raise bad("row")
+        if not isinstance(row["number"], str) or not PHONE_NUMBER.match(row["number"]) or row["source"] not in ("sim", "confirmed"):
+            raise bad("number")
+        if row["slot"] is not None and not _is_int(row["slot"]):
+            raise bad("slot")
+
+
+# Plan 51 K3 (alpha.105): approved phone connectors and their selector entries. Names and entry labels only.
+CONNECTOR_ID = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
+CONNECTOR_ENTRY_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+CONNECTOR_ENTRY_TYPE = re.compile(r"^[a-z][a-z0-9._-]{0,39}$")
+
+
+def _validate_connectors_list(value: dict[str, Any]) -> None:
+    def bad(what: str) -> DesktopRuntimeError:
+        return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android connectors.list result is malformed: {what}.")
+
+    def text(v: Any, limit: int, empty: bool = True) -> bool:
+        return isinstance(v, str) and len(v) <= limit and (empty or v.strip() != "")
+
+    if set(value) != {"connectors"} or not isinstance(value["connectors"], list) or len(value["connectors"]) > 16:
+        raise bad("shape")
+    for c in value["connectors"]:
+        if not isinstance(c, dict) or set(c) != {"id", "label", "entries"} or not isinstance(c["id"], str) \
+                or not CONNECTOR_ID.match(c["id"]) or not text(c["label"], 40, empty=False):
+            raise bad("connector")
+        if not isinstance(c["entries"], list) or len(c["entries"]) > 8:
+            raise bad("entries")
+        for e in c["entries"]:
+            if not isinstance(e, dict) or set(e) != {"id", "type", "label", "subtitle", "state", "text"}:
+                raise bad("entry")
+            if not isinstance(e["id"], str) or not CONNECTOR_ENTRY_ID.match(e["id"]) or not isinstance(e["type"], str) \
+                    or not CONNECTOR_ENTRY_TYPE.match(e["type"]) or not text(e["label"], 40, empty=False) \
+                    or not text(e["subtitle"], 60) or not text(e["text"], 60) or e["state"] not in ("ready", "attention", "off"):
+                raise bad("entry")
 
 
 CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media"})
@@ -1469,7 +1555,8 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
         raise _bad_cc("moment fields")
 
 
-SETUP_STATES = frozenset({"filling", "verification", "created", "failed"})
+# "code" (plan 49): waiting for a code sent by text to the phone itself, which Cyclone fills.
+SETUP_STATES = frozenset({"filling", "verification", "code", "created", "failed"})
 
 
 def _validate_setup(setup: Any) -> None:
@@ -1854,6 +1941,14 @@ class V5ContractService:
             args["values"] = values
         return self._call(device_id, "lab.answer", args)
 
+    def lab_approve(self, device_id: str, mission_id: str, request_id: str) -> dict[str, Any]:
+        """Alpha 108: approve one open request of a lab mission. Only a test-owned action passes: the phone approves
+        deleting the lab's own file or sending to the lab address and refuses everything else (ANSWER_ON_PHONE)."""
+        if not isinstance(request_id, str) or not re.match(r"^[A-Za-z0-9._:-]{1,120}$", request_id):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "requestId is malformed.")
+        return self._call(device_id, "lab.answer", {"missionId": _lab_mission(mission_id), "action": "approve",
+                                                    "requestId": request_id})
+
     def learn_run(self, device_id: str, run_id: str) -> dict[str, Any]:
         """Learn everything one run saw and did, on the phone. Returns counts only."""
         if not isinstance(run_id, str) or not RUN_ID.match(run_id):
@@ -1898,6 +1993,21 @@ class V5ContractService:
     def models_list(self, device_id: str) -> dict[str, Any]:
         """The phone's models for the mapping start sheet's picker. The key stays on the phone."""
         return self._call(device_id, "models.list", {})
+
+    def connectors_list(self, device_id: str) -> dict[str, Any]:
+        """Plan 51 K3: approved phone connectors and their selector entries. A phone older than alpha.105 doesn't know
+        the op; that reads as no connectors, never as an error."""
+        try:
+            return {**self._call(device_id, "connectors.list", {}), "supported": True}
+        except DesktopRuntimeError as error:
+            # An older phone answers UNKNOWN_OPERATION, which arrives here as CAPABILITY_UNAVAILABLE.
+            if error.code in (RuntimeErrorCode.INVALID_REQUEST, RuntimeErrorCode.CAPABILITY_UNAVAILABLE):
+                return {"connectors": [], "supported": False}
+            raise
+
+    def numbers_list(self, device_id: str) -> dict[str, Any]:
+        """Plan 49: this phone's numbers (each SIM's and the owner's confirmed ones) and whether codes from texts are on."""
+        return self._call(device_id, "numbers.list", {})
 
     def signup_maps(self, device_id: str) -> dict[str, Any]:
         """Plan 43 T6: the sign-up maps the phone learned. Schemas only; every string is checked for values."""
@@ -1996,13 +2106,18 @@ class V5ContractService:
 
     # ---- Cyclone Ports (plan 48 run 4) -----------------------------------------------------------------------------
 
-    def ports_poll(self, device_id: str, ack: list[str], *, drop: bool = False, max_items: int = PORTS_MAX_ITEMS) -> dict[str, Any]:
+    def ports_poll(self, device_id: str, ack: list[str], *, drop: bool = False, max_items: int = PORTS_MAX_ITEMS,
+                   skills: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """The phone's outbox: what its runs sent and the waits they opened. [ack] removes items the hub handled."""
         if not isinstance(ack, list) or len(ack) > 100 or not all(isinstance(i, str) and PORTS_ITEM_ID.match(i) for i in ack):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "ack is a list of port item ids.")
         args: dict[str, Any] = {"ack": ack, "max": max(1, min(int(max_items), PORTS_MAX_ITEMS))}
         if drop:
             args["drop"] = True
+        if skills is not None:
+            if len(skills) > 8 or len(json.dumps(skills)) > 32000:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Ports skill advertisements are too large.")
+            args["skills"] = skills
         return self._call(device_id, "ports.poll", args)
 
     def ports_blob(self, device_id: str, item_id: str, offset: int) -> dict[str, Any]:

@@ -9,6 +9,10 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 # Auto-granted infrastructure permissions that keep the app alive and connected but do not
 # expose user data or device capabilities; they intentionally have no setup row.
 INFRASTRUCTURE_PERMISSIONS = {
+    # Plan 51: Cyclone's own signature permissions. Connectors protect their marker service and wake receiver with
+    # them so only Cyclone can reach those; they grant nothing on the phone and need no owner decision.
+    "com.cyclone.mobile.permission.CONNECTOR_HOST",
+    "com.cyclone.mobile.permission.WAKE_CONNECTOR",
     "android.permission.INTERNET",
     "android.permission.RECEIVE_BOOT_COMPLETED",
     "android.permission.WAKE_LOCK",
@@ -48,6 +52,9 @@ SETUP_ROW_PERMISSIONS = {
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",  # Unrestricted battery
     "android.permission.SYSTEM_ALERT_WINDOW",  # Display over apps
     "android.permission.SCHEDULE_EXACT_ALARM",  # Precise timing
+    # Plan 49: Settings → Permissions → Codes. Read texts only for one code step, in memory; never receive or send.
+    "android.permission.READ_SMS",
+    "android.permission.READ_PHONE_NUMBERS",
 }
 
 # READ_CONTACTS left this list in alpha.45 by the owner's decision (plan 29): it now has a setup row and is asked for

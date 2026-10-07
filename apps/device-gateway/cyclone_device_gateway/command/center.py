@@ -193,6 +193,14 @@ class CommandCenter:
         # Plan 33 §7 (C4, moved forward): the AI project manager, on the owner's OpenRouter key.
         from .ai import AiStore
         self.ai = AiStore(self, **(ai or {}))
+        self._task_listener = None
+        self._wake = threading.Event()
+        self._tick_done = threading.Condition()
+        self._ticks = 0
+        self._last_tick_ms = 0
+
+    def set_task_listener(self, listener) -> None:
+        self._task_listener = listener
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -200,12 +208,24 @@ class CommandCenter:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
-        self.connections.mrz.start()
         self._thread = threading.Thread(target=self._loop, name="cyclone-command-center", daemon=True)
         self._thread.start()
 
+    def request_tick(self) -> None:
+        self._wake.set()
+
+    def flush_tick(self, timeout: float = 5.0) -> None:
+        if not (self._thread and self._thread.is_alive()):
+            self.tick()
+            return
+        with self._tick_done:
+            target = self._ticks + 1
+            self._wake.set()
+            self._tick_done.wait_for(lambda: self._ticks >= target, timeout)
+
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
         if self._thread:
             self._thread.join(timeout=5)
         self.connections.close()
@@ -213,11 +233,19 @@ class CommandCenter:
             self._db.close()
 
     def _loop(self) -> None:
-        while not self._stop.wait(self._tick_seconds):
+        while not self._stop.is_set():
+            self._wake.wait(self._tick_seconds)
+            self._wake.clear()
+            if self._stop.is_set():
+                break
             try:
                 self.tick()
             except Exception:  # noqa: BLE001 - the loop must survive one bad tick; the next one retries
-                continue
+                pass
+            self._last_tick_ms = self._clock()
+            with self._tick_done:
+                self._ticks += 1
+                self._tick_done.notify_all()
 
     # ---------------------------------------------------------------- audit
 
@@ -517,7 +545,7 @@ class CommandCenter:
         with self._lock:
             if status == "open":
                 rows = self._db.execute(
-                    f"SELECT * FROM task WHERE status IN ({','.join('?' * len(OPEN_TASK_STATES))}) ORDER BY created_at DESC LIMIT ?",
+                    f"SELECT * FROM task WHERE status IN ({','.join('?' * len(OPEN_TASK_STATES))}) ORDER BY created_at DESC, rowid DESC LIMIT ?",
                     (*OPEN_TASK_STATES, limit)).fetchall()
             elif status == "done":
                 rows = self._db.execute(
@@ -532,6 +560,35 @@ class CommandCenter:
         if row is None:
             raise CommandError("No such task.")
         return self._task_public(row)
+
+    def task_states(self, task_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Status, cause and latest run of many tasks in a few queries, for views that watch hundreds of tasks at once
+        (the fleet). Unknown ids are simply absent."""
+        wanted = list(dict.fromkeys(str(t) for t in task_ids if t))
+        out: dict[str, dict[str, Any]] = {}
+        with self._lock:
+            for start in range(0, len(wanted), 400):
+                chunk = wanted[start:start + 400]
+                marks = ",".join("?" * len(chunk))
+                for r in self._db.execute(
+                        f"SELECT id, device_id, status, cause, created_at, updated_at FROM task WHERE id IN ({marks})", chunk):
+                    out[r["id"]] = {"id": r["id"], "deviceId": r["device_id"], "status": r["status"], "cause": r["cause"],
+                                    "createdAt": r["created_at"], "updatedAt": r["updated_at"], "run": None}
+                for r in self._db.execute(
+                        f"SELECT task_id, summary, turns, cost_usd FROM run WHERE task_id IN ({marks}) ORDER BY started_at ASC",
+                        chunk):
+                    if r["task_id"] in out:   # ascending, so the newest run is the one left
+                        out[r["task_id"]]["run"] = {"summary": r["summary"], "turns": r["turns"], "costUsd": r["cost_usd"]}
+        return out
+
+    def open_tasks_brief(self, limit: int = 100_000) -> list[dict[str, Any]]:
+        """Open tasks, newest first (insertion order breaks ties): id, phone, title, status and age only, in one query."""
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT id, device_id, title, status, created_at FROM task WHERE status IN ({','.join('?' * len(OPEN_TASK_STATES))}) "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?", (*OPEN_TASK_STATES, limit)).fetchall()
+        return [{"id": r["id"], "deviceId": r["device_id"], "title": r["title"], "status": r["status"], "createdAt": r["created_at"]}
+                for r in rows]
 
     def _task_public(self, r: sqlite3.Row) -> dict[str, Any]:
         run = self._db.execute("SELECT * FROM run WHERE task_id = ? ORDER BY started_at DESC LIMIT 1", (r["id"],)).fetchone()
@@ -585,6 +642,16 @@ class CommandCenter:
         sets = ", ".join(f"{k} = ?" for k in extra)
         self._db.execute(f"UPDATE task SET status = ?, cause = ?, updated_at = ?{', ' + sets if sets else ''} WHERE id = ?",
                          (status, cause[:300], self._clock(), *extra.values(), task_id))
+        listener = getattr(self, "_task_listener", None)
+        if listener is not None:
+            device_id = str(extra.get("device_id") or "")
+            if not device_id:
+                row = self._db.execute("SELECT device_id FROM task WHERE id = ?", (task_id,)).fetchone()
+                device_id = str(row["device_id"] or "") if row else ""
+            try:
+                listener({"taskId": task_id, "status": status, "deviceId": device_id})
+            except Exception:
+                return
 
     def _open_run(self, task_id: str) -> sqlite3.Row | None:
         return self._db.execute("SELECT * FROM run WHERE task_id = ? AND ended_at IS NULL", (task_id,)).fetchone()
@@ -641,7 +708,8 @@ class CommandCenter:
 
     def _next_run(self, schedule_json: str, after_ms: int | None = None) -> int:
         schedule = json.loads(schedule_json)
-        after = self._local_now() if after_ms is None else datetime.fromtimestamp(after_ms / 1000).astimezone()
+        local = self._local_now()
+        after = local if after_ms is None else datetime.fromtimestamp(after_ms / 1000, local.tzinfo)
         return int(schedules.next_after(schedule, after).timestamp() * 1000)
 
     def create_routine(self, body: dict[str, Any], *, actor: str = "owner") -> dict[str, Any]:
@@ -750,7 +818,7 @@ class CommandCenter:
         schedule = json.loads(routine["schedule"])
         while due is not None and len(times) < routine["preauth"]:
             times.append(due)
-            due = int(schedules.next_after(schedule, datetime.fromtimestamp(due / 1000).astimezone()).timestamp() * 1000)
+            due = int(schedules.next_after(schedule, datetime.fromtimestamp(due / 1000, self._local_now().tzinfo)).timestamp() * 1000)
         now = self._clock()
         for slot in self._db.execute("SELECT * FROM routine_slot WHERE routine_id = ?", (routine["id"],)).fetchall():
             if slot["due_at"] not in times or slot["device_id"] != devices[0]:
@@ -920,7 +988,7 @@ class CommandCenter:
             listed = self._devices()
         except Exception:  # noqa: BLE001 - discovery trouble means no phone is ready this tick
             return {}
-        return {str(d.get("deviceId")): d for d in listed if d.get("paired") and d.get("state") == "ready" and d.get("deviceId")}
+        return {str(d.get("deviceId")): d for d in listed if d.get("paired") and str(d.get("state") or "").upper() == "READY" and d.get("deviceId")}
 
     def _dispatch(self, ready: dict[str, dict[str, Any]]) -> None:
         now = self._clock()

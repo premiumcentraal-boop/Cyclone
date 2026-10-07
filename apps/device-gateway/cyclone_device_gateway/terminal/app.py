@@ -38,7 +38,9 @@ class TerminalIO:
 
 def parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="cyclone", description="Open Cyclone Glass from any terminal.")
-    parser.add_argument("command", nargs="?", choices=["update", "version"], help="update: install the newest Cyclone now")
+    parser.add_argument("command", nargs="?", choices=["update", "version", "plugin"],
+                        help="update: install the newest Cyclone now; plugin: install and manage plugins")
+    parser.add_argument("rest", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     parser.add_argument("--no-update", action="store_true", help="skip the update check")
     parser.add_argument("--browser", action="store_true", help="open Glass in your normal browser instead of its own window")
     return parser.parse_args(argv)
@@ -158,6 +160,20 @@ def run_terminal(argv: list[str], io: TerminalIO | None = None) -> int:
     if args.command == "version":
         io.out(f"Cyclone {installed}")
         return 0
+    if args.command == "plugin":
+        from .plugins import http_with, run_plugin
+
+        try:
+            launch = launch_target(io)
+        except Exception as exc:
+            io.out(f"Could not reach Cyclone: {exc}.")
+            return 2
+        try:
+            return run_plugin(args.rest, http_with(launch.base_url, launch.token), io.out, io.ask)
+        except SystemExit as exc:  # argparse usage errors
+            return int(exc.code or 0)
+        finally:
+            launch.stop()
     from .banner import Overview, enable_color, fetch_phones, render
 
     color = enable_color()

@@ -4,7 +4,7 @@
 .cc-notice { min-height: 1.4em; margin: 0; font-size: var(--text-sm); color: var(--text-muted); }
 .cc-notice-error { color: var(--danger); }
 .cc-form-area:empty { display: none; }
-.cc-body { display: grid; gap: var(--space-3); }
+.cc-body { display: grid; gap: var(--space-3); min-width: 0; }
 .cc-card { display: grid; gap: var(--space-3); }
 .cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); }
 .cc-field { display: flex; flex-direction: column; gap: var(--space-1); }
@@ -113,7 +113,8 @@
 .page-command .segmented .segment { flex: 0 0 auto; }
 
 /* Plan 43 (T5 + T6): Accounts. A phone strip, the phone's apps on the left, the open app on the right. */
-.ac { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+.ac { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; min-width: 0; }
+.ac-starters { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .ac-phones { display: flex; flex-wrap: wrap; gap: 8px; }
 .ac-phone {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 14px; border: 1px solid var(--border);
@@ -174,6 +175,9 @@
 .pf { display: flex; flex-direction: column; gap: 8px; }
 .pf[hidden] { display: none; }
 .pf-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-connectors { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-connectors:empty { display: none; }
+.pf-connector { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: 999px; font-size: var(--text-sm); }
 .pf-profile {
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
   background: var(--surface); color: var(--text); font-size: var(--text-sm); cursor: pointer;
@@ -189,3 +193,22 @@
 .pf-apps { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; max-height: 40vh; overflow-y: auto; }
 .pf-app { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: var(--text-sm); }
 .pf-app .muted { font-family: var(--font-mono); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Command Center → Numbers (alpha.102): every number Cyclone can receive codes on. Tokens only. */
+.nm { display: grid; gap: var(--space-4); }
+.nm-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
+.nm-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.nm-spacer { flex: 1 1 auto; }
+.nm-h { margin: 0; font-size: var(--text-md); }
+.nm-muted { color: var(--text-muted); font-size: var(--text-sm); }
+.nm-warn { color: var(--warning); font-size: var(--text-sm); }
+.nm-number { font-family: var(--font-mono); font-size: var(--text-md); }
+.nm-phone { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; }
+.nm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
+.nm-field { display: grid; gap: var(--space-1); }
+.nm-field[hidden] { display: none; }
+.nm-field-label { font-size: var(--text-sm); color: var(--text-muted); }
+.nm-actions { white-space: nowrap; }
+.nm-account { min-width: 180px; }
+.nm-editor { display: grid; gap: var(--space-3); padding: var(--space-2) 0; }
+.nm-row.nm-paused td { opacity: 0.7; }

@@ -1,0 +1,157 @@
+{
+  "package": "com.instagram.android",
+  "app": "Instagram",
+  "appVersion": "449.0.0.52.84",
+  "mappedAt": 1791266798333,
+  "finalLabel": "I agree",
+  "complete": true,
+  "pages": [
+    {
+      "index": 1,
+      "title": "What's your mobile number?",
+      "continue": "Next",
+      "check": null,
+      "fields": [
+        {
+          "key": "phone",
+          "label": "Mobile number",
+          "kind": "phone",
+          "required": true,
+          "hint": "Profile > username > Add Instagram account > Create new account; username-first variation: changed=true",
+          "choices": []
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "title": "Enter the confirmation code",
+      "continue": "Next",
+      "check": "sms_code",
+      "fields": [
+        {
+          "key": "confirmation_code",
+          "label": "Confirmation code",
+          "kind": "number",
+          "required": true,
+          "hint": "",
+          "choices": []
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "title": "Create a password",
+      "continue": "Next",
+      "check": null,
+      "fields": [
+        {
+          "key": "password",
+          "label": "Password",
+          "kind": "password",
+          "required": true,
+          "hint": "At least six letters or numbers",
+          "choices": []
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "title": "What's your date of birth?",
+      "continue": "Next",
+      "check": null,
+      "fields": [
+        {
+          "key": "birthday",
+          "label": "Date of birth",
+          "kind": "birthday",
+          "required": true,
+          "hint": "YYYY-MM-DD; set picker year, abbreviated month, day; SET; verify date before Next",
+          "choices": []
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "title": "What's your name?",
+      "continue": "Next",
+      "check": null,
+      "fields": [
+        {
+          "key": "full_name",
+          "label": "Full name",
+          "kind": "full_name",
+          "required": true,
+          "hint": "",
+          "choices": []
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "title": "Create a username",
+      "continue": "Next",
+      "check": null,
+      "fields": [
+        {
+          "key": "username",
+          "label": "Username",
+          "kind": "username",
+          "required": true,
+          "hint": "",
+          "choices": []
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "title": "Agree to Instagram's terms and policies",
+      "continue": "I agree",
+      "check": null,
+      "fields": []
+    },
+    {
+      "index": 8,
+      "title": "Confirm your profile",
+      "continue": "Next",
+      "check": "sms_code",
+      "fields": [
+        {
+          "key": "confirmation_code_2",
+          "label": "Confirmation code",
+          "kind": "number",
+          "required": true,
+          "hint": "Native SMS autofill; observe advance; on terms reuse the already-approved I agree",
+          "choices": []
+        }
+      ]
+    },
+    {
+      "index": 9,
+      "title": "Allow Instagram to access your device?",
+      "continue": "Next",
+      "check": null,
+      "fields": []
+    },
+    {
+      "index": 10,
+      "title": "Contacts and accounts permission",
+      "continue": "Don't allow",
+      "check": null,
+      "fields": []
+    },
+    {
+      "index": 11,
+      "title": "Allow the use of cookies by Instagram?",
+      "continue": "Decline optional cookies",
+      "check": null,
+      "fields": []
+    },
+    {
+      "index": 12,
+      "title": "Signed-in Profile",
+      "continue": "Profile",
+      "check": null,
+      "fields": []
+    }
+  ]
+}

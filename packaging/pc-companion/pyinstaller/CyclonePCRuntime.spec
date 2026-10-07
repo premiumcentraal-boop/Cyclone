@@ -24,6 +24,7 @@ a = Analysis(
         # Served by cyclone_device_gateway.glass.resolve_glass_dist() from the package-relative static/ folder.
         (str(glass_dist), "cyclone_device_gateway/glass/static"),
         (str(version_file), "cyclone_device_gateway/terminal"),
+        (str(repo / "apps/device-gateway/cyclone_device_gateway/command/resources"), "cyclone_device_gateway/command/resources"),
     ],
     hiddenimports=["cyclone_phone_mcp.live_phone_ipc", "secure_gateway_token", "cyclone_device_gateway.tooling_seam", "cyclone_device_gateway.glass.launcher",
                    "cyclone_device_gateway.terminal.app", "cyclone_device_gateway.terminal.install",
@@ -41,8 +42,15 @@ a = Analysis(
                    # Plan 48: the Port Hub and the Cyclone Ports kit it imports (the checker is imported when it runs).
                    "cyclone_device_gateway.ports.api", "cyclone_device_gateway.ports.hub", "cyclone_device_gateway.ports.store",
                    "cyclone_ports", "cyclone_ports.catalog", "cyclone_ports.sdk", "cyclone_ports.devhub", "cyclone_ports.conformance",
+                   # Plan 50: plugins from GitHub (package format, signed index, installer, Plugin Host, routes, CLI).
+                   "cyclone_ports.package", "cyclone_ports.index", "tomllib",
+                   "cyclone_device_gateway.plugins", "cyclone_device_gateway.plugins.api",
+                   "cyclone_device_gateway.plugins.service", "cyclone_device_gateway.plugins.host",
+                   "cyclone_device_gateway.plugins.github", "cyclone_device_gateway.plugins.index",
+                   "cyclone_device_gateway.plugins.store", "cyclone_device_gateway.terminal.plugins",
                    # Plan 33: the Command Center (some modules are imported inside CommandCenter.__init__).
                    "cyclone_device_gateway.command.api", "cyclone_device_gateway.command.center", "cyclone_device_gateway.command.schedule",
+                   "cyclone_device_gateway.command.signup", "cyclone_device_gateway.command.signup_starters",
                    "cyclone_device_gateway.command.vault", "cyclone_device_gateway.command.delivery",
                    "cyclone_device_gateway.command.connections", "cyclone_device_gateway.command.mcp",
                    "cyclone_device_gateway.command.local",

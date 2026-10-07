@@ -29,7 +29,6 @@ import {
   type StepSpec,
   type Then,
   type ToolClass,
-  type MrzStatus,
 } from "../services/command.js";
 import { CURATED } from "../services/cards.js";
 import { el, setChildren } from "../ui/dom.js";
@@ -48,9 +47,6 @@ export function createConnectionsView(ctx: GlassContext, say: (text: string, ton
   const addBox = card("cc-card");
   const list = el("div", "cc-connection-list");
   const activity = el("div", "cc-connection-activity");
-  const mrzBox = card("cc-card");
-  let mrz: MrzStatus | null = null;
-  let mrzBusy = false;
   let connections: CcConnection[] = [];
   let higgsfield = "https://mcp.higgsfield.ai/mcp";
   let destroyed = false;
@@ -220,53 +216,7 @@ export function createConnectionsView(ctx: GlassContext, say: (text: string, ton
   cardsBox.append(el("h2", "card-title", "Connector cards"),
     el("p", "cc-hint", "A card is a connector someone set up, without their keys. Import it, then sign in or paste your own key. Only tools that match the card are switched on, and tools that change things ask you every time."),
     curatedList, labelled("Import a card", cardText), cardFile, importRow);
-  function renderMrz(): void {
-    const title = el("h2", "card-title", "MRZ Studio · Employee ID");
-    const info = el("p", "cc-hint", mrz?.detail || "This Glass runtime does not support Studio discovery yet. Update Cyclone, or paste Studio's Glass JSON below.");
-    const how = el("p", "cc-hint", "Two ways to connect: let Cyclone find Studio on this PC, or paste its saved Glass JSON below. Discovery keeps checking while the runtime is open, even after this tab closes. Your approved connection stays through Glass updates.");
-    const states = el("div", "cc-actions");
-    if (mrz) {
-      states.append(chip(mrz.state === "found" ? "Studio found" : mrz.state === "looking" ? "Looking for Studio" : mrz.state === "offline" ? "Studio offline" : "Needs attention", mrz.state === "found" ? "success" : "warning"));
-      if (mrz.health) for (const [label, good] of [["API", mrz.health.api], ["Worker", mrz.health.worker], ["Photoshop", mrz.health.photoshop], ["Template", mrz.health.template]] as const) {
-        states.append(chip(`${label}: ${good ? "ready" : "not ready"}`, good ? "success" : "warning"));
-      }
-      if (mrz.health?.dryRun) states.append(chip("Dry run · placeholder output", "warning"));
-      if (mrz.connectionId) states.append(chip(mrz.connectionStatus === "ready" ? "MCP connected" : mrz.connectionStatus === "needs_approval" ? "Program approval needed" : "MCP needs attention", mrz.connectionStatus === "ready" ? "success" : "warning"));
-    }
-    const actions = el("div", "cc-actions");
-    const check = actionButton("Check for Studio", { variant: "secondary" });
-    check.disabled = mrzBusy || !mrz;
-    check.addEventListener("click", () => void mrzAction("Checking for Studio", () => command.checkMrz(ctx.client)));
-    const connect = actionButton(mrz?.connectionId ? "Reconnect MRZ Studio" : "Connect MRZ Studio", { variant: "primary", icon: "plug" });
-    connect.disabled = mrzBusy || !mrz || mrz.state !== "found" || mrz.settingsChanged;
-    connect.addEventListener("click", () => void mrzAction("Connecting MRZ Studio", async () => {
-      if (mrz?.connectionId) return command.refreshConnection(ctx.client, mrz.connectionId);
-      return command.connectMrz(ctx.client);
-    }));
-    const studio = el("a", "btn btn-ghost", "Open Studio settings");
-    studio.href = `${mrz?.uiBase || "http://127.0.0.1:5173"}/settings/mcp`;
-    studio.target = "_blank";
-    studio.rel = "noopener noreferrer";
-    const paste = actionButton("Use pasted Glass JSON", { variant: "ghost" });
-    paste.addEventListener("click", () => {
-      mode = "config"; modes.set(mode); drawAdd();
-      if (mrz?.recipe) config.value = JSON.stringify(mrz.recipe, null, 2);
-      config.focus();
-    });
-    actions.append(connect, check, studio, paste);
-    const approval = el("p", "cc-hint", "Finding Studio never runs a program. Approve its pinned program below, then choose the tools Cyclone may use. A changed program needs approval again. The current fallback MCP uses Studio on port 8787.");
-    setChildren(mrzBox, title, how, info, states, actions, approval);
-    if (mrz?.settingsChanged) mrzBox.append(el("p", "cc-hint", "Studio's recipe changed. After jobs finish, remove the old MRZ connection below, then reconnect to review the new recipe. Existing permissions are never silently replaced."));
-    if (mrz?.checkedAt) mrzBox.append(el("p", "cc-sub", `Last checked ${relativeTime(mrz.checkedAt)} · every 30 seconds`));
-  }
-  async function mrzAction(label: string, action: () => Promise<unknown>): Promise<void> {
-    if (mrzBusy) return;
-    mrzBusy = true; renderMrz();
-    try { await act(label, action); }
-    finally { mrzBusy = false; if (!destroyed) renderMrz(); }
-  }
-  renderMrz();
-  element.append(mrzBox, addBox, cardsBox, list, activity);
+  element.append(addBox, cardsBox, list, activity);
 
   // ------------------------------------------------------------------ connections
 
@@ -722,8 +672,6 @@ export function createConnectionsView(ctx: GlassContext, say: (text: string, ton
       if (destroyed) return;
       connections = listed.connections;
       higgsfield = listed.higgsfield;
-      mrz = listed.mrz;
-      renderMrz();
       renderList();
       renderActivity(calls, artifacts);
     } catch (err) {

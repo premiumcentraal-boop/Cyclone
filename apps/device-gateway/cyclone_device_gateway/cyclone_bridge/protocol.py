@@ -25,6 +25,9 @@ ALLOWED_OPS = {
     "ports.poll", "ports.blob", "ports.answer", "ports.file",
     # Plan 43 T6: the sign-up maps the phone learned (schemas only), and forgetting one.
     "signup.maps", "signup.forget",
+    # Plan 49 (alpha.102): the phone's own numbers for the Numbers page (numbers only, never a text or a code).
+    "numbers.list",
+    "connectors.list",
     # Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
     "profiles.list", "profiles.apps", "profiles.switch", "profiles.app",
     # Alpha 87: why Cyclone stopped last time, and the freezes it caught (read only).

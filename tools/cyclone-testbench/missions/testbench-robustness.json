@@ -1,0 +1,308 @@
+[
+ {
+  "id": "tb.robust.from.settings",
+  "title": "Start from another app",
+  "goal": "Set a timer for 2 minutes",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.google.android.deskclock",
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "launch",
+    "package": "com.android.settings"
+   }
+  ],
+  "checks": [
+   {
+    "check": "timer",
+    "running": true
+   }
+  ]
+ },
+ {
+  "id": "tb.robust.from.chrome",
+  "title": "Start mid-browser",
+  "goal": "Use the calculator to work out 99 times 99",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.google.android.calculator",
+   "com.android.chrome"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.calculator"
+   },
+   {
+    "do": "launch",
+    "package": "com.android.chrome"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "any": [
+     "9801"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.robust.dnd",
+  "title": "Do Not Disturb on",
+  "goal": "Set a timer for 1 minute",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "setup": [
+   {
+    "do": "dnd",
+    "on": true
+   },
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "timer",
+    "running": true
+   }
+  ]
+ },
+ {
+  "id": "tb.robust.already.dark",
+  "title": "Nothing to do (dark)",
+  "goal": "Turn on dark mode",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "night_mode",
+    "on": true
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "night_mode",
+    "is": true
+   }
+  ],
+  "notes": "Already on: the best run notices and finishes in one or two turns."
+ },
+ {
+  "id": "tb.robust.already.rotate",
+  "title": "Nothing to do (rotation)",
+  "goal": "Turn on auto-rotate",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "setting",
+    "namespace": "system",
+    "key": "accelerometer_rotation",
+    "value": "1"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "setting",
+    "namespace": "system",
+    "key": "accelerometer_rotation",
+    "equals": "1"
+   }
+  ]
+ },
+ {
+  "id": "tb.robust.big.font",
+  "title": "Large font UI",
+  "goal": "Open wikipedia.org in Chrome",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.android.chrome",
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "setting",
+    "namespace": "system",
+    "key": "font_scale",
+    "value": "1.3"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.android.chrome"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Wikipedia"
+    ]
+   }
+  ],
+  "notes": "Bigger text moves and clips everything: selectors and the map must still work."
+ },
+ {
+  "id": "tb.robust.typos",
+  "title": "Typos",
+  "goal": "sett a timr for 3 minuts pls",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "timer",
+    "running": true
+   }
+  ]
+ },
+ {
+  "id": "tb.robust.chatty",
+  "title": "Lots of words, one task",
+  "goal": "Hey, so I'm about to put a pizza in the oven and honestly I always forget about it, could you maybe set a timer for 12 minutes for me? Thanks a lot!",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "timer",
+    "running": true
+   }
+  ]
+ },
+ {
+  "id": "tb.robust.two.settings",
+  "title": "Two settings in one sentence",
+  "goal": "turn on dark mode and set the screen timeout to 2 minutes",
+  "category": "robustness",
+  "suites": [
+   "robust"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "night_mode",
+    "on": false
+   },
+   {
+    "do": "setting",
+    "namespace": "system",
+    "key": "screen_off_timeout",
+    "value": "30000"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "night_mode",
+    "is": true
+   },
+   {
+    "check": "setting",
+    "namespace": "system",
+    "key": "screen_off_timeout",
+    "equals": "120000"
+   }
+  ]
+ }
+]

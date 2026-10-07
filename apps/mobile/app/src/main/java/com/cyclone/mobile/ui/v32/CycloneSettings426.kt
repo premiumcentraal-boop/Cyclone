@@ -192,6 +192,8 @@ internal fun CycloneSettingsPage426(
                 ),
                 "Connections" to listOf(
                     Settings426Row("PC Gateway", "PC Gateway", Icons.Rounded.Smartphone, "Optional"),
+                    Settings426Row("Connectors", "Connectors", Icons.Rounded.Layers,
+                        com.cyclone.mobile.connector.ConnectorRuntime.approvals(context).size.let { if (it == 0) "None" else "$it on" }),
                 ),
                 "Privacy & safety" to listOf(
                     Settings426Row("Privacy & safety", "Privacy & safety", Icons.Rounded.Security),
@@ -393,7 +395,12 @@ internal fun CycloneSettingsPage426(
                 }
             }
 
-            "Permissions" -> item { Permissions426Card(context) }
+            "Permissions" -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Permissions426Card(context)
+                    Codes426Card(context)
+                }
+            }
             "Profile engine" -> item { Settings426Surface { RootFeaturesCard() } }
             "App Maps" -> item { AppMapsSettingsSection(context, refreshTick) }
             "Vault" -> item { VaultSettingsPanel() }
@@ -422,6 +429,7 @@ internal fun CycloneSettingsPage426(
                     }
                 }
             }
+            "Connectors" -> item { Connectors426Card(context) }
             "Privacy & safety" -> item {
                 Settings426Surface {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -585,6 +593,154 @@ private fun Permissions426Card(context: Context) {
     }
 }
 
+/**
+ * Plan 49: Settings → Permissions → Codes. Cyclone fills a code sent by text to this phone's own number, without asking,
+ * when the run plainly uses that number. Texts are read in memory only.
+ */
+@Composable
+private fun Codes426Card(context: Context) {
+    var tick by remember { mutableStateOf(0) }
+    val canRead = remember(tick) { com.cyclone.mobile.codes.AndroidCodes.canReadTexts(context) }
+    var on by remember(tick) { mutableStateOf(com.cyclone.mobile.codes.AndroidCodes.enabled(context)) }
+    val sims = remember(tick) { com.cyclone.mobile.codes.AndroidCodes.simNumbers(context).map { it.second } }
+    var draft by rememberSaveable { mutableStateOf(com.cyclone.mobile.codes.AndroidCodes.confirmed(context).joinToString(", ")) }
+    LaunchedEffect(Unit) { tick++ }
+    Settings426Surface {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Codes from this phone's texts", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "When a sign-up or task uses this phone's number, Cyclone reads the code from the text and fills it. " +
+                            "Never for banking or payments. Texts are read only for that moment and never saved.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                CycloneLiquidToggle(on, { next ->
+                    on = next
+                    com.cyclone.mobile.codes.AndroidCodes.setEnabled(context, next)
+                })
+            }
+            CyclonePermissionRow(Icons.Rounded.Key, "Read texts", "Needed to read the code. If Android says \"Restricted setting\": App info → ⋮ → Allow restricted settings, then try again.",
+                canRead, if (canRead) "Manage" else "Allow") {
+                if (!canRead) (context as? Activity)?.let {
+                    ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_SMS, Manifest.permission.READ_PHONE_NUMBERS), 324)
+                } else open426(context, CyclonePermissionSetup.appDetails(context))
+                tick++
+            }
+            Text(
+                if (sims.isEmpty()) "Your SIM doesn't tell Android its number. Add this phone's number below."
+                else "This phone's number from the SIM: ${sims.joinToString(", ")}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                label = { Text("This phone's numbers (comma separated)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodySmall,
+            )
+            CycloneLiquidTextAction(
+                label = "Save numbers",
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    com.cyclone.mobile.codes.AndroidCodes.setConfirmed(context, draft.split(',', '\n'))
+                    draft = com.cyclone.mobile.codes.AndroidCodes.confirmed(context).joinToString(", ")
+                    tick++
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Plan 51: Settings → Connectors. Apps on this phone that ask to work with Cyclone. Each is approved by name and signing
+ * key, for exactly the things listed; revoking removes its entries and its data on every profile.
+ */
+@Composable
+private fun Connectors426Card(context: Context) {
+    var tick by remember { mutableStateOf(0) }
+    val found = remember(tick) { runCatching { com.cyclone.mobile.connector.ConnectorDiscovery.discover(context) }.getOrDefault(emptyList()) }
+    var armed by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { tick++ }
+    Settings426Surface {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Apps that connect to Cyclone", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "A connector is an app you installed that asks to work with Cyclone on this phone. It can only do what you " +
+                    "approve here. It can't create, switch or remove your profiles, control your phone, or see your passwords or codes.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (found.isEmpty()) {
+                Text("No connector apps are installed.", style = MaterialTheme.typography.bodySmall)
+            }
+            found.forEach { c ->
+                val manifest = c.manifest
+                val key = c.packageName
+                val pending = if (manifest != null && c.approval != null) manifest.scopes - c.approval.scopes else emptySet()
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(manifest?.label ?: c.appLabel, style = MaterialTheme.typography.titleSmall)
+                    Text("${c.packageName} · key ${c.certHistory.firstOrNull()?.let(com.cyclone.mobile.connector.ConnectorIdentity::fingerprint) ?: "unknown"}",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val status = when {
+                        manifest == null -> c.problem ?: "This app's connector manifest can't be used."
+                        c.idConflict -> "Another app uses the same connector name. Remove one of them."
+                        c.signerChanged -> "Signed by a different key since you approved it. Blocked until you approve it again."
+                        c.approval != null && pending.isNotEmpty() -> "Approved. It now also asks to:"
+                        c.approval != null -> "Approved. It may:"
+                        else -> "Not approved. It asks to:"
+                    }
+                    Text(status, style = MaterialTheme.typography.bodySmall)
+                    val listed = when {
+                        manifest == null -> emptySet()
+                        c.approval != null && pending.isNotEmpty() -> pending
+                        else -> manifest.scopes
+                    }
+                    listed.forEach { scope -> Text("• ${scope.plain}", style = MaterialTheme.typography.bodySmall) }
+                    if (manifest != null && manifest.unknownScopes.isNotEmpty()) {
+                        Text("It also asks for things this Cyclone doesn't know (${manifest.unknownScopes.joinToString(", ")}). Those are ignored.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (manifest != null && !c.idConflict) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (c.approval == null || pending.isNotEmpty()) {
+                                CycloneLiquidTextAction(
+                                    label = if (armed == key) "Tap again to approve" else if (pending.isNotEmpty()) "Approve the new requests" else "Approve",
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        if (armed != key) {
+                                            armed = key
+                                        } else {
+                                            armed = null
+                                            note = runCatching { com.cyclone.mobile.connector.ConnectorRuntime.approve(context, c) }.exceptionOrNull()?.message
+                                            tick++
+                                        }
+                                    },
+                                )
+                            }
+                            if (c.approval != null || c.signerChanged) {
+                                CycloneLiquidTextAction(
+                                    label = "Revoke",
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        note = runCatching { com.cyclone.mobile.connector.ConnectorRuntime.revoke(context, manifest.id) }.exceptionOrNull()?.message
+                                        tick++
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
 @Composable
 private fun Settings426Readiness(title: String, body: String, ready: Boolean) {
     Surface(
@@ -638,6 +794,7 @@ private fun Settings426DetailSubtitle(section: String): String? = when (section)
     "Profile engine" -> "Create and manage separate app profiles."
     "Storage" -> "Where Cyclone keeps local knowledge."
     "PC Gateway" -> "Connect Cyclone to desktop agents when needed."
+    "Connectors" -> "Apps on this phone that work with Cyclone, only as far as you approve."
     else -> null
 }
 

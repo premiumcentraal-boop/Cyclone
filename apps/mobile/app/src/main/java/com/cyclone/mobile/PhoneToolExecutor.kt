@@ -103,6 +103,16 @@ object PhoneToolExecutor {
         target: com.cyclone.mobile.secrets.SecretFillTarget,
         secret: CharArray,
     ): com.cyclone.mobile.secrets.SecretFillExecution = synchronized(mutationLock) {
+        com.cyclone.mobile.secrets.SecretFillRetry.run(settle = { Thread.sleep(80) }) {
+            fillVaultSecretAttempt(context, target, secret)
+        }
+    }
+
+    private fun fillVaultSecretAttempt(
+        context: Context,
+        target: com.cyclone.mobile.secrets.SecretFillTarget,
+        secret: CharArray,
+    ): com.cyclone.mobile.secrets.SecretFillExecution = synchronized(mutationLock) {
         fun fail(code: String) = com.cyclone.mobile.secrets.SecretFillExecution(false, false, code)
 
         if (secret.isEmpty() || secret.size > PhoneTypeEngine.MAX_VALUE_CHARS) {
@@ -116,23 +126,34 @@ object PhoneToolExecutor {
         val service = CycloneAccessibilityService.instance
             ?: return@synchronized fail("ACCESSIBILITY_NOT_CONNECTED")
         val observation = GatewayObservationStore.current(scope)
-            ?: return@synchronized fail("STALE_OBSERVATION")
-        if (observation.id != target.observationId) {
+        val anchor = target.anchor
+        if (anchor == null && (observation == null || observation.id != target.observationId))
             return@synchronized fail("STALE_OBSERVATION")
-        }
 
         val snapshot = if (foreground) {
             if (DeviceState.controller != DeviceState.Controller.AGENT) {
                 return@synchronized fail("HUMAN_HAS_CONTROL")
             }
-            if (DeviceState.requireFreshObservation) {
+            if (anchor == null && DeviceState.requireFreshObservation) {
                 return@synchronized fail("FRESH_OBSERVATION_REQUIRED")
             }
-            service.observe(markFresh = false)
+            try {
+                com.cyclone.mobile.agent.SemanticCaptureBoundary.captureRetrying(
+                    surface = { service.observationSurface(scope.sessionId, scope.displayId,
+                        com.cyclone.mobile.secrets.SecretTargetBinding.scopeKey(scope), null) },
+                    semantic = { service.observe(markFresh = false) },
+                    // Input/overlay animations may change content; field identity is validated below.
+                    tolerateContentChange = anchor != null,
+                    budgetMs = 1_500,
+                ).semantic
+            } catch (_: Exception) { return@synchronized fail("STALE_OBSERVATION") }
         } else {
             val runtime = com.cyclone.mobile.runtime.background.WorkspaceRuntime
-            val generation = observation.payload.optLong("executionGeneration", -1L)
+            val generation = if (anchor != null) runtime.generation(scope.sessionId)
+                else observation!!.payload.optLong("executionGeneration", -1L)
             if (generation < 0L) return@synchronized fail("STALE_SESSION")
+            if (anchor != null && anchor.scopeKey != com.cyclone.mobile.secrets.SecretTargetBinding.scopeKey(scope))
+                return@synchronized fail("STALE_SESSION")
             try {
                 runtime.authorizeTouch(scope, generation)
             } catch (_: Exception) {
@@ -143,29 +164,38 @@ object PhoneToolExecutor {
             } catch (_: Exception) {
                 return@synchronized fail("STALE_SESSION")
             }
-            if (observed.fingerprint != observation.payload.optString("accessibilityFingerprint")) {
+            if (anchor == null && observed.fingerprint != observation!!.payload.optString("accessibilityFingerprint")) {
                 return@synchronized fail("STALE_OBSERVATION")
             }
             observed
         }
 
-        if (snapshot.fingerprint != observation.payload.optString("accessibilityFingerprint")) {
+        if (anchor == null && snapshot.fingerprint != observation!!.payload.optString("accessibilityFingerprint")) {
             return@synchronized fail("STALE_OBSERVATION")
         }
 
         val catalog = PhoneTypeEngine.catalog(
-            observationId = observation.id,
-            evidenceElements = observation.elements.values.map {
+            observationId = target.observationId,
+            evidenceElements = if (anchor != null) emptyList() else observation!!.elements.values.map {
                 PhoneTypeEngine.ObservationElementInput(it.id, it.source, it.role, it.evidence)
             },
             snapshot = snapshot,
         )
-        val element = catalog.elements[target.elementId]
-            ?: return@synchronized fail("STALE_ELEMENT")
+        val rebound = anchor?.let { com.cyclone.mobile.secrets.SecretTargetRecovery.resolve(it, snapshot,
+            com.cyclone.mobile.secrets.SecretTargetBinding.scopeKey(scope),
+            com.cyclone.mobile.secrets.SecretTargetBinding.epoch(scope))
+            ?: return@synchronized fail("SECRET_TARGET_CHANGED") }
+        val element = if (rebound != null) catalog.elements.values.singleOrNull { it.rawNodeId == rebound.id }
+            else catalog.elements[target.elementId]
+        if (element == null) return@synchronized fail("STALE_ELEMENT")
         if (!element.enabled) return@synchronized fail("ACTION_FAILED")
         if (!element.editable) return@synchronized fail("INVALID_TARGET")
         val rawNodeId = element.rawNodeId ?: return@synchronized fail("STALE_ELEMENT")
         val path = element.path ?: return@synchronized fail("STALE_ELEMENT")
+        if (anchor != null && (anchor.scopeKey != com.cyclone.mobile.secrets.SecretTargetBinding.scopeKey(scope) ||
+                anchor.controllerEpoch != com.cyclone.mobile.secrets.SecretTargetBinding.epoch(scope)))
+            return@synchronized fail("STALE_SESSION")
+        if (foreground) DeviceState.markObserved()
 
         // CharBuffer is a mutable CharSequence view over the lease array. Android
         // ACTION_SET_TEXT accepts CharSequence, so this path avoids an immutable plaintext String.
@@ -177,6 +207,10 @@ object PhoneToolExecutor {
             needsFocus = !element.focused,
             valueLength = secret.size,
             valueDigest = PhoneTypeEngine.digest(leasedValue),
+            expectedPackageName = snapshot.packageName,
+            expectedClassName = element.className,
+            expectedResourceId = element.resourceId,
+            expectedPassword = element.password,
         )
         val live = try {
             leasedValue.position(0)
@@ -320,8 +354,12 @@ object PhoneToolExecutor {
                     val x = p.optDouble("x"); val y = p.optDouble("y")
                     x >= it.bounds.left && x < it.bounds.right && y >= it.bounds.top && y < it.bounds.bottom && it.clickable
                 }.minByOrNull { it.bounds.width * it.bounds.height } ?: error("UNSUPPORTED: a grounded control is required")
-                workspaceGate(scope, request.tool, com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, selector),
-                    node.id, snapshot.fingerprint)
+                // Review only what this tap does on the page it lands on (same rule as a foreground tap by position).
+                val gateLabels = if (chosen != null) com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, selector)
+                    else com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsAtPoint(snapshot.nodes,
+                        p.optDouble("x").toInt(), p.optDouble("y").toInt(), snapshot.windows)
+                        .ifEmpty { com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, null) }
+                workspaceGate(scope, request.tool, gateLabels, node.id, snapshot.fingerprint)
                 return node
             }
             val commands = com.cyclone.mobile.runtime.background.WorkspaceCommands
@@ -709,6 +747,7 @@ object PhoneToolExecutor {
                 // Mapping returns to the app's entry room instead of resuming a deep screen.
                 if (p.optBoolean("clearTask", false)) intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 val eventGeneration = DeviceState.uiGeneration()
+                com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                 context.startActivity(intent)
                 TraceFieldSignals.navigated()
                 launchedOutcome(service, before, p, eventGeneration, JSONObject().put("package", packageName).put("launched", true))
@@ -752,6 +791,7 @@ object PhoneToolExecutor {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 val generation = DeviceState.uiGeneration()
+                com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                 context.startActivity(intent)
                 launchedOutcome(service, before, p, generation, JSONObject().put("started", true))
             }
@@ -768,6 +808,7 @@ object PhoneToolExecutor {
                     }
                     val eventGeneration = DeviceState.uiGeneration()
                     try {
+                        com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                         context.startActivity(intent)
                     } catch (_: android.content.ActivityNotFoundException) {
                         return errorResult(PhoneToolErrorCode.ACTION_FAILED, "No camera app on this phone")
@@ -783,6 +824,7 @@ object PhoneToolExecutor {
                 val intent = Intent(Intent.ACTION_VIEW, parsed).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 p.optString("package").takeIf { it.isNotBlank() }?.let(intent::setPackage)
                 val eventGeneration = DeviceState.uiGeneration()
+                com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                 context.startActivity(intent)
                 launchedOutcome(service, before, p, eventGeneration, JSONObject().put("uri", uri).put("started", true))
             }
@@ -809,6 +851,7 @@ object PhoneToolExecutor {
                     ?.let { intent.putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, it) }
                 val eventGeneration = DeviceState.uiGeneration()
                 try {
+                    com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                     context.startActivity(intent)
                 } catch (_: android.content.ActivityNotFoundException) {
                     return errorResult(PhoneToolErrorCode.APP_NOT_FOUND, "No clock app on this phone accepts this request")
@@ -831,6 +874,7 @@ object PhoneToolExecutor {
                 }
                 val eventGeneration = DeviceState.uiGeneration()
                 try {
+                    com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, intent)
                     context.startActivity(intent)
                 } catch (_: android.content.ActivityNotFoundException) {
                     return errorResult(PhoneToolErrorCode.APP_NOT_FOUND, "This phone has no $key settings page")
@@ -1027,6 +1071,18 @@ object PhoneToolExecutor {
     }
 
     private fun actionWithConfirmation(
+        service: CycloneAccessibilityService?,
+        request: PhoneToolRequest,
+        before: String?,
+        action: () -> Boolean,
+    ): Outcome = com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostPassthrough {
+        // Keep host focus through dispatch AND result settling. Restoring Ask immediately at the
+        // gesture callback can steal focus from a newly opened Android permission dialog. This also
+        // lets global Back reach the host rather than Cyclone's focused composer.
+        actionWithConfirmationYielded(service, request, before, action)
+    }
+
+    private fun actionWithConfirmationYielded(
         service: CycloneAccessibilityService?,
         request: PhoneToolRequest,
         before: String?,

@@ -151,38 +151,6 @@ export interface CcConnection {
   usedToday: number;
 }
 
-export interface MrzStatus {
-  state: "looking" | "found" | "offline" | "attention";
-  detail: string;
-  apiBase: string;
-  uiBase: string;
-  checkedAt: number | null;
-  ready: boolean;
-  connectionId: string | null;
-  connectionStatus: string;
-  settingsChanged: boolean;
-  recipe: Record<string, unknown> | null;
-  health: { api: boolean; worker: boolean; photoshop: boolean; template: boolean; dryRun: boolean } | null;
-}
-
-export function parseMrz(raw: unknown): MrzStatus | null {
-  if (!raw || typeof raw !== "object") return null;
-  const r = obj(raw);
-  const h = r.health ? obj(r.health) : null;
-  const local = (value: unknown, fallback: string): string => {
-    try {
-      const u = new URL(str(value));
-      return u.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname) && !u.username && !u.password && !u.search && !u.hash && u.pathname === "/" ? u.origin : fallback;
-    } catch { return fallback; }
-  };
-  return { state: oneOf(r.state, ["looking", "found", "offline", "attention"] as const, "attention"), detail: str(r.detail),
-    apiBase: local(r.apiBase, "http://127.0.0.1:8787"), uiBase: local(r.uiBase, "http://127.0.0.1:5173"),
-    checkedAt: typeof r.checkedAt === "number" ? r.checkedAt : null, ready: r.ready === true,
-    connectionId: typeof r.connectionId === "string" ? r.connectionId : null, connectionStatus: str(r.connectionStatus),
-    settingsChanged: r.settingsChanged === true, recipe: r.recipe && typeof r.recipe === "object" ? obj(r.recipe) : null,
-    health: h ? { api: h.api === true, worker: h.worker === true, photoshop: h.photoshop === true, template: h.template === true, dryRun: h.dryRun === true } : null };
-}
-
 export interface CcApi {
   title: string;
   version: string;
@@ -523,11 +491,9 @@ export const command = {
   approvals: async (client: GatewayClient) =>
     list((await client.get<{ approvals?: unknown }>("/v1/cc/approvals"))?.approvals).map(parseApproval),
   connections: async (client: GatewayClient) => {
-    const r = await client.get<{ connections?: unknown; higgsfield?: unknown; mrz?: unknown }>("/v1/cc/connections");
-    return { connections: list(r?.connections).map(parseConnection), higgsfield: str(r?.higgsfield, "https://mcp.higgsfield.ai/mcp"), mrz: parseMrz(r?.mrz) };
+    const r = await client.get<{ connections?: unknown; higgsfield?: unknown }>("/v1/cc/connections");
+    return { connections: list(r?.connections).map(parseConnection), higgsfield: str(r?.higgsfield, "https://mcp.higgsfield.ai/mcp") };
   },
-  checkMrz: async (client: GatewayClient) => parseMrz(await client.post("/v1/cc/integrations/mrz/check", {})),
-  connectMrz: async (client: GatewayClient) => parseConnection(await client.post("/v1/cc/integrations/mrz/connect", {})),
   addConnection: async (client: GatewayClient, body: { name: string; url: string } | { config: unknown; name?: string }
     | { specUrl: string; baseUrl?: string; name?: string } | { specText: string; baseUrl?: string; name?: string }) =>
     parseConnection(await client.post("/v1/cc/connections", body)),

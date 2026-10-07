@@ -1,0 +1,79 @@
+[
+ {
+  "id": "tb.steer.add",
+  "title": "Steer: add a step",
+  "goal": "Set a timer for 3 minutes",
+  "category": "steer",
+  "suites": [
+   "steer2"
+  ],
+  "apps": [
+   "com.google.android.deskclock",
+   "com.android.settings"
+  ],
+  "owner": {
+   "steer": {
+    "text": "and also turn on dark mode please",
+    "afterTurns": 1
+   }
+  },
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "night_mode",
+    "on": false
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "timer",
+    "running": true
+   },
+   {
+    "check": "night_mode",
+    "is": true
+   }
+  ]
+ },
+ {
+  "id": "tb.steer.language",
+  "title": "Steer: other words",
+  "goal": "Search the web in Chrome for \"lighthouse\"",
+  "category": "steer",
+  "suites": [
+   "steer2"
+  ],
+  "apps": [
+   "com.android.chrome"
+  ],
+  "owner": {
+   "steer": {
+    "text": "Actually search for \"tb 7731 vuurtoren\" instead",
+    "afterTurns": 1
+   }
+  },
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.android.chrome"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "tb 7731 vuurtoren"
+    ]
+   }
+  ]
+ }
+]

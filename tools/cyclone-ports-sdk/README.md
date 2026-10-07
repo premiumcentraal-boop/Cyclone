@@ -86,7 +86,7 @@ Test it: `python -m cyclone_ports.conformance http://127.0.0.1:8780`, then write
   plugin. De-duplicate on the envelope `id`, and treat a repeated `awaitId` as the same wait.
 - **Safe retries:** `deliver()` adds a `deliveryId` and retries 429, 5xx and network errors. The hub answers a repeat
   with `200 duplicate`.
-- **Your own data points:** extension ports `x.<plugin>.<name>` (SPEC §2.1). Optional capabilities go in `features`.
+- **Your own data points:** extension ports `x.<plugin>.<name>` (SPEC Â§2.1). Optional capabilities go in `features`.
 - **Other languages:**
   - `js/verify.mjs` checks signatures in Node;
   - `schemas/signature-vectors.json` lets any language prove its signature check;
@@ -120,9 +120,20 @@ CI (`pc-companion-ci.yml`) runs these tests on every pull request that touches t
 
 ## Status
 
-The contract is a frozen draft. The real Port Hub lands in the gateway in plan 45 runs P1–P5. Until then:
+The contract is a frozen draft. The real Port Hub lands in the gateway in plan 45 runs P1â€“P5. Until then:
 - `secret.out` and `secret.in` are hub/vault-only and can't be served by a plugin;
 - MCP plugins (`cyclone_port_wait`) and recipes (YAML) come in P5.
 
 Plugins built against this kit keep working once the real hub ships. Builders start at
 `Cyclone V5 plan/HANDOFF-run-ports-plugins.md`.
+
+## Publish your plugin (plan 50)
+
+Plugins install into Cyclone from a GitHub **release file**, `<name>-<version>-windows-x64.cyclone.zip`. Add
+`cyclone-plugin.toml`, `README.md` and `LICENSE` next to your manifest, copy `starters/plugin-repo/.github/workflows/release.yml`
+into your repo, create a release and push the tag `v<version>`. The build Action (`action/`) builds one program with
+PyInstaller, starts it the way Cyclone does and runs the conformance checks, packs the file, attests where it was built
+and attaches it to the release. Owners then paste your repo's link in Glass → Ports → Install.
+
+The format, the archive rules, the settings schema, the start handshake and the signed Cyclone index are specified in
+[`PACKAGE.md`](PACKAGE.md). `cyclone-plugin pack|check` and `cyclone-plugin-build` run the same checks locally.

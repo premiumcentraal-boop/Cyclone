@@ -132,6 +132,7 @@ def _security_headers(request: Request, *, cache: str) -> dict[str, str]:
             "style-src 'self'",
             "script-src 'self'",
             "font-src 'self'",
+            "frame-src http://127.0.0.1:* http://[::1]:*",
             "object-src 'none'",
             "base-uri 'none'",
             "form-action 'none'",

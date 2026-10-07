@@ -1,3 +1,14 @@
+# Handoff: Cyclone Ports run 4 (phone side): DONE, released in alpha.99
+
+**Status:** run 4 is built and released in `5.0.0-alpha.99.dev1` (version code 244) from
+`claude/cyclone-v5-handoff-review-9qrs40`. TODO steps 1–7 below are done; the detail is in plan 48 §7. Physical phone
+acceptance remains UNVERIFIED. Next: run 5 (sources, key rotation, rate limits, drift diff, Account Setup verification
+points bound to `code.in`) and run 6 (polish, ship).
+
+---
+
+_The original handoff follows, kept for reference._
+
 # Handoff: Cyclone Ports run 4 (phone side), in progress
 
 Branch: `claude/cyclone-ui-updates-emnerc` (feature). Released so far: alpha.96/97/98 (runs 1–3, plan 48). Run 4 is

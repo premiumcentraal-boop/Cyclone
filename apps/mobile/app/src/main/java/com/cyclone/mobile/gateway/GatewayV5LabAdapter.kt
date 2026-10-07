@@ -24,14 +24,20 @@ import org.json.JSONObject
  *
  * The lab is the owner at the PC, not a second executor: missions run through the same Mind, PhoneToolExecutor, GATE
  * and Secrets Card. Its owner answers go through Task Kit like any button. It can answer a question, fill values,
- * decline or stop; it can never approve (consequential actions stay a person's decision on the phone) and never
- * supplies a secret.
+ * decline or stop, and it never supplies a secret. It approves nothing a person would care about: since alpha 108 it may
+ * approve exactly two test-owned actions, checked here on the phone whatever the PC asks (deleting the lab's own file
+ * [LAB_FILE], sending to the reserved lab address [LAB_RECIPIENT]); everything else stays a person's decision.
  */
 internal object GatewayV5LabAdapter {
     const val MAX_GOAL = 2_000
     private val MISSION_ID = Regex("^m[a-z0-9]{6,40}$")
     private val INLINE_SECRET = Regex("(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\\s*[:=]")
-    val ANSWERS = setOf("reply", "fill", "decline", "stop", "steer")
+    val ANSWERS = setOf("reply", "fill", "decline", "stop", "steer", "approve")
+    const val LAB_FILE = "cyclone-lab-note.txt"
+    const val LAB_RECIPIENT = "cyclone-lab@example.com"
+    const val NOT_LAB_RECIPIENT = "<not the lab address>"
+    private val REQUEST_ID = Regex("^[A-Za-z0-9._:-]{1,120}$")
+    private val FILE_NAME = Regex("(?i)[\\w.-]+\\.[a-z0-9]{2,5}\\b")
 
     /** Seams for JVM tests; production uses the overlay, the Mind and Task Kit. */
     internal var overlayReady: () -> Boolean = { OverlayChromeRuntime.isAttached() }
@@ -85,13 +91,15 @@ internal object GatewayV5LabAdapter {
             .put("workingMs", mission.workingMs)
             .put("costUsd", mission.usage.costUsd)
             .put("moment", open?.let(::momentJson) ?: JSONObject.NULL)
+            // Alpha 108: failed actions so far, so the PC lab can stop a run that is going nowhere.
+            .put("errors", (if (running != null) liveMetrics(id) else mission.metrics)?.optInt("errors", 0) ?: 0)
     }
 
     fun answer(args: JSONObject): JSONObject {
-        requireOnly(args, setOf("missionId", "action", "text", "values"))
+        requireOnly(args, setOf("missionId", "action", "text", "values", "requestId"))
         val id = missionId(args, null)
         val action = (args.opt("action") as? String).orEmpty()
-        if (action !in ANSWERS) throw invalid("action must be one of ${ANSWERS.joinToString()}; the lab never approves.")
+        if (action !in ANSWERS) throw invalid("action must be one of ${ANSWERS.joinToString()}.")
         live()?.takeIf { it.id == id } ?: throw GatewayProtocolException("RUN_NOT_FOUND", "That mission is not running.")
         val command = when (action) {
             "reply" -> (args.opt("text") as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 500 }
@@ -103,6 +111,15 @@ internal object GatewayV5LabAdapter {
             "steer" -> (args.opt("text") as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 500 }
                 ?.also { if (INLINE_SECRET.containsMatchIn(it)) throw invalid("Do not put secrets in a lab answer.") }
                 ?.let { TaskCommand.Steer(it) } ?: throw invalid("steer needs text of 1..500 characters.")
+            "approve" -> {
+                val requestId = (args.opt("requestId") as? String).orEmpty()
+                if (!REQUEST_ID.matches(requestId)) throw invalid("approve needs the requestId of the open approval.")
+                val open = moment()?.takeIf { it.taskId == "mission-$id" && it.requestId == requestId }
+                    ?: throw GatewayProtocolException("MOMENT_CHANGED", "Cyclone is not waiting for that any more.")
+                if (!labMayApprove(open)) throw GatewayProtocolException("ANSWER_ON_PHONE",
+                    "The lab only approves deleting its own test file or sending to the lab address. Approve anything else on the phone.")
+                TaskCommand.Approve
+            }
             else -> TaskCommand.Stop
         }
         val result = send("mission-$id", command)
@@ -126,6 +143,30 @@ internal object GatewayV5LabAdapter {
             moment.fields.take(8).forEach { out.put(JSONObject().put("label", it.label.take(60)).put("kind", it.kind.take(20))) }
         })
         .put("requestId", moment.requestId ?: JSONObject.NULL)
+        // Alpha 108: the approval's gate and whether a send goes to the lab address. The lab only needs that yes or no,
+        // so any other recipient is never sent to the PC at all.
+        .put("gate", moment.gate?.take(40) ?: JSONObject.NULL)
+        .put("send", moment.send?.let {
+            val recipient = if (it.recipient.trim().equals(LAB_RECIPIENT, ignoreCase = true)) LAB_RECIPIENT else NOT_LAB_RECIPIENT
+            JSONObject().put("text", MindRedaction.scrubText(it.text).take(1_000)).put("recipient", recipient.take(200)).put("app", it.app.take(120))
+        } ?: JSONObject.NULL)
+
+    /**
+     * Alpha 108: the only approvals the lab may give, decided here on the phone. Deleting exactly the lab's own file, or
+     * sending to exactly the lab address; nothing hidden in what is approved. Pay, grant and every other target are no.
+     */
+    internal fun labMayApprove(moment: OwnerMoment): Boolean {
+        if (moment.kind != com.cyclone.mobile.owner.MomentKind.APPROVAL || moment.requestId == null) return false
+        if (MindRedaction.scrubText(moment.text) != moment.text) return false
+        return when (moment.gate?.lowercase()) {
+            "delete" -> {
+                val files = FILE_NAME.findAll(moment.text).map { it.value.lowercase() }.toSet()
+                files == setOf(LAB_FILE)
+            }
+            "send" -> moment.send?.recipient?.trim()?.equals(LAB_RECIPIENT, ignoreCase = true) == true
+            else -> false
+        }
+    }
 
     internal fun recordJson(mission: Mission, metrics: JSONObject, live: Boolean, version: Pair<String, Long>): JSONObject = JSONObject()
         .put("missionId", mission.id)

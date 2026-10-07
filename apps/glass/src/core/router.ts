@@ -2,15 +2,15 @@
 export type AppTab = "map" | "coverage" | "skills" | "screens" | "scenarios" | "versions" | "runs" | "issues" | "dictionary" | "abilities";
 const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios", "versions", "runs", "issues", "dictionary", "abilities"];
 /** Plan 33 (C0): the Command Center's sections. */
-export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts" | "vault" | "connections";
-const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts", "vault", "connections"];
+export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts" | "numbers" | "vault" | "connections" | "fleet";
+const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts", "numbers", "vault", "connections", "fleet"];
 /** Plan 33 (C5): the workspace's own screens: its home, one page, and the trash. */
 export type WorkspaceTab = "home" | "page" | "trash" | "ai" | "ports";
 const PAGE_ID = /^pg_[A-Za-z0-9_-]{8,40}$/;
 
 export type Route =
   | { name: "home" }
-  | { name: "command"; tab: CommandTab | WorkspaceTab; pageId?: string; view?: "map" | "activity" }
+  | { name: "command"; tab: CommandTab | WorkspaceTab; pageId?: string; view?: "map" | "activity" | "install" }
   | { name: "apps" }
   | { name: "app"; placeId: string; tab: AppTab; route?: string[]; runId?: string; skill?: string }
   | { name: "runs" }
@@ -66,7 +66,7 @@ export function parseRoute(hash: string): Route {
     }
     if (parts[1] === "trash") return { name: "command", tab: "trash" };
     if (parts[1] === "ai") return { name: "command", tab: "ai" };
-    if (parts[1] === "ports") return parts[2] === "map" || parts[2] === "activity" ? { name: "command", tab: "ports", view: parts[2] } : { name: "command", tab: "ports" };
+    if (parts[1] === "ports") return parts[2] === "map" || parts[2] === "activity" || parts[2] === "install" ? { name: "command", tab: "ports", view: parts[2] } : { name: "command", tab: "ports" };
     const tab = COMMAND_TABS.includes(parts[1] as CommandTab) ? (parts[1] as CommandTab) : "home";
     return { name: "command", tab };
   }

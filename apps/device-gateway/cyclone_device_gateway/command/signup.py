@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS signup_run (
   account_id TEXT NOT NULL, vault_item_id TEXT, state TEXT NOT NULL, setup TEXT, paused INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS signup_run_row ON signup_run(table_id, row_id);
+CREATE TABLE IF NOT EXISTS signup_starter (
+  id TEXT PRIMARY KEY, table_id TEXT NOT NULL, page_id TEXT NOT NULL, map TEXT NOT NULL);
 """
 
 RECIPE = "signup_map:"
@@ -68,6 +70,20 @@ class SignupStore:
         self._c = center
         with center._lock:
             center._db.executescript(SIGNUP_SCHEMA)
+
+    def install_starters(self) -> None:
+        """Install packaged examples once; never replace owner tables, maps, rows or deletions."""
+        from .signup_starters import install_instagram
+        install_instagram(self._c)
+
+    def starters(self) -> dict[str, Any]:
+        with self._c._lock:
+            live = {t['id'] for t in self._c.tables.list()}
+            pages = {p['id'] for p in self._c.pages.tree()}
+            rows = self._c._db.execute('SELECT * FROM signup_starter ORDER BY id').fetchall()
+        return {'starters': [{'id': r['id'], 'app': json.loads(r['map'])['app'],
+                             'tableId': r['table_id'], 'pageId': r['page_id'] if r['page_id'] in pages else '',
+                             'map': json.loads(r['map'])} for r in rows if r['table_id'] in live]}
 
     # ------------------------------------------------------------------ maps
 
@@ -154,11 +170,21 @@ class SignupStore:
         validate_signup_map(signup)
         if existing is not None and any(t["id"] == existing["table_id"] for t in self._c.tables.list()):
             return self._c.tables.get(existing["table_id"])
+        table = self._new_table(signup)
+        with self._c._lock:
+            self._c._db.execute("INSERT OR REPLACE INTO signup_table(device_id, package, table_id, mapped_at) VALUES (?,?,?,?)",
+                                (device, package, table['id'], signup["mappedAt"]))
+            self._c._audit("owner", "signup.table", package, {"device": device, "table": table['id']})
+        return table
+
+    def _new_table(self, signup: dict[str, Any]) -> dict[str, Any]:
+        """Shared schema-to-table path for phone maps and packaged starter workflows."""
+        validate_signup_map(signup)
         t = self._c.tables
         checks = sorted({CHECK_LABEL[p["check"]] for p in signup["pages"] if p["check"]})
-        description = (f"Accounts for Cyclone to create with the {signup['app']} sign-up it mapped ({len(signup['pages'])} pages). "
+        description = (f"Accounts for Cyclone to create with the recorded {signup['app']} sign-up workflow ({len(signup['pages'])} pages). "
                        "Fill a row, set it to Ready, and press Create accounts. Each account's password is made in your vault, never "
-                       "kept here." + (f" Needs a person for: {', '.join(checks)}." if checks else ""))
+                       "kept here." + (f" Verification: {', '.join(checks)}. Cyclone first tries native SMS autofill; other checks may need you." if checks else ""))
         table = t.create({"title": f"{signup['app']} sign-ups", "icon": "🪪", "description": description[:1000]})
         tid = table["id"]
         title = next(p for p in table["properties"] if p["type"] == "title")
@@ -195,10 +221,6 @@ class SignupStore:
         t.add_property(tid, {"name": "Cyclone account", "type": "relation", "config": {"target": "sys:accounts"}})
         t.add_property(tid, {"name": "Progress", "type": "text"})
         t.add_property(tid, {"name": "Notes", "type": "text"})
-        with self._c._lock:
-            self._c._db.execute("INSERT OR REPLACE INTO signup_table(device_id, package, table_id, mapped_at) VALUES (?,?,?,?)",
-                                (device, package, tid, signup["mappedAt"]))
-            self._c._audit("owner", "signup.table", package, {"device": device, "table": tid})
         return t.get(tid)
 
     # ------------------------------------------------------------------ creating accounts (T7)
@@ -355,10 +377,16 @@ class SignupStore:
             raise CommandError("Name the sign-up table by its tableId.")
         with self._c._lock:
             link = self._c._db.execute("SELECT * FROM signup_table WHERE table_id = ?", (table_id,)).fetchone()
+            starter = self._c._db.execute("SELECT * FROM signup_starter WHERE table_id = ?", (table_id,)).fetchone()
+            if link is None and starter is not None:
+                template = json.loads(starter['map'])
+                link = {'device_id': '', 'package': template['package']}
+                mapped = {'map': starter['map']}
+            elif link is not None:
+                mapped = self._c._db.execute("SELECT map FROM signup_map WHERE device_id = ? AND package = ?", (link["device_id"], link["package"])).fetchone()
             if link is None:
                 raise CommandError("That table is not a sign-up table. Make one from an app's sign-up map in Accounts.")
             table = self._c.tables.get(table_id)
-            mapped = self._c._db.execute("SELECT map FROM signup_map WHERE device_id = ? AND package = ?", (link["device_id"], link["package"])).fetchone()
             columns = {r["prop_id"]: (r["field_key"], r["kind"]) for r in self._c._db.execute(
                 "SELECT prop_id, field_key, kind FROM signup_column WHERE table_id = ?", (table_id,))}
         props = {p["name"]: p for p in table["properties"]}
@@ -415,6 +443,12 @@ class SignupStore:
     def _device_of(self, sheet: dict[str, Any], row: dict[str, Any]) -> str:
         prop = sheet["byName"].get("Phone")
         linked = row["cells"].get(prop["id"]) if prop else None
+        if not sheet['device']:
+            if not isinstance(linked, list) or len(linked) != 1:
+                raise CommandError('Choose one phone in this row before creating the account.')
+            known = {d['deviceId'] for d in self._c._devices()}
+            if linked[0] not in known:
+                raise CommandError('The selected phone is unavailable. Choose a connected phone in this row.')
         return linked[0] if isinstance(linked, list) and linked else sheet["device"]
 
     def _progress(self, status: str, setup: dict[str, Any] | None, cause: str) -> str:
@@ -433,6 +467,8 @@ class SignupStore:
             parts.append(f"page {setup['drift']} changed since the map; Cyclone worked it out (map it again to refresh)")
         if setup["state"] == "verification":
             parts.append("a person's step: " + (setup["note"] or "check the phone"))
+        elif setup["state"] == "code":
+            parts.append(setup["note"] or "Waiting for the code on the phone")
         elif setup["note"]:
             parts.append(setup["note"])
         return " · ".join(parts)[:300] or "Creating."

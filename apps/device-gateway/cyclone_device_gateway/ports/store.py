@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS wait (
 CREATE INDEX IF NOT EXISTS wait_run ON wait(run_id);
 CREATE TABLE IF NOT EXISTS binding (
   scope TEXT NOT NULL, port TEXT NOT NULL, plugins TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(scope, port));
+CREATE TABLE IF NOT EXISTS starter_settings (
+  name TEXT PRIMARY KEY, settings TEXT NOT NULL, updated_at INTEGER NOT NULL);
 """
 ACTIVITY_KEEP = 5_000
 JSON_FIELDS = ("manifest", "pending", "consent", "checks")
@@ -49,6 +51,10 @@ class PortStore:
         self._db = sqlite3.connect(str(root / "ports.db"), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
+        # Plan 50: plugins the Plugins installer runs (endpoint and key are set by Cyclone, not by hand).
+        if "managed" not in {r["name"] for r in self._db.execute("PRAGMA table_info(plugin)")}:
+            self._db.execute("ALTER TABLE plugin ADD COLUMN managed INTEGER NOT NULL DEFAULT 0")
+            self._db.commit()
         self._lock = threading.RLock()
         if protect is None and os.name != "nt":
             # Development machines: a file only this user can read. Windows uses DPAPI (GrantStore's default).
@@ -118,6 +124,16 @@ class PortStore:
 
     def _drop_key(self, name: str) -> None:
         self.keys.drop(name)
+
+    def starter_settings(self, name: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute("SELECT settings FROM starter_settings WHERE name=?", (name,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_starter_settings(self, name: str, settings: dict[str, Any]) -> None:
+        with self._lock, self._db:
+            self._db.execute("INSERT OR REPLACE INTO starter_settings VALUES(?,?,?)",
+                             (name, json.dumps(settings), now_ms()))
 
     # ---- bindings (plan 48 run 2) -------------------------------------------------------------------------------------
 

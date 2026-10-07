@@ -14,6 +14,27 @@ test.afterEach(() => {
   while (mounted.length) mounted.pop().destroy();
 });
 
+test('Accounts: installed starter is visible before a phone is connected', async () => {
+  installMiniDom();
+  const routesSeen = [];
+  const gateway = fakeGateway(routes({
+    'GET /v1/cc/signup/starters': () => ({ starters: [{ id: 'instagram-phone-v1', app: 'Instagram',
+      tableId: 'tb_starter000001', pageId: 'pg_guide0000001', map: INSTAGRAM }] }),
+  }));
+  const context = { ...ctx(gateway.fetch), devices: [], device: null, navigate: (route) => routesSeen.push(route) };
+  const view = createCommandPage(context, 'accounts');
+  mounted.push(view);
+  await flush();
+  assert.match(view.element.textContent, /Instagram account creation/);
+  assert.match(view.element.textContent, /Already installed/);
+  assert.match(view.element.textContent, /No phone connected/);
+  button(view, 'Signup guide').click();
+  assert.deepEqual(routesSeen, [{ name: 'command', tab: 'page', pageId: 'pg_guide0000001' }]);
+  button(view, 'Open starter table').click();
+  assert.ok(button(view, 'Create accounts'));
+  assert.equal(gateway.calls.some((x) => x.path === '/v1/cc/signup/create'), false);
+});
+
 const field = (key, label, kind, extra = {}) => ({ key, label, kind, required: true, hint: "", choices: [], ...extra });
 const page = (index, title, fields, check = null) => ({ index, title, continue: "Next", check, fields });
 const INSTAGRAM = {

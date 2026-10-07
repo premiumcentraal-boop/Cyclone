@@ -365,6 +365,7 @@ private fun openInstalledApp(context: android.content.Context, packageName: Stri
     if (packageName.isBlank()) return
     context.packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
         runCatching {
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, launch)
             context.startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }

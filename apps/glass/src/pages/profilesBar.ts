@@ -4,7 +4,7 @@
  * remove one from that profile only). Creating and deleting profiles stays on the phone.
  */
 import type { GlassContext } from "../app.js";
-import { MAIN_PROFILE, cssColor, profilesApi, type PhoneProfile, type ProfileApps } from "../services/profiles.js";
+import { MAIN_PROFILE, cssColor, profilesApi, type ConnectorEntry, type PhoneProfile, type ProfileApps } from "../services/profiles.js";
 import { el, setChildren } from "../ui/dom.js";
 import { actionButton, chip } from "../ui/components.js";
 
@@ -24,7 +24,10 @@ export function createProfilesBar(ctx: GlassContext, say: (text: string, tone?: 
   strip.setAttribute("aria-label", "Profiles");
   const actions = el("div", "pf-actions");
   const manager = el("div", "pf-manager");
-  element.append(strip, actions, manager);
+  // Plan 51 K3: entries the phone's approved connectors add to its Profiles. Shown here, opened on the phone.
+  const connectorRow = el("div", "pf-connectors");
+  element.append(strip, connectorRow, actions, manager);
+  let connectorEntries: ConnectorEntry[] = [];
   let device: string | null = null;
   let profiles: PhoneProfile[] = [];
   let selected = MAIN_PROFILE;
@@ -58,6 +61,13 @@ export function createProfilesBar(ctx: GlassContext, say: (text: string, tone?: 
       profiles = [];
       element.hidden = true;
     }
+    try {
+      connectorEntries = await profilesApi.connectors(ctx.client, device);
+    } catch {
+      connectorEntries = [];
+    }
+    if (destroyed || mine !== seq) return;
+    if (connectorEntries.length) element.hidden = false;
     await loadApps();
     render();
   }
@@ -79,6 +89,16 @@ export function createProfilesBar(ctx: GlassContext, say: (text: string, tone?: 
   }
 
   function render(): void {
+    connectorRow.replaceChildren();
+    for (const e of connectorEntries) {
+      const item = el("span", "pf-connector");
+      item.title = "Open it on the phone, in Profiles.";
+      item.append(el("span", "muted", `From ${e.connector}`), el("span", undefined, e.label));
+      if (e.subtitle) item.append(el("span", "muted", e.subtitle));
+      if (e.state === "attention") item.append(chip(e.text || "Needs you", "warning"));
+      else if (e.state === "off") item.append(chip("Off", "neutral"));
+      connectorRow.append(item);
+    }
     strip.replaceChildren();
     for (const p of profiles) {
       const b = el("button", p.id === selected ? "pf-profile active" : "pf-profile");

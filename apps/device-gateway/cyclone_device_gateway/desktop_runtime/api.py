@@ -213,6 +213,17 @@ class DesktopRuntime:
         # Plan 33 (C0): the Command Center's accounts, tasks, routines, results and approvals, in one local SQLite file.
         from ..command.center import CommandCenter
         self.command = CommandCenter(settings.runtime_dir / "command" / "command.db", share_contract, self.fleet.list_public)
+        self.command.signup.install_starters()
+        from .scenes import SceneStore
+        from .fleet_orchestrator import FleetOrchestrator
+        self.scenes = SceneStore(settings.runtime_dir / "fleet-scenes.json")
+        self.fleet_orchestrator = FleetOrchestrator(
+            self.command, self.fleet.list_public, self.workspace.nickname_map, settings.runtime_dir / "fleet" / "missions.json",
+            groups=lambda: list(self.workspace.public().get("groups") or []),
+            events=getattr(self.fleet, "events", None),
+            colors=self.workspace.color_map,
+        )
+        self.command.set_task_listener(self.fleet_orchestrator.enqueue_task_change)
         # Plan 48: the Port Hub (Cyclone Ports). Absent only when the ports kit isn't installed.
         from ..ports.hub import PortHub
         try:
@@ -220,6 +231,34 @@ class DesktopRuntime:
                                                  base_url=f"http://127.0.0.1:{settings.port}")
         except RuntimeError:
             self.ports = None
+        # Plan 48 run 4: the hub collects each ready phone's port messages and answers its runs' waits. Codes are sealed
+        # only to a phone key the owner trusted in Glass (the Command Center's device keys).
+        self.port_phones = None
+        if self.ports is not None:
+            from ..ports.phone import PhoneBridge
+
+            def trusted_key(device_id: str) -> dict[str, str] | None:
+                row = self.command.delivery.trusted_key(device_id)
+                return None if row is None else {"publicKey": row["public_key"], "fingerprint": row["fingerprint"]}
+
+            self.port_phones = PhoneBridge(self.ports, share_contract, self.fleet.list_public, trusted_key)
+        # Plan 50 (alpha.103): plugins installed from GitHub release files, run by the Plugin Host, joined to the Port Hub.
+        self.plugins = None
+        if self.ports is not None:
+            from ..plugins.service import PluginsService
+            try:
+                self.plugins = PluginsService(settings.runtime_dir / "plugins", self.ports)
+            except RuntimeError:
+                self.plugins = None
+        # Alpha.102: every number Cyclone can receive codes on (the fleet's SIMs, forwarders, rented numbers).
+        from ..numbers.service import NumbersService
+        self.numbers = NumbersService(
+            settings.runtime_dir / "numbers" / "numbers.db",
+            devices=self.fleet.list_public,
+            read_phone=share_contract.numbers_list,
+            plugins=lambda: self.ports.overview()["plugins"] if self.ports is not None else [],
+            accounts=self.command.list_accounts,
+        )
         self.lan_share = LanShareDirectory(
             status=share_contract.share_status,
             trust_record=self.trust.store.record,
@@ -265,17 +304,29 @@ class DesktopRuntime:
         self.command.start()
         if self.ports is not None:
             self.ports.start()
+        if self.port_phones is not None:
+            self.port_phones.start()
+        if self.plugins is not None:
+            self.plugins.start()
         self.care.start()
         self.medic.start()
         self.cloud.start()
 
     def stop(self) -> None:
+        closer = getattr(self, "fleet_orchestrator", None)
+        if closer is not None:
+            closer.close()
         self.cloud.stop()
         self.medic.stop()
         self.care.stop()
         self.command.stop()
+        if self.port_phones is not None:
+            self.port_phones.stop()
+        if self.plugins is not None:
+            self.plugins.stop()
         if self.ports is not None:
             self.ports.stop()
+        self.numbers.close()
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
         self.trust.stop()
         self.live_diagnostics.stop()
@@ -839,6 +890,11 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     app.include_router(create_oauth_callback_router(desktop))
     from ..ports.api import create_ports_router
     app.include_router(create_ports_router(desktop, settings.token))
+    from ..plugins.api import create_plugins_router
+    app.include_router(create_plugins_router(lambda: getattr(desktop, "plugins", None), settings.token))
+    if getattr(desktop, "numbers", None) is not None:
+        from ..numbers.api import create_numbers_router
+        app.include_router(create_numbers_router(desktop.numbers, settings.token))
     # Alpha 87: phone care (update the phone's Cyclone, why it stopped). Test doubles without it skip the routes.
     if getattr(desktop, "care", None) is not None:
         from ..phone_care.api import create_phone_care_router
@@ -848,6 +904,8 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
         app.include_router(create_cloud_fleet_router(desktop.cloud, settings.token))
     # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
     app.state.glass_codes = LaunchCodes()
+    from .fleet_api import create_fleet_router
+    app.include_router(create_fleet_router(desktop, settings.token))
     app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))
     app.add_event_handler("startup", desktop.start)
     app.add_event_handler("shutdown", desktop.stop)

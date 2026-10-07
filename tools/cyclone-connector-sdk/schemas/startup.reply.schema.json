@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/startup.reply.schema.json",
+  "title": "startup.reply",
+  "type": "object",
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "configRef": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1024
+    },
+    "state": {
+      "enum": [
+        "unknown",
+        "ready",
+        "degraded",
+        "failed"
+      ]
+    }
+  }
+}

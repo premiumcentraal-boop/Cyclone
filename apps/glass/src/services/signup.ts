@@ -45,6 +45,16 @@ export interface SignupMap {
   tableId: string | null;
 }
 export interface SignupMaps { deviceId: string; maps: SignupMap[]; fresh: boolean; note: string | null }
+export interface SignupStarter { id: string; app: string; tableId: string; pageId: string; map: SignupMap }
+
+export function parseStarters(raw: unknown): SignupStarter[] {
+  return list(obj(raw).starters).flatMap((x) => {
+    const r = obj(x);
+    const map = parseMap(r.map);
+    return map && str(r.id) && str(r.tableId)
+      ? [{ id: str(r.id), app: str(r.app) || map.app, tableId: str(r.tableId), pageId: str(r.pageId), map }] : [];
+  });
+}
 
 /** Where an app stands for Account Setup on one phone. */
 export type SignupState = "none" | "mapping" | "partial" | "mapped";
@@ -91,6 +101,7 @@ export function parseMap(raw: unknown): SignupMap | null {
 }
 
 export const signupApi = {
+  starters: async (client: GatewayClient) => parseStarters(await client.get('/v1/cc/signup/starters')),
   maps: async (client: GatewayClient, deviceId: string, signal?: AbortSignal) =>
     parseSignupMaps(await client.get(`/v1/cc/signup/maps?deviceId=${encodeURIComponent(deviceId)}`, signal)),
   map: (client: GatewayClient, body: { deviceId: string; package: string; app: string; ownerBasis: OwnerBasis }) =>

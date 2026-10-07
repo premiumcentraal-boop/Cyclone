@@ -137,7 +137,7 @@ internal object GatewayObservationAdapter {
         val settleMaxMs = args.optLong("settleMaxMs", 0L).coerceIn(0L, 6_000L)
         val tolerateContentChange = catalogPersona == AtlasPersona.MAPPING && args.optBoolean("tolerateContentChange", false)
         val captured = try {
-            com.cyclone.mobile.agent.SemanticCaptureBoundary.capture(::surface,
+            com.cyclone.mobile.agent.SemanticCaptureBoundary.captureRetrying(::surface,
                 tolerateContentChange = tolerateContentChange,
                 settle = {
                     service.waitForUiQuiet()

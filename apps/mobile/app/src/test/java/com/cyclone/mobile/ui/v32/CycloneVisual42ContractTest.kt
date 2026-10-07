@@ -9,7 +9,9 @@ class CycloneVisual42ContractTest {
     @Test fun homeReadsRealReadinessRoutinesAndTaskState() {
         val home = source("CycloneV32App.kt")
         // R6: the profile slider leads Home; readiness is a glass status chip under it.
-        assertTrue(home.contains("ProfileSlider(profiles) { onProfiles() }"))
+        assertTrue(home.contains("ProfileSlider(profiles) { p ->"))
+        // Plan 51 K3: a connector entry opens the connector's own screen; everything else opens Profiles.
+        assertTrue(home.contains("else if (!com.cyclone.mobile.connector.ConnectorLauncher.open(context, entry)) onProfiles()"))
         assertTrue(home.contains("com.cyclone.mobile.ui.v32.ask.AskStatusChip(readinessLabel, positive = false, onClick = onSettings)"))
         assertTrue(home.contains("CyclonePermissionSetup.phoneControlSnapshot(context)"))
         assertTrue(home.contains("AutomationRuntime.store.listAutomations()"))

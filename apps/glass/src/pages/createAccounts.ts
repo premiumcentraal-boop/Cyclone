@@ -108,7 +108,7 @@ export function createAccountsPanel(ctx: GlassContext, tableId: string, say: (te
       el("h4", "ca-title", `Create ${prepared.app} accounts`),
       list,
       el("p", "cc-hint", "Confirming approves creating each of these accounts: the phone presses the final button without asking again. " +
-        "Each account gets a new password in your vault. A code, CAPTCHA or ID check still waits for a person."),
+        "Each account gets a new password in your vault. Cyclone first tries to retrieve SMS codes from the selected phone; other checks may need you."),
       actions);
   }
 

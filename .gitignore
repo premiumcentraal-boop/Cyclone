@@ -56,3 +56,7 @@ Thumbs.db
 playwright-report/
 test-results/
 .cyclone/agent-runs/
+
+# Testbench seat: local permission set and briefing (tools/cyclone-testbench/seat)
+/CLAUDE.local.md
+/.claude/settings.local.json

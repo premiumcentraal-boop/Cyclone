@@ -38,7 +38,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -e 'apps/device-gateway[test]' -e 'tools/cyclone-agent-mcp[test]' -e tools/codex-phone-mcp -e tools/cyclone-ports-sdk
           # What the package runs on Windows: the PC features, the cyclone command, Glass hosting and the tooling seam.
-          python -m pytest -q apps/device-gateway/tests/test_pc_features.py apps/device-gateway/tests/test_cyclone_terminal.py apps/device-gateway/tests/test_glass_hosting.py apps/device-gateway/tests/test_tooling_seam.py apps/device-gateway/tests/test_market.py
+          python -m pytest -q apps/device-gateway/tests/test_pc_features.py apps/device-gateway/tests/test_cyclone_terminal.py apps/device-gateway/tests/test_glass_hosting.py apps/device-gateway/tests/test_tooling_seam.py apps/device-gateway/tests/test_market.py apps/device-gateway/tests/test_plugins.py
       - name: Build, install and smoke-test Cyclone-PC
         shell: pwsh
         run: |
@@ -118,6 +118,8 @@ jobs:
           test "$(tr -d '\r\n' < candidate/run-id.txt)" = "$run"
           test "$(tr -d '\r\n' < candidate/signing-state.txt)" = UNSIGNED_VERIFIED_CANDIDATE
           (cd candidate && sha256sum --check "$APK_NAME.sha256")
+          (cd candidate/connector && sha256sum --check SHA256SUMS)
+          mkdir -p connector && cp candidate/connector/Cyclone-Connector-* connector/
 
       - name: Set up Node for Glass
         if: steps.release.outputs.skip == 'false'
@@ -266,6 +268,9 @@ jobs:
               # `cyclone` and install.ps1 refuse a package whose SHA-256 is not listed here.
               'sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (apk, glass, pc, installer, setup)},
           }
+          # Plan 51 K4: the connector kit (client library, sample, schemas) is listed the same way.
+          kit = sorted(Path('connector').glob('Cyclone-Connector-*'))
+          manifest['sha256'].update({p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in kit})
           Path('release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
           notes = Path(f"docs/RELEASE_{os.environ['MOBILE']}.md").read_text()
           title = next(line[2:].strip() for line in notes.splitlines() if line.startswith('# '))
@@ -276,9 +281,11 @@ jobs:
                        f"Windows may say it protected your PC (the file is not code-signed yet): **More info** → **Run anyway**.\n\n"
                        f"**Android:** download **{apk.name}** and install it as an update.\n\n"
                        f"Also: already on alpha.47 or later, type `cyclone update`; or install from PowerShell with "
-                       f"`irm {install} | iex`. Glass alone: **{glass.name}**.\n\n")
+                       f"`irm {install} | iex`. Glass alone: **{glass.name}**.\n\n"
+                       f"Building a phone connector? The Cyclone-Connector-* files are the client library, a sample "
+                       f"connector and the schemas with test vectors.\n\n")
           Path('RELEASE_NOTES.md').write_text(downloads + notes)
           PY
-          gh release create "$TAG" signed/* glass/* pc/* release-manifest.json \
+          gh release create "$TAG" signed/* glass/* pc/* connector/* release-manifest.json \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$(cat release-title.txt)" --prerelease --draft --notes-file RELEASE_NOTES.md
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease

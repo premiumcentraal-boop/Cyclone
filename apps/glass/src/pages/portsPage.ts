@@ -19,10 +19,11 @@ import { createPortsActivity } from "./portsActivity.js";
 import { createPortMap } from "./portsMap.js";
 import { feedRow, openPluginSheet, type PluginSheet } from "./portsPlugin.js";
 import { primary, secondary, sensitivityChip, statusPill, tile, wayGlyph } from "./portsUi.js";
+import { createPluginsInstall } from "./pluginsInstall.js";
 
 const POLL_MS = 5_000;
 
-export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" | "activity" = "plugins"): GlassPage {
+export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" | "activity" | "install" = "plugins"): GlassPage {
   const element = el("div", "page page-ports");
   const header = el("header", "pt-page-head");
   const titles = el("div", "pt-page-titles");
@@ -35,7 +36,7 @@ export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" | "ac
   header.append(titles, add);
   const tabs = el("nav", "pt-tabs");
   tabs.setAttribute("aria-label", "Ports views");
-  for (const [id, label, glyph] of [["plugins", "Plugins", "plug"], ["map", "Port map", "port"], ["activity", "Activity", "pulse"]] as const) {
+  for (const [id, label, glyph] of [["plugins", "Plugins", "plug"], ["install", "Install", "plus"], ["map", "Port map", "port"], ["activity", "Activity", "pulse"]] as const) {
     const tab = el("a", `pt-tab${id === view ? " active" : ""}`);
     tab.href = id === "plugins" ? "#/command/ports" : `#/command/ports/${id}`;
     if (id === view) tab.setAttribute("aria-current", "page");
@@ -53,7 +54,8 @@ export function createPortsPage(ctx: GlassContext, view: "plugins" | "map" | "ac
     note.classList.toggle("pt-note-error", tone === "error");
   };
   const map = view === "map" ? createPortMap(ctx, say, () => openAdd())
-    : view === "activity" ? createPortsActivity(ctx, element, say) : null;
+    : view === "activity" ? createPortsActivity(ctx, element, say)
+    : view === "install" ? createPluginsInstall(ctx, element, say) : null;
   if (map) setChildren(body, map.element);
 
   let data: Overview | null = null;

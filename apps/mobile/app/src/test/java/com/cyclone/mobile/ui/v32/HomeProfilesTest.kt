@@ -25,4 +25,16 @@ class HomeProfilesTest {
         assertEquals("1 app", HomeProfiles.apps(p("x", "X", apps = 1)))
         assertEquals("5 apps", HomeProfiles.apps(p("x", "X", apps = 5)))
     }
+
+    @Test fun `connector entries follow the profiles, never first, and say whose they are`() {
+        val entry = com.cyclone.mobile.connector.SelectorEntry("acme-profiles", "Acme Profiles", "com.acme.profiles",
+            com.cyclone.mobile.connector.ConnectorEntry("cloud", "acme.cloud", "Aaa cloud", "3 devices", null, "attention", "Sign in again"))
+        val fromConnector = HomeProfile(entry.key, "Aaa cloud", listOf("com.acme.profiles"), ready = true, current = true, owner = false,
+            active = true, connector = entry)
+        val order = HomeProfiles.order(listOf(fromConnector, p("b", "Work")))
+        assertEquals(listOf("b", entry.key), order.map { it.key })
+        assertEquals(listOf(HomeProfiles.THIS_PHONE.key, entry.key), HomeProfiles.order(listOf(fromConnector)).map { it.key })
+        assertEquals("From Acme Profiles", HomeProfiles.kind(fromConnector))
+        assertEquals("3 devices · Sign in again", HomeProfiles.apps(fromConnector))
+    }
 }

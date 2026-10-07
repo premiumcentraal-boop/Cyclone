@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/config.args.schema.json",
+  "title": "config.args",
+  "type": "object",
+  "required": [
+    "profileId",
+    "androidUserId",
+    "packageName"
+  ],
+  "properties": {
+    "profileId": {
+      "type": "string",
+      "pattern": "^Cyclone_[a-f0-9]{16}$"
+    },
+    "androidUserId": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "packageName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+    },
+    "value": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "state": {
+      "enum": [
+        "unknown",
+        "ready",
+        "degraded",
+        "failed"
+      ]
+    }
+  }
+}

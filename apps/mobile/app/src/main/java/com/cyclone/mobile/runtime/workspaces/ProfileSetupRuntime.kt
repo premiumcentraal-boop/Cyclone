@@ -169,6 +169,7 @@ object ProfileSetupRuntime {
                 }
             }
             check(verified) { "Android hasn't completed switching profiles yet." }
+            runCatching { com.cyclone.mobile.connector.ConnectorEvents.switched(context, user) }
         }
     }
 

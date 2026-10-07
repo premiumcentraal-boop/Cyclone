@@ -7,6 +7,10 @@
     <!-- Plan 29 (direct first): add events and look up contacts without opening any app. Asked for when first needed. -->
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Plan 49: fill a code sent by text to this phone's own number (read in memory, never stored). -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -44,7 +48,17 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
         </intent>
+        <!-- Plan 51: find connector apps on this phone. -->
+        <intent>
+            <action android:name="com.cyclone.connector.CONNECT" />
+        </intent>
     </queries>
+    <!-- Plan 51: connectors protect their marker service with CONNECTOR_HOST and their wake receiver with
+         WAKE_CONNECTOR, so only Cyclone (same signing key) can reach either. -->
+    <permission android:name="com.cyclone.mobile.permission.CONNECTOR_HOST" android:protectionLevel="signature" />
+    <permission android:name="com.cyclone.mobile.permission.WAKE_CONNECTOR" android:protectionLevel="signature" />
+    <uses-permission android:name="com.cyclone.mobile.permission.CONNECTOR_HOST" />
+    <uses-permission android:name="com.cyclone.mobile.permission.WAKE_CONNECTOR" />
 
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
@@ -113,6 +127,20 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-requested isolated app task with visible pause, stop and human handoff controls" />
         </service>
+        <!-- Plan 51: the one door for phone connectors. Exported, but every call is checked in code: the caller's
+             identity from Binder, the owner's approval for that package and signing key, the scope it uses. -->
+        <service android:name=".connector.ConnectorService" android:exported="true">
+            <intent-filter>
+                <action android:name="com.cyclone.connector.SERVICE" />
+            </intent-filter>
+        </service>
+        <!-- Plan 51: an uninstalled connector loses its approval, entries and profile data. -->
+        <receiver android:name=".connector.ConnectorPackageReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
         <!-- Task Kit: notification buttons for foreground tasks. Not exported. -->
         <receiver android:name=".task.TaskCommandReceiver" android:exported="false" />
         <!-- Alpha 88: the PC wakes a stopped Cyclone over adb; DUMP keeps every ordinary app out. -->

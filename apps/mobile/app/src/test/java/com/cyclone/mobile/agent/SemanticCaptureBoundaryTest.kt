@@ -38,6 +38,33 @@ class SemanticCaptureBoundaryTest {
         assertEquals(1, captures); assertEquals("tree", captured.semantic)
     }
 
+    @Test fun aReadThatChangedOnceIsRetriedInPlace() {
+        // Alpha 109: the first traversal races a change, the second sees a still screen and is returned.
+        var stamp = initial; var traversals = 0; var settles = 0; var now = 0L
+        val captured = SemanticCaptureBoundary.captureRetrying({ stamp }, {
+            traversals++; if (traversals == 1) stamp = stamp.copy(revision = stamp.revision + 1); "tree$traversals"
+        }, clock = { now += 50; now }, settle = { settles++ })
+        assertEquals("tree2", captured.semantic)
+        assertEquals(2, traversals); assertEquals(2, settles)
+    }
+
+    @Test fun aScreenThatKeepsChangingStillFailsAfterTheRetriesOrTheBudget() {
+        var stamp = initial; var traversals = 0; var now = 0L
+        try {
+            SemanticCaptureBoundary.captureRetrying({ stamp }, { traversals++; stamp = stamp.copy(revision = stamp.revision + 1); "tree" },
+                clock = { now += 10; now })
+            fail("A screen that never holds still was accepted")
+        } catch (_: CaptureChanged) { }
+        assertEquals(3, traversals)
+        stamp = initial; traversals = 0; now = 0L
+        try {
+            SemanticCaptureBoundary.captureRetrying({ stamp }, { traversals++; stamp = stamp.copy(revision = stamp.revision + 1); "tree" },
+                clock = { now += 400; now })
+            fail("Retried past the time budget")
+        } catch (_: CaptureChanged) { }
+        assertEquals(1, traversals)
+    }
+
     @Test fun oneTraversalAndMeasuredImageServeTheBundle() {
         var now = 10L; var captures = 0; var images = 0; var samples = 0
         val captured = SemanticCaptureBoundary.capture({ samples++; initial },

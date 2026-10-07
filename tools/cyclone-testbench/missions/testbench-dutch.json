@@ -1,0 +1,193 @@
+[
+ {
+  "id": "tb.nl.timer",
+  "title": "Dutch: timer",
+  "goal": "Zet een timer voor 2 minuten",
+  "category": "dutch",
+  "suites": [
+   "dutch"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "timer",
+    "running": true
+   }
+  ]
+ },
+ {
+  "id": "tb.nl.battery",
+  "title": "Dutch: battery",
+  "goal": "Hoeveel procent batterij heb ik nog?",
+  "category": "dutch",
+  "suites": [
+   "dutch"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer_probe",
+    "probe": "battery"
+   }
+  ]
+ },
+ {
+  "id": "tb.nl.dark",
+  "title": "Dutch: dark mode",
+  "goal": "Zet de donkere modus aan",
+  "category": "dutch",
+  "suites": [
+   "dutch"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "night_mode",
+    "on": false
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "night_mode",
+    "is": true
+   }
+  ]
+ },
+ {
+  "id": "tb.nl.calc",
+  "title": "Dutch: calculator",
+  "goal": "Reken met de rekenmachine uit wat 1234 keer 5678 is",
+  "category": "dutch",
+  "suites": [
+   "dutch"
+  ],
+  "apps": [
+   "com.google.android.calculator"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.calculator"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "any": [
+     "7006652",
+     "7.006.652"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.nl.maps",
+  "title": "Dutch: Maps",
+  "goal": "Laat het Rijksmuseum zien op Google Maps",
+  "category": "dutch",
+  "suites": [
+   "dutch"
+  ],
+  "apps": [
+   "com.google.android.apps.maps"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.apps.maps"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.apps.maps"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Rijksmuseum"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.nl.ask",
+  "title": "Dutch: must ask",
+  "goal": "Zet een wekker... nee, een timer. Vraag me eerst hoe lang.",
+  "category": "dutch",
+  "suites": [
+   "dutch",
+   "judgement"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "owner": {
+   "reply": "3 minuten",
+   "fill": {
+    "*": "3 minuten"
+   }
+  },
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": true
+   },
+   {
+    "check": "timer",
+    "running": true
+   }
+  ]
+ }
+]

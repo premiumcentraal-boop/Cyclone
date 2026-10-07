@@ -15,16 +15,18 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from cyclone_ports import PluginServer, fetch_artifact  # noqa: E402
+from cyclone_ports import PluginServer, fetch_artifact, is_managed  # noqa: E402
 
 MANIFEST = json.loads((Path(__file__).parent / "cyclone-plugin.json").read_text(encoding="utf-8"))
 
 
-def build(secret: str, out_dir: str | os.PathLike, host: str = "127.0.0.1", port: int = 0) -> PluginServer:
+def build(secret: str | None, out_dir: str | os.PathLike, host: str = "127.0.0.1", port: int = 0,
+          server: PluginServer | None = None) -> PluginServer:
     out = Path(out_dir)
     (out / "artifacts").mkdir(parents=True, exist_ok=True)
-    server = PluginServer(dict(MANIFEST), secret, host, port)
-    server.manifest["endpoint"] = server.url
+    if server is None:
+        server = PluginServer(dict(MANIFEST), secret, host, port)
+        server.manifest["endpoint"] = server.url
     lock = threading.Lock()
     seen: dict[str, None] = {}  # envelope ids, newest last: the hub may retry a send
 
@@ -54,6 +56,11 @@ def build(secret: str, out_dir: str | os.PathLike, host: str = "127.0.0.1", port
 
 
 def main() -> None:
+    if is_managed():  # installed by Cyclone (plan 50): address, key and settings come from the start handshake
+        server = PluginServer.managed(MANIFEST)
+        folder = Path(server.handshake["dataDir"]) / Path(server.handshake["settings"].get("folder") or "runs").name
+        build(None, folder, server=server).serve_forever()
+        return
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default="logger-out")
     parser.add_argument("--host", default="127.0.0.1")

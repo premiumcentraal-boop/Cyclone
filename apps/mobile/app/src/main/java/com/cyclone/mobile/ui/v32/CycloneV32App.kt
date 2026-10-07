@@ -251,7 +251,14 @@ private fun V32HomePage(
             ) {
                 item { HomeTopBar(onSettings = onSettings, onSearch = onSearch, onAi = onAi) }
 
-                item { ProfileSlider(profiles) { onProfiles() } }
+                item {
+                    val context = LocalContext.current
+                    ProfileSlider(profiles) { p ->
+                        val entry = p.connector
+                        if (entry == null) onProfiles()
+                        else if (!com.cyclone.mobile.connector.ConnectorLauncher.open(context, entry)) onProfiles()
+                    }
+                }
 
                 if (!ready.ready) {
                     item {
@@ -346,7 +353,7 @@ private fun openSearchResult(
         com.cyclone.mobile.ui.v32.search.SearchCategory.APPS -> {
             val launch = context.packageManager.getLaunchIntentForPackage(item.target)
                 ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (launch != null) runCatching { context.startActivity(launch) }
+            if (launch != null) runCatching { com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeIntent(context, launch); context.startActivity(launch) }
                 .onFailure { Toast.makeText(context, "Couldn't open ${item.title}", Toast.LENGTH_SHORT).show() }
         }
     }

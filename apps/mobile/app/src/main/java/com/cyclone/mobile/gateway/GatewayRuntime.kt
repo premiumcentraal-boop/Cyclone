@@ -113,6 +113,53 @@ object GatewayRuntime {
 
     fun isEnabled(context: Context): Boolean = GatewaySessionStore.enabled(context)
 
+    fun fleetHealth(context: Context): JSONObject {
+        val battery = context.getSystemService(android.os.BatteryManager::class.java)
+        val percent = battery?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }
+        val charging = battery?.isCharging == true
+        val caps = context.getSystemService(android.net.ConnectivityManager::class.java)?.let { cm ->
+            cm.getNetworkCapabilities(cm.activeNetwork)
+        }
+        val network = when {
+            caps == null -> "offline"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+            else -> "other"
+        }
+        val root = fleetRoot()
+        val camera = context.checkSelfPermission(android.Manifest.permission.CAMERA) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        return JSONObject()
+            .put("version", 1)
+            .put("batteryPercent", percent ?: JSONObject.NULL)
+            .put("charging", charging)
+            .put("network", network)
+            .put("os", "Android ${android.os.Build.VERSION.RELEASE}")
+            .put("model", android.os.Build.MODEL)
+            .put("manufacturer", android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() })
+            .put("root", JSONObject()
+                .put("rooted", root.rooted)
+                .put("verified", root.verified)
+                .put("signals", JSONArray(root.signals)))
+            .put("permissions", JSONObject()
+                .put("accessibility", DeviceState.accessibilityConnected)
+                .put("camera", camera))
+    }
+
+    @Volatile private var fleetRootCache: Pair<Long, FleetRootSignals.Result>? = null
+
+    /** Root files change only when the owner roots or unroots, so one look a minute is plenty for a status poll. */
+    private fun fleetRoot(): FleetRootSignals.Result {
+        val now = android.os.SystemClock.elapsedRealtime()
+        fleetRootCache?.let { (at, result) -> if (now - at < 60_000L) return result }
+        val result = runCatching {
+            FleetRootSignals.detect({ File(it).exists() }, System.getenv("PATH"), Build.TAGS,
+                com.cyclone.mobile.runtime.workspaces.RootProbe.status)
+        }.getOrDefault(FleetRootSignals.Result(false, false, emptyList()))
+        fleetRootCache = now to result
+        return result
+    }
+
     /** Kept only for compatibility callers. V3.3 UI must never expose this value. */
     fun tokenForUser(context: Context): String? = GatewaySessionStore.token(context)
 
@@ -200,6 +247,7 @@ object GatewayRuntime {
             .put("socketName", GatewayProtocol.SOCKET_NAME)
             .put("networkListener", false)
             .put("accessibilityConnected", DeviceState.accessibilityConnected)
+            .put("fleetHealth", fleetHealth(context))
             .put("phoneControlReady", phoneControlReady)
             .put("phoneControlNeedsRepair", phoneControlNeedsRepair)
             .put("nextAction", nextAction?.let { action ->
@@ -462,6 +510,14 @@ internal object GatewayDispatcher {
         "dictionary.get", "dictionary.edit", "models.list", "manual.get" -> {
             GatewayV5ManualAdapter.install(context)
             GatewayV5ManualAdapter.dispatch(request.op, request.args)
+        }
+        "connectors.list" -> {
+            if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "connectors.list takes no arguments.", request.id)
+            com.cyclone.mobile.connector.ConnectorRuntime.report(context)
+        }
+        "numbers.list" -> {
+            if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "numbers.list takes no arguments.", request.id)
+            com.cyclone.mobile.codes.AndroidCodes.report(context)
         }
         "apps.list" -> GatewayV5AppsAdapter.dispatch(request.op, request.args)
         "share.status" -> {

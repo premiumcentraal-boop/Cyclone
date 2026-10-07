@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -168,6 +170,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     // Plan 40 P2: what the last switch carried here, and whether the last carry out of here arrived.
     var carried by remember { mutableStateOf<com.cyclone.mobile.runtime.workspaces.CarryReport?>(null) }
     var carryFailed by remember { mutableStateOf(false) }
+    // Plan 51 K3: entries approved connectors add. Shown after your profiles, marked as theirs.
+    var connectorEntries by remember { mutableStateOf(emptyList<com.cyclone.mobile.connector.SelectorEntry>()) }
 
     var ownerUser by remember { mutableStateOf<Int?>(null) }
     var verifiedCurrentUser by remember { mutableStateOf<Int?>(null) }
@@ -207,6 +211,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                 error = "Profiles couldn't load. Open profile setup to repair."
             }
             backups = withContext(Dispatchers.IO) { com.cyclone.mobile.runtime.workspaces.ProfileBackups.list(context) }
+            connectorEntries = withContext(Dispatchers.IO) { com.cyclone.mobile.connector.ConnectorLauncher.selectorEntries(context) }
         }
     }
 
@@ -478,6 +483,19 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                         )
                     }
                 }
+                if (connectorEntries.isNotEmpty()) {
+                    item {
+                        Text("From your connectors", style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                    }
+                    items(connectorEntries, key = { it.key }) { entry ->
+                        ConnectorEntryCard429(context, entry) {
+                            if (!com.cyclone.mobile.connector.ConnectorLauncher.open(context, entry)) {
+                                switchMessage = "${entry.connectorLabel} couldn't be opened. Check it in Settings → Connectors."
+                            }
+                        }
+                    }
+                }
             }
 
             ProfilesTab.DELETED -> {
@@ -631,6 +649,39 @@ private fun ProfileIdentityCard429(profile: ProfileCluster, onOpen: () -> Unit) 
                     }
                 }
             }
+        }
+    }
+}
+
+/** Plan 51 K3: an approved connector's entry. Its icon comes from the connector's own app; a tap opens its screen. */
+@Composable
+private fun ConnectorEntryCard429(context: Context, item: com.cyclone.mobile.connector.SelectorEntry, onOpen: () -> Unit) {
+    val icon = remember(item.key, item.entry.icon) {
+        com.cyclone.mobile.connector.ConnectorLauncher.icon(context, item)
+            ?.let { runCatching { it.toBitmap(64, 64).asImageBitmap() }.getOrNull() }
+    }
+    Card(
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (icon != null) androidx.compose.foundation.Image(icon, null, Modifier.size(40.dp))
+            else CycloneAppIcon(item.packageName, Modifier.size(40.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(item.entry.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOf("From ${item.connectorLabel}", item.entry.subtitle, item.entry.statusText).filter { it.isNotBlank() }.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            ProfileStatePill429(when (item.entry.state) { "attention" -> "Needs you"; "off" -> "Off"; else -> "Ready" })
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f))
         }
     }
 }

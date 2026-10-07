@@ -121,11 +121,13 @@ class Traffic:
         if not isinstance(run_id, str) or not RUN_ID.match(run_id):
             raise TrafficError("That isn't a run id.")
         out = {"runId": run_id}
-        for key in ("taskId", "rowId", "app", "routine"):
+        for key in ("taskId", "rowId", "app", "routine", "plugin"):
             value = meta.get(key)
             if value is not None and not (isinstance(value, str) and len(value) <= 160):
                 raise TrafficError(f"{key} must be text.")
             out[key] = value
+        if out.get("plugin") is not None and not re.fullmatch(r"[a-z][a-z0-9-]{1,40}", out["plugin"]):
+            raise TrafficError("plugin must be a registered plugin name.")
         return out
 
     def _route(self, run: dict[str, Any], port: str) -> dict[str, Any]:
@@ -136,6 +138,13 @@ class Traffic:
         row = next((r for r in resolved["ports"] if r["port"] == port), None)
         if row is None:
             raise TrafficError(f"{port} isn't a port Cyclone knows.")
+        target = run.get("plugin")
+        if target:
+            candidate = next((c for c in row["candidates"] if c["name"] == target and c["live"]), None)
+            # A target may resolve an automatic conflict, but never override the owner's explicit choices.
+            allowed = row["chosen"] is None or target in row["chosen"]
+            row = dict(row, effective=[target] if candidate and allowed else [],
+                       state="ok" if candidate and allowed else "unavailable")
         return row
 
     def _next_seq(self, run_id: str) -> int:
@@ -270,7 +279,7 @@ class Traffic:
         plugin = row["effective"][0]
         await_id, token = "aw_" + secrets.token_hex(8), secrets.token_urlsafe(24)
         request = {"v": 1, "runId": run["runId"], "taskId": run.get("taskId"), "rowId": run.get("rowId"),
-                   "app": run.get("app"), "port": port, "awaitId": await_id, "match": match or {}, "timeoutS": timeout,
+                   "app": run.get("app"), "routine": run.get("routine"), "port": port, "awaitId": await_id, "match": match or {}, "timeoutS": timeout,
                    "sentAt": _now_iso(), "deliverUrl": f"{self.base_url}/v1/ports/{run['runId']}/{port}/deliver"}
         wait = {"awaitId": await_id, "runId": run["runId"], "port": port, "way": row["way"], "plugin": plugin,
                 "request": request, "timeoutAt": now_ms() + int(timeout * 1000)}

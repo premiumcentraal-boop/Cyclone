@@ -90,6 +90,14 @@ class CycloneAccessibilityService : AccessibilityService() {
         val owner = (0 until listed.size()).firstOrNull { i -> listed.valueAt(i).any { it.id == event.windowId } }
         val window = owner?.let { listed.valueAt(it).first { window -> window.id == event.windowId } }
         if (window?.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return
+        if (window != null && owner != null) {
+            // Alpha 109: the status bar and the closed notification shade tick all the time; they are not the task's screen.
+            val siblings = listed.valueAt(owner)
+            val bounds = Rect().also { window.getBoundsInScreen(it) }
+            val display = Rect().also { union -> siblings.forEach { w -> union.union(Rect().also { r -> w.getBoundsInScreen(r) }) } }
+            if (!TaskSurfaceWindows.changesTaskRead(window.type, window.isActive, window.isFocused, bounds.width(), bounds.height(),
+                    display.width(), display.height())) return
+        }
         if (window == null && event.packageName?.toString() == packageName &&
             preferredForegroundRoot(listed.get(0).orEmpty())?.packageName?.toString() != packageName) return
         // A removed or unidentified window cannot safely be assigned to one display.
@@ -272,6 +280,15 @@ class CycloneAccessibilityService : AccessibilityService() {
     fun observe(markFresh: Boolean = true): UiSnapshot {
         if (markFresh) waitForUiQuiet()
         val root = preferredForegroundRoot()
+        // A focused Ask window can make Android's permission-dialog root unreadable. Yield only
+        // when the ordinary host read is empty; never hide the owner's secure input card.
+        if (root == null && !com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.active() &&
+            DeviceState.controller == DeviceState.Controller.AGENT &&
+            com.cyclone.mobile.secrets.SecretsCardRuntime.state.value?.visible != true) {
+            return com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostPassthrough {
+                observe(markFresh)
+            }
+        }
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
         val consumedWindows = mutableSetOf<Int>()
@@ -621,7 +638,12 @@ class CycloneAccessibilityService : AccessibilityService() {
 
         override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
             val node = nodeAtTaskPath(plan.path, displayId, targetPackage) ?: return null
-            return if (node.isEditable) AccessibilityTypeHandle(plan.path, node, plan.rawNodeId) else null
+            if (!node.isEditable ||
+                (plan.expectedPackageName != null && node.packageName?.toString() != plan.expectedPackageName) ||
+                (plan.expectedClassName != null && node.className?.toString() != plan.expectedClassName) ||
+                (plan.expectedResourceId != null && node.viewIdResourceName.orEmpty() != plan.expectedResourceId) ||
+                (plan.expectedPassword != null && node.isPassword != plan.expectedPassword)) return null
+            return AccessibilityTypeHandle(plan.path, node, plan.rawNodeId, plan)
         }
 
         override fun view(handle: Any, redactText: Boolean): PhoneTypeEngine.LiveView? {
@@ -676,6 +698,7 @@ class CycloneAccessibilityService : AccessibilityService() {
 
         override fun refresh(handle: Any): Any? {
             val target = handle as? AccessibilityTypeHandle ?: return null
+            target.plan?.let { return resolve(it) }
             val node = nodeAtTaskPath(target.path, displayId, targetPackage) ?: return null
             return if (node.isEditable) AccessibilityTypeHandle(target.path, node, target.rawNodeId) else null
         }
@@ -775,7 +798,7 @@ class CycloneAccessibilityService : AccessibilityService() {
      */
     fun guardPoint(action: String, x: Float, y: Float) {
         val snapshot = observe(markFresh = false)
-        val labels = ClickGateIntercept.labelsAtPoint(snapshot.nodes, x.toInt(), y.toInt())
+        val labels = ClickGateIntercept.labelsAtPoint(snapshot.nodes, x.toInt(), y.toInt(), snapshot.windows)
         val decision = ClickGateIntercept.decide(action, labels, OverlayChromeRuntime.snapshot().state)
         if (!decision.performClick) {
             if (decision.enterGate && decision.gateClass != null) OverlayChromeRuntime.enterGate(decision.gateClass)
@@ -1131,4 +1154,5 @@ private data class AccessibilityTypeHandle(
     val path: String,
     val node: AccessibilityNodeInfo,
     val rawNodeId: String,
+    val plan: PhoneTypeEngine.ExecutePlan? = null,
 )

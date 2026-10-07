@@ -460,7 +460,7 @@ class OverlayChromeController(
             !yieldHost && !driverIdle
 
         view.importantForAccessibility =
-            if (yieldHost) View.IMPORTANT_FOR_ACCESSIBILITY_NO else View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            if (yieldHost) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_YES
         view.contentDescription = when {
             secretVisible -> "Secret needed"
             snapshot.state == OverlayChromeState.GATE && !snapshot.minimized -> OverlayCopy.GATE
@@ -767,7 +767,9 @@ class OverlayChromeController(
                 if (root != null) applyLayout(latest)
                 val attached = sequenceOf(root, haloRoot, shareRoot).firstOrNull { it?.isAttachedToWindow == true }
                 if (attached != null) {
-                    Choreographer.getInstance().postFrameCallback { latch.countDown() }
+                    Choreographer.getInstance().postFrameCallback {
+                        Choreographer.getInstance().postFrameCallback { latch.countDown() }
+                    }
                 } else {
                     latch.countDown()
                 }

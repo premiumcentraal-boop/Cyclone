@@ -1,0 +1,88 @@
+{
+  "contract": "cyclone.profile-startup/1",
+  "event": {
+    "contract": "cyclone.profile-startup/1",
+    "version": 1,
+    "profileId": "Cyclone_0123456789abcdef",
+    "androidUserId": 10,
+    "packageName": "com.acme.target",
+    "eventType": "cold_start",
+    "deadlineElapsedRealtimeMs": 250
+  },
+  "replies": [
+    {
+      "name": "no reference",
+      "response": {
+        "version": 1
+      },
+      "result": {
+        "version": 1,
+        "configRef": null,
+        "state": "ready"
+      }
+    },
+    {
+      "name": "reference is opaque",
+      "response": {
+        "version": 1,
+        "configRef": "connector-state:opaque-key",
+        "state": "ready",
+        "future": {
+          "field": true
+        }
+      },
+      "result": {
+        "version": 1,
+        "configRef": "connector-state:opaque-key",
+        "state": "ready"
+      }
+    },
+    {
+      "name": "degraded",
+      "response": {
+        "version": 1,
+        "state": "degraded"
+      },
+      "result": {
+        "version": 1,
+        "configRef": null,
+        "state": "degraded"
+      }
+    },
+    {
+      "name": "failed",
+      "response": {
+        "version": 1,
+        "state": "failed"
+      },
+      "result": {
+        "version": 1,
+        "configRef": null,
+        "state": "failed"
+      }
+    },
+    {
+      "name": "unsupported version",
+      "response": {
+        "version": 2
+      },
+      "error": "UNSUPPORTED_CONTRACT"
+    },
+    {
+      "name": "invalid state",
+      "response": {
+        "version": 1,
+        "state": "execute"
+      },
+      "error": "BAD_REQUEST"
+    },
+    {
+      "name": "invalid reference type",
+      "response": {
+        "version": 1,
+        "configRef": {}
+      },
+      "error": "BAD_REQUEST"
+    }
+  ]
+}

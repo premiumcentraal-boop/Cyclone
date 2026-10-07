@@ -120,6 +120,7 @@ object Layer2Workspaces {
         GatewayObservationStore.clear("default-foreground")
         if (w.androidUserId == currentAndroidUserId()) {
             val intent = ctx.packageManager.getLaunchIntentForPackage(w.appPackage) ?: error("APP_NOT_FOUND: no launcher activity")
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeLaunch(ctx, w.appPackage, w.androidUserId, "profile_switch")
             ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } else {
             check(RootProbe.status == RootStatus.ROOTED) { "USER_UNVERIFIED: check root before a cross-profile switch" }
@@ -128,6 +129,7 @@ object Layer2Workspaces {
             val launcher = ctx.getSystemService(LauncherApps::class.java)
             val activity = launcher.getActivityList(w.appPackage, user).firstOrNull()
                 ?: error("APP_NOT_FOUND: install this app in the selected profile")
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeLaunch(ctx, w.appPackage, w.androidUserId, "profile_switch")
             launcher.startMainActivity(activity.componentName, user, null, null)
         }
     }

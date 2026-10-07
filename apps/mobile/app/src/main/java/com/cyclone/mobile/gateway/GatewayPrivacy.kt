@@ -91,6 +91,8 @@ internal object GatewayPrivacy {
                 (source.optBoolean("editable", false) || nodeSensitive || browserAddress)
             val redactNodeDescription = nodeLike && key == "contentDescription" && (nodeSensitive || browserAddress)
             out.put(key, when {
+                // Android's isPassword flag describes a control; it is not a password value.
+                nodeLike && key == "password" && raw is Boolean -> raw
                 sensitiveKey.containsMatchIn(key) -> REDACTED
                 redactNodeValue || redactNodeDescription -> REDACTED
                 else -> sanitizeDeep(raw, key)

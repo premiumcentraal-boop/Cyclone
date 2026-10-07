@@ -23,21 +23,34 @@ class AccountSetupPlan(val map: SignupMap, val values: Map<String, String>) {
         append("created=true with the account's handle as the app shows it; if the app refuses (the name is taken, a limit), ")
         append("call setup_done created=false with why, then finish.\n")
         append("Sign-up map of ${map.appLabel}:\n")
+        if (map.packageName == "com.instagram.android") {
+            append("Instagram entry: if already signed in, Profile > username > Add Instagram account > Create new account. ")
+            append("The first page may ask for Username; use the row's username and setup_page changed=true for the corresponding page. ")
+            append("Adapt to actual page order; never sign out, clear data or alter an existing account. Skip optional contacts, photos and follows; decline optional cookies. ")
+            append("A code can autofill and advance automatically: read the resulting page before another tap. Verify the new own profile before setup_done created=true.\n")
+        }
         for (page in map.pages) {
             append("Page ${page.index}: \"${page.title}\"")
-            page.check?.let { append(" (a person's step: ${it.label})") }
+            page.check?.let {
+                if (it == SignupCheck.SMS_CODE) append(" (${it.label}: call setup_page with check=sms_code; when the code goes to this phone, Cyclone fills it from the text itself, otherwise it is a person's step)")
+                else append(" (a person's step: ${it.label})")
+            }
             append("\n")
             for (field in page.fields) {
                 val value = when {
                     field.kind == SignupFieldKind.PASSWORD -> "use vault_fill what=password"
                     field.kind == SignupFieldKind.PHOTO -> "skip unless required; then ask the owner"
+                    page.check == SignupCheck.SMS_CODE -> "use setup_page check=sms_code for native code autofill on this phone; ask the owner only if it cannot retrieve the code"
                     else -> values[field.key]?.let { "\"$it\"" } ?: if (field.required) "not given: ask the owner" else "leave empty"
                 }
                 append("  - ${field.label} (${field.kind.wire}${if (field.required) "" else ", optional"}): $value\n")
+                if (field.hint.isNotBlank()) append("    Format hint: \"${field.hint}\"\n")
+                if (field.choices.isNotEmpty()) append("    Choices: ${field.choices.joinToString { "\"$it\"" }}\n")
             }
             append("  then press \"${page.continueLabel}\"\n")
         }
-        map.finalLabel?.let { append("Finally press \"$it\".\n") }
+        map.finalLabel?.let { append("The account-creation control is \"$it\"; use it where indicated in the mapped flow. ")
+            append("Complete any subsequent verification or onboarding, then verify the signed-in profile. Never restart the sign-up or create a duplicate.\n") }
     }
 
     companion object {
@@ -73,6 +86,8 @@ data class AccountSetupProgress(
     companion object {
         const val FILLING = "filling"
         const val VERIFICATION = "verification"
+        /** Plan 49: waiting for a code sent by text to this phone; Cyclone fills it itself. */
+        const val CODE = "code"
         const val CREATED = "created"
         const val FAILED = "failed"
 

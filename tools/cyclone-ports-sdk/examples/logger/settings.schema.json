@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "folder": {"type": "string", "title": "Folder", "description": "Inside the plugin's own data folder.", "default": "runs", "minLength": 1, "maxLength": 80}
+  },
+  "required": ["folder"],
+  "additionalProperties": false
+}

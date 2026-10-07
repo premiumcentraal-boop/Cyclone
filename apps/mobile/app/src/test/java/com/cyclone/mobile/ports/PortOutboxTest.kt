@@ -48,7 +48,7 @@ class PortOutboxTest {
         assertEquals("only private fields: nothing to send", "nothing was left to send once private fields were taken out",
             outbox.emit(run, "account.fields", JSONObject().put("fields", JSONObject().put("password", "x"))))
         val items = poll()
-        assertEquals(setOf("firstName", "email"), items[0].getJSONObject("data").getJSONObject("fields").keySet())
+        assertEquals(setOf("firstName", "email"), items[0].getJSONObject("data").getJSONObject("fields").keys().asSequence().toSet())
         assertEquals("Welcome\n[hidden]\nDone", items[1].getJSONObject("data").getString("text"))
         assertEquals("not a port the phone sends", "secret.out is not a port the phone sends on", outbox.emit(run, "secret.out", JSONObject()))
     }

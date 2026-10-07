@@ -57,6 +57,28 @@ class HandsRevalidationTest {
         assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer").status)
     }
 
+    @Test fun directTextReplacementIsNotInterceptedByASelectionToolbar() {
+        val before = screen("a", composer(label = "Month", obs = "a"))
+        val toolbar = element("semantic:b:popup", "Cut", "button", "/9/0", "n90", composerBox, clickable = true)
+        val after = screen("b", composer(label = "Month", obs = "b"), toolbar)
+        assertEquals(TargetDrift.MATCHED, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer",
+            requiresTouchClearance = false).status)
+        assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer").status)
+    }
+
+    @Test fun directTextReplacementStillRequiresUniqueIdentityAndScope() {
+        val before = screen("a", composer(label = "Month", obs = "a", path = "/0/2", node = "a1"))
+        val after = screen("b",
+            composer(label = "Month", obs = "b", path = "/0/3", node = "b1"),
+            composer(label = "Month", obs = "b", path = "/0/4", node = "b2", id = "semantic:b:second"))
+        assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(before, after, "semantic:a:composer",
+            requiresTouchClearance = false).status)
+        val otherApp = screen("b", composer(label = "Month", obs = "b")).let {
+            it.copy(page = it.page.copy(packageName = "com.other.app")) }
+        assertEquals(TargetDrift.SCOPE_MISMATCH, CurrentTargetRevalidation.resolve(before, otherApp, "semantic:a:composer",
+            requiresTouchClearance = false).status)
+    }
+
     @Test fun aSettingsRowAndItsSwitchAreOneControlNotAmbiguous() {
         // Alpha 91: Settings › Display › Auto-rotate screen: a clickable row with a Switch inside. Either one does the same.
         fun row(obs: String) = element("semantic:$obs:row", "Auto-rotate screen", "button", "/0/7", "n70", box(0, 1800, 1080, 1960), clickable = true)
@@ -74,6 +96,37 @@ class HandsRevalidationTest {
         fun delete(obs: String) = element("semantic:$obs:delete", "Delete", "button", "/0/3/1", "n31", box(440, 420, 640, 540), clickable = true)
         assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(screen("a", item("a"), delete("a")),
             screen("b", item("b"), delete("b")), "semantic:a:item").status)
+    }
+
+    @Test fun aClickablePageContainerAroundARowIsNotACompetingControl() {
+        // Alpha 108, captured on a Pixel 8 (Android 16), Settings › Display and touch: `content_parent` is clickable and
+        // scrollable over the whole page, and the Screen timeout row sits inside it. The press goes to the row.
+        fun page(obs: String) = element("semantic:$obs:page", "Display and touch", "button", "0/0", "p0", box(0, 132, 1080, 2337),
+            clickable = true, resource = "com.android.settings:id/content_parent")
+        fun row(obs: String) = element("semantic:$obs:row", "After 30 minutes of inactivity Screen timeout", "button", "0/0/1/0", "r0",
+            box(0, 279, 1080, 451), clickable = true)
+        assertEquals(TargetDrift.MATCHED, CurrentTargetRevalidation.resolve(screen("a", page("a"), row("a")),
+            screen("b", page("b"), row("b")), "semantic:a:row").status)
+    }
+
+    @Test fun aPageContainerDoesNotHideAnOverlappingSibling() {
+        // The container exemption is for ancestors only: a different control over the row still fails closed.
+        fun page(obs: String) = element("semantic:$obs:page", "Display and touch", "button", "0/0", "p0", box(0, 132, 1080, 2337), clickable = true)
+        fun row(obs: String) = element("semantic:$obs:row", "Screen timeout", "button", "0/0/1/0", "r0", box(0, 279, 1080, 451), clickable = true)
+        val popup = element("semantic:b:popup", "Allow", "button", "0/0/2", "q0", box(0, 300, 1080, 420), clickable = true)
+        assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(screen("a", page("a"), row("a")),
+            screen("b", page("b"), row("b"), popup), "semantic:a:row").status)
+    }
+
+    @Test fun anInnerButtonIsStillNotHiddenByTheContainerRule() {
+        // Pressing the outer item while a different inner button covers its centre stays ambiguous, even inside a page container.
+        fun page(obs: String) = element("semantic:$obs:page", "Notes", "button", "/0", "p0", box(0, 132, 1080, 2337), clickable = true)
+        fun item(obs: String) = element("semantic:$obs:item", "Note 1", "button", "/0/3", "n30", box(0, 400, 1080, 560), clickable = true)
+        fun delete(obs: String) = element("semantic:$obs:delete", "Delete", "button", "/0/3/1", "n31", box(440, 420, 640, 540), clickable = true)
+        assertEquals(TargetDrift.AMBIGUOUS, CurrentTargetRevalidation.resolve(screen("a", page("a"), item("a"), delete("a")),
+            screen("b", page("b"), item("b"), delete("b")), "semantic:a:item").status)
+        assertEquals(TargetDrift.MATCHED, CurrentTargetRevalidation.resolve(screen("a", page("a"), item("a"), delete("a")),
+            screen("b", page("b"), item("b"), delete("b")), "semantic:a:delete").status)
     }
 
     @Test fun cyclonesOwnChromeNeverCompetesWithTheAppsControl() {
