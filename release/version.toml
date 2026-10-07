@@ -1,4 +1,4 @@
-# Cyclone V5 alpha.112 dev1: Cyber, the Glass Manager, R1-R5: streamed answers, queue, character, Cyber on every page and moving Glass. Glass 1.0.0-alpha.62.
+# Cyclone V5 alpha.112 dev1: Cyber, the Glass Manager, R1-R5 (streamed answers, queue, character, Cyber on every page, moving Glass) on top of alpha.111 Human Hands. Glass 1.0.0-alpha.62.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
 product_version = "5.0.0-alpha.112.dev1"

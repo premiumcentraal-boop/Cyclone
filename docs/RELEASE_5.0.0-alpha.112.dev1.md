@@ -1,8 +1,16 @@
-# Cyclone V5 Alpha 112: Meet Cyber
+# Cyclone V5 Alpha 112: Meet Cyber, with Human Hands
 
 This developer alpha brings **Cyber**, the Glass Manager (plans 54 and 55): the AI that used to sit beside the
 workspace now lives on every Glass page, as a small character that shows what it is doing, and it answers live.
 Setup is unchanged: your OpenRouter key and a model in Command Center → AI.
+
+## Also in this alpha: Human Hands
+
+This alpha is built on alpha.111 and carries all of it: **Human Hands** (plan 52), where Cyclone moves and types more
+like the person whose phone it is — swipes that speed up and slow down and vary in shape, finger-pressed buttons, the
+keyboard on screen with key-by-key typing, and short human pauses — under **Cyclone AI settings › Hands** (Precise,
+Natural by default, Relaxed; your hand; optional typos). Full details: `docs/RELEASE_5.0.0-alpha.111.dev1.md`. Owners
+updating from alpha.110 or earlier get both at once.
 
 ## Cyber on every page
 
