@@ -71,6 +71,7 @@ Approval boundaries are unchanged: pay, send, delete, permissions and authentica
 | G6 | **No rhythm between actions.** After the Fast Path settle (300 ms, +500/+1000) the next action follows at once. There is no time to read or find the target. | Fast Path, Mind loop | Sessions run at machine tempo. |
 | G7 | **Missing motions.** No drag, no pinch or zoom (two fingers), no double tap with human spacing, no drawing, no custom shapes. | Capability: `phone.drag` unsupported | The Mind cannot rearrange, zoom maps or draw. |
 | G8 | **No real human data.** Every tuning constant is a guess. Templates (V1.5) and device capture were never built. | Calibration doc: "synthetic is not human" | No proof that anything looks human. |
+| G10 | **The keyboard never appears.** `phone.type` focuses the field with `ACTION_FOCUS` (or a semantic `ACTION_CLICK`) and then sets the text. Most apps only ask Android for the keyboard when a finger touches the field, so in Cyclone mode the field fills while no keyboard is on screen. Nothing checks for the keyboard or clears it away afterwards. | `CycloneAccessibilityService` type handle `focus()` / `click()`; the input-method window is read only by the overlay (`OverlayChromeController.kt:721`) | Text appears in a field without the keyboard ever showing: something no person can do. Key-by-key typing (Run 3) needs an open keyboard session to work at all. The keyboard also covers half the page, and Cyclone does not plan around it. |
 | G9 | **Stale truth.** The runtime doc still says named displays are "endpoint + duration only", but since `0c3a34b3` they use cubic `setDisplayId`. Instagram stock skills and the V33 gateway adapter pin `humanize=off` until a Pixel smoke test that never happened. | `docs/HUMAN_GESTURE_RUNTIME_V03.md`, `Instagram*StockSkill.kt`, `GatewayV33ActionAdapter.kt:679` | The docs and the defaults disagree with the code. |
 
 ## 3. Strategy: the rules every run follows
@@ -194,9 +195,9 @@ bounds with Human Gesture. Otherwise it uses `ACTION_CLICK` as today.
 - The touch-first choice is one channel per action.
 - A source-order guard keeps GATE ahead of dispatch.
 
-### Run 3: key-by-key typing
+### Run 3: the keyboard and key-by-key typing
 
-Fix G5. Text goes in as keystrokes, the way a keyboard sends it.
+Fix G5 and G10. Text goes in as keystrokes, the way a keyboard sends it.
 
 **The route.**
 - Android 13+ lets an Accessibility service act as an input method on the focused field: set
@@ -205,6 +206,34 @@ Fix G5. Text goes in as keystrokes, the way a keyboard sends it.
   `setSelection` to place the cursor.
 - The owner's keyboard stays on screen and stays their keyboard; nothing has to be switched. The app's own
   `minSdk` is 33, so every supported phone has this.
+
+**The keyboard on screen (G10).** Key-by-key typing starts the way a person starts: by touching the field.
+1. **Tap the field with a Human Gesture touch**, not `ACTION_FOCUS`. The app then asks for the keyboard itself, the
+   way it does for the owner.
+2. **Wait for the keyboard.** Watch for an input-method window (`AccessibilityWindowInfo.TYPE_INPUT_METHOD`) for up
+   to about 600 ms.
+   - If it does not appear, tap the field once more. That is allowed: the field is already the target and the tap
+     changes no page.
+   - If it still does not appear, go down the ladder (set-text) and report `keyboard: not_shown`.
+3. **Never hide it.** Make sure Cyclone's `SoftKeyboardController` show mode is `SHOW_MODE_AUTO`. A Cyclone overlay
+   must not take window focus from the app while it types: overlays keep `FLAG_NOT_FOCUSABLE` during a run, and
+   Cyclone's own composer gives focus back before acting.
+4. **Plan around the keyboard.**
+   - The observation records the keyboard's bounds.
+   - A target under the keyboard is not tapped through it. Cyclone first closes the keyboard the way a person does
+     (Back, or the keyboard's own hide or "done" key), or scrolls the target into view.
+   - After the last field, Cyclone presses the field's own action key (Next or Done) when the form expects it.
+     Otherwise it closes the keyboard before the next tap.
+5. **Switching keyboards only when needed.** The owner's keyboard is always used. If the current keyboard cannot take
+   input (rare: some games and kiosk apps), Cyclone reports it. It never switches the owner's keyboard by itself;
+   `SoftKeyboardController.switchToInputMethod` is used only if the owner allows it in Settings, and Cyclone switches
+   back afterwards.
+
+Tests for the keyboard steps:
+- The keyboard is detected from window fixtures.
+- A missing keyboard falls down the ladder with `keyboard: not_shown`.
+- A target under the keyboard leads to "close first", never to a tap through it.
+- During a typing step, no overlay holds focus.
 
 **Timing model.**
 - Inter-key gaps come from the letter pair: easy pairs fast, same-finger and shift pairs slower.
@@ -336,13 +365,35 @@ Fix G9 and turn Natural on.
 
 Until this run happens, every device claim stays **UNVERIFIED**.
 
+## 4b. Where touches come from: injected vs device touches
+
+This section answers how today's touches differ from "raw" ones, and why this plan stays with the first.
+
+| Route | How it works | What the app sees | Cost |
+| --- | --- | --- | --- |
+| **Accessibility gesture (today)** | Cyclone hands Android a path and a duration (`dispatchGesture`). Android's system turns it into touch events (down, moves, up) and feeds them into the normal input pipeline. | Ordinary touch events, with tell-tales. On recent Android versions they are marked as coming from Accessibility. They have no real touchscreen behind them, so pressure and finger size are constant. Today the moves are also evenly spaced (Run 1 fixes that part). An app can also simply ask Android which Accessibility services are on. | Works on any phone, needs no root, and is the route Android offers for assistive apps. |
+| **Shell input** (`input tap`, `input swipe`, `input motionevent`) | A shell-level program (ADB, or Cyclone's background helper) injects events through the input manager. | Also injected events from a virtual device rather than the touchscreen. Swipes are straight unless built point by point. | Needs ADB or Shizuku. No more "real" than today. |
+| **A virtual touchscreen in the kernel** (`uinput`) | A root process creates a new touchscreen device and writes events into it, like a driver. | Events from a touchscreen device, with pressure and multi-touch. | **Needs root.** Rooting breaks Play Integrity, so many banking, payment and streaming apps refuse to run, and it opens the whole phone to anything with root. Root itself is the bigger red flag to these apps. It also crosses Cyclone's "no root control" rule. |
+| **External hardware** | A small USB or Bluetooth device that acts as a touch digitizer or pen, or a robot finger on the glass. | Events from a real, physical input device (an external one, for USB and Bluetooth). | Extra hardware connected to the phone all the time; not practical for a phone in a pocket. |
+
+**Decision for this plan:** Cyclone keeps the Accessibility route and makes the motion inside it natural. It does
+not try to make injected events look like hardware touches (no root injector, no hardware digitizer), because:
+- that work exists only to defeat apps' checks on automated input;
+- it costs the owner's phone security or needs extra hardware;
+- apps that look for automation usually check whether an Accessibility service is on, which no form of motion
+  changes.
+
+What natural motion does buy:
+- it removes the crude-script patterns: even speed, identical starts, instant text, no keyboard, machine tempo;
+- it lets Cyclone use gestures the Mind could not ask for before.
+
 ## 5. Order, size and versions
 
 | Run | Main paths | Size | Depends on |
 | --- | --- | --- | --- |
 | 1 Motion physics | `gesture/*`, dispatch, lab | M | — |
 | 2 Intents + touch-first | the Mind and Instant hands, executor, registry | M | 1 |
-| 3 Key-by-key typing | `PhoneTypeEngine`, new `gesture/typing/*`, Accessibility config | M–L | — (parallel with 1–2) |
+| 3 Keyboard + key-by-key typing | `PhoneTypeEngine`, new `gesture/typing/*`, Accessibility config, overlay focus | M–L | — (parallel with 1–2) |
 | 4 Rhythm | Mind loop, Instant hands, settings | S | 2 |
 | 5 My hands | settings page, template store, engine | L | 1, 3 |
 | 6 Drag, pinch, draw | registry, executor, engine, gateway capability, Mind tools | M | 1 |
