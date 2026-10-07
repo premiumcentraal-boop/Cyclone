@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/startup.check.result.schema.json",
+  "title": "startup.check.result",
+  "type": "object",
+  "required": [
+    "version",
+    "deadlineMs"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "deadlineMs": {
+      "const": 250
+    }
+  }
+}

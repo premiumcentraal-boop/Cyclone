@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/answer.schema.json",
+  "title": "Cyclone's answer to a connector call",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "ok",
+        "result"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "result": {}
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ok",
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "NOT_A_CONNECTOR",
+                "NOT_APPROVED",
+                "SCOPE_NOT_GRANTED",
+                "RATE_LIMITED",
+                "BAD_REQUEST",
+                "UNKNOWN_METHOD",
+                "UNSUPPORTED_CONTRACT",
+                "NO_SUCH_PROFILE",
+                "BAD_EXT",
+                "SECRET_REFUSED",
+                "BAD_ENTRIES",
+                "INTERNAL"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 300
+            }
+          }
+        }
+      }
+    }
+  ]
+}

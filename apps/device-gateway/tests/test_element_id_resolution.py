@@ -49,6 +49,7 @@ class Bridge:
             self.last_action = args
             self.page = "APPS"
             return {
+                "verification": {"ok": True, "status": "PASSED", "semanticSuccessClaimed": True},
                 "execution": {
                     "ok": True,
                     "beforeFingerprint": "a",

@@ -15,6 +15,7 @@ import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
 import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionIdentityException
 import org.json.JSONObject
 
@@ -53,12 +54,21 @@ internal object GatewayV33ActionAdapter {
         "phone.back",
         "phone.home",
         "phone.open_app",
+        "phone.launch_intent",
         "phone.set_clipboard",
     )
 
+    internal val LAUNCH_TOOLS = setOf("phone.open_app", "phone.launch_intent", "phone.set_alarm", "phone.set_timer", "phone.open_settings")
+
     private val pageTransitionTools = setOf(
-        "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app",
+        "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent",
+        "phone.set_alarm", "phone.set_timer", "phone.open_settings", "phone.submit_text", "phone.tap_point",
     )
+
+    internal fun requiresMutationObservation(tool: String): Boolean = tool in mutatingTools
+
+    internal fun pageTransitionSettleMs(tool: String): Long =
+        if (tool in pageTransitionTools) 1_800L else 0L
 
     fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
         val tool = args.optString("tool").trim()
@@ -88,7 +98,7 @@ internal object GatewayV33ActionAdapter {
         publicCapability: Boolean,
     ): JSONObject {
         val bound = bindIdentity(requestId, args)
-        val beforeObservation = if (tool in mutatingTools) {
+        val beforeObservation = if (requiresMutationObservation(tool)) {
             requireFreshObservation(requestId, args, bound)
         } else {
             try { GatewayObservationStore.current(bound) } catch (_: SessionIdentityException) { null }
@@ -100,6 +110,10 @@ internal object GatewayV33ActionAdapter {
             JSONObject((args.optJSONObject("params") ?: JSONObject()).toString()),
             bound,
         )
+        if (beforeObservation != null && requiresMutationObservation(tool)) {
+            normalizedParams.put("observationId", beforeObservation.id)
+            if (bound.sessionId != "default-foreground") normalizedParams.put("executionGeneration", beforeObservation.payload.optLong("executionGeneration", -1))
+        }
         normalizedArgs.put("params", normalizedParams)
 
         val baseResult = when (tool) {
@@ -150,9 +164,10 @@ internal object GatewayV33ActionAdapter {
         }
 
         val execution = baseResult.optJSONObject("execution") ?: JSONObject()
+        val result = attachResultPlane(requestId, baseResult, bound, normalizedParams, execution.optJSONObject("payload"))
         if (tool.startsWith("workspace.") || tool == "phone.workspace_switch") {
             val ok = execution.optBoolean("ok", false)
-            return baseResult
+            return result
                 .put("androidExecution", JSONObject().put("ok", ok))
                 .put("verification", JSONObject().put("ok", ok)
                     .put("status", if (ok) "PASSED" else "FAILED")
@@ -179,7 +194,8 @@ internal object GatewayV33ActionAdapter {
             afterObservation = afterObservation,
             androidExecutionOk = androidExecutionOk,
             executorAssertionFailed = verificationFailedInExecutor,
-            explicitExpectation = expect != null,
+            explicitExpectation = expect != null && execution.optJSONObject("payload")?.optBoolean("expectationVerified") == true,
+            expectedUri = normalizedParams.optString("uri"),
         )
         val afterStateVerified = sharedVerification.passed
         val verification = when {
@@ -213,9 +229,10 @@ internal object GatewayV33ActionAdapter {
                 .put("semanticSuccessClaimed", true)
                 .put("basis", sharedVerification.basis ?: "FRESH_AFTER_STATE_CHANGED")
             else -> JSONObject()
-                .put("ok", true)
+                .put("ok", false)
                 .put("status", "OBSERVED")
-                .put("code", JSONObject.NULL)
+                .put("code", "NO_SEMANTIC_PROGRESS")
+                .put("message", "The action was dispatched, but the observed page did not prove the intended transition. Re-observe; do not repeat the same mutation blindly.")
                 .put("semanticSuccessClaimed", false)
         }
 
@@ -231,7 +248,7 @@ internal object GatewayV33ActionAdapter {
             verification = verification,
         )
 
-        return baseResult
+        return result
             .put("transport", JSONObject().put("ok", true).put("protocol", GatewayProtocol.VERSION))
             .put("androidExecution", JSONObject()
                 .put("ok", androidExecutionOk)
@@ -240,7 +257,7 @@ internal object GatewayV33ActionAdapter {
             .put("afterState", afterObservation?.let(::compactAfterState) ?: JSONObject.NULL)
             .put("verification", verification)
             .put("routeLearning", routeLearning)
-            .put("requiresReobserveBeforeNextMutation", tool in mutatingTools)
+            .put("requiresReobserveBeforeNextMutation", requiresMutationObservation(tool))
             .put("publicCapability", publicCapability)
     }
 
@@ -253,26 +270,60 @@ internal object GatewayV33ActionAdapter {
     ): GatewayObservation? {
         val identity = bound ?: ExecutionRequestScope.bind(params)
         val captureArgs = ExecutionRequestScope.attach(JSONObject(params.toString()), identity)
-        val deadline = System.currentTimeMillis() + if (tool in pageTransitionTools) 1_800L else 0L
-        var after = runCatching { GatewayObservationAdapter.capture(context, captureArgs) }.getOrNull()
-        while (
-            after != null &&
-            tool in pageTransitionTools &&
-            !verifiedByAfterState(
-                tool,
-                params.optString("package"),
-                before?.page?.pageKey.orEmpty(),
-                before?.payload?.optString("accessibilityFingerprint").orEmpty(),
-                after.page.packageName,
-                after.page.pageKey,
-                after.payload.optString("accessibilityFingerprint"),
-            ) &&
-            System.currentTimeMillis() < deadline
-        ) {
-            Thread.sleep(120L)
-            after = runCatching { GatewayObservationAdapter.capture(context, captureArgs) }.getOrNull()
+        val capture = { GatewayObservationAdapter.capture(context, captureArgs) }
+        if (tool !in pageTransitionTools) {
+            // No page change expected: one good capture is enough, but a capture refused mid-change is retried.
+            repeat(4) { attempt ->
+                runCatching(capture).getOrNull()?.let { return it }
+                if (attempt < 3) Thread.sleep(120L)
+            }
+            return null
         }
-        return after
+        val launch = tool in LAUNCH_TOOLS
+        com.cyclone.mobile.agent.settle.SettleBudgets.attach(context.filesDir)
+        val budgetKey = params.optString("package").ifBlank { before?.page?.packageName.orEmpty() }
+        val outcome = com.cyclone.mobile.agent.settle.SettleController.run(
+            beforeFingerprint = before?.payload?.optString("accessibilityFingerprint"),
+            budget = com.cyclone.mobile.agent.settle.SettleBudgets.budgetFor(budgetKey,
+                com.cyclone.mobile.agent.settle.SettleBudget(fastMs = pageTransitionSettleMs(tool))),
+            capture = capture,
+            sample = { settleSample(it, launch) },
+            targetReached = { after ->
+                verifiedByAfterState(
+                    tool,
+                    params.optString("package"),
+                    before?.page?.pageKey.orEmpty(),
+                    before?.payload?.optString("accessibilityFingerprint").orEmpty(),
+                    after.page.packageName,
+                    after.page.pageKey,
+                    after.payload.optString("accessibilityFingerprint"),
+                    expectedUri = params.optString("uri"),
+                    afterHaystack = observationHaystack(after),
+                )
+            },
+            // A launch passes through splash and first layout; a tap is judged on its first changed frame.
+            requireStable = launch,
+        )
+        com.cyclone.mobile.agent.settle.SettleRecorder.record(identity.sessionId, outcome)
+        if (outcome.ready) outcome.value?.page?.packageName?.let { com.cyclone.mobile.agent.settle.SettleBudgets.record(it, outcome.waitedMs) }
+        return outcome.value
+    }
+
+    internal fun settleSample(observation: GatewayObservation, launch: Boolean): com.cyclone.mobile.agent.settle.SettleSample {
+        val elements = observation.elements.values.map { element ->
+            Triple(element.role, element.evidence.optString("resourceId"), element.label)
+        }
+        val actionable = observation.elements.values.count { element ->
+            element.evidence.optBoolean("clickable") || element.evidence.optBoolean("editable") ||
+                element.evidence.optBoolean("scrollable") || element.evidence.optBoolean("longClickable")
+        }
+        return com.cyclone.mobile.agent.settle.SettleSample(
+            packageName = observation.page.packageName,
+            fingerprint = observation.payload.optString("accessibilityFingerprint").ifBlank { observation.page.pageKey },
+            actionableControls = actionable,
+            loadingEvidence = com.cyclone.mobile.agent.settle.ScreenStateClassifier.loadingEvidence(
+                observation.page.packageName, elements, actionable, launch),
+        )
     }
 
     internal fun verifyAfterState(
@@ -284,7 +335,15 @@ internal object GatewayV33ActionAdapter {
         androidExecutionOk: Boolean,
         executorAssertionFailed: Boolean = false,
         explicitExpectation: Boolean = false,
-    ): AgentSemanticVerification = AgentSemanticVerifier.verify(
+        expectedUri: String = "",
+    ): AgentSemanticVerification {
+        if (beforeObservation != null && afterObservation != null &&
+            (beforeObservation.execution != afterObservation.execution || beforeObservation.id == afterObservation.id ||
+                afterObservation.capturedAt < beforeObservation.capturedAt)) {
+            return AgentSemanticVerification(com.cyclone.mobile.agent.contract.AgentVerificationStatus.FAILED,
+                false, false, "OBSERVATION_IDENTITY_MISMATCH", "A different or stale execution surface cannot verify this action.")
+        }
+        return AgentSemanticVerifier.verify(
         tool = tool,
         androidExecutionOk = androidExecutionOk,
         executorAssertionFailed = executorAssertionFailed,
@@ -293,7 +352,9 @@ internal object GatewayV33ActionAdapter {
         goalLabel = goalLabel,
         before = beforeObservation?.let(::semanticState),
         after = afterObservation?.let(::semanticState),
+        expectedUri = expectedUri,
     )
+    }
 
     internal fun verifiedByAfterState(
         tool: String,
@@ -308,6 +369,7 @@ internal object GatewayV33ActionAdapter {
         afterHaystack: String = "",
         beforeObservation: GatewayObservation? = null,
         afterObservation: GatewayObservation? = null,
+        expectedUri: String = "",
     ): Boolean {
         val beforeState = beforeObservation?.let(::semanticState) ?: SemanticObservationState(
             packageName = "",
@@ -332,6 +394,7 @@ internal object GatewayV33ActionAdapter {
             goalLabel = goalLabel,
             before = beforeState,
             after = afterState,
+            expectedUri = expectedUri,
         ).passed
     }
 
@@ -439,21 +502,62 @@ internal object GatewayV33ActionAdapter {
         } else {
             GatewayPrivacy.redactActionParams(tool, params)
         }
-        return JSONObject()
-            .put("source", "PC_CODEX")
-            .put("tool", tool)
-            .put("authority", JSONObject()
-                .put("binding", GatewayActionAuthorityRegistry.bindingName())
-                .put("outcome", decision.outcome.name)
-                .put("reasonCode", decision.reasonCode))
-            .put("sanitizedParams", safeParams)
-            .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
+        return attachResultPlane(
+            requestId,
+            JSONObject()
+                .put("source", "PC_CODEX")
+                .put("tool", tool)
+                .put("authority", JSONObject()
+                    .put("binding", GatewayActionAuthorityRegistry.bindingName())
+                    .put("outcome", decision.outcome.name)
+                    .put("reasonCode", decision.reasonCode))
+                .put("sanitizedParams", safeParams)
+                .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson())),
+            bound,
+            scopedParams,
+            result.payload as? JSONObject,
+        )
     }
 
     private fun bindIdentity(requestId: String, args: JSONObject): ExecutionContext = try {
-        ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()))
+        val merged = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+        if (args.has("workspaceId") && !merged.has("workspaceId")) merged.put("workspaceId", args.get("workspaceId"))
+        if (args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+            merged.put("workspaceGeneration", args.get("workspaceGeneration"))
+        }
+        val plane = SessionContract.classify(merged)
+        ExecutionContext(plane.sessionId, plane.displayId)
     } catch (error: SessionIdentityException) {
-        throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch", requestId)
+        throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch", requestId)
+    }
+
+    private fun attachResultPlane(
+        requestId: String,
+        result: JSONObject,
+        bound: ExecutionContext,
+        params: JSONObject,
+        payload: JSONObject? = null,
+    ): JSONObject {
+        val identity = JSONObject(params.toString())
+            .put("sessionId", bound.sessionId)
+            .put("displayId", bound.displayId)
+        if (payload != null) {
+            if (payload.has("workspaceId") && !payload.isNull("workspaceId") &&
+                (!identity.has("workspaceId") || identity.isNull("workspaceId"))
+            ) {
+                identity.put("workspaceId", payload.get("workspaceId"))
+            }
+            if (payload.has("workspaceGeneration") && !payload.isNull("workspaceGeneration") &&
+                (!identity.has("workspaceGeneration") || identity.isNull("workspaceGeneration"))
+            ) {
+                identity.put("workspaceGeneration", payload.get("workspaceGeneration"))
+            }
+        }
+        return try {
+            SessionContract.attach(result, SessionContract.classify(identity))
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch", requestId)
+        }
     }
 
     private fun requireFreshObservation(requestId: String, args: JSONObject, bound: ExecutionContext): GatewayObservation {
@@ -571,6 +675,8 @@ internal object GatewayV33ManualDesktopAdapter {
                 toolArgs.put("tool", "phone.tap")
                 params.put("normalizedX", args.optDouble("x", Double.NaN))
                 params.put("normalizedY", args.optDouble("y", Double.NaN))
+                // Desktop input must land at the selected pixel, without AI gesture drift.
+                params.put("humanize", "off")
                 params.put("waitForChangeMs", 0)
             }
             "swipe" -> {
@@ -582,6 +688,7 @@ internal object GatewayV33ManualDesktopAdapter {
                     throw GatewayProtocolException("PROTOCOL_MISMATCH", "$name must be between 0 and 1", requestId)
                 }
                 toolArgs.put("tool", "phone.swipe")
+                params.put("humanize", "off")
                 params.put("x1", pixel("x1", snapshot.screenWidth))
                 params.put("y1", pixel("y1", snapshot.screenHeight))
                 params.put("x2", pixel("x2", snapshot.screenWidth))
@@ -617,7 +724,9 @@ internal object GatewayV33ManualDesktopAdapter {
                 params.put("waitForChangeMs", 0)
             }
         }
-        return GatewayV33ActionAdapter.execute(context, requestId, toolArgs)
+        return PhoneToolExecutor.withHumanDesktopControl {
+            GatewayV33ActionAdapter.execute(context, requestId, toolArgs)
+        }
             .put("manualDesktopKind", kind)
             .put("typedValueRedacted", kind == "text")
     }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..actions.router import ActionValidationError
 from ..execution_scope import attach_execution_identity, parse_execution_identity
+from .human_gesture import safe_gesture_diagnostics
 from .models import (
     CAPABILITY_PROTOCOL_VERSION,
     CapabilityActionRequest,
@@ -405,14 +406,23 @@ def _parse_observation_witness(observation: dict | None) -> Witness | None:
 
 
 def _safe_android_execution(raw: dict) -> dict | None:
+    """Project Android authority plus a strictly bounded Human Gesture diagnostic block."""
     result = raw.get("result")
     if not isinstance(result, dict):
         return None
     execution = result.get("execution")
     if not isinstance(execution, dict):
+        execution = result.get("androidExecution")
+    if not isinstance(execution, dict):
+        execution = result.get("android_execution")
+    if not isinstance(execution, dict):
         return None
-    allowed = ("ok", "beforeFingerprint", "afterFingerprint", "error", "verification")
-    return {key: execution[key] for key in allowed if key in execution}
+    allowed = ("ok", "beforeFingerprint", "afterFingerprint", "error", "verification", "pageChanged")
+    projected = {key: execution[key] for key in allowed if key in execution}
+    gesture = safe_gesture_diagnostics(execution)
+    if gesture is not None:
+        projected["gesture"] = gesture
+    return projected or None
 
 
 def _error(

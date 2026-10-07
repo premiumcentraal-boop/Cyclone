@@ -1,5 +1,6 @@
 package com.cyclone.mobile
 
+import com.cyclone.mobile.gesture.HumanGestureRuntimeCapabilities
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -50,6 +51,7 @@ data class UiNodeSnapshot(
     val focusable: Boolean,
     val visibleToUser: Boolean,
     val actions: List<String> = emptyList(),
+    val password: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -76,6 +78,7 @@ data class UiNodeSnapshot(
         .put("focusable", focusable)
         .put("visibleToUser", visibleToUser)
         .put("actions", JSONArray(actions))
+        .put("password", password)
 }
 
 data class UiWindowSnapshot(
@@ -253,6 +256,8 @@ enum class PhoneToolErrorCode {
     SECURITY_RESTRICTION,
     POLICY_DENIED,
     INTERNAL_ERROR,
+    WORKSPACE_SCOPE_CONFLICT,
+    TARGET_SCOPE_MISMATCH,
 }
 
 data class PhoneToolError(val code: PhoneToolErrorCode, val message: String) {
@@ -285,18 +290,85 @@ data class PhoneToolResult(
     val payload: Any? = null,
     val error: PhoneToolError? = null,
 ) {
-    fun toJson(): JSONObject = JSONObject()
-        .put("commandId", commandId)
-        .put("tool", tool)
-        .put("ok", ok)
-        .put("startedAtMs", startedAtMs)
-        .put("finishedAtMs", finishedAtMs)
-        .put("durationMs", finishedAtMs - startedAtMs)
-        .put("attempts", attempts)
-        .put("beforeFingerprint", beforeFingerprint ?: JSONObject.NULL)
-        .put("afterFingerprint", afterFingerprint ?: JSONObject.NULL)
-        .put("payload", payload ?: JSONObject.NULL)
-        .put("error", error?.toJson() ?: JSONObject.NULL)
+    fun toJson(): JSONObject {
+        val renderedPayload = when {
+            tool != "phone.click" -> payload
+            payload is JSONObject && payload.optJSONObject("humanGesture") != null -> payload
+            !ok && HumanGestureDispatch.peekTrace(commandId) == null -> payload
+            else -> {
+                val base = if (payload is JSONObject) JSONObject(payload.toString()) else JSONObject()
+                base.put("humanGesture", serializedClickEvidence(base))
+            }
+        }
+        val finalizedPayload = addRuntimeEvidence(renderedPayload)
+        return JSONObject()
+            .put("commandId", commandId)
+            .put("tool", tool)
+            .put("ok", ok)
+            .put("startedAtMs", startedAtMs)
+            .put("finishedAtMs", finishedAtMs)
+            .put("durationMs", finishedAtMs - startedAtMs)
+            .put("attempts", attempts)
+            .put("beforeFingerprint", beforeFingerprint ?: JSONObject.NULL)
+            .put("afterFingerprint", afterFingerprint ?: JSONObject.NULL)
+            .put("payload", finalizedPayload ?: JSONObject.NULL)
+            .put("error", error?.toJson() ?: JSONObject.NULL)
+    }
+
+    private fun serializedClickEvidence(base: JSONObject): JSONObject {
+        val trace = HumanGestureDispatch.peekTrace(commandId)
+        val sessionId = base.optString("sessionId").takeIf { it.isNotBlank() }
+        val displayId = if (base.has("displayId")) base.optInt("displayId") else 0
+        return if (trace == null) {
+            JSONObject()
+                .put("requestedHumanize", JSONObject.NULL)
+                .put("resolvedProfile", JSONObject.NULL)
+                .put("profileSource", "not_applied_semantic")
+                .put("appliedProfile", "none")
+                .put("dispatchMode", "semantic_action")
+                .put("interactionMode", "semantic")
+                .put("correctedOrRejected", false)
+                .put("completed", true)
+                .put("reason", JSONObject.NULL)
+                .put("durationMs", JSONObject.NULL)
+                .put("sessionId", sessionId ?: "default-foreground")
+                .put("displayId", displayId)
+        } else {
+            JSONObject()
+                .put("requestedHumanize", JSONObject.NULL)
+                .put("resolvedProfile", trace.profile.name.lowercase())
+                .put("profileSource", "android_dispatch_trace")
+                .put("appliedProfile", trace.profile.name.lowercase())
+                .put("dispatchMode", trace.dispatchMode)
+                .put("interactionMode", "coordinate")
+                .put("correctedOrRejected", !trace.accepted)
+                .put("completed", trace.accepted)
+                .put("reason", trace.reason ?: JSONObject.NULL)
+                .put("durationMs", trace.durationMs)
+                .put("sessionId", sessionId ?: "default-foreground")
+                .put("displayId", if (trace.displayId > 0) trace.displayId else displayId)
+        }
+    }
+
+    private fun addRuntimeEvidence(value: Any?): Any? {
+        if (value !is JSONObject) return value
+        val humanGesture = value.optJSONObject("humanGesture") ?: return value
+        val out = JSONObject(value.toString())
+        val evidence = out.getJSONObject("humanGesture")
+        val dispatchMode = evidence.optString("dispatchMode")
+        val backend = if (dispatchMode == "workspace_endpoint_duration") {
+            "workspace_endpoint_duration"
+        } else {
+            "accessibility_dispatch_gesture"
+        }
+        val capabilities = HumanGestureRuntimeCapabilities.toJson(accessibilityConnected = true)
+        evidence
+            .put("backend", backend)
+            .put("controlVersion", capabilities.getString("controlVersion"))
+            .put("traceVersion", capabilities.getString("traceVersion"))
+            .put("synthesisVersion", capabilities.getString("synthesisVersion"))
+        return out
+    }
 }
 
 object PhoneToolNames {

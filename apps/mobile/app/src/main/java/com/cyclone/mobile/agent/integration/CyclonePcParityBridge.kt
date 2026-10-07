@@ -45,7 +45,10 @@ class CyclonePcParityBridge internal constructor(
     constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
         this(CycloneAgentEnvironment(context.applicationContext, execution, userTaskGoal), execution = execution)
 
+    var onOperation: ((String, AgentActionEnvelope?) -> Unit)? = null
     private var page: AgentPageCard? = null
+    var observationHealth = com.cyclone.mobile.agent.ObservationHealth(com.cyclone.mobile.agent.ObservationState.UNAVAILABLE, execution.sessionId, execution.displayId)
+        private set
     private var memory: RecoveryMemory = RecoveryMemory()
     private var lastRecovery: RecoveryDecision? = null
     private var searchEvidence: List<AgentElementCandidate> = emptyList()
@@ -53,13 +56,40 @@ class CyclonePcParityBridge internal constructor(
     private var brainEvidence: JSONObject? = null
     private var routeEvidence: JSONObject? = null
     private var forceVision = false
+    private var visualCaptureAttempts = 0
+    private var visualCaptureInFlight = false
+    var incident: com.cyclone.mobile.agent.recovery.RecoveryIncident? = null
 
-    fun observe(goal: String): AgentPageCard? {
+    @Synchronized fun observe(goal: String): AgentPageCard? = observeInternal(goal, false)?.page
+
+    @Synchronized fun observeWithImage(goal: String): com.cyclone.mobile.agent.contract.AgentObservationResult? = observeInternal(goal, true)
+
+    private fun observeInternal(goal: String, withImage: Boolean): com.cyclone.mobile.agent.contract.AgentObservationResult? {
+        val now = System.nanoTime() / 1_000_000
+        if (observationHealth.attempts > 0 && (observationHealth.terminal || now < observationHealth.cooldownUntilMs)) return null
         val previousKey = page?.pageKey
-        val result = environment.locate(goal)
-        val fresh = result.page ?: return null
+        val result = if (withImage) environment.observeWithImage(goal) else environment.locate(goal).let {
+            com.cyclone.mobile.agent.contract.AgentObservationResult(page = it.page, failure = it.failure)
+        }
+        val fresh = result.page ?: run {
+            page = null
+            environment.invalidateObservation()
+            observationHealth = com.cyclone.mobile.agent.ObservationHealth.failure(result.failure, execution.sessionId,
+                execution.displayId, observationHealth.attempts + 1, observationHealth.lastSuccessMs, now)
+            return null
+        }
+        if (fresh.sessionId != execution.sessionId || fresh.displayId != execution.displayId) {
+            page = null
+            environment.invalidateObservation()
+            observationHealth = com.cyclone.mobile.agent.ObservationHealth(com.cyclone.mobile.agent.ObservationState.SCOPE_MISMATCH,
+                execution.sessionId, execution.displayId, 1)
+            return null
+        }
+        observationHealth = com.cyclone.mobile.agent.ObservationHealth(
+            if (fresh.controls.isEmpty()) com.cyclone.mobile.agent.ObservationState.EMPTY_VALID else com.cyclone.mobile.agent.ObservationState.HEALTHY,
+            execution.sessionId, execution.displayId, lastSuccessMs = fresh.capturedAtMs)
         page = fresh
-        if (previousKey == null || previousKey != fresh.pageKey) {
+        if (previousKey == null) {
             memory = RecoveryMemory(
                 attemptedLevels = setOf(RecoveryLevel.CURRENT_SEMANTIC_PAGE),
                 attemptedEvidence = setOf(EvidenceSource.CURRENT_SEMANTIC_PAGE),
@@ -74,10 +104,30 @@ class CyclonePcParityBridge internal constructor(
                 attemptedEvidence = memory.attemptedEvidence + EvidenceSource.CURRENT_SEMANTIC_PAGE,
             )
         }
-        return fresh
+        return result
+    }
+
+    fun invalidateAfterHandoff() {
+        observationHealth = com.cyclone.mobile.agent.ObservationHealth(com.cyclone.mobile.agent.ObservationState.UNAVAILABLE, execution.sessionId, execution.displayId)
+        environment.invalidateObservation()
+        page = null
+        searchEvidence = emptyList()
+        inspectionEvidence = emptyList()
+        memory = RecoveryMemory()
+        visualCaptureAttempts = 0
+        visualCaptureInFlight = false
+        lastRecovery = null
+        forceVision = false
     }
 
     fun currentPage(): AgentPageCard? = page
+
+    fun invalidateCapture() {
+        environment.invalidateObservation()
+        page = null
+        searchEvidence = emptyList()
+        inspectionEvidence = emptyList()
+    }
 
     fun observation(): CycloneObservation? = page?.let { card ->
         // Observation IDs intentionally do NOT participate in convergence. They rotate after every
@@ -85,6 +135,7 @@ class CyclonePcParityBridge internal constructor(
         val semanticWitness = listOf(card.pageKey, card.contentKey, card.accessibilityFingerprint)
             .joinToString("|")
         CycloneObservation(
+            sessionId = card.sessionId, displayId = card.displayId, generation = card.generation, packageName = card.packageName,
             identity = semanticWitness,
             pageIdentity = card.pageKey,
             evidenceIdentity = semanticWitness,
@@ -99,6 +150,8 @@ class CyclonePcParityBridge internal constructor(
         val out = JSONObject()
             .put("contract", "cyclone-pc-parity-local-v2")
             .put("goal", goal)
+            .put("recoveryIncident", incident?.toJson() ?: JSONObject.NULL)
+            .put("observationHealth", observationHealth.toJson())
             .put("goalContract", contract.toJson())
             .put("completionState", completion.toJson())
             .put("staleIdRule", "elementId and elementIndex are valid only for the current observation; re-locate after every mutation")
@@ -134,7 +187,7 @@ class CyclonePcParityBridge internal constructor(
             out.put("fastPathLanding", landing.toJson())
             out.put(
                 "landingRule",
-                "Prefer this open_app/intent landing before hunting launcher icons. 3.9.12 Ask→workspace already routes a uniquely named installed app.",
+                "Prefer this open_app/intent landing before hunting launcher icons. Named apps and installed-app jobs both land locally.",
             )
         }
         card?.let { current ->
@@ -156,6 +209,8 @@ class CyclonePcParityBridge internal constructor(
         val recoveryJson = JSONObject()
             .put("attemptedLevels", JSONArray(memory.attemptedLevels.sortedBy { it.stage }.map { it.name }))
             .put("attemptedEvidence", JSONArray(memory.attemptedEvidence.map { it.name }))
+            .put("visualCaptureAttempts", visualCaptureAttempts)
+            .put("usableVisualCaptures", memory.capturesForSemanticState)
             .put("semanticSearchExhausted", memory.semanticSearchExhausted)
             .put("materiallyDifferentActionsWithoutProgress", memory.materiallyDifferentActionsWithoutProgress)
         lastRecovery?.let {
@@ -193,17 +248,21 @@ class CyclonePcParityBridge internal constructor(
             val elementId = resolveElementId(action.controlId, legacyPage, goal)
             if (elementId != null) params.put("elementId", elementId)
         }
+        onOperation?.invoke(action.tool, null)
         return environment.act(action.tool, params, goal).also { envelope ->
+            onOperation?.invoke(action.tool, envelope)
             page = envelope.after ?: page
         }
     }
 
     fun actGraph(action: LearnedAction, goal: String): AgentActionEnvelope {
         val query = action.label.ifBlank { action.id }
-        val candidate = search(query, goal).firstOrNull()
+        val candidate = search(query, goal).filter { normalize(it.label) == normalize(query) || normalize(it.semanticName) == normalize(query) }.singleOrNull()
         val params = JSONObject()
         if (candidate != null) params.put("elementId", candidate.elementId)
+        onOperation?.invoke("phone.click", null)
         return environment.act("phone.click", params, goal).also { envelope ->
+            onOperation?.invoke("phone.click", envelope)
             page = envelope.after ?: page
         }
     }
@@ -222,7 +281,7 @@ class CyclonePcParityBridge internal constructor(
      * Selects and performs only read-only recovery escalation. Mutation recovery (scroll/back/backtrack)
      * remains an explicit next model/tool decision so GATE/policy and user intent stay authoritative.
      */
-    fun recover(cause: RecoverableCause, goal: String): RecoveryDecision? {
+    fun recover(cause: RecoverableCause, goal: String, failuresWithoutProgress: Int = 0): RecoveryDecision? {
         val card = page ?: observe(goal) ?: return null
         val request = RecoveryRequest(
             observation = observationEvidence(card),
@@ -241,7 +300,15 @@ class CyclonePcParityBridge internal constructor(
             boundedExplorationAvailable = true,
             backtrackOrAlternateBranchAvailable = true,
         )
-        val decision = recovery.selectRecovery(request)
+        // A second grounding failure after semantic search needs pixels, even on a populated tree.
+        val groundingFailure = cause in setOf(RecoverableCause.STALE_SELECTOR,
+            RecoverableCause.TARGET_MISSING_FROM_COMPACT_CONTROLS, RecoverableCause.VERIFICATION_FAILED,
+            RecoverableCause.AFTER_STATE_MISSING, RecoverableCause.AMBIGUOUS_SEMANTICS,
+            RecoverableCause.SAME_PAGE_NO_EFFECT)
+        val decision = if (failuresWithoutProgress >= 2 && groundingFailure &&
+            RecoveryLevel.GOAL_RANKED_SEARCH in memory.attemptedLevels && memory.capturesForSemanticState == 0) {
+            RecoveryDecision(RecoveryLevel.SILENT_SCREENSHOT_VISION, "grounding_failed_after_semantic_search")
+        } else recovery.selectRecovery(request.copy(knownVerifiedRouteAvailable = request.knownVerifiedRouteAvailable && failuresWithoutProgress == 0))
         lastRecovery = decision
         when (decision.level) {
             RecoveryLevel.KNOWN_VERIFIED_ROUTE -> loadKnowledge(goal)
@@ -273,11 +340,6 @@ class CyclonePcParityBridge internal constructor(
             }
             RecoveryLevel.SILENT_SCREENSHOT_VISION -> {
                 forceVision = true
-                memory = memory.copy(
-                    attemptedLevels = memory.attemptedLevels + RecoveryLevel.SILENT_SCREENSHOT_VISION,
-                    attemptedEvidence = memory.attemptedEvidence + EvidenceSource.SCREENSHOT_VISION,
-                    capturesForSemanticState = memory.capturesForSemanticState + 1,
-                )
             }
             RecoveryLevel.BACKTRACK_OR_REPLAN -> {
                 memory = memory.copy(
@@ -312,7 +374,43 @@ class CyclonePcParityBridge internal constructor(
         return value
     }
 
+    /** Attempts are bounded separately from usable visual evidence. */
+    @Synchronized fun claimVisionCapture(): Boolean {
+        if (visualCaptureInFlight || visualCaptureAttempts >= 2 || memory.capturesForSemanticState > 0) return false
+        visualCaptureAttempts++
+        visualCaptureInFlight = true
+        forceVision = false
+        return true
+    }
+
+    @Synchronized fun finishVisionCapture(usable: Boolean) {
+        if (!visualCaptureInFlight) return
+        visualCaptureInFlight = false
+        if (usable) memory = memory.copy(capturesForSemanticState = 1,
+            attemptedLevels = memory.attemptedLevels + RecoveryLevel.SILENT_SCREENSHOT_VISION,
+            attemptedEvidence = memory.attemptedEvidence + EvidenceSource.SCREENSHOT_VISION)
+    }
+
+    /** One bounded retry for unavailable pixels, with no provider call until usable evidence exists. */
+    fun captureVisualEvidence(goal: String, pause: (Long) -> Unit = { Thread.sleep(it) }): com.cyclone.mobile.agent.contract.AgentObservationResult? {
+        var result: com.cyclone.mobile.agent.contract.AgentObservationResult? = null
+        repeat(2) { attempt ->
+            if (!claimVisionCapture()) return result
+            var usable = false
+            try {
+                result = observeWithImage(goal)
+                usable = result?.page != null && result?.image?.optBoolean("available", false) == true &&
+                    !result?.image?.optString("pngBase64").isNullOrBlank()
+            } finally { finishVisionCapture(usable) }
+            if (usable || observationHealth.terminal || visualCaptureAttempts >= 2 || attempt == 1) return result
+            pause(500)
+        }
+        return result
+    }
+
     fun markVerifiedProgress() {
+        visualCaptureAttempts = 0
+        visualCaptureInFlight = false
         memory = RecoveryMemory(
             attemptedLevels = setOf(RecoveryLevel.CURRENT_SEMANTIC_PAGE),
             attemptedEvidence = setOf(EvidenceSource.CURRENT_SEMANTIC_PAGE),
@@ -334,6 +432,9 @@ class CyclonePcParityBridge internal constructor(
 
     fun verifiedSimpleNavigation(goal: String): Boolean =
         GoalContractCompiler.isSimpleWebNavigation(goal) && completionEvidence(goal)
+
+    fun verifiedNamedAppOpen(goal: String): Boolean =
+        com.cyclone.mobile.agent.plan.TaskDifficulty.isNamedAppOpenOnly(goal) && completionEvidence(goal)
 
     fun completionEvaluation(goal: String): JSONObject {
         val contract = GoalContractCompiler.compile(goal)
@@ -361,10 +462,10 @@ class CyclonePcParityBridge internal constructor(
             ?: controlId?.takeIf { it.isNotBlank() }
             ?: goal
         val normalized = normalize(query)
-        card.controls.firstOrNull {
+        card.controls.singleOrNull {
             normalize(it.semanticName) == normalized || normalize(it.label) == normalized
         }?.let { return it.elementId }
-        return search(query, goal).firstOrNull()?.elementId
+        return search(query, goal).filter { normalize(it.label) == normalized || normalize(it.semanticName) == normalized }.singleOrNull()?.elementId
     }
 
     private fun search(query: String, goal: String): List<AgentElementCandidate> {
@@ -426,22 +527,8 @@ class CyclonePcParityBridge internal constructor(
         )
     }
 
-    private fun pageCardJson(card: AgentPageCard): JSONObject = JSONObject()
-        .put("observationId", card.observationId)
-        .put("generation", card.generation)
-        .put("package", card.packageName)
-        .put("activity", card.activity ?: JSONObject.NULL)
-        .put("pageKey", card.pageKey)
-        .put("structuralKey", card.structuralKey)
-        .put("contentKey", card.contentKey)
-        .put("accessibilityFingerprint", card.accessibilityFingerprint)
-        .put("pageSummary", JSONObject(card.pageSummary.toString()))
-        .put("pageText", JSONObject(card.pageText.toString()))
-        .put("pageEvidence", JSONObject(card.pageEvidence.toString()))
-        .put("controls", JSONArray().also { array -> card.controls.forEach { array.put(candidateJson(it)) } })
-        .put("nextHopHints", JSONArray(card.nextHopHints.toString()))
-        .put("perceptionMode", card.perceptionMode)
-        .put("treeUseful", card.treeUseful)
+    private fun pageCardJson(card: AgentPageCard): JSONObject =
+        com.cyclone.mobile.agent.tools.ObservationProjections.prompt(card)
 
     private fun compactText(card: AgentPageCard): String {
         val combined = buildString {
@@ -482,6 +569,9 @@ class CyclonePcParityBridge internal constructor(
                     .put("semanticSuccessClaimed", envelope.semanticSuccessClaimed)
                     .put("delta", envelope.delta.summary.take(240))
                     .put("errorClass", envelope.errorClass.name)
+                    .put("failureLayer", envelope.failureLayer.name)
+                    .put("executorInvoked", envelope.executorInvoked)
+                    .put("safeMessage", envelope.safeMessage?.let { com.cyclone.mobile.ai.TracePrivacy.clean(it).take(300) } ?: JSONObject.NULL)
                     .put("learningRecorded", envelope.learning.recorded),
             )
         }
@@ -544,6 +634,9 @@ class CyclonePcParityBridge internal constructor(
         .put("risk", candidate.evidence.optString("risk"))
         .put("expectedEffect", candidate.evidence.opt("expectedEffect") ?: JSONObject.NULL)
         .put("clickable", candidate.evidence.optBoolean("clickable"))
+        .put("enabled", candidate.evidence.optBoolean("enabled", true))
+        .put("visibleToUser", candidate.evidence.optBoolean("visibleToUser", true))
+        .put("bounds", candidate.evidence.optJSONObject("bounds") ?: JSONObject.NULL)
         .put("editable", candidate.evidence.optBoolean("editable"))
         .put("scrollable", candidate.evidence.optBoolean("scrollable"))
         .put("selected", candidate.evidence.optBoolean("selected"))

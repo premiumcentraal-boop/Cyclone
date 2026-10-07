@@ -1,5 +1,8 @@
 package com.cyclone.mobile
 
+import com.cyclone.mobile.ui.overlay.tracefield.TraceActKind
+import com.cyclone.mobile.ui.overlay.tracefield.TraceFieldCaptureGate
+import com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime as TraceField
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
@@ -16,6 +19,8 @@ import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
 import com.cyclone.mobile.guided.GuidedRecorderOverlayController
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
+import com.cyclone.mobile.gesture.HumanizePreference
+import com.cyclone.mobile.gesture.RuntimeGestureKind
 import com.cyclone.mobile.ui.overlay.ClickGateIntercept
 import com.cyclone.mobile.ui.overlay.GateBlockedException
 import com.cyclone.mobile.ui.overlay.OverlayChromeObservation
@@ -36,6 +41,8 @@ class CycloneAccessibilityService : AccessibilityService() {
         val crop: UiBounds?,
         val timestampMs: Long,
         val liveFrame: com.cyclone.mobile.ai.vision.live.LiveFrame? = null,
+        val displayBounds: UiBounds? = null,
+        val capturedAtMonotonicMs: Long? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("filePath", file.absolutePath)
@@ -44,10 +51,11 @@ class CycloneAccessibilityService : AccessibilityService() {
             .put("height", height)
             .put("timestampMs", timestampMs)
             .put("crop", crop?.toJson() ?: JSONObject.NULL)
+            .put("displayBounds", (displayBounds ?: crop)?.toJson() ?: JSONObject.NULL)
             .put("sessionId", liveFrame?.sessionId ?: "default-foreground")
             .put("displayId", liveFrame?.displayId ?: 0)
             .put("frameId", liveFrame?.frameId ?: JSONObject.NULL)
-            .put("capturedAtMonotonicMs", liveFrame?.capturedAtMonotonicMs ?: JSONObject.NULL)
+            .put("capturedAtMonotonicMs", liveFrame?.capturedAtMonotonicMs ?: capturedAtMonotonicMs ?: JSONObject.NULL)
             .put("source", liveFrame?.source?.name ?: "ACCESSIBILITY_SCREENSHOT")
     }
 
@@ -57,8 +65,56 @@ class CycloneAccessibilityService : AccessibilityService() {
     @Volatile private var appLearnerRuntimeReady = false
     private var lastAutomationPackage: String? = null
     private var guidedOverlay: GuidedRecorderOverlayController? = null
+    private val observationRevisions = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.atomic.AtomicLong>()
+    private val sensitiveEditableHint = Regex(
+        "(?i)(password|passcode|passwd|secret|otp|one.?time|verification.?code|cvv|cvc|card.?number|pin|api.?key|token)"
+    )
+
+    /** Window metadata only: this must never traverse semantic children. Overlay chrome is excluded. */
+    fun observationSurface(sessionId: String, displayId: Int, scope: String, profileId: Int?): com.cyclone.mobile.agent.ObservationSurface {
+        val display = getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(displayId)
+            ?: error("DISPLAY_GONE")
+        val metrics = createDisplayContext(display).resources.displayMetrics
+        val listed = windowsOnAllDisplays.get(displayId).orEmpty()
+        val signature = com.cyclone.mobile.agent.SemanticCaptureBoundary.windowSignature(listed.map { window ->
+                val bounds = Rect().also { window.getBoundsInScreen(it) }
+                UiWindowSnapshot(window.id, "", window.type, window.layer, window.isActive, window.isFocused,
+                    UiBounds(bounds.left, bounds.top, bounds.right, bounds.bottom))
+            })
+        return com.cyclone.mobile.agent.ObservationSurface(sessionId, displayId, scope, signature,
+            metrics.widthPixels, metrics.heightPixels, display.rotation,
+            observationRevisions.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicLong() }.get(), profileId)
+    }
+
+    private fun recordObservationEvent(event: AccessibilityEvent, listed: android.util.SparseArray<List<AccessibilityWindowInfo>>) {
+        val owner = (0 until listed.size()).firstOrNull { i -> listed.valueAt(i).any { it.id == event.windowId } }
+        val window = owner?.let { listed.valueAt(it).first { window -> window.id == event.windowId } }
+        if (window?.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return
+        if (window != null && owner != null) {
+            // Alpha 109: the status bar and the closed notification shade tick all the time; they are not the task's screen.
+            val siblings = listed.valueAt(owner)
+            val bounds = Rect().also { window.getBoundsInScreen(it) }
+            val display = Rect().also { union -> siblings.forEach { w -> union.union(Rect().also { r -> w.getBoundsInScreen(r) }) } }
+            if (!TaskSurfaceWindows.changesTaskRead(window.type, window.isActive, window.isFocused, bounds.width(), bounds.height(),
+                    display.width(), display.height())) return
+        }
+        if (window == null && event.packageName?.toString() == packageName &&
+            preferredForegroundRoot(listed.get(0).orEmpty())?.packageName?.toString() != packageName) return
+        // A removed or unidentified window cannot safely be assigned to one display.
+        val displays = owner?.let { listOf(listed.keyAt(it)) } ?: observationRevisions.keys.toList()
+        displays.forEach { displayId ->
+            observationRevisions.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicLong() }.incrementAndGet()
+        }
+    }
 
     companion object {
+        private const val PASTE_SETTLE_MS = 150L
+        /** Alpha 93: the wait before a typed field is read back a second time. */
+        private const val TYPE_SETTLE_MS = 150L
+        // Plan 52: how long Cyclone waits for the keyboard (or its input connection) after touching a field.
+        private const val KEYBOARD_WAIT_MS = 700L
+        /** How long the foreground task's package is reused between structural events. */
+        private const val HOST_TTL_MS = 1_000L
         @Volatile var instance: CycloneAccessibilityService? = null
             private set
     }
@@ -68,11 +124,21 @@ class CycloneAccessibilityService : AccessibilityService() {
         CycloneProcessDiagnostics.install(applicationContext)
         CycloneProcessDiagnostics.markStage(this, "primary.accessibility.onServiceConnected")
         instance = this
+        // Plan 52: the owner's Hands choice (Precise / Natural / Relaxed, hand, typos) for every gesture and key.
+        runCatching { com.cyclone.mobile.gesture.HandsSettings.apply(applicationContext) }
         DeviceState.accessibilityConnected = true
         DeviceState.addLog("Accessibility connected")
 
         runCatching { OverlayChromeRuntime.attach(this) }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.overlay.attach", it) }
+        // Alpha 95: Driver mode's orb attaches on its own (it used to come only at the end of the chrome's attach).
+        runCatching { com.cyclone.mobile.ui.overlay.DriverOverlay.attach(this) }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.drive.attach", it) }
+        // A Cyclone Mind mission cut off by a crash or process death minutes ago continues once the phone is reachable.
+        val app = applicationContext
+        Thread({ runCatching { Thread.sleep(3_000); com.cyclone.mobile.mind.mission.MindMissions.onServiceReady(app) } }, "cyclone-mind-recover").start()
+        runCatching { com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime.attach(this) }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.tracefield.attach", it) }
 
         // Android owns this callback boundary. Optional Cyclone runtimes are deliberately initialized
         // away from it so a corrupt DB, migration issue, legacy bridge config, or app-learning bug can
@@ -107,14 +173,41 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** The home screen apps: never shown as "the app Cyclone works in". */
+    private val homePackages: Set<String> by lazy {
+        runCatching {
+            packageManager.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_HOME), 0).mapNotNull { it.activityInfo?.packageName }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        // This runs on the main thread for every screen event (hundreds a second in a busy app): read Android's window
+        // list once per event, and resolve the foreground task's root (one call per window) only when the screen's
+        // structure changed. A freeze here is what the PC used to see as a lost phone (alpha 87).
+        val listed = runCatching { windowsOnAllDisplays }.getOrNull() ?: return
+        runCatching { recordObservationEvent(event, listed) }
+        val front = listed.get(0).orEmpty()
         // Background windows must not update the global foreground package, learning or UI state.
-        if (event.windowId != -1 && windowsOnAllDisplays.get(0).orEmpty().none { it.id == event.windowId }) return
+        if (event.windowId != -1 && front.none { it.id == event.windowId }) return
         try {
             val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() }
-            packageName?.let { DeviceState.currentPackage = it }
-            event.className?.toString()?.takeIf { it.isNotBlank() }?.let { DeviceState.currentClassName = it }
+            val eventWindow = front.firstOrNull { it.id == event.windowId }
+            val structural = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            val refreshed = structural || hostStale(front)
+            val host = if (refreshed) preferredForegroundRoot(front).also { rememberHost(front, it) } else null
+            val hostPackage = if (refreshed) host?.packageName?.toString() else rememberedHostPackage
+            if (!TaskSurfaceWindows.eventBelongsToTask(eventWindow?.type, packageName.orEmpty(), hostPackage)) return
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                host?.packageName?.toString()?.let {
+                    DeviceState.currentPackage = it
+                    // The working status shows the app Cyclone works in, not the home screen or Cyclone itself.
+                    com.cyclone.mobile.ui.overlay.WorkingApp.seen(it, homePackages)
+                }
+                host?.className?.toString()?.let { DeviceState.currentClassName = it }
+            }
             DeviceState.lastUiEventAtMs = System.currentTimeMillis()
 
             if (automationRuntimeReady) {
@@ -151,7 +244,9 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onInterrupt() { com.cyclone.mobile.runtime.background.WorkspaceRuntime.invalidateAll() }
+    // Android sends onInterrupt when an app asks accessibility feedback (speech) to stop. It is not a loss of the
+    // service, so background screens stay; only onDestroy (the service really going away) ends them.
+    override fun onInterrupt() = Unit
 
     override fun onDestroy() {
         com.cyclone.mobile.runtime.background.WorkspaceRuntime.invalidateAll()
@@ -161,6 +256,9 @@ class CycloneAccessibilityService : AccessibilityService() {
         guidedOverlay = null
         runCatching { OverlayChromeRuntime.detach() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.overlay", it) }
+        runCatching { com.cyclone.mobile.ui.overlay.DriverOverlay.detach() }
+        runCatching { com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime.detach() }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.tracefield", it) }
         runCatching { RoutineTeachingOverlayRuntime.dismiss() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.teaching", it) }
         instance = null
@@ -185,7 +283,16 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     fun observe(markFresh: Boolean = true): UiSnapshot {
         if (markFresh) waitForUiQuiet()
-        val root = preferredForegroundRoot() ?: rootInActiveWindow
+        val root = preferredForegroundRoot()
+        // A focused Ask window can make Android's permission-dialog root unreadable. Yield only
+        // when the ordinary host read is empty; never hide the owner's secure input card.
+        if (root == null && !com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.active() &&
+            DeviceState.controller == DeviceState.Controller.AGENT &&
+            com.cyclone.mobile.secrets.SecretsCardRuntime.state.value?.visible != true) {
+            return com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostPassthrough {
+                observe(markFresh)
+            }
+        }
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
         val consumedWindows = mutableSetOf<Int>()
@@ -193,11 +300,11 @@ class CycloneAccessibilityService : AccessibilityService() {
             collectNode(root, "0", null, 0, nodes)
             consumedWindows += root.windowId
         }
-        includeSiblingApplicationWindows(nodes, consumedWindows)
+        includeSiblingApplicationWindows(nodes, consumedWindows, root?.packageName?.toString().orEmpty())
         val folded = AccessibilityRoles.foldTalkBackHosts(nodes)
         nodes.clear()
         nodes.addAll(folded)
-        val windowsSnapshot = windows.orEmpty().map { window ->
+        val windowsSnapshot = windowsOnAllDisplays.get(0).orEmpty().filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }.map { window ->
             val rect = Rect().also { window.getBoundsInScreen(it) }
             UiWindowSnapshot(
                 id = window.id,
@@ -216,11 +323,11 @@ class CycloneAccessibilityService : AccessibilityService() {
             metrics.widthPixels,
             metrics.heightPixels,
         )
-        val packageName = root?.packageName?.toString()?.takeIf { it.isNotBlank() } ?: DeviceState.currentPackage
+        val packageName = root?.packageName?.toString()?.takeIf { it.isNotBlank() }
         val fingerprint = screenFingerprint(packageName, nodes)
         val snapshot = UiSnapshot(
             packageName = packageName,
-            className = DeviceState.currentClassName,
+            className = root?.className?.toString(),
             screenWidth = metrics.widthPixels,
             screenHeight = metrics.heightPixels,
             timestampMs = System.currentTimeMillis(),
@@ -229,7 +336,10 @@ class CycloneAccessibilityService : AccessibilityService() {
             windows = windowsSnapshot,
             nodes = nodes,
         )
-        if (markFresh) DeviceState.markObserved()
+        if (markFresh) {
+            DeviceState.markObserved()
+            TraceField.observed(fingerprint)
+        }
         return snapshot
     }
 
@@ -239,10 +349,14 @@ class CycloneAccessibilityService : AccessibilityService() {
         val display = getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(displayId)
             ?: error("DISPLAY_GONE")
         val listed = windowsOnAllDisplays.get(displayId).orEmpty()
-        val root = listed.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        // Plan 28: the display is Cyclone's alone, so whatever is on top there is part of the task: the app itself, or a
+        // permission dialog, share sheet or sign-in page it opened. The top application window leads the snapshot.
+        val roots = listed.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
             .sortedByDescending { it.layer }.mapNotNull { it.root }
-            .firstOrNull { it.packageName?.toString() == targetPackage }
+            .filter { it.packageName?.toString() != packageName }
+        val root = roots.firstOrNull()
             ?: error("BACKGROUND_MODE_UNAVAILABLE: no target Accessibility window on this display")
+        val shownPackage = root.packageName?.toString() ?: targetPackage
         val nodes = mutableListOf<UiNodeSnapshot>()
         val ownedWindows = listed.filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
         ownedWindows.forEach { window ->
@@ -252,8 +366,8 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
         val metrics = createDisplayContext(display).resources.displayMetrics
         val folded = AccessibilityRoles.foldTalkBackHosts(nodes)
-        return UiSnapshot(targetPackage, root.className?.toString(), metrics.widthPixels, metrics.heightPixels,
-            System.currentTimeMillis(), screenFingerprint(targetPackage, folded), "agent",
+        return UiSnapshot(shownPackage, root.className?.toString(), metrics.widthPixels, metrics.heightPixels,
+            System.currentTimeMillis(), screenFingerprint(shownPackage, folded), "agent",
             ownedWindows.map { window ->
                 val rect = Rect().also { window.getBoundsInScreen(it) }
                 UiWindowSnapshot(window.id, window.title?.toString().orEmpty(), window.type, window.layer,
@@ -264,8 +378,22 @@ class CycloneAccessibilityService : AccessibilityService() {
     fun find(selector: ElementSelector, limit: Int = 20): List<SelectorMatch> =
         SelectorEngine.resolve(observe(markFresh = false), selector, limit)
 
-    fun click(selector: ElementSelector): Boolean {
+    fun click(
+        selector: ElementSelector,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
+        val clicked = clickResolved(selector, humanize, commandId)
+        if (!clicked) TraceField.recovering()
+        return clicked
+    }
+
+    private fun clickResolved(
+        selector: ElementSelector,
+        humanize: HumanizePreference,
+        commandId: String?,
+    ): Boolean {
         repeat(2) {
             val snapshot = observe(markFresh = false)
             val match = SelectorEngine.resolve(snapshot, selector, 1).firstOrNull() ?: return@repeat
@@ -280,6 +408,26 @@ class CycloneAccessibilityService : AccessibilityService() {
                     OverlayChromeRuntime.enterGate(decision.gateClass)
                 }
                 throw GateBlockedException(decision.gateClass)
+            }
+            TraceField.targeted(activation.bounds, activation.path)
+            TraceField.acted(TraceActKind.TAP, activation.bounds.centerX, activation.bounds.centerY)
+            // Plan 52: with Natural hands, a plainly visible, uncovered control is pressed with a finger (after the
+            // approval check above) instead of ACTION_CLICK. The channel is chosen here, once: a press that changes
+            // nothing is never followed by a semantic click, and anything doubtful keeps the semantic path below.
+            val touchFirst = com.cyclone.mobile.gesture.TouchFirst.decide(
+                snapshot, activation, com.cyclone.mobile.gesture.Hands.style, humanize,
+            )
+            if (touchFirst == com.cyclone.mobile.gesture.TouchFirst.Verdict.TOUCH) {
+                return HumanGestureDispatch.tap(
+                    service = this,
+                    x = activation.bounds.centerX,
+                    y = activation.bounds.centerY,
+                    preference = com.cyclone.mobile.gesture.TouchFirst.touchPreference(humanize),
+                    kind = RuntimeGestureKind.FALLBACK_TAP,
+                    commandId = commandId,
+                    targetBounds = activation.bounds,
+                    mode = "touch_first",
+                )
             }
             val targetLive = if (activation.path == snapshotNode.path) {
                 node
@@ -299,7 +447,15 @@ class CycloneAccessibilityService : AccessibilityService() {
             if (preferHost && clickActivatableAncestor(targetLive)) return true
             if (activateNode(targetLive, activation.role)) return true
             if (!preferHost && clickActivatableAncestor(targetLive)) return true
-            return tap(activation.bounds.centerX, activation.bounds.centerY)
+            return HumanGestureDispatch.tap(
+                service = this,
+                x = activation.bounds.centerX,
+                y = activation.bounds.centerY,
+                preference = humanize,
+                kind = RuntimeGestureKind.FALLBACK_TAP,
+                commandId = commandId,
+                targetBounds = activation.bounds,
+            )
         }
         return false
     }
@@ -349,15 +505,15 @@ class CycloneAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private fun includeSiblingApplicationWindows(nodes: MutableList<UiNodeSnapshot>, consumedWindows: MutableSet<Int>) {
-        val overlay = OverlayChromeRuntime.snapshot()
-        val includeOverlay = overlay.state == OverlayChromeState.GATE && !overlay.minimized
-        for (window in windows.orEmpty()) {
+    private fun includeSiblingApplicationWindows(nodes: MutableList<UiNodeSnapshot>, consumedWindows: MutableSet<Int>, hostPackage: String) {
+        // GATE is added separately as bounded synthetic state, never as the animated Compose tree.
+        for (window in windowsOnAllDisplays.get(0).orEmpty()) {
             val wroot = window.root ?: continue
             if (wroot.windowId in consumedWindows) continue
             val pkg = wroot.packageName?.toString().orEmpty()
             val isWeb = isWebishWindow(window, wroot)
-            if (!OverlayChromeObservation.shouldCollectSiblingWindow(window.type, pkg, isWeb, includeOverlay)) continue
+            if (!TaskSurfaceWindows.includeSibling(window.type, pkg, hostPackage)) continue
+            if (!OverlayChromeObservation.shouldCollectSiblingWindow(window.type, pkg, isWeb)) continue
             collectNode(wroot, "w${window.id}/0", null, 0, nodes)
             consumedWindows += wroot.windowId
         }
@@ -371,28 +527,46 @@ class CycloneAccessibilityService : AccessibilityService() {
             "chrome" in title || "webview" in cls || "web_view" in cls
     }
 
-    private fun preferredForegroundRoot(): AccessibilityNodeInfo? {
-        val active = rootInActiveWindow
-        val activePkg = active?.packageName?.toString().orEmpty()
-        if (activePkg.isNotBlank() && activePkg != "com.android.systemui") return active
-        val listed = windows.orEmpty()
-        val app = listed.firstOrNull { window ->
-            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
-                (window.isActive || window.isFocused) &&
-                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
-        } ?: listed.firstOrNull { window ->
-            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
-                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
-        }
-        return app?.root ?: active
+    // The foreground task's package from the last structural event, and the window layout it was read for.
+    @Volatile private var rememberedHostPackage: String? = null
+    private var rememberedHostWindows: List<Int> = emptyList()
+    private var rememberedHostAt = 0L
+
+    private fun hostStale(front: List<AccessibilityWindowInfo>): Boolean =
+        front.map { it.id } != rememberedHostWindows || android.os.SystemClock.uptimeMillis() - rememberedHostAt > HOST_TTL_MS
+
+    private fun rememberHost(front: List<AccessibilityWindowInfo>, host: AccessibilityNodeInfo?) {
+        rememberedHostPackage = host?.packageName?.toString()
+        rememberedHostWindows = front.map { it.id }
+        rememberedHostAt = android.os.SystemClock.uptimeMillis()
     }
+
+    private fun preferredForegroundRoot(listed: List<AccessibilityWindowInfo> = windowsOnAllDisplays.get(0).orEmpty()): AccessibilityNodeInfo? {
+        val active = rootInActiveWindow
+        // Each window's root is read once: reading it again could come back null for a dialog (alpha 91).
+        val roots = listed.associate { it.id to it.root }
+        val ordered = TaskSurfaceWindows.ordered(listed.map { window ->
+            TaskSurfaceWindows.Window(window.id, window.type, roots[window.id]?.packageName?.toString().orEmpty(),
+                window.layer, window.isActive, window.isFocused)
+        }, active?.windowId)
+        ordered.firstNotNullOfOrNull { roots[it.id] }?.let { return it }
+        // OEM fallback only when enumeration is unavailable. Never use Cyclone's untyped overlay root.
+        return active?.takeIf { listed.isEmpty() && !it.packageName.isNullOrBlank() && it.packageName?.toString() !in setOf("com.cyclone.mobile", "com.android.systemui") }
+    }
+
+    internal fun foregroundTaskWindowId(): Int? = preferredForegroundRoot()?.windowId
 
     /**
      * V2.9 replay optimization: a human may demonstrate a two-second hold, but if Android exposes
      * ACTION_LONG_CLICK Cyclone sends that semantic action immediately. The original gesture duration
      * remains only as a compatibility fallback for apps that do not expose a native long-click.
      */
-    fun longPress(selector: ElementSelector, durationMs: Long = 650): Boolean {
+    fun longPress(
+        selector: ElementSelector,
+        durationMs: Long = 650,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
         repeat(2) {
             val target = resolveLiveTarget(selector) ?: return@repeat
@@ -403,12 +577,38 @@ class CycloneAccessibilityService : AccessibilityService() {
                 DeviceState.addLog("Semantic ACTION_LONG_CLICK used instead of timed hold")
                 return true
             }
-            return rawLongPress(snapshotNode.bounds.centerX, snapshotNode.bounds.centerY, durationMs)
+            return HumanGestureDispatch.longPress(
+                service = this,
+                x = snapshotNode.bounds.centerX,
+                y = snapshotNode.bounds.centerY,
+                durationMs = durationMs,
+                preference = humanize,
+                kind = RuntimeGestureKind.LONG_PRESS,
+                commandId = commandId,
+                targetBounds = snapshotNode.bounds,
+            )
         }
         return false
     }
 
-    fun typeEditable(plan: PhoneTypeEngine.ExecutePlan, value: String): PhoneTypeEngine.LiveResult {
+    /** Presses the keyboard action key (Enter, Search, Go) on the grounded editable field. */
+    fun imeEnter(selector: ElementSelector): Boolean {
+        if (!agentCanAct()) return false
+        repeat(2) {
+            val target = resolveLiveTarget(selector) ?: return@repeat
+            val (snapshotNode, node) = target
+            if (!sameNode(snapshotNode, node)) return@repeat
+            if (!node.isEditable) return false
+            return node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        }
+        return false
+    }
+
+    fun typeEditable(
+        plan: PhoneTypeEngine.ExecutePlan,
+        value: CharSequence,
+        redactObservedText: Boolean = false,
+    ): PhoneTypeEngine.LiveResult {
         if (!agentCanAct()) {
             return PhoneTypeEngine.LiveResult(
                 ok = false,
@@ -417,35 +617,72 @@ class CycloneAccessibilityService : AccessibilityService() {
                 rawNodeId = plan.rawNodeId,
             )
         }
-        return PhoneTypeEngine.perform(plan, value, AccessibilityTypeLive())
+        return PhoneTypeEngine.perform(
+            plan,
+            value,
+            AccessibilityTypeLive(displayId = 0, targetPackage = null),
+            redactObservedText = redactObservedText,
+        )
     }
 
-    private inner class AccessibilityTypeLive : PhoneTypeEngine.LiveHost {
+    /**
+     * Workspace-scoped secure input. Authority is proved by PhoneToolExecutor before entry;
+     * this method only resolves the exact node on [displayId] and performs ACTION_SET_TEXT.
+     */
+    internal fun typeEditableOnDisplay(
+        plan: PhoneTypeEngine.ExecutePlan,
+        value: CharSequence,
+        displayId: Int,
+        targetPackage: String,
+        /** True for secrets (set-text only, exact in-process match); false for ordinary text (the full ladder). */
+        redact: Boolean = true,
+    ): PhoneTypeEngine.LiveResult {
+        if (displayId <= 0 || targetPackage.isBlank()) {
+            return PhoneTypeEngine.LiveResult(
+                ok = false,
+                error = PhoneToolError(PhoneToolErrorCode.INVALID_REQUEST, "Invalid workspace target"),
+                elementId = plan.elementId,
+                rawNodeId = plan.rawNodeId,
+            )
+        }
+        return PhoneTypeEngine.perform(
+            plan,
+            value,
+            AccessibilityTypeLive(displayId = displayId, targetPackage = targetPackage),
+            redactObservedText = redact,
+        )
+    }
+
+    private inner class AccessibilityTypeLive(
+        private val displayId: Int,
+        private val targetPackage: String?,
+    ) : PhoneTypeEngine.LiveHost {
 
         override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
-            val roots = ArrayList<AccessibilityNodeInfo>()
-            rootInActiveWindow?.let(roots::add)
-            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
-            for (root in roots) {
-                val node = nodeAtPath(root, plan.path) ?: continue
-                if (node.isEditable) return AccessibilityTypeHandle(plan.path, node, plan.rawNodeId)
-            }
-            return null
+            val node = nodeAtTaskPath(plan.path, displayId, targetPackage) ?: return null
+            if (!node.isEditable ||
+                (plan.expectedPackageName != null && node.packageName?.toString() != plan.expectedPackageName) ||
+                (plan.expectedClassName != null && node.className?.toString() != plan.expectedClassName) ||
+                (plan.expectedResourceId != null && node.viewIdResourceName.orEmpty() != plan.expectedResourceId) ||
+                (plan.expectedPassword != null && node.isPassword != plan.expectedPassword)) return null
+            return AccessibilityTypeHandle(plan.path, node, plan.rawNodeId, plan)
         }
 
-        override fun view(handle: Any): PhoneTypeEngine.LiveView? {
+        override fun view(handle: Any, redactText: Boolean): PhoneTypeEngine.LiveView? {
             val target = handle as? AccessibilityTypeHandle ?: return null
             val node = target.node
-            val text = node.text?.toString().orEmpty()
+            val text = node.text
+            val textLength = text?.length ?: 0
             return PhoneTypeEngine.LiveView(
                 rawNodeId = target.rawNodeId,
                 path = target.path,
                 editable = node.isEditable,
                 focused = node.isFocused,
                 enabled = node.isEnabled,
-                textLength = text.length,
-                textDigest = PhoneTypeEngine.digest(text),
+                textLength = textLength,
+                textDigest = if (redactText) "<redacted>" else PhoneTypeEngine.digest(text ?: ""),
                 actions = accessibilityActionNames(node),
+                password = node.isPassword,
             )
         }
 
@@ -459,57 +696,333 @@ class CycloneAccessibilityService : AccessibilityService() {
             return target.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         }
 
-        override fun setText(handle: Any, value: String): Boolean {
+        override fun setText(handle: Any, value: CharSequence): Boolean {
             val target = handle as? AccessibilityTypeHandle ?: return false
+            if (displayId == 0) {
+                val rect = Rect().also { target.node.getBoundsInScreen(it) }
+                TraceField.acted(TraceActKind.TYPE, rect.exactCenterX(), rect.exactCenterY())
+            }
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
             }
             return target.node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         }
 
+        override fun matchesText(handle: Any, value: CharSequence): Boolean {
+            val target = handle as? AccessibilityTypeHandle ?: return false
+            val observed = target.node.text ?: return false
+            if (observed.length != value.length) return false
+            for (index in 0 until value.length) {
+                if (observed[index] != value[index]) return false
+            }
+            return true
+        }
+
         override fun refresh(handle: Any): Any? {
             val target = handle as? AccessibilityTypeHandle ?: return null
-            val roots = ArrayList<AccessibilityNodeInfo>()
-            rootInActiveWindow?.let(roots::add)
-            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
-            for (root in roots) {
-                val node = nodeAtPath(root, target.path) ?: continue
-                if (node.isEditable) return AccessibilityTypeHandle(target.path, node, target.rawNodeId)
-            }
-            return null
+            target.plan?.let { return resolve(it) }
+            val node = nodeAtTaskPath(target.path, displayId, targetPackage) ?: return null
+            return if (node.isEditable) AccessibilityTypeHandle(target.path, node, target.rawNodeId) else null
         }
+
+        override fun settle() {
+            Thread.sleep(TYPE_SETTLE_MS)
+        }
+
+        /**
+         * Plan 52: touch the field like a person so the app opens the keyboard itself (focusing it by Accessibility
+         * never does). Main screen only; one more touch if the keyboard does not appear, then the ladder goes on.
+         */
+        override fun raiseKeyboard(handle: Any): Boolean? {
+            if (displayId != 0) return null
+            val target = handle as? AccessibilityTypeHandle ?: return null
+            val node = target.node
+            if (node.isPassword) return null
+            if (node.isFocused && keyboardOnScreen()) return true
+            val rect = Rect().also { node.getBoundsInScreen(it) }
+            if (rect.width() < 24 || rect.height() < 16) return null
+            // The middle-left of the field: clear of trailing clear/eye icons a finger could press instead.
+            val zone = UiBounds(
+                rect.left + (rect.width() * 0.2f).toInt(), rect.top + (rect.height() * 0.25f).toInt(),
+                rect.left + (rect.width() * 0.6f).toInt(), rect.bottom - (rect.height() * 0.25f).toInt(),
+            )
+            if (keyboardCovers(zone)) return null
+            repeat(2) { attempt ->
+                val tapped = HumanGestureDispatch.tap(
+                    service = this@CycloneAccessibilityService,
+                    x = zone.centerX,
+                    y = zone.centerY,
+                    preference = HumanizePreference.LIGHT,
+                    kind = RuntimeGestureKind.FALLBACK_TAP,
+                    targetBounds = zone,
+                    mode = "keyboard_touch",
+                )
+                if (!tapped) return if (attempt == 0) null else false
+                if (waitForKeyboard(KEYBOARD_WAIT_MS)) return true
+            }
+            return false
+        }
+
+        /**
+         * Plan 52: key-by-key typing through the Accessibility input method (Android 13+), with the owner's own
+         * keyboard on screen. Only into the field Cyclone touched (same app, focused, not a password editor), and
+         * only while the agent may act. The value never leaves this process; nothing about the keys is recorded.
+         */
+        override fun typeKeys(
+            handle: Any,
+            strokes: List<com.cyclone.mobile.gesture.typing.Keystroke>,
+        ): PhoneTypeEngine.KeysOutcome {
+            if (displayId != 0) return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            val target = handle as? AccessibilityTypeHandle ?: return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            if (target.node.isPassword) return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            val method = runCatching { inputMethod }.getOrNull()
+            if (method == null) {
+                com.cyclone.mobile.gesture.Hands.keystrokesSupported = false
+                return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            }
+            val expectedPackage = target.node.packageName?.toString()
+            fun connection(): android.accessibilityservice.InputMethod.AccessibilityInputConnection? {
+                if (!method.currentInputStarted) return null
+                val info = method.currentInputEditorInfo ?: return null
+                if (expectedPackage != null && info.packageName != expectedPackage) return null
+                if (secretEditor(info.inputType)) return null
+                return method.currentInputConnection
+            }
+            var input = connection()
+            var waited = 0L
+            while (input == null && waited < KEYBOARD_WAIT_MS) {
+                Thread.sleep(50L)
+                waited += 50L
+                input = connection()
+            }
+            if (input == null) return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            if (!target.node.refresh() || !target.node.isFocused) return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            val rect = Rect().also { target.node.getBoundsInScreen(it) }
+            TraceField.acted(TraceActKind.TYPE, rect.exactCenterX(), rect.exactCenterY())
+            // Replace whatever the field holds, as set-text does: the first key overwrites the selection.
+            input.performContextMenuAction(android.R.id.selectAll)
+            for (stroke in strokes) {
+                Thread.sleep(stroke.delayMs)
+                if (!agentCanAct()) return PhoneTypeEngine.KeysOutcome.STOPPED
+                val live = connection() ?: return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+                if (stroke.backspace) {
+                    live.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_DEL))
+                    live.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_DEL))
+                } else {
+                    live.commitText(stroke.text!!, 1, null)
+                }
+            }
+            return PhoneTypeEngine.KeysOutcome.DONE
+        }
+
+        override fun readText(handle: Any): CharSequence? {
+            val target = handle as? AccessibilityTypeHandle ?: return null
+            if (target.node.isPassword) return null
+            return if (target.node.isShowingHintText) "" else target.node.text ?: ""
+        }
+
+        /**
+         * Plan 21 (Hands): clipboard + ACTION_PASTE over the field's whole text. The clip is marked sensitive (no
+         * preview), and afterwards the owner's previous clip is put back, or ours is cleared. Never for passwords.
+         */
+        override fun paste(handle: Any, value: CharSequence): Boolean {
+            val target = handle as? AccessibilityTypeHandle ?: return false
+            val node = target.node
+            if (node.isPassword) return false
+            val clipboard = getSystemService(android.content.ClipboardManager::class.java) ?: return false
+            val previous = runCatching { clipboard.primaryClip }.getOrNull()
+            val clip = android.content.ClipData.newPlainText("Cyclone", value).apply {
+                description.extras = android.os.PersistableBundle().apply {
+                    putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+                }
+            }
+            return try {
+                clipboard.setPrimaryClip(clip)
+                if (!node.isFocused) node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                val length = if (node.isShowingHintText) 0 else node.text?.length ?: 0
+                if (length > 0) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+                        putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                        putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, length)
+                    })
+                }
+                if (displayId == 0) {
+                    val rect = Rect().also { node.getBoundsInScreen(it) }
+                    TraceField.acted(TraceActKind.TYPE, rect.exactCenterX(), rect.exactCenterY())
+                }
+                node.performAction(AccessibilityNodeInfo.ACTION_PASTE).also {
+                    // Give the app a moment to read the clip before it is replaced.
+                    Thread.sleep(PASTE_SETTLE_MS)
+                }
+            } catch (_: Exception) {
+                false
+            } finally {
+                runCatching { if (previous != null) clipboard.setPrimaryClip(previous) else clipboard.clearPrimaryClip() }
+            }
+        }
+    }
+
+    /** Plan 52: the owner's keyboard (an input-method window) is on screen. */
+    fun keyboardOnScreen(): Boolean = runCatching {
+        windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+    }.getOrDefault(false)
+
+    /** Plan 52: the keyboard covers any part of [bounds]; a finger there would press a key, not the target. */
+    fun keyboardCovers(bounds: UiBounds): Boolean = runCatching {
+        windows.any { window ->
+            window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
+                Rect().also { window.getBoundsInScreen(it) }.intersects(bounds.left, bounds.top, bounds.right, bounds.bottom)
+        }
+    }.getOrDefault(false)
+
+    private fun waitForKeyboard(timeoutMs: Long): Boolean {
+        var waited = 0L
+        while (waited <= timeoutMs) {
+            if (keyboardOnScreen()) return true
+            Thread.sleep(50L)
+            waited += 50L
+        }
+        return false
+    }
+
+    private fun secretEditor(inputType: Int): Boolean {
+        val klass = inputType and android.text.InputType.TYPE_MASK_CLASS
+        val variation = inputType and android.text.InputType.TYPE_MASK_VARIATION
+        return (klass == android.text.InputType.TYPE_CLASS_TEXT && variation in setOf(
+            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            android.text.InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+        )) || (klass == android.text.InputType.TYPE_CLASS_NUMBER && variation == android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD)
     }
 
     fun scroll(selector: ElementSelector?, forward: Boolean = true): Boolean {
         if (!agentCanAct()) return false
-        val node = selector?.let { resolveLiveTarget(it)?.second } ?: findScrollable(rootInActiveWindow)
+        val node = if (selector != null) resolveLiveTarget(selector)?.second else findScrollable(preferredForegroundRoot())
         node ?: return false
         val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        val rect = Rect().also { node.getBoundsInScreen(it) }
+        TraceField.acted(TraceActKind.SCROLL, rect.exactCenterX(), rect.exactCenterY(), 0f, if (forward) -1f else 1f)
         return node.performAction(action)
     }
 
-    fun tap(x: Float, y: Float): Boolean {
+    fun tap(
+        x: Float,
+        y: Float,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
-        return rawTap(x, y)
+        TraceField.acted(TraceActKind.TAP, x, y)
+        return HumanGestureDispatch.tap(
+            service = this,
+            x = x,
+            y = y,
+            preference = humanize,
+            kind = RuntimeGestureKind.COORDINATE_TAP,
+            commandId = commandId,
+        )
     }
 
-    fun longPress(x: Float, y: Float, durationMs: Long = 650): Boolean {
+    /**
+     * Coordinate tap for what accessibility does not expose, with the same GATE check a labelled click gets:
+     * whatever sits under the point is classified before anything is dispatched.
+     */
+    fun tapPoint(x: Float, y: Float, humanize: HumanizePreference = HumanizePreference.AUTO, commandId: String? = null): Boolean {
         if (!agentCanAct()) return false
-        return rawLongPress(x, y, durationMs)
+        guardPoint("phone.tap_point", x, y)
+        return tap(x, y, humanize, commandId)
     }
 
-    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean {
+    /**
+     * GATE check for a gesture by position: whatever sits under ([x], [y]) is classified exactly like a labelled
+     * click. Throws [GateBlockedException] (and raises the approval card) when the owner must approve first.
+     */
+    fun guardPoint(action: String, x: Float, y: Float) {
+        val snapshot = observe(markFresh = false)
+        val labels = ClickGateIntercept.labelsAtPoint(snapshot.nodes, x.toInt(), y.toInt(), snapshot.windows)
+        val decision = ClickGateIntercept.decide(action, labels, OverlayChromeRuntime.snapshot().state)
+        if (!decision.performClick) {
+            if (decision.enterGate && decision.gateClass != null) OverlayChromeRuntime.enterGate(decision.gateClass)
+            throw GateBlockedException(decision.gateClass)
+        }
+    }
+
+    fun longPress(
+        x: Float,
+        y: Float,
+        durationMs: Long = 650,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
-        return rawSwipe(x1, y1, x2, y2, durationMs)
+        TraceField.acted(TraceActKind.LONG_PRESS, x, y)
+        return HumanGestureDispatch.longPress(
+            service = this,
+            x = x,
+            y = y,
+            durationMs = durationMs,
+            preference = humanize,
+            kind = RuntimeGestureKind.LONG_PRESS,
+            commandId = commandId,
+        )
+    }
+
+    fun swipe(
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
+        durationMs: Long = 350,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+        ending: com.cyclone.mobile.gesture.StrokeEnding? = null,
+        kind: RuntimeGestureKind = RuntimeGestureKind.SWIPE,
+    ): Boolean {
+        if (!agentCanAct()) return false
+        TraceField.acted(TraceActKind.SCROLL, (x1 + x2) / 2f, (y1 + y2) / 2f, x2 - x1, y2 - y1)
+        return HumanGestureDispatch.swipe(
+            service = this,
+            x1 = x1,
+            y1 = y1,
+            x2 = x2,
+            y2 = y2,
+            durationMs = durationMs,
+            preference = humanize,
+            kind = kind,
+            commandId = commandId,
+            ending = ending,
+        )
     }
 
     fun goBack(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_BACK)
     fun goHome(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_HOME)
 
     /** Guided gestures are direct user instructions and bypass the AGENT lock. */
-    fun guidedTap(x: Float, y: Float): Boolean = rawTap(x, y)
-    fun guidedLongPress(x: Float, y: Float, durationMs: Long = 750): Boolean = rawLongPress(x, y, durationMs)
-    fun guidedSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean = rawSwipe(x1, y1, x2, y2, durationMs)
+    fun guidedTap(x: Float, y: Float): Boolean = HumanGestureDispatch.tap(
+        service = this,
+        x = x,
+        y = y,
+        preference = HumanizePreference.AUTO,
+        kind = RuntimeGestureKind.GUIDED_TAP,
+    )
+    fun guidedLongPress(x: Float, y: Float, durationMs: Long = 750): Boolean = HumanGestureDispatch.longPress(
+        service = this,
+        x = x,
+        y = y,
+        durationMs = durationMs,
+        preference = HumanizePreference.AUTO,
+        kind = RuntimeGestureKind.GUIDED_LONG_PRESS,
+    )
+    fun guidedSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean = HumanGestureDispatch.swipe(
+        service = this,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        durationMs = durationMs,
+        preference = HumanizePreference.AUTO,
+        kind = RuntimeGestureKind.GUIDED_SWIPE,
+    )
     fun guidedBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
     fun guidedHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
 
@@ -534,6 +1047,18 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     fun takeScreenshot(crop: UiBounds? = null, callback: (Result<ScreenshotArtifact>) -> Unit) {
+        // The Trace Field is a non-secure full-screen layer: hide it before any full-display capture.
+        TraceFieldCaptureGate.hold { release ->
+            val done: (Result<ScreenshotArtifact>) -> Unit = { result -> release(); callback(result) }
+            try {
+                takeDisplayScreenshot(crop, done)
+            } catch (failure: Throwable) {
+                done(Result.failure(failure))
+            }
+        }
+    }
+
+    private fun takeDisplayScreenshot(crop: UiBounds?, callback: (Result<ScreenshotArtifact>) -> Unit) {
         takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, object : TakeScreenshotCallback {
             override fun onSuccess(result: ScreenshotResult) {
                 val outcome = runCatching {
@@ -541,6 +1066,7 @@ class CycloneAccessibilityService : AccessibilityService() {
                         val wrapped = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB))
                             ?: error("Unable to map screenshot buffer")
                         val bitmap = wrapped.copy(Bitmap.Config.ARGB_8888, false) ?: wrapped
+                        if (crop == null) com.cyclone.mobile.ui.overlay.tracefield.TraceFieldBackdrop.ingest(bitmap)
                         val boundedCrop = crop?.let { bounds ->
                             UiBounds(
                                 bounds.left.coerceIn(0, bitmap.width), bounds.top.coerceIn(0, bitmap.height),
@@ -551,7 +1077,7 @@ class CycloneAccessibilityService : AccessibilityService() {
                         val file = File(cacheDir, "cyclone-${System.currentTimeMillis()}.png")
                         FileOutputStream(file).use { output -> outputBitmap.compress(Bitmap.CompressFormat.PNG, 95, output) }
                         DeviceState.lastScreenshotPath = file.absolutePath
-                        ScreenshotArtifact(file, outputBitmap.width, outputBitmap.height, boundedCrop, System.currentTimeMillis())
+                        ScreenshotArtifact(file, outputBitmap.width, outputBitmap.height, boundedCrop, System.currentTimeMillis(), capturedAtMonotonicMs = result.timestamp)
                     } finally { result.hardwareBuffer.close() }
                 }
                 callback(outcome)
@@ -563,7 +1089,9 @@ class CycloneAccessibilityService : AccessibilityService() {
         })
     }
 
-    private fun agentCanAct(): Boolean = DeviceState.controller == DeviceState.Controller.AGENT && !DeviceState.requireFreshObservation
+    private fun agentCanAct(): Boolean =
+        (DeviceState.controller == DeviceState.Controller.AGENT && !DeviceState.requireFreshObservation) ||
+            PhoneToolExecutor.humanDesktopControlActive()
 
     private fun resolveLiveTarget(selector: ElementSelector): Pair<UiNodeSnapshot, AccessibilityNodeInfo>? {
         val snapshot = observe(markFresh = false)
@@ -572,37 +1100,45 @@ class CycloneAccessibilityService : AccessibilityService() {
         return match.node to live
     }
 
-    private fun liveNodeAtSnapshotPath(snapshotNode: UiNodeSnapshot): AccessibilityNodeInfo? {
-        val path = snapshotNode.path
-        val candidates = ArrayList<AccessibilityNodeInfo>()
-        preferredForegroundRoot()?.let(candidates::add)
-        rootInActiveWindow?.let { root ->
-            if (candidates.none { it.windowId == root.windowId }) candidates.add(root)
-        }
-        windows.orEmpty().forEach { window ->
-            val wroot = window.root ?: return@forEach
-            if (candidates.none { it.windowId == wroot.windowId }) candidates.add(wroot)
-        }
-        for (root in candidates) {
-            val live = nodeAtPath(root, path) ?: continue
-            if (sameNode(snapshotNode, live)) return live
-        }
-        return null
-    }
+    private fun liveNodeAtSnapshotPath(snapshotNode: UiNodeSnapshot): AccessibilityNodeInfo? =
+        nodeAtTaskPath(snapshotNode.path)?.takeIf { sameNode(snapshotNode, it) }
 
-    private fun nodeAtPath(root: AccessibilityNodeInfo, path: String): AccessibilityNodeInfo? {
-        val pieces = path.split('/').filter { it.isNotBlank() }
-        if (pieces.isEmpty()) return null
-        val start = pieces.first()
-        val walkRoot = if (start.startsWith("w")) {
-            val windowId = start.removePrefix("w").toIntOrNull() ?: return null
-            windows.orEmpty().firstOrNull { it.id == windowId }?.root ?: return null
+    private fun nodeAtTaskPath(
+        path: String,
+        displayId: Int = 0,
+        targetPackage: String? = null,
+    ): AccessibilityNodeInfo? {
+        val parsed = TaskSurfaceWindows.parseNodePath(path) ?: return null
+        val root = if (displayId == 0) {
+            val primary = preferredForegroundRoot() ?: return null
+            if (parsed.windowId == null || parsed.windowId == primary.windowId) {
+                primary
+            } else {
+                val window = windowsOnAllDisplays.get(0).orEmpty()
+                    .firstOrNull { it.id == parsed.windowId } ?: return null
+                val candidate = window.root ?: return null
+                if (!TaskSurfaceWindows.includeSibling(
+                        window.type,
+                        candidate.packageName?.toString().orEmpty(),
+                        primary.packageName?.toString().orEmpty(),
+                    )
+                ) return null
+                candidate
+            }
         } else {
-            if (start != "0") return null
-            root
+            val packageName = targetPackage ?: return null
+            val windows = windowsOnAllDisplays.get(displayId).orEmpty()
+            val window = parsed.windowId?.let { id -> windows.firstOrNull { it.id == id } }
+                ?: windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+                    .sortedByDescending { it.layer }
+                    .firstOrNull { it.root?.packageName?.toString() == packageName }
+                ?: return null
+            val candidate = window.root ?: return null
+            if (candidate.packageName?.toString() != packageName) return null
+            candidate
         }
-        var node = walkRoot
-        for (index in pieces.drop(1)) node = node.getChild(index.toIntOrNull() ?: return null) ?: return null
+        var node = root
+        for (index in parsed.children) node = node.getChild(index) ?: return null
         return node
     }
 
@@ -624,14 +1160,22 @@ class CycloneAccessibilityService : AccessibilityService() {
             val childRect = Rect().also { child.getBoundsInScreen(it) }
             childIds += stableNodeId("$path/$i", child, UiBounds(childRect.left, childRect.top, childRect.right, childRect.bottom))
         }
+        val password = node.isPassword
+        val sensitive = isSensitiveEditable(node)
+        val safeText = if (sensitive) "" else node.text?.toString().orEmpty()
+        val safeDescription = if (sensitive) "" else node.contentDescription?.toString().orEmpty()
         out += UiNodeSnapshot(
             id = id, path = path, parentId = parentId, childIds = childIds, depth = depth, windowId = node.windowId,
-            className = node.className?.toString().orEmpty(), role = inferRole(node, parentClassName), text = node.text?.toString().orEmpty(),
-            contentDescription = node.contentDescription?.toString().orEmpty(), resourceId = node.viewIdResourceName.orEmpty(), bounds = bounds,
+            className = node.className?.toString().orEmpty(),
+            role = inferRole(node, parentClassName, safeText, safeDescription),
+            text = safeText,
+            contentDescription = safeDescription,
+            resourceId = node.viewIdResourceName.orEmpty(), bounds = bounds,
             clickable = node.isClickable, longClickable = node.isLongClickable, editable = node.isEditable, scrollable = node.isScrollable,
             enabled = node.isEnabled, selected = node.isSelected, checked = node.isChecked, checkable = node.isCheckable,
             focused = node.isFocused, focusable = node.isFocusable, visibleToUser = node.isVisibleToUser,
             actions = accessibilityActionNames(node),
+            password = password,
         )
         val selfClass = node.className?.toString().orEmpty()
         for (i in 0 until node.childCount) node.getChild(i)?.let { collectNode(it, "$path/$i", id, depth + 1, out, selfClass) }
@@ -655,8 +1199,8 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     private fun automationSelector(node: AccessibilityNodeInfo): AutomationSelector = AutomationSelector(
         resourceId = node.viewIdResourceName?.takeIf { it.isNotBlank() },
-        text = node.text?.toString()?.takeIf { it.isNotBlank() },
-        contentDescription = node.contentDescription?.toString()?.takeIf { it.isNotBlank() },
+        text = if (isSensitiveEditable(node)) null else node.text?.toString()?.takeIf { it.isNotBlank() },
+        contentDescription = if (isSensitiveEditable(node)) null else node.contentDescription?.toString()?.takeIf { it.isNotBlank() },
         role = inferRole(node, ""),
         className = node.className?.toString()?.takeIf { it.isNotBlank() },
         requireClickable = node.isClickable.takeIf { it },
@@ -670,7 +1214,12 @@ class CycloneAccessibilityService : AccessibilityService() {
         return sha256(raw).take(16)
     }
 
-    private fun inferRole(node: AccessibilityNodeInfo, parentClassName: String): String {
+    private fun inferRole(
+        node: AccessibilityNodeInfo,
+        parentClassName: String,
+        safeText: String = if (isSensitiveEditable(node)) "" else node.text?.toString().orEmpty(),
+        safeDescription: String = if (isSensitiveEditable(node)) "" else node.contentDescription?.toString().orEmpty(),
+    ): String {
         return AccessibilityRoles.inferRole(
             className = node.className?.toString().orEmpty(),
             clickable = node.isClickable,
@@ -678,18 +1227,30 @@ class CycloneAccessibilityService : AccessibilityService() {
             checkable = node.isCheckable,
             scrollable = node.isScrollable,
             selected = node.isSelected,
-            text = node.text?.toString().orEmpty(),
-            contentDescription = node.contentDescription?.toString().orEmpty(),
+            text = safeText,
+            contentDescription = safeDescription,
             resourceId = node.viewIdResourceName.orEmpty(),
             parentClassName = parentClassName,
             actions = accessibilityActionNames(node),
         )
     }
 
+    private fun isSensitiveEditable(node: AccessibilityNodeInfo): Boolean {
+        if (node.isPassword) return true
+        if (!node.isEditable) return false
+        val hints = listOf(
+            node.viewIdResourceName.orEmpty(),
+            node.contentDescription?.toString().orEmpty(),
+            node.hintText?.toString().orEmpty(),
+            node.className?.toString().orEmpty(),
+        ).joinToString(" ")
+        return sensitiveEditableHint.containsMatchIn(hints)
+    }
+
     private fun screenFingerprint(packageName: String?, nodes: List<UiNodeSnapshot>): String {
         val normalized = buildString {
             append(packageName.orEmpty())
-            nodes.filter { it.visibleToUser }.take(800).forEach {
+            nodes.filter { it.visibleToUser && it.windowId != OverlayChromeObservation.OVERLAY_WINDOW_ID }.take(800).forEach {
                 append('|').append(it.resourceId).append('|').append(it.text.take(120)).append('|').append(it.contentDescription.take(120))
                     .append('|').append(it.className).append('|').append(it.bounds.left).append(',').append(it.bounds.top)
                     .append(',').append(it.bounds.right).append(',').append(it.bounds.bottom)
@@ -705,7 +1266,23 @@ class CycloneAccessibilityService : AccessibilityService() {
         return null
     }
 
-    private fun waitForUiQuiet(quietMs: Long = 90L, maxWaitMs: Long = 300L) {
+    /** Waits until no accessibility event has touched [displayId] for [quietMs] (at most [maxWaitMs]). */
+    fun waitForRevisionQuiet(displayId: Int, quietMs: Long, maxWaitMs: Long) {
+        val counter = observationRevisions.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicLong() }
+        val started = android.os.SystemClock.uptimeMillis()
+        var seen = counter.get()
+        var quietSince = started
+        while (android.os.SystemClock.uptimeMillis() - started < maxWaitMs) {
+            Thread.sleep(20)
+            val now = counter.get()
+            if (now != seen) {
+                seen = now
+                quietSince = android.os.SystemClock.uptimeMillis()
+            } else if (android.os.SystemClock.uptimeMillis() - quietSince >= quietMs) return
+        }
+    }
+
+    fun waitForUiQuiet(quietMs: Long = 90L, maxWaitMs: Long = 300L) {
         val started = System.currentTimeMillis()
         while (System.currentTimeMillis() - started < maxWaitMs) {
             val lastEvent = DeviceState.lastUiEventAtMs
@@ -721,4 +1298,5 @@ private data class AccessibilityTypeHandle(
     val path: String,
     val node: AccessibilityNodeInfo,
     val rawNodeId: String,
+    val plan: PhoneTypeEngine.ExecutePlan? = null,
 )

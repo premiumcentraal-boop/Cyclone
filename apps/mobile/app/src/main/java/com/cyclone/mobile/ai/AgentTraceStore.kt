@@ -41,6 +41,9 @@ object AgentTraceRuntime {
     lateinit var store: AgentTraceStore
         private set
 
+    /** True once the trace database is open; readers (Glass `runs.*`) check this instead of touching [store]. */
+    fun isReady(): Boolean = initialized
+
     @Synchronized
     fun initialize(context: Context) {
         if (initialized) return
@@ -75,7 +78,7 @@ object AgentTraceRuntime {
     fun finish(context: Context, sessionId: String, status: String, result: String, decisions: Int) {
         initialize(context)
         val ok = status == "COMPLETED"
-        store.finishSession(sessionId, status, result, decisions)
+        if (!store.finishSession(sessionId, status, result, decisions)) return
         runCatching { AgentRunDiagnosticV39.ensureCanonical(context.applicationContext, sessionId) }
         AiTraceOverlayV27Runtime.finishTask(sessionId, ok, result)
 
@@ -86,6 +89,7 @@ object AgentTraceRuntime {
             runCatching { AgentRunDiagnosticV39.ensureCanonical(context.applicationContext, sessionId) }
             TaskResultNotifierV292.notify(context, sessionId, ok, result, compiled.summary)
         }
+        runCatching { com.cyclone.mobile.brain.UserMdCompiler.enqueue(context.applicationContext, sessionId) }
     }
 }
 
@@ -204,13 +208,13 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
                 putNull("ended_at")
                 if (result == null) putNull("result") else put("result", TracePrivacy.clean(result).take(1500))
             },
-            "id=?",
+            "id=? AND ended_at IS NULL",
             arrayOf(id),
         )
     }
 
-    fun finishSession(id: String, status: String, result: String, decisions: Int) {
-        writableDatabase.update(
+    fun finishSession(id: String, status: String, result: String, decisions: Int): Boolean {
+        val changed = writableDatabase.update(
             "sessions",
             ContentValues().apply {
                 put("status", status.take(40))
@@ -218,9 +222,10 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
                 put("result", TracePrivacy.clean(result).take(1500))
                 put("decisions", decisions.coerceAtLeast(0))
             },
-            "id=?",
+            "id=? AND ended_at IS NULL",
             arrayOf(id),
         )
+        if (changed == 0) return false
         append(
             id,
             if (status == "COMPLETED") "DONE" else "STOPPED",
@@ -229,6 +234,7 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
             ok = status == "COMPLETED",
             detail = result,
         )
+        return true
     }
 
     fun session(id: String): AiTraceSession? {
@@ -336,17 +342,45 @@ object TraceHumanizer {
 }
 
 object TracePrivacy {
+    private val email = Regex("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}")
     private val secretAssignments = Regex("(?i)(password|passwd|token|api[_ -]?key|secret|otp|2fa|pin)\\s*[:=]\\s*[^,;\\s}]+")
     private val bearer = Regex("(?i)bearer\\s+[a-z0-9._~+/-]{8,}")
     private val longBase64 = Regex("[A-Za-z0-9+/]{180,}={0,2}")
-    private val paymentCard = Regex("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)")
+    // Digits inside words/hex ids (page keys) are not card numbers; timestamps and counters are not either.
+    private val paymentCard = Regex("(?<![\\p{L}\\p{N}_])(?:\\d[ -]?){12,18}\\d(?![\\p{L}\\p{N}_])")
+    private val groupedCard = Regex("^\\d{4}([ -])\\d{4}\\1\\d{4}\\1\\d{1,7}$")
+    private val numericField = Regex("(?i)(?:ms|at|time|timestamp|generation|gen|id|span|start|end|elapsed|duration|count|size|bytes)[\"']?\\s*[:=]\\s*[\"']?$")
     private val usSsn = Regex("(?<!\\d)\\d{3}-\\d{2}-\\d{4}(?!\\d)")
 
     fun clean(value: String): String = value
+        .replace(email) { com.cyclone.mobile.agent.plan.DestinationAuthority.maskEmail(it.value) }
         .replace(secretAssignments) { "${it.groupValues[1]}=[REDACTED]" }
         .replace(bearer, "Bearer [REDACTED]")
         .replace(usSsn, "[IDENTIFIER_REDACTED]")
-        .replace(paymentCard, "[PAYMENT_REDACTED]")
+        .replace(paymentCard) { match -> if (looksLikeCard(value, match)) "[PAYMENT_REDACTED]" else match.value }
         .replace(longBase64, "[BINARY_REDACTED]")
         .replace(Regex("(?s)\\\"pngBase64\\\"\\s*:\\s*\\\".*?\\\""), "\"pngBase64\":\"[REDACTED]\"")
+
+    /**
+     * A card number is Luhn-valid or written in card groups (4-4-4-…); a millisecond timestamp or counter in a known
+     * numeric field is neither redacted nor mangled (alpha.22 reports showed readAtMs as [PAYMENT_REDACTED]).
+     */
+    private fun looksLikeCard(source: String, match: MatchResult): Boolean {
+        val raw = match.value.trim()
+        if (groupedCard.matches(raw)) return true
+        val before = source.substring(maxOf(0, match.range.first - 24), match.range.first)
+        if (numericField.containsMatchIn(before)) return false
+        return luhn(raw.filter(Char::isDigit))
+    }
+
+    internal fun luhn(digits: String): Boolean {
+        if (digits.length !in 13..19) return false
+        var sum = 0
+        digits.reversed().forEachIndexed { index, char ->
+            var d = char - '0'
+            if (index % 2 == 1) { d *= 2; if (d > 9) d -= 9 }
+            sum += d
+        }
+        return sum % 10 == 0
+    }
 }

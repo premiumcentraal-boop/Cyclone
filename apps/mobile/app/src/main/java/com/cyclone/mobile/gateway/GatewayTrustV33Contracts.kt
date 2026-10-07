@@ -56,6 +56,19 @@ internal object GatewayTrustProtocolV33 {
         "expiresAtMs" to challenge.expiresAtMs.toString(),
     )
 
+    /**
+     * Six digits the phone and the PC both show while a PC is being connected. Not a secret: it lets the user
+     * see that the request on the phone is the one on the PC screen. PC twin: `trust_match_code` in trust_v33.py.
+     */
+    fun matchCode(transcript: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(transcript.toByteArray(Charsets.UTF_8))
+        val value = ((digest[0].toLong() and 0xff) shl 24) or ((digest[1].toLong() and 0xff) shl 16) or
+            ((digest[2].toLong() and 0xff) shl 8) or (digest[3].toLong() and 0xff)
+        return (value % 1_000_000L).toString().padStart(6, '0')
+    }
+
+    fun matchCode(challenge: GatewayPendingTrust): String = matchCode(trustTranscript(challenge))
+
     fun trustReceiptTranscript(record: GatewayTrustedPc, challengeId: String): String = canonical(
         "purpose" to "trust-receipt",
         "protocol" to VERSION,
@@ -267,6 +280,7 @@ internal class GatewayTrustEngine(
             .put("confirmationRequired", true)
             .put("confirmationState", "PENDING")
             .put("transcript", GatewayTrustProtocolV33.trustTranscript(challenge))
+            .put("matchCode", GatewayTrustProtocolV33.matchCode(challenge))
     }
 
     @Synchronized
@@ -512,6 +526,29 @@ internal class GatewayTrustEngine(
     fun disconnectSessions() {
         sessionsByToken.clear()
         pendingSessions.clear()
+    }
+
+    /** The PCs this phone trusts now (like WhatsApp's linked devices), most recently used first. */
+    @Synchronized
+    fun linkedPcs(): List<GatewayTrustedPc> =
+        records.all()
+            .filter { it.revokedAtMs == null && it.phoneId == phoneIdentity.phoneId }
+            .sortedByDescending { maxOf(it.lastSessionAtMs, it.createdAtMs) }
+
+    /** Whether a trusted PC has a live session right now. */
+    @Synchronized
+    fun isSessionActive(trustId: String): Boolean = sessionsByToken.values.any { it.trustId == trustId }
+
+    /**
+     * Local user authority from Cyclone Settings: log one PC out. Its trust record is revoked and only its sessions end;
+     * other linked PCs stay connected. Connecting again needs a new code + Allow.
+     */
+    @Synchronized
+    fun revokeLocal(trustId: String): GatewayTrustedPc? {
+        val revoked = records.revoke(trustId, nowMs()) ?: return null
+        sessionsByToken.entries.removeIf { it.value.trustId == trustId }
+        pendingSessions.entries.removeIf { it.value.trustId == trustId }
+        return revoked
     }
 
     @Synchronized

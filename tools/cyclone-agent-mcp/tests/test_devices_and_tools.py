@@ -167,6 +167,10 @@ def test_every_phone_scoped_server_function_has_device_id_and_no_escape_hatch():
                     "phone_virtual_create",
                     "phone_virtual_start",
                     "phone_virtual_stop",
+                    # Lab catalog, reports and stop act on experiments (each already bound to one phone).
+                    "phone_lab_missions",
+                    "phone_lab_report",
+                    "phone_lab_stop",
                 }
             ) and "device_id" not in args
     lowered = " ".join(TOOL_NAMES).lower()
@@ -258,3 +262,65 @@ def test_command_shaped_params_and_batch_typing_are_rejected():
         "device_ids": ["phone-a"], "tool": "phone.type", "params": {"value": "x"}, "goal": "type",
     })
     assert typed["error"]["code"] == "INVALID_REQUEST"
+
+
+class _LabGateway:
+    def __init__(self):
+        self.calls = []
+
+    def lab_start(self, *args):
+        self.calls.append(("start", args))
+        return {"id": "exp-20260925-120000-abcd", "status": "running"}
+
+    def lab_experiment(self, experiment_id):
+        self.calls.append(("get", experiment_id))
+        return {"experiment": {"id": experiment_id}, "arms": {}, "insights": ["x"], "trials": [
+            {"missionId": "nav.home", "variant": "A", "verdict": "pass"},
+            {"missionId": "clock.timer.5", "variant": "A", "verdict": "fail", "category": "false_success", "cause": "said done",
+             "phone": {"summary": "Timer set", "traceId": "ai-run-1", "metrics": {"errorTail": ["tap: not found"], "toolCalls": {"tap": 2}}}},
+        ]}
+
+    def lab_experiments(self):
+        return {"experiments": []}
+
+
+def test_lab_tools_start_experiments_and_report_failures_compactly():
+    from cyclone_agent_mcp.tools import PhoneTools
+
+    gateway = _LabGateway()
+    tools = PhoneTools(gateway=gateway)
+    started = tools.call("phone_lab_start", {"device_id": "phone-1", "name": "marks", "missions": ["nav.home"],
+                                             "variants": [{"name": "A"}, {"name": "B", "marks": False}], "repetitions": 2})
+    assert started["status"] == "running"
+    report = tools.call("phone_lab_report", {"experiment_id": "exp-20260925-120000-abcd"})
+    assert "trials" not in report and report["failures"][0]["category"] == "false_success"
+    assert report["failures"][0]["errorTail"] == ["tap: not found"]
+    assert tools.call("phone_lab_report", {}) == {"experiments": []}
+    for bad in ({"device_id": "phone-1", "name": "x", "missions": ["../x"]},
+                {"device_id": "phone-1", "name": "x", "missions": ["nav.home"], "variants": [{"name": "A", "shell": "id"}]},
+                {"device_id": "phone-1", "name": "x", "missions": ["nav.home"], "repetitions": 99}):
+        assert tools.call("phone_lab_start", bad)["error"]["code"] == "INVALID_REQUEST"
+    assert tools.call("phone_lab_report", {"experiment_id": "../../etc"})["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_app_manual_is_read_only_and_validated():
+    class ManualGateway(FakeToolsGateway):
+        def app_manual(self, device_id, package_name, query=None):
+            self.calls.append(("app_manual", device_id, package_name, query))
+            return {"appLabel": "Instagram", "currentVersion": "402.0", "query": query, "clear": True,
+                    "abilities": [{"id": "ab:0123456789ab", "name": "Requests on Messages"}, {"id": "ab:ffffffffffff", "name": "Open Settings"}],
+                    "hits": [{"id": "ab:0123456789ab", "score": 0.94}], "quiz": None, "scores": {"map": 0.75}, "markdown": "# Instagram"}
+
+    gateway = ManualGateway([DeviceSummary("phone-1", "READY")])
+    tools = PhoneTools(gateway)
+    out = tools.call("phone_app_manual", {"device_id": "phone-1", "app": "com.instagram.android", "query": " message requests "})
+    assert gateway.calls[-1] == ("app_manual", "phone-1", "com.instagram.android", "message requests")
+    assert out["clearMatch"] is True
+    assert out["matches"][0]["name"] == "Requests on Messages" and out["matches"][0]["fit"] == 0.94
+    contract = next(c for c in TOOL_CONTRACTS if c.name == "phone_app_manual")
+    assert contract.read_only and contract.phone_scoped
+    for bad in ({"device_id": "phone-1", "app": "../etc"},
+                {"device_id": "phone-1", "app": "com.instagram.android", "query": "x" * 300},
+                {"device_id": "phone-1", "app": "com.instagram.android", "shell": "id"}):
+        result = tools.call("phone_app_manual", bad)
+        assert not isinstance(result, dict) or "abilities" not in result, bad

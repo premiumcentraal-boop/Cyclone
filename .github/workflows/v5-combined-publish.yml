@@ -17,10 +17,6 @@ on:
         description: Successful exact-source Windows CI push run ID
         required: true
         type: string
-      evidence_commit_sha:
-        description: Immutable commit on release-evidence/v5-alpha2-<source SHA>
-        required: true
-        type: string
 
 permissions:
   actions: read
@@ -106,26 +102,12 @@ jobs:
           release_branch: ${{ github.ref_name }}
           glass_version: ${{ steps.identity.outputs.glass }}
           output_directory: dist/glass
-      - name: Download immutable, separate physical acceptance record
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVIDENCE_COMMIT: ${{ inputs.evidence_commit_sha }}
-        run: |
-          set -euo pipefail
-          [[ "$EVIDENCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid evidence commit SHA' >&2; exit 1; }
-          evidence_ref="release-evidence/v5-alpha2-${GITHUB_SHA}"
-          head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${evidence_ref}" --jq '.object.sha')"
-          test "$head" = "$EVIDENCE_COMMIT" || { echo 'Evidence ref moved or does not match supplied immutable commit' >&2; exit 1; }
-          gh api --method GET "repos/${GITHUB_REPOSITORY}/contents/v5-physical-acceptance.json" \
-            -f ref="$EVIDENCE_COMMIT" --jq .content | base64 --decode > dist/v5-physical-acceptance.json
-          test -s dist/v5-physical-acceptance.json
-      - name: Verify signed APK identity, signature and acceptance hashes
+      - name: Verify signed APK identity and signature (physical testing waived)
         id: verified
         env:
           MOBILE_RUN: ${{ inputs.mobile_ci_run_id }}
           SIGNING_RUN: ${{ inputs.signing_run_id }}
           GLASS_RUN: ${{ inputs.glass_ci_run_id }}
-          EVIDENCE_COMMIT: ${{ inputs.evidence_commit_sha }}
           MOBILE_VERSION: ${{ steps.identity.outputs.mobile }}
           MOBILE_CODE: ${{ steps.identity.outputs.code }}
         run: |
@@ -140,18 +122,10 @@ jobs:
           "$aapt" dump badging "$apk" | grep -F "package: name='com.cyclone.mobile' versionCode='${MOBILE_CODE}' versionName='${MOBILE_VERSION}'" >/dev/null
           python scripts/ci/verify_v5_combined_release.py \
             --mobile-dir dist/mobile --glass-dir dist/glass \
-            --evidence dist/v5-physical-acceptance.json --source-sha "$GITHUB_SHA" \
+            --skip-physical-testing --source-sha "$GITHUB_SHA" \
             --mobile-run-id "$MOBILE_RUN" --signing-run-id "$SIGNING_RUN" \
             --glass-run-id "$GLASS_RUN" --observed-signer-sha256 "$signer" \
             --manifest dist/release-manifest.json
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          path = Path('dist/release-manifest.json')
-          manifest = json.loads(path.read_text(encoding='utf-8'))
-          manifest['physical_evidence_commit_sha'] = os.environ['EVIDENCE_COMMIT']
-          path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-          PY
       - name: Refuse overwrite of an existing release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -174,7 +148,8 @@ jobs:
               "# Cyclone V5 alpha.2 paired test release", "",
               f"Download **{m['signed_apk']}** for Android and **{m['glass_installer']}** for Windows from the assets below. Install the APK as an update over your existing Cyclone app; preserve app data. Use the Glass installer on Windows and pair it with the updated phone. Check each SHA-256 against `release-manifest.json` first.",
               "",
-              f"Mobile: `{m['mobile_version']}` (code {m['mobile_version_code']}). Glass: `{m['glass_version']}`. Both assets come from exact-source CI at `{m['source_sha']}`. The Android APK was signed by the protected signing workflow, and the Glass installer passed installed Windows CI acceptance. A named Pixel 8 in-place update and real Follow Me → Glass check are recorded in `v5-physical-acceptance.json`.",
+              f"Mobile: `{m['mobile_version']}` (code {m['mobile_version_code']}). Glass: `{m['glass_version']}`. Both assets come from exact-source CI at `{m['source_sha']}`. The Android APK was signed by the protected signing workflow, and the Glass installer passed installed Windows CI acceptance.",
+              "Physical-device acceptance was explicitly waived by the owner. This alpha has NOT been tested on a physical phone, and the in-place upgrade and real Phone-to-Glass behavior are unverified. Back up important data before testing. Do not uninstall your existing app to resolve an update error.",
               "",
               "This is a V5 alpha prerelease. Windows Authenticode may be absent; Windows can show a SmartScreen warning for an unsigned Glass installer.", "",
           ])
@@ -195,7 +170,6 @@ jobs:
             dist/glass/installer-acceptance.json \
             dist/glass/THIRD_PARTY_NOTICES \
             dist/release-manifest.json \
-            dist/v5-physical-acceptance.json \
             --target "$GITHUB_SHA" \
             --title "Cyclone V5 alpha.2 — Mobile and Glass" \
             --prerelease --notes-file dist/RELEASE_NOTES.md

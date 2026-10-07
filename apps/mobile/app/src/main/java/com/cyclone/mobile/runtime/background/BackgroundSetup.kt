@@ -18,7 +18,7 @@ data class BackgroundReadiness(
         !installed -> "Shizuku: install it from Background tasks setup."
         !running -> "Shizuku: open it, pair with wireless debugging and tap Start."
         !authorized -> "Shizuku access: allow Cyclone in Background tasks setup."
-        !accessibility -> "Accessibility: enable Cyclone phone control."
+        !accessibility -> "Accessibility: enable or repair Cyclone phone control."
         !notifications -> "Task notifications: allow Cyclone notifications."
         else -> null
     }
@@ -36,7 +36,6 @@ object BackgroundSetup {
         }.getOrNull()
 
     fun read(context: Context, target: String? = null): BackgroundReadiness {
-        val service = CycloneAccessibilityService.instance
         val running = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
         val humanPackage = foregroundPackage()
         return BackgroundReadiness(
@@ -44,7 +43,7 @@ object BackgroundSetup {
             runCatching { context.packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0); true }.getOrDefault(false),
             running,
             running && runCatching { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED }.getOrDefault(false),
-            service != null && CyclonePermissionSetup.primaryControlEnabled(context),
+            CyclonePermissionSetup.phoneControlReady(context),
             CyclonePermissionSetup.resultNotificationsEnabled(context) && runCatching { NotificationManagerCompat.from(context).areNotificationsEnabled() }.getOrDefault(false),
             !humanPackage.isNullOrBlank() && humanPackage != context.packageName && humanPackage != target,
         )

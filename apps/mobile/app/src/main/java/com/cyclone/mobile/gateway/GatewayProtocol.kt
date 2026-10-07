@@ -55,9 +55,31 @@ internal object GatewayProtocol {
         "ui.search",
         "ui.element",
         "app_graph.get",
+        "atlas.places",
+        "atlas.get",
+        "atlas.diff",
+        "mapping.status",
+        "secrets.slots",
+        "ask.status",
+        "apps.list",
+        "runs.list",
+        "runs.get",
+        "atlas.versions",
+        "scenarios.list",
+        "knowledge.get",
+        "atlas.here",
+        "share.status",
         "brain.recall",
         "teach.status",
         "debug.snapshot",
+        "dictionary.get",
+        "models.list",
+        "manual.get",
+        "signup.maps",
+        "profiles.list",
+        "profiles.apps",
+        "connectors.list",
+        "health.report",
     )
 
     val operations = linkedSetOf(
@@ -101,6 +123,73 @@ internal object GatewayProtocol {
         "skill.compile",
         "skill.run",
         "skill.match",
+        "atlas.places",
+        "atlas.get",
+        "atlas.diff",
+        "mapping.start",
+        "mapping.pause",
+        "mapping.stop",
+        "mapping.status",
+        "secrets.slots",
+        "secrets.request",
+        "ask.start",
+        "ask.status",
+        "ask.cancel",
+        "apps.list",
+        "runs.list",
+        "runs.get",
+        "runs.mark",
+        "atlas.versions",
+        "scenarios.list",
+        "knowledge.get",
+        "atlas.here",
+        "share.status",
+        "share.request",
+        // Cyclone Lab: the PC starts, watches, answers and reads back Mind missions for measurement.
+        "lab.start",
+        "lab.status",
+        "lab.answer",
+        "lab.record",
+        // Cyclone Marketplace: the phone's store of recipes and connections, read and changed from Glass.
+        "market.catalog",
+        "market.install",
+        "market.remove",
+        "market.run",
+        // Learn: one press per run turns what it saw and did into app knowledge.
+        "learn.run",
+        // Grounded skills: the owner's saved skills and where each lives on the map.
+        "skills.list",
+        // Command Center (plan 33): the PC assigns a task, follows it and answers its Owner Moments.
+        "cc.start",
+        "cc.status",
+        "cc.answer",
+        "cc.key",
+        "cc.media",
+        // Cyclone Ports (plan 48 run 4): the PC's Port Hub collects what runs send and answers their waits.
+        "ports.poll",
+        "ports.blob",
+        "ports.answer",
+        "ports.file",
+        // The app dictionary (plan 36 §7): read it, the owner's edits from Glass, and the phone's models for the picker.
+        "dictionary.get",
+        "dictionary.edit",
+        "models.list",
+        // The App Manual (plan 36 §8): abilities, the self-quiz and the manual as text. Read only.
+        "manual.get",
+        // Plan 43 T6: the sign-up maps this phone learned (schemas only), and forgetting one.
+        "signup.maps",
+        "signup.forget",
+        // Plan 49 (alpha.102): this phone's numbers (each SIM's and the owner's confirmed ones) for Glass → Numbers.
+        "numbers.list",
+        // Plan 51 K3 (alpha.105): approved phone connectors and their selector entries, read only.
+        "connectors.list",
+        // Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
+        "profiles.list",
+        "profiles.apps",
+        "profiles.switch",
+        "profiles.app",
+        // Alpha 87: why Cyclone stopped last time and the freezes it caught (read only).
+        "health.report",
     )
 
     fun parse(line: String): GatewayRequest {

@@ -26,11 +26,12 @@ object OpenRouterCustomModelStore {
             .toList()
     }
 
-    fun all(context: Context): List<OpenRouterModelPreset> = OpenRouterModelPresets.all + list(context)
+    fun all(context: Context): List<OpenRouterModelPreset> = OpenRouterCatalogStore.picker(context)
 
     fun add(context: Context, rawSlug: String): Result<OpenRouterModelPreset> = runCatching {
         val slug = rawSlug.trim()
         require(isValidSlug(slug)) { "Use an OpenRouter slug like provider/model-name." }
+        OpenRouterCatalogStore.select(context, slug, true)
         OpenRouterModelPresets.all.firstOrNull { it.id == slug }?.let { return@runCatching it }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val updated = prefs.getStringSet(KEY_MODELS, emptySet()).orEmpty().toMutableSet().apply { add(slug) }
@@ -39,6 +40,7 @@ object OpenRouterCustomModelStore {
     }
 
     fun remove(context: Context, slug: String) {
+        OpenRouterCatalogStore.select(context, slug, false)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val updated = prefs.getStringSet(KEY_MODELS, emptySet()).orEmpty().toMutableSet().apply { remove(slug) }
         prefs.edit().putStringSet(KEY_MODELS, updated).apply()

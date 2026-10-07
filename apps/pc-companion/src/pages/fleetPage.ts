@@ -23,7 +23,7 @@ export function createFleetPage(
   onDiagnostics: () => void,
   gatewayStatus: FleetGatewayStatus,
 ): FleetPageHandle {
-  const page = el("section", "page fleet-page");
+  const page = el("section", `page fleet-page${devices.length <= 1 ? " single-phone" : ""}`);
   const header = el("header", "page-header fleet-header");
   const titleGroup = el("div");
   titleGroup.append(el("h1", "page-title", "Phones"), el("p", "page-subtitle", fleetSubtitle(devices)));
@@ -136,7 +136,7 @@ export function createFleetPage(
   const saveGroup = button("Save group", "button secondary compact");
   const batchStatus = el("span", "fleet-batch-status");
   tools.append(search, sourceFilter, selectedCount, selectAll, clear, home, back, screenshot, saveGroup, batchStatus);
-  page.append(tools);
+  if (devices.length > 1) page.append(tools);
 
   const viewport = el("div", "fleet-viewport");
   const grid = el("div", "fleet-grid");

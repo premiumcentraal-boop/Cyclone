@@ -50,6 +50,9 @@ INSTANCE_ID = re.compile(r"^vdev_[a-f0-9]{16}$")
 ROUTINE_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+LAB_EXPERIMENT_ID = re.compile(r"^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$")
+LAB_MISSION_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
+LAB_VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap"})
 ANDROID_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
 
 MUTATING_ACTIONS = ALLOWED_ACTIONS - {"phone.wait_for"}
@@ -415,14 +418,30 @@ class PhoneTools:
         finally:
             self.recorder.record(name, arguments, result, ok, int((time.perf_counter() - started) * 1000))
 
+    def _only_paired_phone(self) -> str:
+        """With no device_id, the one paired phone in the PC's fleet (alpha 88): status and capabilities then read the
+        same phone phone_devices shows, instead of the legacy single-phone surface that can disagree with it."""
+        fleet = getattr(self.gateway, "_fleet_devices", None)
+        if not callable(fleet):
+            return ""
+        try:
+            devices, surface = fleet()
+        except Exception:
+            return ""
+        if surface != "fleet" or not isinstance(devices, list):
+            return ""
+        paired = [str(d.get("deviceId") or d.get("id") or "") for d in devices if isinstance(d, dict) and d.get("paired") is True]
+        paired = [d for d in paired if d]
+        return paired[0] if len(paired) == 1 else ""
+
     def phone_status(self, args: dict[str, Any]) -> Any:
-        device_id = _device_id(args)
+        device_id = _device_id(args) or self._only_paired_phone()
         if device_id:
             return _with_sessions_inventory(redact(self.gateway.device_status(device_id)))
         return _with_sessions_inventory(redact(self.gateway.status()))
 
     def phone_capabilities(self, args: dict[str, Any]) -> Any:
-        device_id = _device_id(args)
+        device_id = _device_id(args) or self._only_paired_phone()
         refresh = bool(args.get("refresh", False))
         if device_id:
             return redact(self.gateway.device_capabilities(device_id, refresh=refresh))
@@ -1083,6 +1102,91 @@ class PhoneTools:
         device_id = _required_id(args, "device_id", TARGET_ID)
         run_id = _required_id(args, "run_id", RUN_ID)
         return redact(self.gateway.routine_cancel(device_id, run_id))
+
+    def phone_lab_missions(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, set())
+        return redact(self.gateway.lab_missions())
+
+    def phone_lab_start(self, args: dict[str, Any]) -> Any:
+        """Start a lab experiment. Variants change only named knobs; boundaries are the phone's and cannot be relaxed."""
+        _only_keys(args, {"device_id", "name", "missions", "variants", "repetitions"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        name = args.get("name")
+        if not isinstance(name, str) or not 0 < len(name.strip()) <= 80:
+            raise ValueError("name is 1..80 characters")
+        missions = args.get("missions")
+        if not isinstance(missions, list) or not 1 <= len(missions) <= 100 or not all(isinstance(m, str) and LAB_MISSION_ID.match(m) for m in missions):
+            raise ValueError("missions is a list of lab mission ids (see phone_lab_missions)")
+        variants = args.get("variants") or [{"name": "A"}]
+        if not isinstance(variants, list) or not 1 <= len(variants) <= 4 or not all(
+            isinstance(v, dict) and set(v) <= LAB_VARIANT_KEYS and isinstance(v.get("name"), str) for v in variants
+        ):
+            raise ValueError("variants is 1..4 objects with a name and only known knobs")
+        repetitions = args.get("repetitions", 1)
+        if isinstance(repetitions, bool) or not isinstance(repetitions, int) or not 1 <= repetitions <= 20:
+            raise ValueError("repetitions is 1..20")
+        return redact(self.gateway.lab_start(device_id, name.strip(), missions, variants, repetitions))
+
+    def phone_lab_report(self, args: dict[str, Any]) -> Any:
+        """Without an id: the experiment list. With one: rates, A/B, insights and the failed runs, compacted."""
+        _only_keys(args, {"experiment_id"})
+        if not args.get("experiment_id"):
+            return redact(self.gateway.lab_experiments())
+        detail = self.gateway.lab_experiment(_required_id(args, "experiment_id", LAB_EXPERIMENT_ID))
+        if not isinstance(detail, dict) or "trials" not in detail:
+            return redact(detail)
+        failures = []
+        for trial in detail["trials"]:
+            if not isinstance(trial, dict) or trial.get("verdict") == "pass":
+                continue
+            phone = trial.get("phone") or {}
+            metrics = phone.get("metrics") or {}
+            failures.append({
+                "mission": trial.get("missionId"), "variant": trial.get("variant"), "verdict": trial.get("verdict"),
+                "category": trial.get("category"), "cause": trial.get("cause"), "signals": trial.get("signals"),
+                "checks": trial.get("checks"), "summary": phone.get("summary"), "turns": phone.get("turns"),
+                "errorTail": metrics.get("errorTail"), "toolCalls": metrics.get("toolCalls"), "traceId": phone.get("traceId"),
+            })
+        return redact({**{k: v for k, v in detail.items() if k != "trials"}, "failures": failures[:60]})
+
+    def phone_ask(self, args: dict[str, Any]) -> Any:
+        """Alpha 91: send one request exactly as the owner would type it, and (optionally) wait for its outcome: the lane
+        that took it (instant, answer, ignore, flash, mind), who decided, and the times. Approvals stay on the phone."""
+        _only_keys(args, {"device_id", "goal", "wait_s"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        goal = args.get("goal")
+        if not isinstance(goal, str) or not 0 < len(goal.strip()) <= 2000:
+            raise ValueError("goal is 1..2000 characters")
+        wait_s = args.get("wait_s", 20)
+        if not isinstance(wait_s, (int, float)) or not 0 <= wait_s <= 300:
+            raise ValueError("wait_s is 0..300 seconds")
+        started = time.monotonic()
+        ack = self.gateway.ask_start(device_id, goal)
+        request_id = ack.get("requestId") if isinstance(ack, dict) else None
+        status: Any = None
+        while wait_s and time.monotonic() - started < wait_s:
+            time.sleep(0.4)
+            status = self.gateway.ask_status(device_id, request_id)
+            request = status.get("request") if isinstance(status, dict) else None
+            if not isinstance(request, dict):
+                continue
+            if request.get("state") in {"done", "failed", "cancelled"}:
+                break
+            if request.get("lane") in {"flash", "mind"} and status.get("state") in {"done", "failed", "action-needed", "needs-secret"}:
+                break
+        return redact({"requestId": request_id, "waitedS": round(time.monotonic() - started, 2), "status": status or ack})
+
+    def phone_ask_cancel(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"device_id", "request_id"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        request_id = args.get("request_id")
+        if request_id is not None and (not isinstance(request_id, str) or not re.match(r"^req-[0-9a-f-]{8,40}$", request_id)):
+            raise ValueError("request_id is the id phone_ask returned")
+        return redact(self.gateway.ask_cancel(device_id, request_id))
+
+    def phone_lab_stop(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"experiment_id"})
+        return redact(self.gateway.lab_stop(_required_id(args, "experiment_id", LAB_EXPERIMENT_ID)))
 
 
 def _identity_kwargs(scope: dict[str, Any] | None) -> dict[str, Any]:

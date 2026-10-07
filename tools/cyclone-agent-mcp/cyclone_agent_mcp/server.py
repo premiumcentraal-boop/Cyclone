@@ -257,6 +257,41 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         """Cancel one explicitly targeted Cyclone routine run."""
         return tools.call("phone_routine_cancel", {"device_id": device_id, "run_id": run_id})
 
+    @mcp.tool(annotations=READ)
+    def phone_app_manual(device_id: str, app: str, query: str | None = None) -> dict[str, Any]:
+        """Read an app's manual from a paired phone: what you can do in the app (abilities), the path to each in the app's
+        own words, how to find one item in its lists, the self-quiz and the manual as Markdown. With query, the abilities
+        that fit it first. Read only: it never taps anything and holds no content (no chats, names or messages)."""
+        args: dict[str, Any] = {"device_id": device_id, "app": app}
+        if query:
+            args["query"] = query
+        return tools.call("phone_app_manual", args)
+
+    @mcp.tool(annotations=READ)
+    def phone_lab_missions() -> dict[str, Any]:
+        """List Cyclone Lab missions (goal, suite, how success is read from the phone) for measuring Cyclone."""
+        return tools.call("phone_lab_missions", {})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_lab_start(device_id: str, name: str, missions: list[str], variants: list[dict[str, Any]] | None = None,
+                        repetitions: int = 1) -> dict[str, Any]:
+        """Run a Cyclone Lab experiment: missions x variants x repetitions on one paired phone, scored from the phone.
+        A variant is {name, modelId?, effort?, workingMinutes?, marks?, freshMemory?, promptAddendum?, useMap?}. The lab never
+        approves consequential actions and never supplies secrets."""
+        return tools.call("phone_lab_start", {"device_id": device_id, "name": name, "missions": missions,
+                                              "variants": variants or [{"name": "A"}], "repetitions": repetitions})
+
+    @mcp.tool(annotations=READ)
+    def phone_lab_report(experiment_id: str | None = None) -> dict[str, Any]:
+        """Cyclone Lab results: without an id the experiment list; with one, success rates with confidence intervals,
+        A/B comparisons, insights and every failed run with its cause, checks and tool errors."""
+        return tools.call("phone_lab_report", {"experiment_id": experiment_id} if experiment_id else {})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_lab_stop(experiment_id: str) -> dict[str, Any]:
+        """Stop a running Cyclone Lab experiment after the current mission is stopped."""
+        return tools.call("phone_lab_stop", {"experiment_id": experiment_id})
+
     return mcp
 
 

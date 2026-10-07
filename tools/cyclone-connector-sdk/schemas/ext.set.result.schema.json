@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/ext.set.result.schema.json",
+  "title": "ext.set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profileId",
+    "cleared"
+  ],
+  "properties": {
+    "profileId": {
+      "type": "string"
+    },
+    "cleared": {
+      "type": "boolean"
+    }
+  }
+}

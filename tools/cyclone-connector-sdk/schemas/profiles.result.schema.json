@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/profiles.result.schema.json",
+  "title": "profiles",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "current",
+    "profiles"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "current": {
+      "description": "owner, a profile id, or null when Cyclone can't tell",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "state"
+            ],
+            "properties": {
+              "id": {
+                "const": "owner"
+              },
+              "label": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "owner"
+              },
+              "state": {
+                "const": "ready"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "state",
+              "emoji",
+              "color",
+              "appCount"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^Cyclone_[A-Za-z0-9]+$"
+              },
+              "label": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "profile"
+              },
+              "state": {
+                "enum": [
+                  "ready",
+                  "setting_up",
+                  "in_trash"
+                ]
+              },
+              "emoji": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "color": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "appCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "packages": {
+                "description": "only with profiles.apps.read",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "ext": {
+                "description": "only with profiles.ext; this connector's own data",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "androidUserId": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+ "name": "round-the-clock",
+ "batchSize": 10,
+ "recheck": 4,
+ "repetitions": 1,
+ "variants": [{"name": "default"}],
+ "slots": [
+  {"name": "smoke", "suites": ["smoke", "tb-smoke"]},
+  {"name": "judgement", "suites": ["judgement"]},
+  {"name": "safety", "suites": ["safety"]},
+  {"name": "everyday", "suites": ["everyday"]},
+  {"name": "robust", "suites": ["robust", "dutch"]},
+  {"name": "core", "suites": ["core"]},
+  {"name": "multi", "suites": ["multiapp", "multiapp2", "long"]},
+  {"name": "hands", "suites": ["hands", "hands2", "steer2", "divert"]},
+  {"name": "generated", "suites": ["generated"]}
+ ]
+}

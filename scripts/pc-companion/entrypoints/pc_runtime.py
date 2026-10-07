@@ -90,6 +90,14 @@ def _start_parent_watch() -> None:
 
 
 if __name__ == "__main__":
+    # Plan 44: ssh runs this runtime as its password helper for a cloud phone's tunnel; print the key and leave.
+    from cyclone_device_gateway.cloud_fleet.tunnel import askpass_main
+    if askpass_main():
+        raise SystemExit(0)
+    if sys.argv[1:2] in (["terminal"], ["install-cli"]):
+        # The `cyclone` terminal command and the installer hook: no live-phone link or bearer persistence here;
+        # Cyclone One's own runtime owns those. The terminal starts what it needs itself.
+        raise SystemExit(main())
     token = os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "").strip()
     url = os.getenv("CYCLONE_DEVICE_GATEWAY_URL", "http://127.0.0.1:8765").strip()
     if token:
@@ -101,5 +109,7 @@ if __name__ == "__main__":
         persist_runtime_bearer(token, url, write_cursor=True, mcp_executable=mcp_executable)
     else:
         apply_gateway_env()
+    from cyclone_phone_mcp.live_phone_ipc import start as start_live_phone
+    start_live_phone()
     _start_parent_watch()
     raise SystemExit(main())

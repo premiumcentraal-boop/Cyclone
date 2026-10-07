@@ -9,6 +9,9 @@
 *.keystore
 *.keystore.b64
 secrets/
+# The phone's secrets code package (source, not secrets) stays tracked.
+!apps/mobile/app/src/main/java/com/cyclone/mobile/secrets/
+!apps/mobile/app/src/test/java/com/cyclone/mobile/secrets/
 
 # Python / test artifacts
 .venv/
@@ -53,3 +56,7 @@ Thumbs.db
 playwright-report/
 test-results/
 .cyclone/agent-runs/
+
+# Testbench seat: local permission set and briefing (tools/cyclone-testbench/seat)
+/CLAUDE.local.md
+/.claude/settings.local.json

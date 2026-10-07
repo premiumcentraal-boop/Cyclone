@@ -1,0 +1,96 @@
+name: Sign a tested owner phone candidate without publishing
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sign:
+    environment: mobile-release-approval
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_CERT_SHA256: e78c6e0b32d66da05839243c65e9987ba54722d402543f00408b57b1585dbf60
+      HISTORICAL_CERT_SHA256: cc2a7a5d8e5e3686d8f7afe0a0e6e76ca42a1e6e6306e26f0eba84e4e69f3965
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Read candidate identity
+        id: candidate
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          data = tomllib.load(open('release/version.toml', 'rb'))
+          mobile = data['components']['mobile']
+          print(f'mobile={mobile}')
+          print(f"code={data['android_version_code']}")
+          print(f'apk=Cyclone-{mobile}.apk')
+          PY
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: Cyclone-Android-${{ steps.candidate.outputs.mobile }}
+          path: candidate
+      - name: Verify tested unsigned provenance
+        env:
+          APK_NAME: ${{ steps.candidate.outputs.apk }}
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < candidate/source-sha.txt)" = "$GITHUB_SHA"
+          test "$(tr -d '\r\n' < candidate/run-id.txt)" = "$GITHUB_RUN_ID"
+          test "$(tr -d '\r\n' < candidate/signing-state.txt)" = UNSIGNED_VERIFIED_CANDIDATE
+          (cd candidate && sha256sum --check "$APK_NAME.sha256")
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools
+      - run: sdkmanager --install 'build-tools;35.0.0'
+      - name: Sign inside the existing protected environment
+        env:
+          CYCLONE_KEYSTORE_B64: ${{ secrets.CYCLONE_ANDROID_KEYSTORE_B64 }}
+          CYCLONE_STORE_PASSWORD: ${{ secrets.CYCLONE_ANDROID_STORE_PASSWORD }}
+          CYCLONE_KEY_ALIAS: ${{ secrets.CYCLONE_ANDROID_KEY_ALIAS }}
+          CYCLONE_KEY_PASSWORD: ${{ secrets.CYCLONE_ANDROID_KEY_PASSWORD }}
+          CYCLONE_SIGNING_LINEAGE_B64: ${{ secrets.CYCLONE_ANDROID_SIGNING_LINEAGE_B64 }}
+          APK_NAME: ${{ steps.candidate.outputs.apk }}
+          MOBILE: ${{ steps.candidate.outputs.mobile }}
+          CODE: ${{ steps.candidate.outputs.code }}
+        run: |
+          set -euo pipefail
+          for value in CYCLONE_KEYSTORE_B64 CYCLONE_STORE_PASSWORD CYCLONE_KEY_ALIAS CYCLONE_KEY_PASSWORD CYCLONE_SIGNING_LINEAGE_B64; do
+            test -n "${!value}" || { echo "Missing signing credential: $value" >&2; exit 1; }
+          done
+          keystore="$RUNNER_TEMP/cyclone-owner-test.keystore"
+          lineage="$RUNNER_TEMP/cyclone-owner-test.lineage"
+          printf '%s' "$CYCLONE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          printf '%s' "$CYCLONE_SIGNING_LINEAGE_B64" | base64 --decode > "$lineage"
+          chmod 600 "$keystore" "$lineage"
+          mkdir -p signed
+          bt="$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          "$bt/apksigner" sign --ks "$keystore" --ks-key-alias "$CYCLONE_KEY_ALIAS" \
+            --ks-pass env:CYCLONE_STORE_PASSWORD --key-pass env:CYCLONE_KEY_PASSWORD \
+            --lineage "$lineage" --rotation-min-sdk-version 33 \
+            --v1-signing-enabled false --v2-signing-enabled false --v3-signing-enabled true --v4-signing-enabled false \
+            --out "signed/$APK_NAME" "candidate/$APK_NAME"
+          "$bt/apksigner" verify --min-sdk-version 33 --verbose --print-certs "signed/$APK_NAME" > signed/signing-info.txt
+          new_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' signed/signing-info.txt | head -1)"
+          test "$new_cert" = "$RELEASE_CERT_SHA256"
+          "$bt/apksigner" lineage --in "$lineage" --print-certs -v > signed/signing-lineage.txt
+          grep -q "$RELEASE_CERT_SHA256" signed/signing-lineage.txt
+          grep -q "$HISTORICAL_CERT_SHA256" signed/signing-lineage.txt
+          "$bt/aapt2" dump badging "signed/$APK_NAME" > signed/badging.txt
+          grep -q "package: name='com.cyclone.mobile' versionCode='$CODE' versionName='$MOBILE'" signed/badging.txt
+          (cd signed && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
+          cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
+          printf '%s\n' 'SIGNED_OWNER_TEST_ARTIFACT_NOT_PUBLISHED' > signed/signing-state.txt
+      - name: Destroy ephemeral signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/cyclone-owner-test.keystore" "$RUNNER_TEMP/cyclone-owner-test.lineage"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Cyclone-Signed-Owner-Test-${{ steps.candidate.outputs.mobile }}
+          path: signed/
+          if-no-files-found: error
+          retention-days: 3

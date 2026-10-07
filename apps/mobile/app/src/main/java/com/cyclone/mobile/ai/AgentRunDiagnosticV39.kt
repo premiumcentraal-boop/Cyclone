@@ -10,7 +10,7 @@ import java.util.Locale
 
 /** High-signal, user-shareable projection of Cyclone's durable trace database. */
 object AgentRunDiagnosticV39 {
-    const val SCHEMA = "cyclone-run-diagnostic-v39/3"
+    const val SCHEMA = "cyclone-run-diagnostic-v39/5"
     const val MAX_BYTES = 1024 * 1024
 
     data class Metrics(
@@ -24,7 +24,12 @@ object AgentRunDiagnosticV39 {
         val completionRejections: Int,
         val modelContextSnapshots: Int,
         val freeModeEntries: Int,
+        val executorInvocations: Int,
+        val androidAcceptedExecutions: Int,
+        val freshAfterStates: Int,
+        val taskProgressObservations: Int,
     ) {
+        val semanticallyVerifiedMutations: Int get() = verifiedActions
         /** Compatibility aggregate for existing Brain/result UI while diagnostics keep failure classes separate. */
         val failures: Int get() = toolFailures + verificationFailures
     }
@@ -35,22 +40,45 @@ object AgentRunDiagnosticV39 {
     )
 
     fun metrics(events: List<AiTraceEvent>): Metrics {
-        val explicitToolCalls = events.count { it.kind in setOf("ACTION_REQUESTED", "TOOL_CALL") }
-        val runtimeToolCalls = events.count { it.kind == "TOOL_REQUESTED" }
+        // TOOL_RESULT is the turn summary; ANDROID_EXECUTION/ACTION_REJECTED are per-action
+        // results inside it. Count the detailed plane when present, and retain summary-only
+        // rejections (the exact failure mode of the 4.3.4 Reddit run).
+        val boundary = if (events.any { it.kind == "TOOL_REQUESTED" }) "TOOL_REQUESTED" else "ACTION_REQUESTED"
+        val groups = mutableListOf<MutableList<AiTraceEvent>>()
+        events.forEach { event ->
+            if (groups.isEmpty() || event.kind == boundary) groups += mutableListOf<AiTraceEvent>()
+            groups.last().add(event)
+        }
+        fun preferredCount(primary: String, fallback: String, predicate: (AiTraceEvent) -> Boolean): Int =
+            events.filter { it.kind == primary }.takeIf { it.isNotEmpty() }
+                ?.count(predicate) ?: events.count { it.kind == fallback && predicate(it) }
         return Metrics(
-            toolCalls = maxOf(explicitToolCalls, runtimeToolCalls),
-            toolFailures = events.count {
-                it.ok == false && it.kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT")
+            toolCalls = groups.sumOf { group ->
+                maxOf(group.count { it.kind in setOf("ACTION_REQUESTED", "TOOL_CALL") },
+                    group.count { it.kind == "TOOL_REQUESTED" })
+            } + events.count { it.kind == "MIND_ACTION" },
+            executorInvocations = events.count { it.kind == "ANDROID_EXECUTION" && it.detail.orEmpty().contains("executorInvoked=true") },
+            androidAcceptedExecutions = events.count { it.kind == "ANDROID_EXECUTION" && it.ok == true },
+            freshAfterStates = events.count { it.kind == "AFTER_OBSERVATION" && it.ok == true },
+            taskProgressObservations = events.count { it.kind == "PROGRESS_CLASSIFIED" && it.ok == true },
+            toolFailures = groups.sumOf { group ->
+                val detailed = group.filter { it.kind in setOf("ANDROID_EXECUTION", "ACTION_REJECTED") }
+                (detailed.takeIf { it.isNotEmpty() } ?: group.filter { it.kind == "TOOL_RESULT" }).count { it.ok == false }
+            } + events.count { it.kind == "MIND_RESULT" && it.ok == false },
+            verificationFailures = groups.sumOf { group ->
+                var accepted: Boolean? = null
+                val detailed = group.filter { it.kind == "VERIFICATION" }
+                if (detailed.isNotEmpty()) {
+                    group.count { event ->
+                        if (event.kind in setOf("ANDROID_EXECUTION", "ACTION_REJECTED")) accepted = event.ok
+                        event.kind == "VERIFICATION" && event.ok == false && accepted != false
+                    }
+                } else group.count { it.kind == "VERIFY" && it.ok == false && !it.code.orEmpty().startsWith("completion.") }
             },
-            verificationFailures = events.count {
-                it.ok == false && it.kind in setOf("VERIFICATION", "PROGRESS_CLASSIFIED", "VERIFY")
-            },
-            recoveries = events.count { event ->
-                event.kind == "REPLAN" ||
-                    event.kind == "RECOVERY_SELECTED" ||
-                    (event.kind == "RECOVERY_CLASSIFIED" && event.code != "progress.continue")
-            },
-            visionChecks = events.count { it.kind.contains("VISION") },
+            recoveries = if (events.any { it.kind == "RECOVERY_CLASSIFIED" })
+                events.count { it.kind == "RECOVERY_CLASSIFIED" && it.code != "progress.continue" }
+                else preferredCount("RECOVERY_SELECTED", "REPLAN") { true },
+            visionChecks = preferredCount("VISION", "VISION_ESCALATION") { true },
             verifiedActions = events.count { it.kind == "VERIFICATION" && it.ok == true },
             completionChecks = events.count {
                 it.kind == "VERIFY" && it.code.orEmpty().startsWith("completion.")
@@ -64,6 +92,29 @@ object AgentRunDiagnosticV39 {
             modelContextSnapshots = events.count { it.kind == "MODEL_CONTEXT" },
             freeModeEntries = events.count { it.kind == "FREE_MODE_ENTER" },
         )
+    }
+
+    /**
+     * alpha.23: what the owner needs to judge a run at a glance: how long screens took, whether a missing after-state
+     * was proven later, how slow the model was, whether the backup model took over, and what proved completion.
+     */
+    internal fun reliabilitySummary(events: List<AiTraceEvent>): String = buildString {
+        val waits = events.filter { it.kind == "WAIT" }.mapNotNull { runCatching { org.json.JSONObject(it.detail.orEmpty()) }.getOrNull() }
+        appendLine("Screen waits: ${waits.size} (${waits.sumOf { it.optLong("waitedMs") }} ms total, " +
+            "${waits.count { it.optBoolean("extended") }} extended on loading evidence)")
+        val deferred = events.filter { it.kind == "VERIFICATION" && it.code.orEmpty().startsWith("verify.deferred") }
+        appendLine("Deferred proofs: ${deferred.count { it.ok == true }} proven / ${deferred.count { it.ok == false }} not proven")
+        val latencies = events.filter { it.kind == "PROVIDER_PHASE" && it.code in setOf("provider_closed", "provider_deadline") }
+            .mapNotNull { Regex("elapsedMs=(\\d+)").find(it.detail.orEmpty())?.groupValues?.get(1)?.toLongOrNull() }
+        appendLine("Model request latency ms: ${if (latencies.isEmpty()) "none" else latencies.joinToString(", ")}")
+        events.lastOrNull { it.kind == "PROVIDER_FALLBACK" }?.let { appendLine("Backup model: ${clean(it.displayText)}") }
+        val basis = events.lastOrNull { it.kind == "NAV_CLAUSE" && it.ok == true }?.detail?.let { detail ->
+            runCatching { org.json.JSONObject(detail).optString("proof") }.getOrNull()?.takeIf(String::isNotBlank)
+        } ?: events.lastOrNull { it.kind == "VERIFY" && it.code == "completion.verified" }?.let { "goal contract verified" }
+        appendLine("Completion basis: ${basis?.let(::clean) ?: "none"}")
+        if (events.any { it.code == "completion.claim_is_navigation" }) {
+            appendLine("Rejected claim: the model reported only navigation for an action goal")
+        }
     }
 
     /**
@@ -113,6 +164,7 @@ object AgentRunDiagnosticV39 {
         val effectiveTurns = maxOf(
             session.decisions,
             events.count { it.kind == "PLAN" && it.code == "model.page_decision" },
+            events.count { it.kind == "MIND_TURN" },
         )
         val firstDoneAt = events.firstOrNull {
             it.kind == "PLAN" && it.code == "done"
@@ -138,8 +190,20 @@ object AgentRunDiagnosticV39 {
             appendLine("METRICS")
             appendLine("------------------------------------------------------------")
             appendLine("Model/decision turns: $effectiveTurns")
+            if (events.any { it.kind == "MIND_TURN" }) {
+                // Cyclone Mind: one model, one conversation. Every action below was chosen by that model.
+                appendLine("Engine: Cyclone Mind (one continuous conversation; every action chosen by the model)")
+                appendLine("Mind tool calls: ${events.count { it.kind == "MIND_ACTION" }}")
+                appendLine("Mind tool results not ok: ${events.count { it.kind == "MIND_RESULT" && it.ok == false }}")
+                appendLine("Harness notices: ${events.count { it.kind == "MIND_NOTICE" }}")
+                appendLine("Resumes: ${events.count { it.kind == "MISSION_RESUME" }}")
+            }
             appendLine("Tool calls: ${metrics.toolCalls}")
-            appendLine("Verified actions: ${metrics.verifiedActions}")
+            appendLine("Canonical executor invocations (explicit evidence): ${metrics.executorInvocations}")
+            appendLine("Android accepted executions: ${metrics.androidAcceptedExecutions}")
+            appendLine("Fresh after-state observations: ${metrics.freshAfterStates}")
+            appendLine("Task-progress observations: ${metrics.taskProgressObservations}")
+            appendLine("Semantically verified mutations: ${metrics.semanticallyVerifiedMutations}")
             appendLine("Tool failures: ${metrics.toolFailures}")
             appendLine("Verification failures: ${metrics.verificationFailures}")
             appendLine("Actual recovery cycles: ${metrics.recoveries}")
@@ -149,6 +213,7 @@ object AgentRunDiagnosticV39 {
             appendLine("Free Mode entries: ${metrics.freeModeEntries}")
             appendLine("Vision events: ${metrics.visionChecks}")
             timeAfterFirstDone?.let { appendLine("Time after first DONE ms: $it") }
+            append(reliabilitySummary(events))
             appendLine()
             appendLine("TIMELINE")
             appendLine("============================================================")
@@ -183,13 +248,18 @@ object AgentRunDiagnosticV39 {
 
     private fun section(kind: String): String = when {
         kind in setOf("PAGE", "BRAIN", "MODEL_CONTEXT", "OBSERVE", "KNOWN_ROUTE_LOOKUP") -> "MODEL SAW / CONTEXT"
-        kind in setOf("PLAN", "DECISION", "MODEL_DECISION") -> "MODEL DECISION"
+        kind in setOf("PLAN", "DECISION", "MODEL_DECISION", "MIND_TURN") -> "MODEL DECISION"
+        kind == "MIND_ACTION" -> "TOOL REQUEST"
+        kind == "MIND_RESULT" -> "TOOL RESULT"
+        kind == "MIND_NOTICE" -> "HARNESS NOTICE"
+        kind.startsWith("MISSION_") -> "MISSION"
         kind in setOf("ACTION_REQUESTED", "TOOL_REQUESTED", "TOOL_CALL") -> "TOOL REQUEST"
-        kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT") -> "TOOL RESULT"
+        kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT", "ACTION_REJECTED") -> "TOOL RESULT"
         kind in setOf("AFTER_OBSERVATION", "VERIFICATION", "PROGRESS_CLASSIFIED", "VERIFY") -> "VERIFICATION"
         kind.startsWith("RECOVERY") || kind == "REPLAN" -> "RECOVERY"
         kind == "FREE_MODE_ENTER" || kind == "FREE_MODE_EXIT" -> "ADAPTIVE FREE MODE"
         kind.contains("VISION") -> "VISION"
+        kind.startsWith("PROVIDER") -> "PROVIDER BOUNDARY"
         kind.contains("GATE") || kind == "BOUNDARY" -> "GATE / HUMAN BOUNDARY"
         kind.startsWith("LEARNING") || kind == "LEARNING" -> "BRAIN LEARNING"
         kind in setOf("DONE", "STOPPED", "CANCELLED") -> "FINAL RESULT"

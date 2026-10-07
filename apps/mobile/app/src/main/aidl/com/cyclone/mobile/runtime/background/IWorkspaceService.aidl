@@ -10,5 +10,9 @@ interface IWorkspaceService {
     Bundle resume(String sessionId) = 5;
     Bundle handoff(String sessionId) = 6;
     void close(String sessionId) = 7;
+    Bundle adopt(String sessionId, String packageName) = 8;
+    Bundle mainTask(String packageName) = 9;
+    Bundle view(String sessionId, String uri) = 10;
+    Bundle launchSecond(String sessionId, String component) = 11;
     void destroy() = 16777114;
 }

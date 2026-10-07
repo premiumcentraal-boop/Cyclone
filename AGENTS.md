@@ -19,16 +19,26 @@ Load more context only when the task needs it.
 - Re-observe after page-changing actions. Ordinary taps use Fast Path fingerprint settle (300ms, then +500/+1000); Unchanged is not a second click.
 - Transport success is not task success. One screen-changing mutation per agent decision turn; form fills may batch.
 - Keep approval boundaries for pay/send/delete/permission/authentication-sensitive actions.
+- Cyclone Lab approves nothing a person would care about. Its only exception (alpha 108, test-only approvals) needs
+  `CYCLONE_LAB_APPROVALS=test-only` where the gateway runs and a mission that declares it, and covers exactly deleting
+  `cyclone-lab-note.txt` and sending to `cyclone-lab@example.com`; the phone (`GatewayV5LabAdapter.labMayApprove`)
+  enforces the same list. Widening it is a reviewed change to both lists, never a mission or a setting.
+- The fleet layer never answers an approval. Glass may show the ask and open the Command Center approvals tab. It must not add an approve or send route.
+- The fleet layer (`fleet_*.py`) holds no model key and makes no model call: it splits a sentence deterministically and each phone's own Mind does the work. (The Command Center's optional AI manager is separate and owner-configured.)
 - Never persist passwords, OTPs, API keys, payment data or raw typed secret values in Brain, learning stores or diagnostics.
 - Run diagnostics may contain model-visible context, decisions, tool calls/results, verification and recovery—not hidden provider chain-of-thought.
 - PC integrations route through the constrained gateway/MCP contracts; do not expose generic shell/root control to the model.
+- Task buttons (stop, take over, I'm done, approve, confirm…) on any surface go through Task Kit (`TaskCommands` in `apps/mobile/.../task/`) to the engine that owns the task; surfaces never call an engine directly (guarded by `scripts/ci/tests/test_mobile_task_kit.py`). See `Cyclone V5 plan/17-structure.md`.
 
 ## Ownership
 
 - Android runtime + UX: `apps/mobile/**`
 - Device gateway: `apps/device-gateway/**`
-- Windows companion: `apps/pc-companion/**`, `packaging/pc-companion/**`
+- Cyclone for Windows (web-only): `packaging/pc/**`, `scripts/pc/**`, gateway PC features in `apps/device-gateway/cyclone_device_gateway/pc/**` and `terminal/**`; the retired desktop window in `apps/pc-companion/**` (reference only), PyInstaller specs in `packaging/pc-companion/**`
+- Cyclone Glass (local browser dashboard, no intelligence): `apps/glass/**`, gateway hosting in `apps/device-gateway/cyclone_device_gateway/glass/**`
 - PC agent adapters: `tools/codex-phone-mcp/**`, `tools/cyclone-agent-mcp/**`
+- Testing (round-the-clock Lab testbench): `tools/cyclone-testbench/**`, `.claude/skills/cyclone-testing/**`
+- Plugins from GitHub (plan 50): `apps/device-gateway/cyclone_device_gateway/plugins/**`; the package format and index in `tools/cyclone-ports-sdk/cyclone_ports/{package,index}.py`. Core holds no plugin.
 - CI/release: `.github/workflows/**`, `scripts/ci/**`, `release/version.toml`
 
 Keep parallel agents on non-overlapping paths whenever possible.
@@ -36,6 +46,30 @@ Keep parallel agents on non-overlapping paths whenever possible.
 ## Versioning
 
 The authoritative product/component metadata is `release/version.toml`. Android `versionName` and `versionCode` live in `apps/mobile/app/build.gradle.kts` and must agree with release metadata. Increment `versionCode` for every distributed Android build.
+
+### Fast release lane (since 5.0.0-alpha.43; web-only PC since 5.0.0-alpha.47)
+
+Releases ship **Android, Glass and Cyclone for Windows** from one push. Cyclone for Windows is web-only (plan 31): the
+runtime (`CyclonePCRuntime.exe`), the agent MCP, Glass inside the runtime and the `cyclone` command, as one
+`Cyclone-PC-<product_version>.zip`. The Cyclone One desktop window (`apps/pc-companion`, Tauri) is retired: its source
+stays for reference, it is not built, and `pc_companion` in `release/version.toml` stays `1.6.0-alpha.43`.
+
+To release: bump `product_version`, `components.mobile`, `android_version_code` (+ `build.gradle.kts`),
+`python_version`, `components.device_gateway` and `components.mcp` (+ the three `pyproject.toml` files) when PC code
+changed, and `components.glass` only when `apps/glass` changed; add `docs/RELEASE_<mobile>.md`; push to the dev branch.
+`.github/workflows/v5-publish.yml` builds and smoke-tests the Windows package on a Windows runner (install into a
+scratch profile, `cyclone version`, the runtime serving Glass and the authenticated `/v1/pc/*` routes), waits for
+Mobile CI on that commit, signs the APK with the rotated key, builds the Glass zip and publishes, with every file's
+SHA-256 in `release-manifest.json`. No RC branch and no per-release publisher. Do not push other commits to the dev
+branch until the publish finishes (Mobile CI cancels in-progress runs per branch).
+
+Owners install by double-clicking `Cyclone-Setup-<product_version>.exe` (since alpha.48: NSIS, per user, no admin,
+`packaging/pc/cyclone-setup.nsi`; it runs the same `install.ps1` on the package it carries, then adds Start menu and
+desktop shortcuts and an Apps & features entry whose uninstaller is `Uninstall Cyclone.exe`, never `uninstall.exe`),
+or with `irm https://github.com/premiumcentraal-boop/Cyclone/releases/download/<tag>/install.ps1 | iex` (per user,
+no admin, into `%LOCALAPPDATA%\Cyclone One`), and update with `cyclone update`; all refuse a package whose SHA-256
+is not in the release manifest. The package build installs and uninstalls the setup silently on Windows before a
+release. `CYCLONE_GLASS_DIST` remains a developer override for serving a local Glass.
 
 ## Validation
 
@@ -49,9 +83,19 @@ cd apps/mobile
 For PC gateway/MCP changes:
 
 ```bash
-python -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp
+python -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp -e tools/cyclone-ports-sdk
 python -m pytest apps/device-gateway/tests -q
 python -m unittest discover -s tools/codex-phone-mcp/tests -v
+python -m pytest scripts/ci/tests/test_pc_web_only.py -q
+python -m pytest tools/cyclone-ports-sdk/tests -q   # Cyclone Ports kit; the gateway's Port Hub and plugin installer import it
+```
+
+For Cyclone Glass changes:
+
+```bash
+cd apps/glass && npm ci && npm test && npm run build
+python scripts/ci/glass_guard.py
+python -m pytest apps/device-gateway/tests/test_glass_hosting.py -q
 ```
 
 Run `python scripts/ci/release_versions.py --check` and `python scripts/ci/mobile_product_guard.py` when product identity or release surfaces change.

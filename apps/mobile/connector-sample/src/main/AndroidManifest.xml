@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="@string/app_name" android:icon="@drawable/ic_sample" android:allowBackup="false">
+        <activity android:name=".SampleActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Cyclone opens this when the owner taps one of our entries. -->
+        <activity android:name=".EntryActivity" android:exported="true" />
+        <!-- The marker Cyclone finds. Only Cyclone holds CONNECTOR_HOST, so no other app can bind it. -->
+        <service android:name=".CycloneConnect" android:exported="true"
+                 android:permission="com.cyclone.mobile.permission.CONNECTOR_HOST">
+            <intent-filter>
+                <action android:name="com.cyclone.connector.CONNECT" />
+            </intent-filter>
+            <meta-data android:name="com.cyclone.connector" android:resource="@xml/cyclone_connector" />
+        </service>
+        <!-- Cyclone's data-free wake when new events wait. Only Cyclone holds WAKE_CONNECTOR. -->
+        <receiver android:name=".CycloneWake" android:exported="true"
+                  android:permission="com.cyclone.mobile.permission.WAKE_CONNECTOR">
+            <intent-filter>
+                <action android:name="com.cyclone.connector.WAKE" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

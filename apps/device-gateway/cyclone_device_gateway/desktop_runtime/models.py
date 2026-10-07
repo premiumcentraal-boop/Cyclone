@@ -67,6 +67,10 @@ class FleetEventType(StrEnum):
     SCREEN_STATE_CHANGED = "SCREEN_STATE_CHANGED"
     SESSION_ADDED = "session.added"
     SESSION_REMOVED = "session.removed"
+    MISSION_CREATED = "MISSION_CREATED"
+    TASK_UPDATED = "TASK_UPDATED"
+    NEEDS_YOU = "NEEDS_YOU"
+    MISSION_DONE = "MISSION_DONE"
 
 
 class RuntimeErrorCode(StrEnum):
@@ -84,6 +88,7 @@ class RuntimeErrorCode(StrEnum):
     TRUST_REVOKED = "TRUST_REVOKED"
     TRUST_EXPIRED = "TRUST_EXPIRED"
     TRUST_AUTH_FAILED = "TRUST_AUTH_FAILED"
+    TRUST_REJECTED = "TRUST_REJECTED"
     PROTOCOL_MISMATCH = "PROTOCOL_MISMATCH"
     PHONE_LOCKED = "PHONE_LOCKED"
     CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
@@ -97,12 +102,27 @@ class RuntimeErrorCode(StrEnum):
     AGENT_CONTEXT_TRUNCATION = "AGENT_CONTEXT_TRUNCATION"
     STREAM_CAPACITY = "STREAM_CAPACITY"
     HUMAN_HAS_CONTROL = "HUMAN_HAS_CONTROL"
+    SESSION_REQUIRED = "SESSION_REQUIRED"
+    SESSION_DISPLAY_MISMATCH = "SESSION_DISPLAY_MISMATCH"
+    STALE_CONTROL_REVISION = "STALE_CONTROL_REVISION"
+    MAPPING_PLANE_BUSY = "MAPPING_PLANE_BUSY"
+    MAPPING_JOB_NOT_FOUND = "MAPPING_JOB_NOT_FOUND"
+    RUN_NOT_FOUND = "RUN_NOT_FOUND"
+    MAPPING_INVALID_STATE = "MAPPING_INVALID_STATE"
+    ASK_BUSY = "ASK_BUSY"
+    OVERLAY_UNAVAILABLE = "OVERLAY_UNAVAILABLE"
+    MOMENT_CHANGED = "MOMENT_CHANGED"
+    ANSWER_ON_PHONE = "ANSWER_ON_PHONE"
+    SEALED_REJECTED = "SEALED_REJECTED"
+    KEY_UNAVAILABLE = "KEY_UNAVAILABLE"
     GATE = "GATE"
     MUTATE_LOCK = "MUTATE_LOCK"
     TARGET_MISMATCH = "TARGET_MISMATCH"
     STALE_WORKSPACE = "STALE_WORKSPACE"
     QUEUE_EMPTY = "QUEUE_EMPTY"
     USER_UNVERIFIED = "USER_UNVERIFIED"
+    # Alpha 87: the phone is alive but its Cyclone app is still busy (not a lost connection).
+    PHONE_APP_BUSY = "PHONE_APP_BUSY"
 
 
 class DesktopRuntimeError(RuntimeError):
@@ -136,23 +156,22 @@ class VideoProfileSpec:
 
 
 VIDEO_PROFILES: dict[str, VideoProfileSpec] = {
-    # Thumbnail capture is deliberately conservative. Fleet cards do not auto-start it; callers that
-    # explicitly request a thumbnail get a low-frequency preview rather than a 12 adb-screencap/sec
-    # workload that can obscure pairing/USB failures on real devices.
+    # Fleet cards do not auto-start media. An explicit thumbnail is a bounded H.264 preview;
+    # only the emergency screenshot path runs at one frame per second.
     "thumbnail": VideoProfileSpec(
         name="thumbnail",
         max_long_edge=540,
-        target_fps=4,
-        bitrate_bps=800_000,
-        preferred_codec="image/jpeg",
+        target_fps=8,
+        bitrate_bps=1_000_000,
+        preferred_codec="video/avc",
         cpu_weight=1,
     ),
     "focus": VideoProfileSpec(
         name="focus",
-        max_long_edge=1080,
-        target_fps=15,
-        bitrate_bps=2_000_000,
-        preferred_codec="image/jpeg",
+        max_long_edge=1920,
+        target_fps=30,
+        bitrate_bps=12_000_000,
+        preferred_codec="video/avc",
         cpu_weight=4,
     ),
 }

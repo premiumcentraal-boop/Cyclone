@@ -5,19 +5,25 @@ import android.content.res.Configuration
 import com.cyclone.mobile.AccessibilityRoles
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.applearner.AppLearnerRuntime
+import com.cyclone.mobile.applearner.graphv2.AtlasRuntime
 import com.cyclone.mobile.applearner.PageAwarenessRuntime
 import com.cyclone.mobile.applearner.PageContext
 import com.cyclone.mobile.applearner.PageControl
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
-import com.cyclone.mobile.capture.PhoneScreenCapture
-import com.cyclone.mobile.capture.PhoneScreenCapture.ScreenCaptureException
+import com.cyclone.mobile.brain.graphv2.AtlasPersona
 import com.cyclone.mobile.fastpath.FastPathTree
+import com.cyclone.mobile.mapping.session.MappingPlaneRequest
+import com.cyclone.mobile.mapping.session.MappingSessionRuntime
 import com.cyclone.mobile.observability.pagecontext.PageContextSummary
 import com.cyclone.mobile.observability.pagecontext.PageTextExtractor
+import com.cyclone.mobile.places.PlaceResolver
 import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
 import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionIdentityException
+import com.cyclone.mobile.runtime.session.SessionPlane
+import com.cyclone.mobile.runtime.workspaces.Layer2Workspaces
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -41,17 +47,49 @@ internal data class GatewayObservation(
     val payload: JSONObject,
     val elements: Map<String, GatewayElement>,
     val execution: ExecutionContext = ExecutionContext.DEFAULT,
-)
+    val generation: Long = 0,
+    /**
+     * Who produced this screen: [AtlasPersona.LIVE] only for an ordinary capture with no mapping pass running on the
+     * plane; [AtlasPersona.MAPPING] while a mapping pass is active; null when that could not be established. Live
+     * fact readers (task ledger, clause proof, people memory) accept only LIVE.
+     */
+    val persona: AtlasPersona? = null,
+    /**
+     * Current values of ordinary editable fields, for the on-phone Cyclone Mind only. Process-local: never part of
+     * [payload], never exported to the PC gateway, Glass or diagnostics. Password, sensitive-hint and browser address
+     * fields are never included.
+     */
+    val fieldValues: Map<String, String> = emptyMap(),
+) {
+    override fun toString(): String = "GatewayObservation(id=$id, package=${page.packageName}, generation=$generation)"
+}
 
 internal object GatewayObservationStore {
     private val scoped = com.cyclone.mobile.runtime.session.SessionObservationStore(
         com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions)
-    fun current(sessionId: String? = null): GatewayObservation? = scoped.current(sessionId)?.payload as? GatewayObservation
+    fun current(sessionId: String? = null): GatewayObservation? = scoped.current(sessionId)?.let(::project)
     fun current(execution: ExecutionContext): GatewayObservation? =
-        scoped.current(execution.sessionId, execution.displayId)?.payload as? GatewayObservation
-    fun replace(observation: GatewayObservation) {
+        scoped.current(execution.sessionId, execution.displayId)?.let(::project)
+    fun replace(observation: GatewayObservation): GatewayObservation = project(
         scoped.publish(observation.execution.sessionId, observation.execution.displayId, observation.id,
-            observation, observation.capturedAt)
+            observation, observation.capturedAt))
+    private fun project(envelope: com.cyclone.mobile.runtime.session.SessionObservationEnvelope): GatewayObservation {
+        val source = envelope.payload as GatewayObservation
+        val identity = com.cyclone.mobile.runtime.session.ObservationIdentity.fromPayload(source.id, envelope.generation,
+            source.execution, source.capturedAt, source.payload)
+        val elements = source.elements.mapValues { (_, element) -> element.copy(evidence = JSONObject(element.evidence.toString())
+            .put("observation", identity.toJson()).put("generation", envelope.generation)) }
+        val payload = JSONObject(source.payload.toString()).put("observation", identity.toJson()).put("generation", envelope.generation)
+        payload.optJSONObject("pageContext")?.put("observation", identity.toJson())
+        payload.optJSONObject("screenshot")?.put("observation", identity.toJson())?.put("generation", envelope.generation)
+        payload.optJSONArray("semanticControls")?.let { controls ->
+            for (i in 0 until controls.length()) controls.optJSONObject(i)?.let { control ->
+                control.put("observation", identity.toJson()).put("generation", envelope.generation)
+            }
+        }
+        return source.copy(generation = envelope.generation, elements = elements,
+            page = source.page.copy(observation = identity, controls = source.page.controls.map { it.copy(selector = JSONObject(it.selector.toString())) }),
+            payload = payload)
     }
     fun clear(sessionId: String? = null) { scoped.clear(sessionId) }
 }
@@ -61,21 +99,85 @@ internal object GatewayObservationAdapter {
     // user-entered text (including passwords/OTPs) or a stable brute-forceable digest.
     private val editableStateSalt = UUID.randomUUID().toString()
 
-    fun capture(context: Context, args: JSONObject = JSONObject()): GatewayObservation {
+    fun capture(
+        context: Context,
+        args: JSONObject = JSONObject(),
+        catalogPersona: AtlasPersona = AtlasPersona.LIVE,
+    ): GatewayObservation {
+        val merged = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+        if (args.has("workspaceId") && !merged.has("workspaceId")) merged.put("workspaceId", args.get("workspaceId"))
+        if (args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+            merged.put("workspaceGeneration", args.get("workspaceGeneration"))
+        }
         val execution = try {
-            ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()))
+            SessionContract.classify(merged)
+            ExecutionRequestScope.bind(merged)
         } catch (error: SessionIdentityException) {
-            throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch")
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch")
         }
         val background = execution.sessionId != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID
         if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.requireScope(execution)
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
         PageAwarenessRuntime.initialize(context)
-        val snapshot = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = true)
+        val planeAtStart = observationPlane(args, execution)
+        val executionGenerationAtStart = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId) else null
+        fun surface(): com.cyclone.mobile.agent.ObservationSurface {
+            if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.requireScope(execution)
+            val plane = observationPlane(args, execution)
+            val workspace = plane.workspaceId?.let { id -> Layer2Workspaces.engine.snapshot().singleOrNull { it.id == id } }
+            val profile = com.cyclone.mobile.agent.SemanticCaptureBoundary.workspaceProfile(plane, Layer2Workspaces.engine.holder(), workspace)
+            val executionGeneration = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId) else null
+            return service.observationSurface(execution.sessionId, execution.displayId,
+                plane.toJson().put("executionGeneration", executionGeneration ?: JSONObject.NULL).toString(), profile)
+        }
+        val includeScreenshot = args.optBoolean("includeScreenshot", false)
+        // The mapper retries with longer quiet waits, and its last attempt may tolerate animated content (plan 20).
+        val settleQuietMs = args.optLong("settleQuietMs", 0L).coerceIn(0L, 1_000L)
+        val settleMaxMs = args.optLong("settleMaxMs", 0L).coerceIn(0L, 6_000L)
+        val tolerateContentChange = catalogPersona == AtlasPersona.MAPPING && args.optBoolean("tolerateContentChange", false)
+        val captured = try {
+            com.cyclone.mobile.agent.SemanticCaptureBoundary.captureRetrying(::surface,
+                tolerateContentChange = tolerateContentChange,
+                settle = {
+                    service.waitForUiQuiet()
+                    if (settleMaxMs > 0) service.waitForRevisionQuiet(execution.displayId, settleQuietMs.coerceAtLeast(90L), settleMaxMs)
+                },
+                semantic = { if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = false) },
+                image = if (!includeScreenshot) null else ({
+                    val result = com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
+                        "observation-image-${UUID.randomUUID()}", "phone.screenshot", JSONObject()
+                            .put("sessionId", execution.sessionId).put("displayId", execution.displayId)
+                            .put("minCapturedAtMonotonicMs", android.os.SystemClock.uptimeMillis())
+                            .put("includeBase64", args.optBoolean("includeScreenshotBase64", false))))
+                    if (!result.ok) JSONObject().put("available", false).put("errorCode", "SCREENSHOT_FAILED")
+                    else result.payload as? JSONObject ?: JSONObject().put("available", false)
+                }))
+        } catch (error: Exception) {
+            GatewayObservationStore.clear(execution.sessionId)
+            if (error is com.cyclone.mobile.agent.CaptureChanged) throw captureChanged()
+            throw error
+        }
+        if (!background) com.cyclone.mobile.DeviceState.markObserved()
+        val snapshot = captured.semantic
+        // Reduce the trusted browser address-bar value before sanitizing/exporting observation.
+        // Full URLs (including paths and queries) never enter PageCard, Atlas or diagnostics here.
+        val resolvedPlace = PlaceResolver.resolveObservedSnapshot(snapshot)
+        val observedBrowserOrigin = resolvedPlace?.origin
+        val captureStart = captured.startMs
+        val captureEnd = captured.endMs
+        if (snapshot.screenWidth != captured.surface.width || snapshot.screenHeight != captured.surface.height ||
+            com.cyclone.mobile.agent.SemanticCaptureBoundary.windowSignature(snapshot.windows) != captured.surface.windowSignature) {
+            GatewayObservationStore.clear(execution.sessionId)
+            throw captureChanged()
+        }
+        val screenshot = captured.image
         val raw = snapshot.toJson()
-        val page = PageAwarenessRuntime.capture(context, raw)
         val safeRaw = GatewayPrivacy.sanitizeAccessibilitySnapshot(raw)
+        // Learning and legacy page projection never receive raw editable text. The unsanitized
+        // snapshot remains process-local only for salted, non-exported verification state below.
+        val learned = PageAwarenessRuntime.capture(context, safeRaw)
+        val page = com.cyclone.mobile.agent.tools.ObservationProjections.freshLegacy(safeRaw, learned)
         val observationId = UUID.randomUUID().toString()
         val rawNodes = safeRaw.optJSONArray("nodes") ?: JSONArray()
         val rawTextById = snapshot.nodes.associate { it.id to it.text }
@@ -107,6 +209,7 @@ internal object GatewayObservationAdapter {
                 .put("longClickable", matchingNode?.optBoolean("longClickable") ?: false)
                 .put("scrollable", matchingNode?.optBoolean("scrollable") ?: false)
                 .put("editable", matchingNode?.optBoolean("editable") ?: false)
+                .put("password", matchingNode?.optBoolean("password") ?: false)
                 .put("enabled", matchingNode?.optBoolean("enabled") ?: true)
                 .put("selected", matchingNode?.optBoolean("selected") ?: false)
                 .put("checked", matchingNode?.optBoolean("checked") ?: false)
@@ -114,6 +217,7 @@ internal object GatewayObservationAdapter {
                 .put("focused", matchingNode?.optBoolean("focused") ?: false)
                 .put("textStateDigest", editableTextState(matchingNode, rawTextById) ?: JSONObject.NULL)
                 .put("rawNodeId", matchingNode?.optString("id")?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
+                .put("rawPath", matchingNode?.optString("path")?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
             semanticControls.put(evidence)
             elements[elementId] = GatewayElement(elementId, "semantic", control.label, control.semanticName, control.role, evidence)
         }
@@ -165,6 +269,7 @@ internal object GatewayObservationAdapter {
                 .put("longClickable", node.optBoolean("longClickable"))
                 .put("scrollable", node.optBoolean("scrollable"))
                 .put("editable", node.optBoolean("editable"))
+                .put("password", node.optBoolean("password"))
                 .put("enabled", node.optBoolean("enabled", true))
                 .put("selected", node.optBoolean("selected"))
                 .put("checked", node.optBoolean("checked"))
@@ -172,6 +277,7 @@ internal object GatewayObservationAdapter {
                 .put("focused", node.optBoolean("focused"))
                 .put("textStateDigest", editableTextState(node, rawTextById) ?: JSONObject.NULL)
                 .put("rawNodeId", node.optString("id").takeIf(String::isNotBlank) ?: JSONObject.NULL)
+                .put("rawPath", node.optString("path").takeIf(String::isNotBlank) ?: JSONObject.NULL)
             semanticControls.put(evidence)
             elements[elementId] = GatewayElement(elementId, "semantic_supplement", label.take(140), semanticize(label), node.optString("role"), evidence)
         }
@@ -231,25 +337,25 @@ internal object GatewayObservationAdapter {
             windows = windows.length(),
             nextHopHints = nextHopHints,
         )
-        val includeScreenshot = args.optBoolean("includeScreenshot", false) && !background
-        val screenshot = if (includeScreenshot) {
-            runCatching {
-                PhoneScreenCapture.capture(
-                    service = service,
-                    maxDimension = args.optInt("screenshotMaxDimension", PhoneScreenCapture.DEFAULT_EVIDENCE_MAX_DIMENSION)
-                        .takeIf { it > 0 },
-                    includeBase64 = args.optBoolean("includeScreenshotBase64", false),
-                )
-            }.getOrElse { error ->
-                JSONObject()
-                    .put("available", false)
-                    .put("errorCode", (error as? ScreenCaptureException)?.code ?: "SCREENSHOT_FAILED")
-                    .put("error", (error.message ?: "Screen capture failed").take(240))
-            }
-        } else null
-        screenshot?.optString("filePath")?.takeIf { it.isNotBlank() }?.let { path ->
-            runCatching { PageAwarenessRuntime.store.attachPreview(page.pageKey, path) }
+        if (observedBrowserOrigin != null) {
+            boundedPageEvidence.put("browserOrigin", observedBrowserOrigin)
+                .put("browserOriginSource", "chrome-address-bar")
+                .put("browserOriginObservationId", observationId)
         }
+        boundedPageEvidence.put("captureStartMonotonicMs", captureStart)
+            .put("legacyFreshnessShadow", JSONObject().put("matches", learned.controls.map { it.key } == page.controls.map { it.key })
+                .put("currentControls", page.controls.size).put("learnedControls", learned.controls.size))
+            .put("captureEndMonotonicMs", captureEnd).put("captureDurationMs", captureEnd - captureStart)
+            .put("captureWidth", snapshot.screenWidth).put("captureHeight", snapshot.screenHeight)
+            .put("imageState", "unavailable")
+        boundedPageEvidence.put("windowSignature", captured.surface.windowSignature)
+            .put("rotation", captured.surface.rotation).put("semanticRevision", captured.surface.revision)
+            .put("profileId", captured.surface.profileId ?: JSONObject.NULL)
+            .put("captureClock", "uptimeMillis")
+            .put("imageState", if (screenshot?.optBoolean("available") == true) "current" else "unavailable")
+            .put("imageStartMonotonicMs", captured.imageStartMs ?: JSONObject.NULL)
+            .put("imageEndMonotonicMs", captured.imageEndMs ?: JSONObject.NULL)
+            .put("imageErrorCode", screenshot?.optString("errorCode")?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
 
         val fullPage = page.toAgentJson(maxControls = page.controls.size)
             .put("structuralKey", page.structuralKey)
@@ -262,7 +368,7 @@ internal object GatewayObservationAdapter {
             Configuration.ORIENTATION_PORTRAIT -> "portrait"
             else -> "undefined"
         }
-        val payload = JSONObject()
+        var payload = JSONObject()
             .put("observationId", observationId)
             .put("elementIdScope", "observation-local; IDs are valid only while this observation is current")
             .put("timestamp", snapshot.timestampMs)
@@ -294,9 +400,61 @@ internal object GatewayObservationAdapter {
 
         payload.put("sessionId", execution.sessionId).put("displayId", execution.displayId)
         if (background) payload.put("executionGeneration", com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId))
+        val plane = try {
+            observationPlane(args, execution)
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch")
+        }
+        if (plane != planeAtStart || (background &&
+            com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId) != executionGenerationAtStart)) {
+            GatewayObservationStore.clear(execution.sessionId)
+            throw captureChanged()
+        }
+        payload = SessionContract.attach(payload, plane)
+        val activeMapping = runCatching {
+            MappingSessionRuntime.controller(context).statusForPlane(
+                MappingPlaneRequest(plane.sessionId, plane.displayId,
+                    plane.workspaceId, plane.workspaceGeneration),
+            )
+        }
+        val job = activeMapping.getOrNull()
+        val observedPersona = when {
+            activeMapping.isFailure -> null
+            job != null && !job.state.terminal -> AtlasPersona.MAPPING
+            catalogPersona == AtlasPersona.LIVE -> AtlasPersona.LIVE
+            else -> null
+        }
+        resolvedPlace?.let { place ->
+            // Session status, rather than caller JSON, decides which Atlas persona receives a
+            // catalog entry. An internal mapping capture without an active job stays unresolved.
+            val persona = when {
+                activeMapping.isFailure -> null
+                job != null && !job.state.terminal -> runCatching { AtlasPersona.fromWire(job.persona) }.getOrNull()
+                job != null -> null
+                catalogPersona == AtlasPersona.LIVE -> AtlasPersona.LIVE
+                else -> null
+            }
+            persona?.let { runCatching { AtlasRuntime.catalog.recordObserved(place, it) } }
+        }
         elements.values.forEach { it.evidence.put("sessionId", execution.sessionId).put("displayId", execution.displayId) }
-        return GatewayObservation(observationId, System.currentTimeMillis(), page, payload, elements, execution).also { GatewayObservationStore.replace(it) }
+        val fieldValues = elements.values.mapNotNull { element ->
+            val evidence = element.evidence
+            if (!evidence.optBoolean("editable") || evidence.optBoolean("password")) return@mapNotNull null
+            val resourceId = evidence.optString("resourceId")
+            val hints = "$resourceId ${evidence.optString("contentDescription")} ${element.label} ${evidence.optString("role")}"
+            if (GatewayPrivacy.isSensitiveHint(hints) || com.cyclone.mobile.places.PlaceResolver.isChromeAddressBarResourceId(resourceId)) {
+                return@mapNotNull null
+            }
+            val rawId = evidence.optString("rawNodeId").takeIf { it.isNotBlank() && it != "null" } ?: evidence.optString("id")
+            val value = rawTextById[rawId]?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            element.id to value.take(500)
+        }.toMap()
+        return GatewayObservationStore.replace(GatewayObservation(observationId, snapshot.timestampMs, page, payload, elements, execution,
+            persona = observedPersona, fieldValues = fieldValues))
     }
+
+    private fun captureChanged() = GatewayProtocolException("OBSERVATION_CHANGED_DURING_CAPTURE",
+        "The screen or task scope changed during capture; request a fresh same-scope observation.")
 
     fun search(observation: GatewayObservation, query: String, limit: Int): JSONArray {
         val normalized = normalize(query)
@@ -337,12 +495,52 @@ internal object GatewayObservationAdapter {
             ?: throw GatewayProtocolException("ELEMENT_NOT_FOUND", "Element ID is not present in the current observation")
     }
 
+    private fun observationPlane(args: JSONObject, execution: ExecutionContext): SessionPlane {
+        val identity = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+        if (args.has("workspaceId") && !identity.has("workspaceId")) identity.put("workspaceId", args.get("workspaceId"))
+        if (args.has("workspaceGeneration") && !identity.has("workspaceGeneration")) {
+            identity.put("workspaceGeneration", args.get("workspaceGeneration"))
+        }
+        if (!identity.has("sessionId")) identity.put("sessionId", execution.sessionId)
+        if (!identity.has("displayId")) identity.put("displayId", execution.displayId)
+        val requestedWorkspace = identity.has("workspaceId") && !identity.isNull("workspaceId") &&
+            identity.optString("workspaceId").isNotBlank() && identity.optString("workspaceId") != "null"
+        val holder = Layer2Workspaces.engine.holder()
+        if (!requestedWorkspace &&
+            holder != null &&
+            execution.sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID &&
+            execution.displayId == ExecutionSession.DEFAULT_DISPLAY_ID
+        ) {
+            identity.put("workspaceId", holder.workspaceId)
+            identity.put("workspaceGeneration", holder.generation)
+        }
+        return SessionContract.classify(identity)
+    }
+
     private fun editableTextState(node: JSONObject?, rawTextById: Map<String, String>): String? {
         if (node == null || !node.optBoolean("editable")) return null
         val rawText = rawTextById[node.optString("id")].orEmpty()
         val digest = MessageDigest.getInstance("SHA-256")
             .digest("$editableStateSalt|$rawText".toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    /** The live value of an ordinary field for the on-phone Mind; null for secrets, the address bar and non-fields. */
+    fun fieldValue(observation: GatewayObservation, elementId: String): String? = observation.fieldValues[elementId]
+
+    /** Every semantic control of the observation, for agents that can read more than the page card's shortlist. */
+    fun controls(observation: GatewayObservation): JSONArray = JSONArray(observation.payload.optJSONArray("semanticControls")?.toString() ?: "[]")
+
+    /** Equality only, for the live Ask ledger. Never expose editable text or the process-local salt. */
+    fun matchesObservedEmail(observation: GatewayObservation, elementId: String, email: String): Boolean {
+        if (!Regex("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}").matches(email)) return false
+        val current = GatewayObservationStore.current(observation.execution) ?: return false
+        if (current.id != observation.id) return false
+        val evidence = observation.elements[elementId]?.evidence ?: return false
+        if (!evidence.optBoolean("editable") || evidence.optBoolean("password")) return false
+        val expected = MessageDigest.getInstance("SHA-256").digest("$editableStateSalt|$email".toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        return evidence.optString("textStateDigest") == expected
     }
 
     private fun bestNode(control: PageControl, nodes: JSONArray): JSONObject? {
@@ -390,10 +588,12 @@ internal object GatewayObservationAdapter {
         if (label == query || semantic == query || resource == query || description == query) return 1.0
         if (label.contains(query) || semantic.contains(query) || resource.contains(query) || description.contains(query)) return 0.92
         val tokens = query.split(' ').filter { it.isNotBlank() }.distinct()
-        val usable = tokens.filter { it.length >= 2 || (it.length == 1 && it[0].isLetterOrDigit()) }
+        // Generic words should not make an unrelated Settings row look like the requested control.
+        val specific = tokens.filter { it !in setOf("setting", "settings", "option", "button", "switch", "the", "to", "for") }
+        val usable = specific.ifEmpty { tokens }
         if (usable.isEmpty()) return 0.0
         val matched = usable.count(corpus::contains)
-        if (matched == 0) return 0.0
+        if (matched == 0 || (usable.size >= 3 && matched < 2)) return 0.0
         val ratio = matched.toDouble() / usable.size
         return (0.50 + ratio * 0.35 + if (element.source == "semantic") 0.05 else 0.0).coerceAtMost(0.89)
     }

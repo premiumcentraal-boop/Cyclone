@@ -295,7 +295,8 @@ def test_transition_recorded_and_type_redacted(tmp_path):
     )
     assert result["before_page"] == "HOME"
     assert result["after_page"] == "APPS"
-    assert db.transition_history()[0]["verification"] == "page_changed"
+    assert db.transition_history()[0]["verification"] == "verification_missing"
+    assert result["success"] is False
     text = (tmp_path / "audit.jsonl").read_text()
     assert "super-secret" not in text
     assert "typed_value_redacted" in text

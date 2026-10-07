@@ -20,6 +20,13 @@ class BridgeDisconnectedError(BridgeError):
     pass
 
 
+class BridgeBusyError(BridgeDisconnectedError):
+    """The phone accepted the request but didn't answer in time: its Cyclone app is alive but busy.
+
+    A subclass of BridgeDisconnectedError so every existing handler still treats it as a transport failure; callers
+    that know better (desktop_runtime.phone_errors) report it as PHONE_APP_BUSY instead of a lost phone."""
+
+
 class BridgeProtocolError(BridgeError):
     pass
 
@@ -77,13 +84,20 @@ class CycloneBridgeClient:
         correlation_id = request_id or (str(inherited_id) if inherited_id else None) or str(uuid.uuid4())
         payload = {"id": correlation_id, "op": op, "args": request_args, "auth": auth}
         try:
-            with socket.create_connection((self.host, self.port), timeout=self.timeout) as s:
+            connection = socket.create_connection((self.host, self.port), timeout=self.timeout)
+        except OSError as exc:
+            raise BridgeDisconnectedError("Android bridge transport unavailable") from exc
+        with connection as s:
+            try:
                 f = s.makefile("rwb")
                 f.write((json.dumps(payload, separators=(",", ":")) + "\n").encode())
                 f.flush()
                 line = f.readline()
-        except OSError as exc:
-            raise BridgeDisconnectedError("Android bridge transport unavailable") from exc
+            except TimeoutError as exc:
+                # Connected and sent, but no answer in time: the phone is there and its app is busy.
+                raise BridgeBusyError("Cyclone on the phone did not answer in time") from exc
+            except OSError as exc:
+                raise BridgeDisconnectedError("Android bridge transport unavailable") from exc
         if not line:
             raise BridgeDisconnectedError("Android bridge closed without response")
         try:

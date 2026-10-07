@@ -91,13 +91,34 @@ class OverlayChromeWindowPolicyTest {
         assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
         assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0)
         assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE == 0)
+        assertTrue("ordinary Ask chrome must be visible in USB mirroring", flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
+        assertTrue("Secrets Card remains capture-protected", OverlayChromeWindowPolicy.flags(expanded, secretVisible = true) and WindowManager.LayoutParams.FLAG_SECURE != 0)
     }
 
     @Test
-    fun minimizedStateUsesTheSameBottomCenterCompactPolicy() {
-        val minimized = OverlayChromeWindowPolicy.main(compact = true)
+    fun hostGesturePassthroughMakesExpandedPanelIgnoreTouchesWithoutChangingRestingPolicy() {
+        val expanded = OverlayChromeWindowPolicy.main(compact = false)
+        val resting = OverlayChromeWindowPolicy.flags(expanded)
+        val passing = OverlayChromeWindowPolicy.withHostGesturePassthrough(resting)
+        assertTrue(resting and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0)
+        assertTrue(passing and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+        assertTrue(passing and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+        assertTrue(passing and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
+    }
+
+    @Test
+    fun minimizedComposerIsContentHeightFocusableAndReadyForImmediateTyping() {
+        val minimized = OverlayChromeWindowPolicy.minimizedComposer()
+        val flags = OverlayChromeWindowPolicy.flags(minimized)
         assertTrue(minimized.bottomCenter)
-        assertEquals(48, minimized.widthDp)
-        assertEquals(OverlayChromeContract.IDLE_TOUCH_BOTTOM_MARGIN_DP, minimized.bottomMarginDp)
+        assertTrue(minimized.matchParentWidth)
+        assertEquals(null, minimized.heightDp)
+        assertFalse(minimized.notFocusable)
+        assertTrue(minimized.notTouchModal)
+        assertFalse(minimized.notTouchable)
+        assertEquals(0, minimized.bottomMarginDp)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE == 0)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0)
     }
 }
