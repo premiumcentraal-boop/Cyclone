@@ -26,7 +26,9 @@ object ClickGateIntercept {
         chosen: UiNodeSnapshot,
         activation: UiNodeSnapshot = chosen,
         selector: ElementSelector? = null,
+        packageName: String? = null,
     ): List<String> {
+        SkillDetailsNavigation.labels(packageName, activation)?.let { return it }
         val labels = mutableListOf<String>()
         fun add(value: String?) {
             val trimmed = value?.trim().orEmpty()

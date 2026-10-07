@@ -60,7 +60,7 @@ object Marketplace {
     fun catalog(): List<MarketListing> =
         MarketCatalog.LISTINGS.filter { runCatching { MarketRules.validate(it) }.isSuccess } + owner?.list().orEmpty()
 
-    /** An explicit Run press inside the phone's built-in skill sheet; never used by gateway callers. */
+    /** Phone-sheet Run entry; gateway callers must pass the takeover check in run(context, …) first. */
     fun runNative(context: Context, id: String, values: Map<String, String>): RunRefusal? {
         val skill = InstagramSkills.byId(id) ?: return RunRefusal("NOT_FOUND", "That built-in skill is unavailable.")
         if (id == InstagramSkills.ACCOUNT_SETUP) return RunRefusal("SETUP_REQUIRED", "Complete the account setup form first.")

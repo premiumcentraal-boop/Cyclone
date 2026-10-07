@@ -14,6 +14,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.automation.AutomationDefinition
@@ -113,8 +117,10 @@ internal fun CycloneSkillsLibraryPage(context: Context, refreshTick: Int, routin
 }
 
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun LibrarySkillRow(listing: MarketListing, grounded: Boolean, onClick: () -> Unit) {
-    CycloneSimpleCard(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    CycloneSimpleCard(Modifier.fillMaxWidth().semantics { testTagsAsResourceId = true }
+        .testTag(com.cyclone.mobile.ui.overlay.SkillDetailsNavigation.tag(listing.id)).clickable(onClick = onClick)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             CycloneAppIcon(listing.apps.firstOrNull(), Modifier.size(36.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

@@ -49,6 +49,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -193,8 +197,10 @@ private fun Glyph(glyph: String, size: Int) {
 }
 
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun FeaturedCard(listing: MarketListing, onClick: () -> Unit) {
-    CycloneSimpleCard(Modifier.width(158.dp).clickable(onClick = onClick)) {
+    CycloneSimpleCard(Modifier.width(158.dp).semantics { testTagsAsResourceId = true }
+        .testTag(com.cyclone.mobile.ui.overlay.SkillDetailsNavigation.tag(listing.id)).clickable(onClick = onClick)) {
         Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Glyph(listing.glyph, 64)
@@ -206,9 +212,12 @@ private fun FeaturedCard(listing: MarketListing, onClick: () -> Unit) {
 }
 
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun ListingRow(listing: MarketListing, entry: InstalledListing?, reason: String? = null, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().semantics { testTagsAsResourceId = true }
+            .testTag(com.cyclone.mobile.ui.overlay.SkillDetailsNavigation.tag(listing.id))
+            .clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
