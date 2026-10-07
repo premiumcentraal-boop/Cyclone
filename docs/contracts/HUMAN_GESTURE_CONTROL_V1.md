@@ -155,7 +155,7 @@ the bounded evidence:
 Callers cannot force either behaviour, and `humanize = off` keeps the semantic click. Secrets are never typed key by
 key.
 
-### Drag, pinch, double tap and drawing (plan 52 run 6, alpha.113)
+### Drag, pinch, double tap and drawing (plan 52 run 6, alpha.114)
 
 These are phone-planned, element-grounded tools. None takes screen coordinates; `x1`, `y1`, `x2`, `y2`, `points`,
 `path`, `fromX`/`fromY`/`toX`/`toY` are refused with `INVALID_REQUEST` before anything moves.
@@ -218,7 +218,7 @@ If the block is absent, malformed, reports `runtimeAvailable != true`, or uses a
 - ordinary legacy phone control still works.
 
 `phone.double_tap`, `phone.drag`, `phone.pinch` and `phone.draw` stay `unsupported` unless the phone also lists them
-in `humanGesture.hands.gestures` (alpha.113 and later); an unrecognized or older phone signal cannot claim them. Which of
+in `humanGesture.hands.gestures` (alpha.114 and later); an unrecognized or older phone signal cannot claim them. Which of
 them work on background displays is projected as `gesture_background_displays` (pinch: false until a device proves it).
 
 ## Execution-plane identity

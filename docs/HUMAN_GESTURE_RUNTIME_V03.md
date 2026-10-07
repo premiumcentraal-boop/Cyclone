@@ -8,9 +8,9 @@ The original V0.3 engine landed on `integration/human-gesture-v0.3` (`0239ecd7`)
 
 Human Gesture remains downstream of Cyclone authorization. `PhoneToolExecutor` remains the phone mutation authority; the runtime does not bypass GATE, human ownership, MutationGrounding, `nodeAtTaskPath`, duplicate suppression, confirmation, Session Contract identity, Layer2 ownership, or Fast Path settle (300 then +500/+1000; Unchanged is not a second click).
 
-Named virtual displays use the same cubic `dispatchGesture` path through `setDisplayId` (since `0c3a34b3`); the helper's straight `input -d` stroke is only the fallback when Android never queued a gesture. Since 5.0.0-alpha.113 the Instagram stock skills swipe by intent (no `humanize=off` pin); the PC desktop manual-control adapter stays pinned to `off` because the owner chooses that exact pixel. Physical Pixel 8 remains **UNVERIFIED**.
+Named virtual displays use the same cubic `dispatchGesture` path through `setDisplayId` (since `0c3a34b3`); the helper's straight `input -d` stroke is only the fallback when Android never queued a gesture. Since 5.0.0-alpha.114 the Instagram stock skills swipe by intent (no `humanize=off` pin); the PC desktop manual-control adapter stays pinned to `off` because the owner chooses that exact pixel. Physical Pixel 8 remains **UNVERIFIED**.
 
-**Human Hands (plan 52, 5.0.0-alpha.111, final in alpha.113):** the owner's Hands style (Precise / Natural / Relaxed; Natural by default) sits on top of this runtime, with drag, pinch, double tap and drawing since alpha.113. See the sections at the end of this document.
+**Human Hands (plan 52, 5.0.0-alpha.111, final in alpha.114):** the owner's Hands style (Precise / Natural / Relaxed; Natural by default) sits on top of this runtime, with drag, pinch, double tap and drawing since alpha.114. See the sections at the end of this document.
 
 ## Public `humanize` boundary
 
@@ -24,7 +24,7 @@ Supported values are exactly:
 
 Explicit blank/unknown values fail closed with `INVALID_REQUEST` before Android mutation. Non-string JSON values stringify to values outside the bounded enum and likewise fail closed.
 
-The field is accepted only on the touch-relevant phone tools exposed by `PhoneToolRegistry`: `phone.click`, `phone.long_press`, `phone.tap`, `phone.scroll`, `phone.swipe`, and (alpha.113) `phone.double_tap`, `phone.drag`, `phone.pinch` and `phone.draw`, where `off` means Precise geometry for that one gesture.
+The field is accepted only on the touch-relevant phone tools exposed by `PhoneToolRegistry`: `phone.click`, `phone.long_press`, `phone.tap`, `phone.scroll`, `phone.swipe`, and (alpha.114) `phone.double_tap`, `phone.drag`, `phone.pinch` and `phone.draw`, where `off` means Precise geometry for that one gesture.
 
 ## Semantic-first action matrix
 
@@ -180,7 +180,7 @@ fixed vocabulary.
 
 PHYSICAL DEVICE: UNVERIFIED for every Human Hands behaviour.
 
-## Final Human Hands (plan 52 runs 6 and 7, alpha.113)
+## Final Human Hands (plan 52 runs 6 and 7, alpha.114)
 
 **Natural is the default.** The stored default was already Natural; it now loads at process start
 (`GatewayInitProvider`) as well as when Accessibility connects. Settings shows "Natural (default)". The in-process

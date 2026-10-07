@@ -1,7 +1,7 @@
 # Human Hands device matrix (plan 52, run 7)
 
 What has to be seen on a real Pixel before any Human Hands behaviour is called verified. Until a row has a dated
-result from a physical phone, it is **UNVERIFIED** (as of 5.0.0-alpha.113, every row is).
+result from a physical phone, it is **UNVERIFIED** (as of 5.0.0-alpha.114, every row is).
 
 ## How to run it
 

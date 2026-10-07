@@ -1,20 +1,20 @@
-# Cyclone V5 alpha.113 dev6: native Instagram starter skills and unified Skills library, on alpha.112. Glass 1.0.0-alpha.62.
-# Owner-authorized developer release; named candidate acceptance is recorded in its release notes.
+# Cyclone V5 alpha.114 dev1: Human Hands final (plan 52 runs 6-7: drag, pinch, double tap, draw; natural placement and pacing; Natural default), on alpha.113 dev6. Glass 1.0.0-alpha.62.
+# Owner-requested developer release; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.113.dev6"
+product_version = "5.0.0-alpha.114.dev1"
 channel = "development"
-android_version_code = 266
-python_version = "5.0.0-alpha.112.dev1"
+android_version_code = 267
+python_version = "5.0.0-alpha.114.dev1"
 
 [components]
-mobile = "5.0.0-alpha.113.dev6"
+mobile = "5.0.0-alpha.114.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
 glass = "1.0.0-alpha.62"
-device_gateway = "5.0.0-alpha.112.dev1"
-mcp = "5.0.0-alpha.112.dev1"
+device_gateway = "5.0.0-alpha.114.dev1"
+mcp = "5.0.0-alpha.114.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha113-native-instagram-skills"
+candidate_generation = "cyclone-v5-alpha114-human-hands-final"

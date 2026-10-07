@@ -59,17 +59,17 @@ Approval boundaries are unchanged: pay, send, delete, permissions and authentica
 | Tests | 10 Kotlin test files (about 38 tests), plus 2 lab and 2 gateway/MCP test files | Bounds, determinism, fuzz, performance, safety ordering and contract shape. |
 | Design only | `docs/HUMAN_GESTURE_TEMPLATES_V1_5.md` | Recorded templates in a start-to-end frame (`s, n, tau`). **Not built.** |
 
-## 1b. As built (5.0.0-alpha.113)
+## 1b. As built (5.0.0-alpha.114)
 
 | Run | Status | Alpha |
 | --- | --- | --- |
 | 1 Motion physics | Built | alpha.111 |
 | 2 Intents + touch-first | Built | alpha.111 |
 | 3 Keyboard + key-by-key typing | Built | alpha.111 |
-| 4 Rhythm | Built in alpha.111. **Final in alpha.113:** a new page is read, the same page only glanced at; reach follows Fitts's law from the last touch; quick after a field tap; one more look before a confirm. | alpha.111, alpha.113 |
+| 4 Rhythm | Built in alpha.111. **Final in alpha.114:** a new page is read, the same page only glanced at; reach follows Fitts's law from the last touch; quick after a field tap; one more look before a confirm. | alpha.111, alpha.114 |
 | 5 My hands (owner templates) | **Not built** | — |
-| 6 Drag, pinch, double tap, draw, swipe style | **Built:** typed tools, engine, dispatch, capabilities, gateway projection, Mind tools `drag` / `zoom` / `double_tap` / `draw`, and Instant "zoom in/out" and "drag X to Y". Pinch is main screen only. | alpha.113 |
-| 7 Defaults and docs | **Built, except the device run:** Natural is the default and loads at process start. Natural tap placement and press length. Instagram pins removed; the PC desktop-control pin kept, with the reason. Runtime and contract docs updated. Device matrix: `docs/HUMAN_HANDS_DEVICE_MATRIX.md` and testbench suite `hands3`. | alpha.113 |
+| 6 Drag, pinch, double tap, draw, swipe style | **Built:** typed tools, engine, dispatch, capabilities, gateway projection, Mind tools `drag` / `zoom` / `double_tap` / `draw`, and Instant "zoom in/out" and "drag X to Y". Pinch is main screen only. | alpha.114 |
+| 7 Defaults and docs | **Built, except the device run:** Natural is the default and loads at process start. Natural tap placement and press length. Instagram pins removed; the PC desktop-control pin kept, with the reason. Runtime and contract docs updated. Device matrix: `docs/HUMAN_HANDS_DEVICE_MATRIX.md` and testbench suite `hands3`. | alpha.114 |
 
 The device proof itself (the Pixel matrix) has not happened. Every device claim stays **UNVERIFIED** until it does.
 Owner decision 1 in §6 (Natural as the default) is taken: Natural.
