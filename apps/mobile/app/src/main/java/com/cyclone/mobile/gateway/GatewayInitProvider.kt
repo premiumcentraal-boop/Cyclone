@@ -22,6 +22,9 @@ class GatewayInitProvider : ContentProvider() {
         // First, so a freeze during startup is caught too.
         runCatching { com.cyclone.mobile.runtime.health.MainThreadWatchdog.start(app) }
         runCatching { com.cyclone.mobile.ai.OpenRouterCatalogStore.initialize(app) }
+        // Plan 52 run 7: the owner's Hands style (Natural unless they chose otherwise) from the first moment of the
+        // process, not only once Accessibility connects.
+        runCatching { com.cyclone.mobile.gesture.HandsSettings.apply(app) }
         runCatching { com.cyclone.mobile.secrets.VaultGatewayV5Integration.install(app) }
             .onFailure {
                 GatewayRuntime.reportSafeError(

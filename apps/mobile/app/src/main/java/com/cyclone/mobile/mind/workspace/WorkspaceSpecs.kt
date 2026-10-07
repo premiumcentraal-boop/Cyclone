@@ -10,7 +10,7 @@ import org.json.JSONObject
  */
 object WorkspaceSpecs {
     /** Tools that change the screen: they may say which plan step they serve and what they expect. */
-    val EXPECT_TOOLS = setOf("tap", "tap_sequence", "long_press", "swipe", "tap_point", "type_text", "press_enter", "scroll", "back", "home", "wait",
+    val EXPECT_TOOLS = setOf("tap", "tap_sequence", "long_press", "swipe", "double_tap", "drag", "zoom", "draw", "tap_point", "type_text", "press_enter", "scroll", "back", "home", "wait",
         "open_app", "open_link", "open_settings", "open_notification", "go_to")
 
     /** Tools that move the mission to another app on purpose: the next app in front opens a stay at once. */

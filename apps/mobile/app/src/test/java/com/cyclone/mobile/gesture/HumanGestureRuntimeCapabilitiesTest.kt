@@ -52,4 +52,21 @@ class HumanGestureRuntimeCapabilitiesTest {
             actions.getJSONObject("scroll").getString("foregroundMode"),
         )
     }
+
+    @Test
+    fun `run 6 gestures are reported per display, pinch stays off background screens, and none takes raw points`() {
+        val actions = HumanGestureRuntimeCapabilities.toJson(true).getJSONObject("actions")
+        for (name in listOf("doubleTap", "drag", "pinch", "draw")) {
+            val gesture = actions.getJSONObject(name)
+            assertFalse(gesture.getBoolean("rawPoints"))
+            assertEquals("synthesized_touch", gesture.getString("foregroundMode"))
+        }
+        assertTrue(actions.getJSONObject("doubleTap").getBoolean("backgroundDisplays"))
+        assertFalse(actions.getJSONObject("pinch").getBoolean("backgroundDisplays"))
+        assertTrue(actions.getJSONObject("draw").getBoolean("groundedCanvasOnly"))
+        val off = HumanGestureRuntimeCapabilities.toJson(false).getJSONObject("actions")
+        assertFalse(off.getJSONObject("pinch").getBoolean("supported"))
+        val hands = HumanGestureRuntimeCapabilities.toJson(true).getJSONObject("hands")
+        assertEquals(4, hands.getJSONArray("gestures").length())
+    }
 }

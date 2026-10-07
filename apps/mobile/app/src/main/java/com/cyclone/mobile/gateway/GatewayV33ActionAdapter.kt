@@ -675,7 +675,8 @@ internal object GatewayV33ManualDesktopAdapter {
                 toolArgs.put("tool", "phone.tap")
                 params.put("normalizedX", args.optDouble("x", Double.NaN))
                 params.put("normalizedY", args.optDouble("y", Double.NaN))
-                // Desktop input must land at the selected pixel, without AI gesture drift.
+                // Desktop input must land at the selected pixel, without AI gesture drift. Plan 52 run 7 keeps this pin
+                // on purpose: it is the owner's own hand on the PC choosing an exact point, not an agent action.
                 params.put("humanize", "off")
                 params.put("waitForChangeMs", 0)
             }
@@ -688,6 +689,7 @@ internal object GatewayV33ManualDesktopAdapter {
                     throw GatewayProtocolException("PROTOCOL_MISMATCH", "$name must be between 0 and 1", requestId)
                 }
                 toolArgs.put("tool", "phone.swipe")
+                // Plan 52 run 7: kept pinned like the tap above; the owner draws this stroke on the PC themselves.
                 params.put("humanize", "off")
                 params.put("x1", pixel("x1", snapshot.screenWidth))
                 params.put("y1", pixel("y1", snapshot.screenHeight))

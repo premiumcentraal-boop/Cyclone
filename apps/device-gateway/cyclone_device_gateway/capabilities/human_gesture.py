@@ -7,6 +7,8 @@ CONTROL_VERSION = "cyclone.human_gesture.control.v1"
 TRACE_VERSION = "cyclone.human_gesture.trace.v1"
 PROFILE_VALUES = ("auto", "off", "light", "normal")
 HUMANIZE_ACTIONS = frozenset({"phone.click", "phone.long_press", "phone.swipe", "phone.scroll"})
+# Plan 52 run 6: gestures the phone plans from typed intents. They have no PC/MCP route; this is capability truth only.
+GESTURE_ACTIONS = ("phone.double_tap", "phone.drag", "phone.pinch", "phone.draw")
 SAFE_ACTION_STATES = frozenset({
     "supported",
     "semantic_native",
@@ -34,7 +36,10 @@ _FALLBACK_ACTIONS = {
     "phone.long_press": "transport_ready_runtime_unreported",
     "phone.scroll": "transport_ready_runtime_unreported",
     "phone.swipe": "transport_ready_runtime_unreported",
+    "phone.double_tap": "unsupported",
     "phone.drag": "unsupported",
+    "phone.pinch": "unsupported",
+    "phone.draw": "unsupported",
 }
 _FALLBACK_PLANES = {
     "foreground": "runtime_unreported",
@@ -46,6 +51,10 @@ _ACTION_ALIASES = {
     "phone.long_press": ("phone.long_press", "longPressFallback", "long_press_fallback"),
     "phone.swipe": ("phone.swipe", "swipe"),
     "phone.scroll": ("phone.scroll", "scroll"),
+    "phone.double_tap": ("phone.double_tap", "doubleTap", "double_tap"),
+    "phone.drag": ("phone.drag", "drag"),
+    "phone.pinch": ("phone.pinch", "pinch"),
+    "phone.draw": ("phone.draw", "draw"),
 }
 _PLANE_ALIASES = {
     "foreground": ("foreground", "foregroundDisplay0", "foreground_display0"),
@@ -223,7 +232,16 @@ def discovery_from_bridge_status(status: Any) -> dict[str, Any]:
     raw_actions = _read(block, "actions", "actionSupport", "action_support")
     raw_actions = raw_actions if isinstance(raw_actions, dict) else {}
     actions = {action: _action_state(raw_actions, action) for action in sorted(HUMANIZE_ACTIONS)}
-    actions["phone.drag"] = "unsupported"
+    # Only a phone that lists the run 6 gestures in its hands block has them; anything else stays unsupported.
+    raw_hands = _read(block, "hands")
+    listed = raw_hands.get("gestures") if isinstance(raw_hands, dict) else None
+    listed = {g for g in listed if isinstance(g, str)} if isinstance(listed, list) else set()
+    background: dict[str, bool] = {}
+    for action in GESTURE_ACTIONS:
+        state = _action_state(raw_actions, action) if action.removeprefix("phone.") in listed else "unsupported"
+        actions[action] = "unsupported" if state in {"not_reported", "downgraded"} else state
+        raw = next((raw_actions[k] for k in _ACTION_ALIASES[action] if k in raw_actions), None)
+        background[action] = actions[action] != "unsupported" and isinstance(raw, dict) and raw.get("backgroundDisplays") is True
 
     raw_planes = _read(block, "executionPlanes", "execution_planes", "planes")
     raw_planes = raw_planes if isinstance(raw_planes, dict) else {}
@@ -245,15 +263,16 @@ def discovery_from_bridge_status(status: Any) -> dict[str, Any]:
     hands = _hands(_read(block, "hands"))
     if hands is not None:
         out["hands"] = hands
+    out["gesture_background_displays"] = background
     return out
 
 
 _HANDS_STYLES = frozenset({"precise", "natural", "relaxed"})
-_HANDS_FLAGS = ("speedCurves", "swipeIntents", "touchFirstClicks", "keystrokeTyping", "pacing")
+_HANDS_FLAGS = ("speedCurves", "swipeIntents", "touchFirstClicks", "keystrokeTyping", "pacing", "naturalPlacement", "swipeStyles")
 
 
 def _hands(value: Any) -> dict[str, Any] | None:
-    """Plan 52: the phone's Human Hands facts, reduced to a fixed vocabulary (style, hand, five booleans)."""
+    """Plan 52: the phone's Human Hands facts, reduced to a fixed vocabulary (style, hand, seven booleans)."""
     if not isinstance(value, dict):
         return None
     style = value.get("style")

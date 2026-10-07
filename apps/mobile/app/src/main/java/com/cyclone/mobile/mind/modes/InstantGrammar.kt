@@ -5,7 +5,11 @@ import java.text.Normalizer
 
 /** What Instant mode can do by itself (plan 42 §4). */
 enum class InstantIntent {
-    SWIPE, SCROLL, BACK, HOME, RECENTS, TAP, OPEN_APP, CAMERA, PHOTO, SELFIE, CALL, TIMER, ALARM, FLASHLIGHT, VOLUME, MEDIA
+    SWIPE, SCROLL, BACK, HOME, RECENTS, TAP, OPEN_APP, CAMERA, PHOTO, SELFIE, CALL, TIMER, ALARM, FLASHLIGHT, VOLUME, MEDIA,
+    /** Plan 52 run 6: two fingers apart (in) or together (out). */
+    ZOOM,
+    /** Plan 52 run 6: press, carry and drop one control onto another ("drag X to Y"). */
+    DRAG,
 }
 
 /**
@@ -17,8 +21,10 @@ data class InstantCommand(
     val text: String,
     /** up, down, left, right (swipes and scrolls); on or off (flashlight); up or down (volume); play_pause, next, previous (media). */
     val direction: String? = null,
-    /** A screen label (tap), an app package (open app), or a name to look up in contacts (call). */
+    /** A screen label (tap, drag), an app package (open app), or a name to look up in contacts (call). */
     val target: String? = null,
+    /** Plan 52 run 6: where a drag drops (a screen label). */
+    val destination: String? = null,
     /** How the target reads to the owner: the label or the app's name. */
     val targetLabel: String? = null,
     val seconds: Int? = null,
@@ -92,6 +98,16 @@ object InstantGrammar {
                 InstantCommand(InstantIntent.OPEN_APP, text, target = pkg, targetLabel = label)
             }
         }
+        DRAG.matchEntire(t)?.let { m ->
+            val from = m.groupValues[2].trim()
+            val to = m.groupValues[3].trim()
+            val source = pick(from, world.labels, InstantIntent.DRAG, text) { InstantCommand(InstantIntent.DRAG, text, target = it, targetLabel = it) }
+            if (source !is GrammarResult.Match) return source
+            val drop = pick(to, world.labels.filter { it != source.command.target }, InstantIntent.DRAG, text) {
+                source.command.copy(destination = it)
+            }
+            return drop
+        }
         TAP.matchEntire(t)?.let { m ->
             val wanted = m.groupValues[3].removeSuffix(" button").removeSuffix(" knop").trim()
             return pick(wanted, world.labels, InstantIntent.TAP, text) { label -> InstantCommand(InstantIntent.TAP, text, target = label, targetLabel = label) }
@@ -111,14 +127,14 @@ object InstantGrammar {
         val tokens = words(text)
         if (tokens.isEmpty() || tokens.size > MAX_WORDS || tokens.drop(1).any { it in JOINERS }) return false
         val t = tokens.joinToString(" ")
-        return complete(text) || OPEN.matches(t) || TAP.matches(t)
+        return complete(text) || OPEN.matches(t) || TAP.matches(t) || DRAG.matches(t)
     }
 
     /**
      * True when the command names something on the screen ("tap Pokémon GO", "click Settings"): only then does Instant
      * read the screen before routing. Gestures, apps, the camera and calls read it once, right before the move.
      */
-    fun needsScreen(text: String): Boolean = TAP.matches(words(text).joinToString(" "))
+    fun needsScreen(text: String): Boolean = words(text).joinToString(" ").let { TAP.matches(it) || DRAG.matches(it) }
 
     /** While the owner is still talking: what the command is becoming, so the phone can get ready (plan 42 §5.2). */
     fun prefix(text: String): InstantIntent? {
@@ -140,9 +156,16 @@ object InstantGrammar {
     private val SWIPE = Regex("^(swipe|veeg|swipen) (up|down|left|right|omhoog|omlaag|naar boven|naar beneden|links|rechts|naar links|naar rechts)$")
     private val SCROLL = Regex("^(scroll|scrol|scrollen)(?: (up|down|omhoog|omlaag|naar boven|naar beneden))?(?: a bit| een beetje| more| verder)?$")
 
+    // Plan 52 run 6: "zoom in", "zoom out a bit", "inzoomen", "zoom uit".
+    private val ZOOM = Regex("^(?:zoom (in|out|uit)|(in|uit)zoomen)(?: a bit| a little| more| een beetje| verder)?$")
+
     private fun gesture(t: String): InstantCommand? {
         SWIPE.matchEntire(t)?.let { return InstantCommand(InstantIntent.SWIPE, t, direction = DIRECTIONS[it.groupValues[2]]) }
         SCROLL.matchEntire(t)?.let { return InstantCommand(InstantIntent.SCROLL, t, direction = DIRECTIONS[it.groupValues[2]] ?: "down") }
+        ZOOM.matchEntire(t)?.let { m ->
+            val word = m.groupValues.drop(1).firstOrNull { it.isNotBlank() }.orEmpty()
+            return InstantCommand(InstantIntent.ZOOM, t, direction = if (word == "in") "in" else "out")
+        }
         return when (t) {
             "back", "go back", "terug", "ga terug", "press back", "back button" -> InstantCommand(InstantIntent.BACK, t)
             "home", "go home", "home screen", "go to the home screen", "go to home screen", "naar huis", "startscherm",
@@ -198,6 +221,8 @@ object InstantGrammar {
     private val CALL = Regex("^(call|phone|ring|bel|bellen)(?: to| naar)? (.+)$")
     private val OPEN = Regex("^(open|launch|start|go to|ga naar|openen)( the| my| de| mijn)? (.+)$")
     private val TAP = Regex("^(tap|click|press|klik|druk|tik|select)(?: on| op)?( the| de| het)? (.+)$")
+    // Plan 52 run 6: "drag Holiday.pdf to Documents", "sleep foto naar Album".
+    private val DRAG = Regex("^(drag|sleep|verplaats)(?: the| de| het)? (.+?) (?:to|onto|into|naar|op|in)(?: the| de| het)? (.+)$")
 
     private inline fun pick(wanted: String, options: List<String>, intent: InstantIntent, text: String,
                             build: (String) -> InstantCommand): GrammarResult {

@@ -19,6 +19,8 @@ object InstantCopy {
         InstantIntent.FLASHLIGHT -> "Flashlight ${command.direction ?: "on"}"
         InstantIntent.VOLUME -> "Volume ${command.direction ?: "up"}"
         InstantIntent.MEDIA -> "Media"
+        InstantIntent.ZOOM -> "Zooming ${command.direction ?: "in"}"
+        InstantIntent.DRAG -> "Moving ${command.targetLabel ?: command.target.orEmpty()}"
     }.trim()
 
     /** The last thing done, as a short sentence ("Took the photo."). */

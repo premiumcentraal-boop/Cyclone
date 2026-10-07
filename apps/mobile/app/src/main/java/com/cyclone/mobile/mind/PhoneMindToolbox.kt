@@ -282,6 +282,10 @@ class PhoneMindToolbox(
         "forget" -> forget(arguments.optString("id"))
         "tap_point" -> tapPoint(arguments)
         "swipe" -> swipe(arguments)
+        "double_tap" -> onElement(arguments, "phone.double_tap", "Double-tapped")
+        "drag" -> drag(arguments)
+        "zoom" -> zoom(arguments)
+        "draw" -> draw(arguments)
         "notifications" -> notifications()
         "open_notification" -> openNotification(arguments.optString("id"))
         "reply_notification" -> replyNotification(arguments)
@@ -304,10 +308,42 @@ class PhoneMindToolbox(
      * Plan 52: a short human pause before acting (Natural / Relaxed hands): time to read the page and find the control.
      * The time the model already spent thinking counts toward it; a stop ends it at once.
      */
-    private fun humanPause() {
+    /** The page the last action was taken on: a second action on the same page only glances, it does not re-read. */
+    private var lastActedPage: String? = null
+
+    /**
+     * Plan 52 (final): the pause before an action, like a person's. A new page is read; another action on the same
+     * page (a keypad, a form) only glances; a far or small target takes longer to reach than the one next to the
+     * thumb; typing right after tapping a field is quick. Time the model already spent counts toward it.
+     */
+    private fun humanPause(tool: String = "", ref: MindRef? = null) {
+        val page = screen?.legacyPage?.let { "${it.packageName}|${it.structuralKey}" }?.takeIf { !it.endsWith("|") }
+        val newPage = page == null || page != lastActedPage
+        lastActedPage = page
+        val box = ref?.let { controlsById[it.elementId]?.evidence?.optJSONObject("bounds") }
+        val center = box?.let {
+            com.cyclone.mobile.gesture.GesturePoint((it.optInt("left") + it.optInt("right")) / 2f, (it.optInt("top") + it.optInt("bottom")) / 2f)
+        }
+        val size = box?.let { minOf(it.optInt("right") - it.optInt("left"), it.optInt("bottom") - it.optInt("top")).toFloat() }
+        val kind = when (tool) {
+            "phone.type", "phone.replace_text", "phone.submit_text" -> com.cyclone.mobile.gesture.PaceKind.TYPE
+            "phone.scroll" -> com.cyclone.mobile.gesture.PaceKind.SCROLL
+            "phone.swipe" -> com.cyclone.mobile.gesture.PaceKind.SWIPE
+            "phone.double_tap", "phone.drag", "phone.pinch", "phone.draw" -> com.cyclone.mobile.gesture.PaceKind.GESTURE
+            in NAVIGATION -> com.cyclone.mobile.gesture.PaceKind.NAVIGATE
+            else -> com.cyclone.mobile.gesture.PaceKind.TAP
+        }
         val pause = com.cyclone.mobile.gesture.Pacing.pauseMs(
-            com.cyclone.mobile.gesture.Hands.style, pageTextChars,
-            System.currentTimeMillis() - observedAtMs, com.cyclone.mobile.gesture.SeededGestureRng(System.nanoTime()),
+            com.cyclone.mobile.gesture.Hands.style,
+            com.cyclone.mobile.gesture.PaceStep(
+                pageTextChars = pageTextChars,
+                alreadyWaitedMs = System.currentTimeMillis() - observedAtMs,
+                newPage = newPage,
+                reachPx = center?.let { com.cyclone.mobile.gesture.HandMemory.reachTo(it) },
+                targetSizePx = size?.takeIf { it > 0f },
+                kind = kind,
+            ),
+            com.cyclone.mobile.gesture.SeededGestureRng(System.nanoTime()),
         )
         var left = pause
         while (left > 0 && !cancelled()) {
@@ -843,7 +879,7 @@ class PhoneMindToolbox(
         val (ref, error) = target(arguments)
         if (ref == null) return error!!
         if (requireEditable && !ref.editable) return MindToolResult.error("${ref.ref} is not a text field.")
-        if (tool == "phone.click" || tool == "phone.long_press") {
+        if (tool == "phone.click" || tool == "phone.long_press" || tool == "phone.double_tap") {
             HomeSafety.refusal(screen?.packageName, ref.label, ownerWords.toString())?.let { return MindToolResult.error("Not tapped: $it") }
         }
         return act(tool, JSONObject().put("elementId", ref.elementId), "$verb ${ref.ref} \"${ref.label}\"", ref)
@@ -1188,7 +1224,7 @@ class PhoneMindToolbox(
                 params.put("elementId", again.elementId)
             }
         }
-        humanPause()
+        humanPause(tool, ref)
         if (cancelled()) return MindToolResult("NOT RUN: the owner stopped the mission.", ok = false)
         owner.status(workspace?.narrate(done) ?: done)
         fresh = false
@@ -1367,8 +1403,84 @@ class PhoneMindToolbox(
         // check still classifies the start point it picked.
         val amount = if (arguments.optString("distance") == "short") "peek" else "page"
         val region = JSONObject().put("left", left).put("top", top).put("right", right).put("bottom", bottom)
-        return act("phone.swipe", JSONObject().put("direction", direction).put("amount", amount).put("region", region)
-            .put("guard", true), "Swiped $direction on $where")
+        val params = JSONObject().put("direction", direction).put("amount", amount).put("region", region).put("guard", true)
+        arguments.optString("speed").lowercase().takeIf { it in setOf("gentle", "normal", "flick") }?.let { params.put("speed", it) }
+        arguments.optString("style").lowercase().takeIf { it in setOf("arc", "straight-ish", "s-curve") }?.let { params.put("style", it) }
+        return act("phone.swipe", params, "Swiped $direction on $where")
+    }
+
+    /**
+     * Plan 52 run 6: press, hold, carry and drop. Both ends are refs of the same screen (read again first if needed, so
+     * the drop target is bound to the screen the phone acts on); the phone plans the hand.
+     */
+    private fun drag(arguments: JSONObject): MindToolResult {
+        if (!fresh) env.observe(goal).page?.let(::bind)
+        val (ref, error) = target(arguments)
+        if (ref == null) return error!!
+        HomeSafety.refusal(screen?.packageName, ref.label, ownerWords.toString())?.let { return MindToolResult.error("Not dragged: $it") }
+        val params = JSONObject().put("elementId", ref.elementId)
+        val toRaw = arguments.optString("to_ref")
+        val direction = arguments.optString("direction").lowercase()
+        val done = when {
+            toRaw.isNotBlank() && direction.isNotBlank() -> return MindToolResult.error("Give to_ref or direction, not both.")
+            toRaw.isNotBlank() -> {
+                val to = refs.resolve(toRaw) ?: return MindToolResult.error(
+                    "$toRaw is not on the current screen. Use a ref from the latest screen (screen_read shows it).")
+                if (to.elementId == ref.elementId) return MindToolResult.error("Drop it somewhere else than where it is.")
+                params.put("toElementId", to.elementId)
+                "Dragged ${ref.ref} \"${ref.label}\" onto ${to.ref} \"${to.label}\""
+            }
+            direction in setOf("up", "down", "left", "right") -> {
+                params.put("direction", direction).put("amount", when (arguments.optString("distance")) {
+                    "short" -> "peek"; "long" -> "page"; else -> "half"
+                })
+                "Dragged ${ref.ref} \"${ref.label}\" $direction"
+            }
+            else -> return MindToolResult.error("Say where to drop it: to_ref, or direction (up, down, left, right).")
+        }
+        return act("phone.drag", params, done, ref)
+    }
+
+    /** Plan 52 run 6: two fingers apart (in) or together (out), on one element or the screen. */
+    private fun zoom(arguments: JSONObject): MindToolResult {
+        val direction = arguments.optString("direction").lowercase()
+        if (direction !in setOf("in", "out")) return MindToolResult.error("direction must be in or out.")
+        val amount = arguments.optString("amount").lowercase()
+        val scale = when {
+            direction == "in" && amount == "a little" -> 1.5
+            direction == "in" && amount == "a lot" -> 3.0
+            direction == "in" -> 2.0
+            amount == "a little" -> 0.67
+            amount == "a lot" -> 0.33
+            else -> 0.5
+        }
+        val params = JSONObject().put("scale", scale)
+        var where = "the screen"
+        var ref: MindRef? = null
+        if (arguments.optString("ref").isNotBlank()) {
+            val (found, error) = target(arguments)
+            if (found == null) return error!!
+            ref = found
+            params.put("elementId", found.elementId)
+            where = "${found.ref} \"${found.label}\""
+        }
+        return act("phone.pinch", params, "Zoomed $direction on $where", ref)
+    }
+
+    /** Plan 52 run 6: drawing, only inside a drawing or signature box; the phone refuses anything else. */
+    private fun draw(arguments: JSONObject): MindToolResult {
+        val (ref, error) = target(arguments)
+        if (ref == null) return error!!
+        val params = JSONObject().put("elementId", ref.elementId)
+        val shape = arguments.optString("shape").trim()
+        val strokes = arguments.optJSONArray("strokes")
+        val what = when {
+            shape.isNotBlank() && strokes != null -> return MindToolResult.error("Give shape or strokes, not both.")
+            shape.isNotBlank() -> { params.put("shape", shape); "a $shape" }
+            strokes != null -> { params.put("strokes", strokes); "${strokes.length()} line${if (strokes.length() == 1) "" else "s"}" }
+            else -> return MindToolResult.error("Say what to draw: shape, or strokes.")
+        }
+        return act("phone.draw", params, "Drew $what in ${ref.ref} \"${ref.label}\"", ref)
     }
 
     private fun notifications(): MindToolResult {
@@ -2048,7 +2160,7 @@ class PhoneMindToolbox(
         val VALUE_KINDS = linkedSetOf("text", "name", "email", "phone", "date", "number", "address", "choice")
         /** Tools that need a usable screen; memory, planning, questions and finishing work with the phone locked. */
         private val PHONE_TOOLS = setOf("screen_read", "screen_look", "screen_find", "tap", "tap_sequence", "tap_point", "long_press", "type_text",
-            "press_enter", "scroll", "swipe", "back", "home", "wait", "open_app", "open_link", "open_settings", "set_timer",
+            "press_enter", "scroll", "swipe", "double_tap", "drag", "zoom", "draw", "back", "home", "wait", "open_app", "open_link", "open_settings", "set_timer",
             "set_alarm", "vault_fill", "open_notification", "go_to", "pilot", "port_send", "port_wait")
         /** Read-only manual tools: offered only when the mission has the App Manual. */
         private val MANUAL_TOOLS = setOf("abilities_find", "how_to_find")
@@ -2173,9 +2285,28 @@ class PhoneMindToolbox(
             MindToolSpec("how_to_find", "How to find one item in a list of the app (a chat, a person, a file): its search, order and groups, from the manual.",
                 objectSchema("list" to string("Which list, e.g. \"chats\" or \"followers\"."), "app" to string("The app's name or package; default: the app on screen."))),
             MindToolSpec("long_press", "Long-press an element.", objectSchema("ref" to REF, required = listOf("ref"))),
-            MindToolSpec("swipe", "Swipe on the screen or on one element: carousels, tabs, photos, horizontal lists. left moves the content left.",
+            MindToolSpec("swipe", "Swipe on the screen or on one element: carousels, tabs, photos, stories, the next video, horizontal lists. " +
+                "left moves the content left. Your hands pick where the thumb lands and how it moves; say only what you want.",
                 objectSchema("direction" to string("Which way the content moves.", listOf("left", "right", "up", "down")), "ref" to REF,
-                    "distance" to string("How far.", listOf("short", "long")), required = listOf("direction"))),
+                    "distance" to string("How far.", listOf("short", "long")),
+                    "speed" to string("gentle to move carefully, flick for a quick throw; default normal.", listOf("gentle", "normal", "flick")),
+                    "style" to string("Optional path: arc (a thumb's sweep), straight-ish or s-curve. Leave it out to vary naturally.",
+                        listOf("arc", "straight-ish", "s-curve")), required = listOf("direction"))),
+            MindToolSpec("double_tap", "Double-tap an element: like a post or zoom into a photo the way people do.",
+                objectSchema("ref" to REF, required = listOf("ref"))),
+            MindToolSpec("drag", "Press and hold an element, carry it and drop it: onto another element (to_ref) to move or reorder " +
+                "it, or by direction for sliders and handles. Dropping on Trash or Bin asks the owner.",
+                objectSchema("ref" to REF, "to_ref" to string("Where to drop it: a ref from the latest screen."),
+                    "direction" to string("Instead of to_ref: which way to drag.", listOf("up", "down", "left", "right")),
+                    "distance" to string("How far, with direction.", listOf("short", "medium", "long")), required = listOf("ref"))),
+            MindToolSpec("zoom", "Zoom with two fingers: maps, photos, documents, small text. Optionally on one element.",
+                objectSchema("direction" to string("in makes things bigger.", listOf("in", "out")), "ref" to REF,
+                    "amount" to string("How much; default normal.", listOf("a little", "normal", "a lot")), required = listOf("direction"))),
+            MindToolSpec("draw", "Draw inside a drawing or signature box (ref) only: a shape, or up to 4 lines of points from 0 to 1 " +
+                "across the box. A signature always asks the owner first.",
+                objectSchema("ref" to REF, "shape" to string("A shape to draw.", listOf("circle", "check", "underline", "zigzag", "scribble", "signature-style")),
+                    "strokes" to JSONObject().put("type", "array").put("description", "Instead of shape: lines, each a list of [x, y] from 0 to 1 inside the box."),
+                    required = listOf("ref"))),
             MindToolSpec("tap_point", "Tap a point of the last screenshot, for things that have no ref (unlabelled icons, images, games, maps). Use refs whenever one exists.",
                 objectSchema("x" to integer("Pixels from the left of the screenshot."), "y" to integer("Pixels from the top of the screenshot."),
                     required = listOf("x", "y"))),

@@ -186,15 +186,20 @@ class HumanGestureDiscovery(BaseModel):
         "phone.long_press": "transport_ready_runtime_unreported",
         "phone.scroll": "transport_ready_runtime_unreported",
         "phone.swipe": "transport_ready_runtime_unreported",
+        "phone.double_tap": "unsupported",
         "phone.drag": "unsupported",
+        "phone.pinch": "unsupported",
+        "phone.draw": "unsupported",
     })
     execution_planes: dict[str, str] = Field(default_factory=lambda: {
         "foreground": "runtime_unreported",
         "session_kernel_vd": "runtime_unreported",
         "layer2_workspace": "runtime_unreported",
     })
-    # Plan 52: the phone's Human Hands facts (style, hand, five booleans), already reduced to a fixed vocabulary.
+    # Plan 52: the phone's Human Hands facts (style, hand, seven booleans), already reduced to a fixed vocabulary.
     hands: dict[str, str | bool] | None = None
+    # Plan 52 run 6: which planned gestures also work on background screens (pinch stays off until a device proves it).
+    gesture_background_displays: dict[str, bool] = Field(default_factory=dict)
 
 
 class CapabilityDiscoveryResponse(BaseModel):

@@ -183,6 +183,21 @@ class HumanGestureSemanticSafetyContractTest {
         assertTrue("OverlayGesturePassthrough.withHostPassthrough" in observation)
     }
 
+    @Test
+    fun `run 6 gestures are planned on the phone and judged before they move`() {
+        val hand = slice(service, "fun handGesture(", "fun goBack()")
+        assertOrdered(hand, "agentCanAct()", "HandGestureTools.plan(")
+        assertOrdered(hand, "HandGestureTools.plan(", "ClickGateIntercept.decide(")
+        assertOrdered(hand, "ClickGateIntercept.decide(", "HumanGestureDispatch.gesture(")
+        assertTrue("throw GateBlockedException" in hand)
+        val workspace = slice(executor, "private fun executeWorkspace", "private fun executeInternal")
+        assertOrdered(workspace, "in HandGestureTools.TOOLS ->", "workspaceGate(scope, request.tool, prepared.gateLabels")
+        assertOrdered(workspace, "workspaceGate(scope, request.tool, prepared.gateLabels", "HumanGestureDispatch.gesture(")
+        assertOrdered(workspace, "PINCH_ON_BACKGROUND", "HumanGestureDispatch.gesture(")
+        val foreground = slice(executor, "in HandGestureTools.TOOLS -> {\n                // Plan 52 run 6: the phone plans", "\"phone.scroll\" -> foregroundScroll")
+        assertTrue("actionWithConfirmation(service, request, before)" in foreground)
+    }
+
     private fun assertOrdered(source: String, first: String, second: String) {
         val firstIndex = source.indexOf(first)
         val secondIndex = source.indexOf(second)

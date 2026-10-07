@@ -8,9 +8,9 @@ The original V0.3 engine landed on `integration/human-gesture-v0.3` (`0239ecd7`)
 
 Human Gesture remains downstream of Cyclone authorization. `PhoneToolExecutor` remains the phone mutation authority; the runtime does not bypass GATE, human ownership, MutationGrounding, `nodeAtTaskPath`, duplicate suppression, confirmation, Session Contract identity, Layer2 ownership, or Fast Path settle (300 then +500/+1000; Unchanged is not a second click).
 
-Named virtual displays use the same cubic `dispatchGesture` path through `setDisplayId` (since `0c3a34b3`); the helper's straight `input -d` stroke is only the fallback when Android never queued a gesture. Instagram stock `phone.swipe` is pinned `humanize=off` until Pixel smoke. Physical Pixel 8 remains **UNVERIFIED**.
+Named virtual displays use the same cubic `dispatchGesture` path through `setDisplayId` (since `0c3a34b3`); the helper's straight `input -d` stroke is only the fallback when Android never queued a gesture. Since 5.0.0-alpha.113 the Instagram stock skills swipe by intent (no `humanize=off` pin); the PC desktop manual-control adapter stays pinned to `off` because the owner chooses that exact pixel. Physical Pixel 8 remains **UNVERIFIED**.
 
-**Human Hands (plan 52, 5.0.0-alpha.111):** the owner's Hands style (Precise / Natural / Relaxed) now sits on top of this runtime. See the section at the end of this document.
+**Human Hands (plan 52, 5.0.0-alpha.111, final in alpha.113):** the owner's Hands style (Precise / Natural / Relaxed; Natural by default) sits on top of this runtime, with drag, pinch, double tap and drawing since alpha.113. See the sections at the end of this document.
 
 ## Public `humanize` boundary
 
@@ -24,7 +24,7 @@ Supported values are exactly:
 
 Explicit blank/unknown values fail closed with `INVALID_REQUEST` before Android mutation. Non-string JSON values stringify to values outside the bounded enum and likewise fail closed.
 
-The field is accepted only on the touch-relevant phone tools exposed by `PhoneToolRegistry`: `phone.click`, `phone.long_press`, `phone.tap`, `phone.scroll`, and `phone.swipe`.
+The field is accepted only on the touch-relevant phone tools exposed by `PhoneToolRegistry`: `phone.click`, `phone.long_press`, `phone.tap`, `phone.scroll`, `phone.swipe`, and (alpha.113) `phone.double_tap`, `phone.drag`, `phone.pinch` and `phone.draw`, where `off` means Precise geometry for that one gesture.
 
 ## Semantic-first action matrix
 
@@ -35,7 +35,7 @@ The field is accepted only on the touch-relevant phone tools exposed by `PhoneTo
 | `phone.tap` | LIGHT | coordinate touch | Foreground/display 0 uses `dispatchGesture`; OFF is legacy straight, LIGHT/NORMAL are Android-synthesized plans. |
 | `phone.swipe` | NORMAL | coordinate touch | Foreground/display 0 uses cubic Human Gesture for LIGHT/NORMAL; OFF uses legacy straight endpoint path. |
 | `phone.scroll` | NORMAL if fallback is necessary | Accessibility `ACTION_SCROLL_FORWARD/BACKWARD` | If semantic scroll rejects, foreground may synthesize only inside a safely grounded scrollable node. No ungrounded PC-authored choreography is accepted. |
-| named VD / Session Kernel | requested profile is parsed but curved fidelity is not claimed | existing workspace input backend | Endpoint+duration compatibility only. Non-OFF requested profiles are reported as downgraded/compatibility behavior. |
+| named VD / Session Kernel | same as foreground action | Accessibility `dispatchGesture` with `setDisplayId` | Cubic and speed-curved strokes, as on display 0. The helper's straight `input -d` is used only when Android never queued the gesture. Pinch is not offered here until a device proves it. |
 | Layer2 display-0 workspace | same as foreground action | Accessibility path under the existing Layer2 mutation lease | Because Layer2 remains `default-foreground` / display 0, it inherits the foreground `dispatchGesture` backend and cubic Human Gesture support while preserving Layer2 ownership checks. |
 
 ## Foreground scroll fallback
@@ -68,7 +68,7 @@ The fallback remains inside the already-authorized `PhoneToolExecutor` mutation 
 Current execution-plane truth:
 
 - foreground/display 0: Accessibility `dispatchGesture`, cubic path fidelity available for synthesized taps/swipes/long-press fallback and safely grounded scroll fallback;
-- named VD: endpoint+duration compatibility backend only; full curved-path equivalence is not claimed;
+- named VD: the same Accessibility `dispatchGesture` backend through `setDisplayId` (cubic and speed-curved); `input -d` only when a gesture was never queued; pinch reported unavailable;
 - Layer2: display-0 Accessibility backend under the existing Layer2 mutation lease, so cubic Human Gesture support is available without creating a new execution plane.
 
 Higher layers should consume the phone-originated `human_gesture` capability instead of hard-coding runtime availability.
@@ -179,3 +179,35 @@ Secrets (Vault fills, `redactObservedText`) never take the keys path. Named and 
 fixed vocabulary.
 
 PHYSICAL DEVICE: UNVERIFIED for every Human Hands behaviour.
+
+## Final Human Hands (plan 52 runs 6 and 7, alpha.113)
+
+**Natural is the default.** The stored default was already Natural; it now loads at process start
+(`GatewayInitProvider`) as well as when Accessibility connects. Settings shows "Natural (default)". The in-process
+placeholder stays Precise only for code with no Android process (unit tests, tools), so those runs stay exact and
+pause-free.
+
+| Piece | Where | Natural / Relaxed | Precise |
+| --- | --- | --- | --- |
+| Tap placement | `gesture/HandPlacement.kt`, `HumanGestureDispatch.tap/longPress` | Gaussian around the centre (≈14 % of the control, capped 14 px across, 10 px down), a thumb's small low and hand-side bias, always inside the safe area. Press 52–170 ms, log-normal around ~90 ms. | The centre, 80 ms |
+| Pauses | `Pacing.pauseMs(PaceStep)`, `HandMemory`, `PhoneMindToolbox.humanPause` | Reading time on a new page, only a glance for another action on the same page; Fitts's-law reach from the last touch to the target; quick after tapping a field; one more look before a confirm. Time already spent counts toward it. | None |
+| Swipe style | `SwipeStyle`, `HumanMotion.planStroke(preferredShape)` | `phone.swipe {style: arc / straight-ish / s-curve}` picks the path family; omitted, it varies. | Ignored |
+| `phone.double_tap` | `HandGestures.doubleTap` | Two presses in one gesture description, 90–180 ms apart, the second a few px from the first, both inside the control. Same approval check as a tap. | Centre, 120 ms apart |
+| `phone.drag` | `HandGestures.drag`, chained strokes | Hold 0.55–1.5 s to pick up (sub-pixel roll, under the touch slop), a carried stroke slowing into the drop, a 120–260 ms rest, release. To a control (`toElementId`, bound to its selector by the Mind's environment) or by direction. Dropping on Trash/Bin is a delete (GATE). Needs chained strokes; unavailable when the phone dropped them. | Straight, 650 ms hold |
+| `phone.pinch` | `HandGestures.pinch`, `HumanGestureDispatch.dispatchFingers` | Two fingers on a slanted thumb–index axis, the thumb moving less and a beat later, a 2–6° turn, a rest before lifting; never closer than 90 px. Both fingers in every chained piece; one two-stroke description when chains are off. Reports `achievedScale`. **Main screen only.** | Fixed axis, no turn |
+| `phone.draw` | `HandGestures.draw`, `DrawCanvas` | Only inside a grounded drawing or signature canvas (visible, ≥120×80 px, not a text field or list, no controls inside, reads as a canvas). Shapes: circle, check, underline, zigzag, scribble, signature-style; or ≤4 strokes of ≤64 points in 0..1 of the canvas. Pen speed curve per stroke, tremor, pen lifts between strokes. **Every signature asks the owner (GRANT).** | Exact shape |
+
+None of the new tools takes screen coordinates (`x1`, `points`, `path`… are refused); the phone plans every point.
+Results carry bounded facts (gesture, durations, counts, ratios), never coordinates or text. `phone.capabilities`
+reports each gesture per display (`actions.doubleTap/drag/pinch/draw`, `backgroundDisplays`, `rawPoints: false`)
+and `hands.gestures`; the gateway projects them only when that list is present. The PC/MCP has no route to them.
+
+Mind tools: `double_tap`, `drag`, `zoom`, `draw`, and `swipe` with `speed` / `style`. Instant: "zoom in/out" and
+"drag X to Y" (a drop on Trash or anything irreversible goes to the Mind, which asks the owner). The Mind's system
+prompt has a "Your hands" section: name the target and the intent, never pixels or timings.
+
+Device matrix: `tools/cyclone-testbench/missions/testbench-natural-hands.json` (suite `hands3`) plus
+`docs/HUMAN_HANDS_DEVICE_MATRIX.md`.
+
+PHYSICAL DEVICE: UNVERIFIED for every run 6 and run 7 behaviour.
+

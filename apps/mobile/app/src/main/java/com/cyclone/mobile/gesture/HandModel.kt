@@ -67,6 +67,8 @@ data class PlannedSwipe(
     val end: GesturePoint,
     val durationMs: Long,
     val ending: StrokeEnding,
+    /** Plan 52 run 6: the path family the caller asked for (`style`), or null for the planner's own choice. */
+    val shape: StrokeShape? = null,
 )
 
 /**
@@ -184,7 +186,8 @@ object HandModel {
 
 /**
  * Plan 52: `phone.swipe` may carry an intent instead of coordinates:
- * `{direction: up|down|left|right, amount?: peek|half|page|far, speed?: gentle|normal|flick, region?: {left,top,right,bottom}}`.
+ * `{direction: up|down|left|right, amount?: peek|half|page|far, speed?: gentle|normal|flick, style?: arc|straight-ish|s-curve,
+ * region?: {left,top,right,bottom}}`.
  * The direction is the way the finger travels. The phone resolves it with [HandModel]; the old x1..y2 form still works.
  */
 object SwipeIntents {
@@ -204,6 +207,8 @@ object SwipeIntents {
             else SwipeAmount.PAGE
         val speed = if (params.has("speed")) SwipeSpeed.parse(params.optString("speed")) ?: return null to "speed must be gentle, normal or flick"
             else SwipeSpeed.NORMAL
+        val swipeStyle = if (params.has("style")) SwipeStyle.parse(params.optString("style")) ?: return null to "style must be arc, straight-ish or s-curve"
+            else null
         val region = params.optJSONObject("region")?.let { box ->
             val left = box.optDouble("left", Double.NaN)
             val top = box.optDouble("top", Double.NaN)
@@ -216,7 +221,7 @@ object SwipeIntents {
         } ?: viewport
         val planned = HandModel.plan(SwipeIntent(direction, amount, speed, region), viewport, handedness, rng, varied = style.natural)
             ?: return null to "that area is too small to swipe in"
-        return planned to null
+        return planned.copy(shape = swipeStyle?.shape) to null
     }
 }
 

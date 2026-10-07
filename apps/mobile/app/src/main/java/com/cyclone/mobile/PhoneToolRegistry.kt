@@ -35,6 +35,36 @@ object PhoneToolRegistry {
         .put("amount", JSONObject().put("type", "string").put("enum", JSONArray(listOf("peek", "half", "page", "far"))).put("default", "page"))
         .put("speed", JSONObject().put("type", "string").put("enum", JSONArray(listOf("gentle", "normal", "flick"))).put("default", "normal"))
         .put("region", JSONObject().put("type", "object").put("description", "Optional {left, top, right, bottom} to swipe inside; default the screen."))
+        .put("style", JSONObject().put("type", "string").put("enum", JSONArray(listOf("arc", "straight-ish", "s-curve")))
+            .put("description", "Optional path family; default: the hand model varies it."))
+
+    private fun element(description: String): JSONObject = JSONObject().put("type", "string").put("description", description)
+
+    /** Plan 52 run 6: gesture tools name controls and intents; the phone plans every point. */
+    private fun doubleTapParameters(): JSONObject = humanizeParameters()
+        .put("elementId", element("The control to double-tap (current observation)."))
+
+    private fun dragParameters(): JSONObject = humanizeParameters()
+        .put("elementId", element("The control to pick up (current observation)."))
+        .put("toElementId", element("The control to drop it on. Give this or direction."))
+        .put("direction", JSONObject().put("type", "string").put("enum", JSONArray(listOf("up", "down", "left", "right"))))
+        .put("amount", JSONObject().put("type", "string").put("enum", JSONArray(listOf("peek", "half", "page", "far"))).put("default", "half"))
+        .put("holdMs", JSONObject().put("type", "integer").put("minimum", 550).put("maximum", 1500)
+            .put("description", "How long to hold before moving; default about 0.6 s."))
+
+    private fun pinchParameters(): JSONObject = humanizeParameters()
+        .put("elementId", element("The area to zoom (a map, a photo); default the screen."))
+        .put("scale", JSONObject().put("type", "number").put("minimum", 0.25).put("maximum", 4.0)
+            .put("description", "Above 1 zooms in (fingers apart), below 1 zooms out."))
+        .put("zoom", JSONObject().put("type", "string").put("enum", JSONArray(listOf("in", "out"))))
+        .put("center", JSONObject().put("type", "object").put("description", "Optional {x, y} from 0 to 1 inside the area."))
+
+    private fun drawParameters(): JSONObject = humanizeParameters()
+        .put("elementId", element("The drawing or signature canvas (current observation). Drawing happens only inside it."))
+        .put("shape", JSONObject().put("type", "string")
+            .put("enum", JSONArray(listOf("circle", "check", "underline", "zigzag", "scribble", "signature-style"))))
+        .put("strokes", JSONObject().put("type", "array")
+            .put("description", "Instead of shape: at most 4 lines of at most 64 [x, y] points, each 0 to 1 inside the canvas."))
 
     val definitions: List<PhoneToolDefinition> = listOf(
         PhoneToolDefinition("workspace.list", false, description = "List durable Layer 2 profiles, armed jobs and global mutation owner"),
@@ -55,6 +85,10 @@ object PhoneToolRegistry {
         PhoneToolDefinition("phone.replace_text", true, "accessibility", "Replace text on a selected or focused editable element"),
         PhoneToolDefinition("phone.scroll", true, "accessibility", "Scroll semantically first; when unsupported, safe grounded coordinate fallback uses auto=NORMAL Human Gesture", humanizeParameters()),
         PhoneToolDefinition("phone.swipe", true, "accessibility", "Swipe by intent (direction, amount, speed, region: the phone's hand model picks where the thumb lands, how far and how fast) or by x1,y1,x2,y2; auto resolves to NORMAL Human Gesture and off preserves the straight compatibility path", swipeParameters()),
+        PhoneToolDefinition("phone.double_tap", true, "accessibility", "Double-tap a control (zoom a photo, like a post): two quick taps 90-180 ms apart, planned on the phone inside the control; same approval check as a tap", doubleTapParameters()),
+        PhoneToolDefinition("phone.drag", true, "accessibility", "Drag a control onto another control (toElementId) or by direction: press and hold to pick it up, carry it, slow into the drop, rest, release. Dropping on Trash/Bin asks the owner first", dragParameters()),
+        PhoneToolDefinition("phone.pinch", true, "accessibility", "Zoom with two fingers on an area (a map, a photo, a page): scale above 1 zooms in. Main screen only for now", pinchParameters()),
+        PhoneToolDefinition("phone.draw", true, "accessibility", "Draw inside a grounded drawing or signature canvas only: a named shape or up to 4 normalised strokes. Every signature needs the owner's approval", drawParameters()),
         PhoneToolDefinition("phone.back", true, "accessibility", "Perform Android Back"),
         PhoneToolDefinition("phone.home", true, "accessibility", "Perform Android Home"),
         PhoneToolDefinition("phone.open_app", true, "app_launch", "Planner landing: launch an installed package through its launcher intent before hunting icons"),

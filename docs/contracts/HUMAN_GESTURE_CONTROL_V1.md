@@ -155,9 +155,19 @@ the bounded evidence:
 Callers cannot force either behaviour, and `humanize = off` keeps the semantic click. Secrets are never typed key by
 key.
 
-### Drag
+### Drag, pinch, double tap and drawing (plan 52 run 6, alpha.113)
 
-There is still no dedicated grounded `phone.drag` contract. Advertise it as `unsupported`. Do not disguise drag as swipe.
+These are phone-planned, element-grounded tools. None takes screen coordinates; `x1`, `y1`, `x2`, `y2`, `points`,
+`path`, `fromX`/`fromY`/`toX`/`toY` are refused with `INVALID_REQUEST` before anything moves.
+
+| Tool | Request | Phone behaviour |
+| --- | --- | --- |
+| `phone.double_tap` | `elementId` | Two presses 90–180 ms apart inside the control; GATE as a tap. |
+| `phone.drag` | `elementId` and either `toElementId` / `toSelector` or `direction` (+ `amount`); optional `holdMs` 550–1500 | Pickup hold, carried stroke slowing into the drop, rest, release. GATE judges both ends; a drop on Trash/Bin is DELETE. |
+| `phone.pinch` | optional `elementId`; `scale` 0.25–4 (≠ 0.9–1.1) or `zoom: in/out`; optional `center {x, y}` in 0..1 | Two fingers, one gesture description per chained piece. Main screen only. |
+| `phone.draw` | `elementId` of a drawing or signature canvas; `shape` or `strokes` (≤4 × ≤64 points in 0..1 of the canvas) | Only inside a grounded canvas. Every signature (shape or canvas) is GRANT: the owner approves it. The only request form where a caller describes a path, and it cannot leave the canvas. |
+
+They have no PC/MCP route (like `phone.swipe`). Do not disguise drag as swipe.
 
 ## Runtime-driven capability truth
 
@@ -207,7 +217,9 @@ If the block is absent, malformed, reports `runtimeAvailable != true`, or uses a
 - action/plane runtime support remains unreported/conservative;
 - ordinary legacy phone control still works.
 
-`phone.drag` remains unsupported even if an unrecognized phone signal tries to claim it.
+`phone.double_tap`, `phone.drag`, `phone.pinch` and `phone.draw` stay `unsupported` unless the phone also lists them
+in `humanGesture.hands.gestures` (alpha.113 and later); an unrecognized or older phone signal cannot claim them. Which of
+them work on background displays is projected as `gesture_background_displays` (pinch: false until a device proves it).
 
 ## Execution-plane identity
 
@@ -225,7 +237,9 @@ Human Gesture preserves the three existing planes exactly.
 {"sessionId": "named-session", "displayId": 7}
 ```
 
-`displayId` must be greater than zero. The V0.2 backend is endpoint/duration style for background input, so full curved-path fidelity must not be claimed unless a future phone runtime explicitly reports it.
+`displayId` must be greater than zero. Since `0c3a34b3` named displays use the same cubic, speed-curved Accessibility
+`dispatchGesture` path through `setDisplayId`; the helper's straight endpoint/duration input is only the fallback when
+Android never queued a gesture. Phones report this as `namedVirtualDisplay.cubicPath = true`.
 
 ### Layer2 display-0 workspace
 

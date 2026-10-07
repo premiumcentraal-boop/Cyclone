@@ -718,6 +718,41 @@ class PhoneMindToolboxTest {
         assertFalse(box.run("swipe", """{"direction":"sideways"}""").ok)
     }
 
+    @Test fun gesturesAreIntentsTheEngineTurnsIntoAHand() {
+        val env = FakeEnv(login)
+        val box = PhoneMindToolbox(env, FakeOwner(), device, "goal")
+        box.run("screen_read")
+        assertTrue(box.run("double_tap", """{"ref":"e3"}""").ok)
+        assertEquals("phone.double_tap", env.acts.last().first)
+        assertTrue(env.acts.last().second.has("elementId"))
+
+        assertTrue(box.run("drag", """{"ref":"e3","to_ref":"e1"}""").ok)
+        val drag = env.acts.last().second
+        assertEquals("phone.drag", env.acts.last().first)
+        assertTrue(drag.has("toElementId") && drag.has("elementId"))
+        box.run("drag", """{"ref":"e3","direction":"down","distance":"long"}""")
+        assertEquals("page", env.acts.last().second.getString("amount"))
+        assertFalse(box.run("drag", """{"ref":"e3"}""").ok)
+        assertFalse(box.run("drag", """{"ref":"e3","to_ref":"e1","direction":"up"}""").ok)
+
+        assertTrue(box.run("zoom", """{"direction":"in"}""").ok)
+        assertEquals("phone.pinch", env.acts.last().first)
+        assertEquals(2.0, env.acts.last().second.getDouble("scale"), 0.0)
+        box.run("zoom", """{"direction":"out","amount":"a lot","ref":"e3"}""")
+        assertEquals(0.33, env.acts.last().second.getDouble("scale"), 0.0)
+        assertFalse(box.run("zoom", """{"direction":"sideways"}""").ok)
+
+        assertTrue(box.run("draw", """{"ref":"e3","shape":"check"}""").ok)
+        assertEquals("phone.draw", env.acts.last().first)
+        assertEquals("check", env.acts.last().second.getString("shape"))
+        assertFalse(box.run("draw", """{"ref":"e3"}""").ok)
+        env.acts.forEach { (_, params) -> assertFalse("no coordinates from the model", params.has("x1") || params.has("x")) }
+
+        box.run("swipe", """{"direction":"left","style":"s-curve","speed":"flick"}""")
+        assertEquals("s-curve", env.acts.last().second.getString("style"))
+        assertEquals("flick", env.acts.last().second.getString("speed"))
+    }
+
     @Test fun notificationsHideCodesAndCanBeOpened() {
         val phone = object : MindDevicePort by device {
             override fun notifications() = listOf(

@@ -163,6 +163,46 @@ class ModesTest {
         override fun volume(up: Boolean): InstantMove { did += "volume $up"; return InstantMove(true, false, "") }
         override fun media(action: String): InstantMove { did += "media $action"; return InstantMove(true, false, "") }
         override fun stopped() = false
+        override fun zoom(zoomIn: Boolean): InstantMove { did += "zoom $zoomIn"; return InstantMove(true, true, "") }
+        override fun drag(from: String, to: String): InstantMove { did += "drag $from>$to"; return InstantMove(true, true, "") }
+    }
+
+    // ---- plan 52 run 6: zoom and drag --------------------------------------------------------------------------------
+
+    @Test fun zoomInAndOutAreInstantGestures() {
+        val zoomIn = (InstantGrammar.parse("zoom in") as GrammarResult.Match).command
+        assertEquals(InstantIntent.ZOOM, zoomIn.intent)
+        assertEquals("in", zoomIn.direction)
+        assertEquals("out", (InstantGrammar.parse("zoom out a bit") as GrammarResult.Match).command.direction)
+        assertEquals("out", (InstantGrammar.parse("uitzoomen") as GrammarResult.Match).command.direction)
+        assertEquals("in", (InstantGrammar.parse("inzoomen") as GrammarResult.Match).command.direction)
+        val phone = Phone(InstantScreen("Maps", listOf("Search here")))
+        assertTrue(InstantRun.run(zoomIn, phone).done)
+        assertEquals(listOf("zoom true"), phone.did)
+    }
+
+    @Test fun dragXToYMovesBetweenTwoLabelsOnTheScreen() {
+        val world = GrammarWorld(labels = listOf("Holiday.pdf", "Documents", "Trash"))
+        val command = (InstantGrammar.parse("drag Holiday.pdf to Documents", world) as GrammarResult.Match).command
+        assertEquals(InstantIntent.DRAG, command.intent)
+        assertEquals("Holiday.pdf", command.target)
+        assertEquals("Documents", command.destination)
+        assertTrue(InstantGrammar.needsScreen("drag Holiday.pdf to Documents"))
+        val phone = Phone(InstantScreen("Files", world.labels))
+        assertTrue(InstantRun.run(command, phone).done)
+        assertEquals(listOf("drag Holiday.pdf>Documents"), phone.did)
+        // Nothing to drop on: not a command.
+        assertEquals(GrammarResult.None, InstantGrammar.parse("drag Holiday.pdf to Mars", world))
+    }
+
+    @Test fun droppingOnTrashGoesToTheMindWhichAsksTheOwner() {
+        val world = GrammarWorld(labels = listOf("Holiday.pdf", "Documents", "Trash"))
+        val command = (InstantGrammar.parse("drag Holiday.pdf to the Trash", world) as GrammarResult.Match).command
+        val phone = Phone(InstantScreen("Files", world.labels))
+        val outcome = InstantRun.run(command, phone)
+        assertFalse(outcome.done)
+        assertEquals(Mode.MIND, outcome.promotion!!.to)
+        assertTrue(phone.did.isEmpty())
     }
 
     @Test fun swipeUpAndClickPokemonGoHappenInOneMove() {

@@ -31,7 +31,7 @@ DEFAULT_CAMPAIGN = {
         {"name": "robust", "suites": ["robust", "dutch"]},
         {"name": "core", "suites": ["core"]},
         {"name": "multi", "suites": ["multiapp", "multiapp2", "long"]},
-        {"name": "hands", "suites": ["hands", "hands2", "steer2", "divert"]},
+        {"name": "hands", "suites": ["hands", "hands2", "hands3", "steer2", "divert"]},
     ],
 }
 

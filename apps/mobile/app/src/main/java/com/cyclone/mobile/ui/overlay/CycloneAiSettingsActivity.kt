@@ -328,7 +328,10 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                         FilterChip(
                             selected = hands.style == style,
                             onClick = { save(hands.copy(style = style)) },
-                            label = { Text(style.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                            label = {
+                                val name = style.name.lowercase().replaceFirstChar { it.uppercase() }
+                                Text(if (style == com.cyclone.mobile.gesture.HandsStyle.NATURAL) "$name (default)" else name)
+                            },
                         )
                     }
                 }

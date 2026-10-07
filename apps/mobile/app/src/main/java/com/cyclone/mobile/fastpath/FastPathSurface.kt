@@ -25,6 +25,11 @@ object FastPathSurface {
         "phone.back",
         "phone.submit_text",
         "phone.tap_point",
+        // Plan 52 run 6: element-scoped gestures, grounded to the current observation like a click.
+        "phone.double_tap",
+        "phone.drag",
+        "phone.pinch",
+        "phone.draw",
     )
     val PLANNER_MCP_TOOLS = setOf(
         "phone_status",

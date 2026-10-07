@@ -35,8 +35,10 @@ object PhoneToolExecutor {
         "phone.scroll", "phone.swipe", "phone.back", "phone.home", "phone.open_app",
         "phone.open_notification", "phone.set_clipboard", "phone.share", "phone.launch_intent",
         "phone.set_alarm", "phone.set_timer",
+        // Plan 52 run 6: gestures planned on the phone from typed intents.
+        "phone.double_tap", "phone.drag", "phone.pinch", "phone.draw",
     )
-    private val touchHumanizeTools = setOf("phone.tap", "phone.long_press", "phone.swipe", "phone.scroll")
+    private val touchHumanizeTools = setOf("phone.tap", "phone.long_press", "phone.swipe", "phone.scroll") + HandGestureTools.TOOLS
     private val humanizeAwareTools = touchHumanizeTools + "phone.click"
     private val mutationLock = com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.engine.mutationLock
     // Only the authenticated manual.execute adapter enters this scope. It lets the desktop human
@@ -431,7 +433,30 @@ object PhoneToolExecutor {
                     val landed = HumanGestureDispatch.swipe(
                         service, x1, y1, x2, y2, duration,
                         humanize, RuntimeGestureKind.SWIPE, request.commandId, scope.displayId, viewport, stroke.ending,
+                        stroke.shape,
                     ) || shellGesture(request.commandId, scope, generation, floatArrayOf(x1, y1, x2, y2, duration.coerceIn(100L, 3000L).toFloat()))
+                    workspaceTouchFailure(request, scope, snapshot, started, landed)?.let { return it }
+                }
+                in HandGestureTools.TOOLS -> {
+                    // Plan 52 run 6: the same planned gestures on a background screen, with this screen's approvals.
+                    // Two-finger pinches stay off here until a device run proves they land on a background display.
+                    if (request.tool == "phone.pinch" && !HandGestureTools.PINCH_ON_BACKGROUND) {
+                        error("UNSUPPORTED: pinch is not available on background screens yet")
+                    }
+                    val style = if (humanize == HumanizePreference.OFF) com.cyclone.mobile.gesture.HandsStyle.PRECISE
+                        else com.cyclone.mobile.gesture.Hands.style
+                    val plan = HandGestureTools.plan(
+                        request.tool, p, snapshot, viewport, style, com.cyclone.mobile.gesture.Hands.handedness,
+                        com.cyclone.mobile.gesture.SeededGestureRng(
+                            com.cyclone.mobile.gesture.HumanGestureSeed.derive(request.commandId, request.tool, System.nanoTime()),
+                        ),
+                    )
+                    val prepared = when (plan) {
+                        is HandGestureTools.Plan.Refused -> error("${plan.code.name}: ${plan.message}")
+                        is HandGestureTools.Plan.Ready -> plan.prepared
+                    }
+                    workspaceGate(scope, request.tool, prepared.gateLabels, prepared.gateNodeId, snapshot.fingerprint)
+                    val landed = HumanGestureDispatch.gesture(service, prepared.gesture, request.commandId, scope.displayId)
                     workspaceTouchFailure(request, scope, snapshot, started, landed)?.let { return it }
                 }
                 "phone.back" -> runtime.input(scope, generation, commands.BACK)
@@ -716,6 +741,17 @@ object PhoneToolExecutor {
                 )
             }
             "phone.type", "phone.replace_text" -> typeEditable(service, request)
+            in HandGestureTools.TOOLS -> {
+                // Plan 52 run 6: the phone plans the gesture; the approval check inside judges what it touches.
+                val outcome = actionWithConfirmation(service, request, before) {
+                    service?.handGesture(request.tool, p, request.commandId) == true
+                }
+                val trace = HumanGestureDispatch.consumeTrace(request.commandId)
+                val evidence = gestureEvidence(request, humanize, gestureKind(request.tool), trace,
+                    trace?.dispatchMode ?: "not_dispatched", "coordinate")
+                HandGestureTools.facts(trace).let { facts -> facts.keys().forEach { evidence.put(it, facts.get(it)) } }
+                attachGestureEvidence(outcome, evidence)
+            }
             "phone.scroll" -> foregroundScroll(service, request, before, humanize)
             "phone.swipe" -> {
                 // Plan 52: an intent (direction, amount, speed, region) is resolved here by the hand model, so the
@@ -733,6 +769,8 @@ object PhoneToolExecutor {
                         humanize,
                         request.commandId,
                         stroke.ending,
+                        RuntimeGestureKind.SWIPE,
+                        stroke.shape,
                     ) == true
                 }
                 val trace = HumanGestureDispatch.consumeTrace(request.commandId)
@@ -924,6 +962,7 @@ object PhoneToolExecutor {
         val y2: Float,
         val durationMs: Long,
         val ending: com.cyclone.mobile.gesture.StrokeEnding?,
+        val shape: com.cyclone.mobile.gesture.StrokeShape? = null,
     )
 
     private fun foregroundViewport(service: CycloneAccessibilityService): com.cyclone.mobile.gesture.GestureBounds {
@@ -973,7 +1012,7 @@ object PhoneToolExecutor {
         val planned = com.cyclone.mobile.gesture.SwipeIntents.resolve(
             p, area, com.cyclone.mobile.gesture.Hands.handedness, com.cyclone.mobile.gesture.SeededGestureRng(seed),
         ).first ?: return null
-        return SwipeStroke(planned.start.x, planned.start.y, planned.end.x, planned.end.y, planned.durationMs, planned.ending)
+        return SwipeStroke(planned.start.x, planned.start.y, planned.end.x, planned.end.y, planned.durationMs, planned.ending, planned.shape)
     }
 
     private fun foregroundScroll(
@@ -1070,6 +1109,7 @@ object PhoneToolExecutor {
             .put("sessionId", scope.sessionId)
             .put("displayId", scope.displayId)
             .put("completed", trace?.accepted == true)
+            .also { evidence -> HandGestureTools.facts(trace).let { facts -> facts.keys().forEach { evidence.put(it, facts.get(it)) } } }
     }
 
     private fun gestureKind(tool: String): RuntimeGestureKind = when (tool) {
@@ -1077,6 +1117,8 @@ object PhoneToolExecutor {
         "phone.long_press" -> RuntimeGestureKind.LONG_PRESS
         "phone.scroll" -> RuntimeGestureKind.SCROLL
         "phone.swipe" -> RuntimeGestureKind.SWIPE
+        "phone.double_tap" -> RuntimeGestureKind.COORDINATE_TAP
+        "phone.drag", "phone.pinch", "phone.draw" -> RuntimeGestureKind.SWIPE
         else -> RuntimeGestureKind.PRECISION
     }
 
@@ -1486,7 +1528,7 @@ object PhoneToolExecutor {
     }
 }
 
-private class PhoneToolException(val error: PhoneToolError) : RuntimeException(error.message)
+internal class PhoneToolException(val error: PhoneToolError) : RuntimeException(error.message)
 
 /** Visual-only: tells the user's Trace Field a new screen is coming. Never affects the action result. */
 private object TraceFieldSignals {

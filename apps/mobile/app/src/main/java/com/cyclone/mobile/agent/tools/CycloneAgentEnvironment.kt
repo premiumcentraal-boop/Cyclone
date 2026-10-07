@@ -270,6 +270,23 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
 
+        // Plan 52 run 6: a drag's drop target is bound to its semantic selector now, from the observation the planner
+        // saw, so it survives the re-observation below (ids are re-bound; selectors are not).
+        val dropSelector: JSONObject? = if (tool == "phone.drag" && params.optString("toElementId").isNotBlank()) {
+            val toId = params.optString("toElementId")
+            if (!belongsToObservation(toId, before.id)) {
+                return@synchronized failureEnvelope(tool, effectiveGoal,
+                    staleFailure("The drop target belongs to an expired observation."), before, visibleGeneration)
+            }
+            val evidence = runCatching { runtime.element(before, toId) }.getOrElse { error ->
+                return@synchronized failureEnvelope(tool, effectiveGoal,
+                    failureFromThrowable(error, AgentFailureLayer.OBSERVATION), before, visibleGeneration)
+            }
+            evidence.optJSONObject("selector")?.takeIf { it.length() > 0 }?.let { JSONObject(it.toString()) }
+                ?: return@synchronized failureEnvelope(tool, effectiveGoal,
+                    staleFailure("The drop target has no stable selector; observe again."), before, visibleGeneration)
+        } else null
+
         // Re-observe once at the execution boundary, then bind a new ID. Never repair coordinates.
         if (revalidateTargets && rawElementId != null) {
             val fresh = runCatching { runtime.capture() }.getOrElse {
@@ -290,6 +307,7 @@ class CycloneAgentEnvironment internal constructor(
         }
         val normalizedParams = JSONObject(params.toString())
             .put("fastPath", true)
+        dropSelector?.let { normalizedParams.remove("toElementId"); normalizedParams.put("toSelector", it) }
         if (com.cyclone.mobile.fastpath.MutationGrounding.requiredFor(tool)) {
             normalizedParams.put("observationId", before.id)
         }
@@ -984,6 +1002,10 @@ class CycloneAgentEnvironment internal constructor(
             "phone.tap_point",
             "phone.swipe",
             "phone.open_notification",
+            "phone.double_tap",
+            "phone.drag",
+            "phone.pinch",
+            "phone.draw",
         )
         private val ELEMENT_ID_REQUIRED_TOOLS = setOf(
             "phone.click",
@@ -991,8 +1013,11 @@ class CycloneAgentEnvironment internal constructor(
             "phone.type",
             "phone.replace_text",
             "phone.submit_text",
+            "phone.double_tap",
+            "phone.drag",
+            "phone.draw",
         )
-        private val ELEMENT_SCOPED_TOOLS = ELEMENT_ID_REQUIRED_TOOLS + "phone.scroll"
+        private val ELEMENT_SCOPED_TOOLS = ELEMENT_ID_REQUIRED_TOOLS + "phone.scroll" + "phone.pinch"
         private val SELECTOR_KEYS = setOf(
             "resourceId",
             "text",

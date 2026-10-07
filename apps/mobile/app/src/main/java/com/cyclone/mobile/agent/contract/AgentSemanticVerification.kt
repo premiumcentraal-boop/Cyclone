@@ -62,6 +62,10 @@ object AgentSemanticVerifier {
         "phone.open_settings",
         "phone.submit_text",
         "phone.tap_point",
+        "phone.double_tap",
+        "phone.drag",
+        "phone.pinch",
+        "phone.draw",
     )
 
     // PhoneToolExecutor evaluates params.expect only for actionWithConfirmation tools.
@@ -74,6 +78,10 @@ object AgentSemanticVerifier {
         "phone.scroll",
         "phone.back",
         "phone.home",
+        "phone.double_tap",
+        "phone.drag",
+        "phone.pinch",
+        "phone.draw",
     )
 
     fun verify(

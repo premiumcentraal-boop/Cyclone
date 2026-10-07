@@ -112,6 +112,8 @@ object HumanMotion {
         durationMs: Long,
         handedness: Handedness,
         rng: GestureRng,
+        /** Plan 52 run 6: the path family the caller asked for (swipe `style`); null lets the planner choose. */
+        preferredShape: StrokeShape? = null,
     ): MotionPlan {
         require(viewport.width > 2f && viewport.height > 2f) { "Viewport must have positive size" }
         val margin = 1f
@@ -123,7 +125,12 @@ object HumanMotion {
             return MotionPlan(listOf(TimedPoint(a.x, a.y, 0L), TimedPoint(b.x, b.y, duration)), StrokeShape.STRAIGHT, ending, profile)
         }
 
-        val shape = chooseShape(profile, ending, length, rng)
+        val chosen = chooseShape(profile, ending, length, rng)
+        val shape = when {
+            preferredShape == null || preferredShape == StrokeShape.STRAIGHT -> chosen
+            preferredShape == StrokeShape.OVERSHOOT && ending != StrokeEnding.HOLD -> chosen
+            else -> preferredShape
+        }
         val flickCut = 0.62 + rng.nextUnit() * 0.12
         val geometry = geometry(a, b, viewport, margin, profile, shape, handedness, rng)
         val resolvedShape = geometry.second
@@ -157,6 +164,40 @@ object HumanMotion {
             points += TimedPoint(settle.x, settle.y, last.tMs + rest)
         }
         return MotionPlan(points, resolvedShape, ending, profile)
+    }
+
+    /**
+     * Plan 52 run 6: times an already-shaped path (a drawing stroke). Every vertex keeps its place and gets the moment
+     * the finger passes it, following [ending]'s speed curve over the path's length, so a pen starts slowly, speeds up
+     * along the line and slows into the end, instead of crawling at one even speed.
+     */
+    fun timePath(path: List<GesturePoint>, durationMs: Long, ending: StrokeEnding, profile: HumanizeProfile): MotionPlan {
+        require(path.size >= 2) { "A path needs at least two points" }
+        val duration = durationMs.coerceIn(40L, 6_000L).coerceAtLeast(path.size.toLong())
+        val cumulative = DoubleArray(path.size)
+        for (index in 1 until path.size) cumulative[index] = cumulative[index - 1] + path[index - 1].distanceTo(path[index])
+        val total = cumulative.last()
+        val points = ArrayList<TimedPoint>(path.size)
+        var lastT = -1L
+        for (index in path.indices) {
+            val target = if (total <= 1e-6) index.toDouble() / path.lastIndex else cumulative[index] / total
+            // Invert the progress curve: the moment the finger has covered this share of the path.
+            var low = 0.0
+            var high = 1.0
+            repeat(32) {
+                val mid = (low + high) / 2.0
+                if (progress(ending, mid) < target) low = mid else high = mid
+            }
+            var t = when (index) {
+                0 -> 0L
+                path.lastIndex -> duration
+                else -> (high * duration).roundToLong()
+            }
+            if (t <= lastT) t = lastT + 1
+            points += TimedPoint(path[index].x, path[index].y, t)
+            lastT = t
+        }
+        return MotionPlan(points, StrokeShape.STRAIGHT, ending, profile)
     }
 
     /**

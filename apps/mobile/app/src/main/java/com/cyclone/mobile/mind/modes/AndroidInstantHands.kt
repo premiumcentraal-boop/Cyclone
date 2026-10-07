@@ -86,6 +86,21 @@ internal class AndroidInstantHands(
         return move(env.act("phone.launch_intent", JSONObject().put("action", "camera").put("front", front), "Instant: open the camera"))
     }
 
+    /** Plan 52 run 6: two fingers on the screen's middle; the phone plans them. */
+    override fun zoom(zoomIn: Boolean): InstantMove {
+        if (current() == null) return InstantMove(false, false, "the screen couldn't be read")
+        return move(env.act("phone.pinch", JSONObject().put("zoom", if (zoomIn) "in" else "out"), "Instant: zoom ${if (zoomIn) "in" else "out"}"))
+    }
+
+    /** Plan 52 run 6: both ends are controls on this screen, found by their labels; the executor checks the drop. */
+    override fun drag(from: String, to: String): InstantMove {
+        fresh()
+        val source = controls.firstOrNull { MindRefBook.label(it) == from } ?: return InstantMove(false, false, "\"$from\" is not on the screen")
+        val target = controls.firstOrNull { MindRefBook.label(it) == to } ?: return InstantMove(false, false, "\"$to\" is not on the screen")
+        return move(env.act("phone.drag", JSONObject().put("elementId", source.elementId).put("toElementId", target.elementId),
+            "Instant: drag \"$from\" to \"$to\""))
+    }
+
     override fun contacts(name: String): List<InstantContact> {
         val found = LinkedHashMap<String, InstantContact>()
         for (query in (listOf(name) + (FAMILY[name.lowercase().trim()] ?: emptyList())).distinct()) {

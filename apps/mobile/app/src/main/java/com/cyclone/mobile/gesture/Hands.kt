@@ -36,8 +36,10 @@ enum class Handedness {
  */
 object Hands {
     /**
-     * PRECISE until the owner's stored choice is loaded ([HandsSettings.apply] when the Accessibility service
-     * connects; the stored default is NATURAL). Code that runs without the service (unit tests, tools) stays precise.
+     * Plan 52 run 7: NATURAL is the product default. The owner's stored choice (NATURAL unless they picked another)
+     * is loaded at process start and again when the Accessibility service connects ([HandsSettings.apply]); every
+     * real touch needs that service, so every real action uses it. Only code that runs with no Android process at all
+     * (unit tests, tools) sees this PRECISE placeholder, which keeps those runs exact and free of pauses.
      */
     @Volatile var style: HandsStyle = HandsStyle.PRECISE
     @Volatile var handedness: Handedness = Handedness.RIGHT

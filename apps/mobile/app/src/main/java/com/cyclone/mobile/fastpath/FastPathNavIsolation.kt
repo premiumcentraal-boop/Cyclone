@@ -30,6 +30,10 @@ object FastPathNavIsolation {
         "phone.tap",
         "phone.scroll",
         "phone.swipe",
+        "phone.double_tap",
+        "phone.drag",
+        "phone.pinch",
+        "phone.draw",
     )
     val SCREEN_CHANGING_TOOLS = INHERENT_NAV_TOOLS + MAYBE_NAV_TOOLS
     const val DROP_REASON =

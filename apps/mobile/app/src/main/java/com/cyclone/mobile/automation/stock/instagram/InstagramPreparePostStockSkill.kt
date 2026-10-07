@@ -382,13 +382,13 @@ internal class InstagramPostPhonePort(private val context: Context) {
             return map(execute("phone.scroll", params))
         }
         if (screen.width <= 0 || screen.height <= 0) return PostAction.Failed("No live screen dimensions for picker scroll")
+        // Plan 52 run 7: an intent, not fixed coordinates. The phone's hand model picks where the thumb lands in the
+        // picker and how it moves, so this scroll no longer repeats the same straight stroke every time.
         return map(execute("phone.swipe", JSONObject()
-            .put("x1", screen.width * 0.5)
-            .put("y1", screen.height * 0.78)
-            .put("x2", screen.width * 0.5)
-            .put("y2", screen.height * 0.38)
-            .put("durationMs", 350)
-            .put("humanize", "off")))
+            .put("direction", "up")
+            .put("amount", "half")
+            .put("region", JSONObject().put("left", 0).put("top", (screen.height * 0.3).toInt())
+                .put("right", screen.width).put("bottom", (screen.height * 0.85).toInt()))))
     }
 
     private fun tapNode(node: PostNode): PostAction {

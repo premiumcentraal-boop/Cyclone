@@ -86,6 +86,11 @@ object CycloneAiAccessPolicy {
         "phone.launch_intent",
         "phone.submit_text",
         "phone.tap_point",
+        // Plan 52 run 6: free-form gestures stay out of Guided access.
+        "phone.double_tap",
+        "phone.drag",
+        "phone.pinch",
+        "phone.draw",
     )
 
     private val balancedBlockedTools = setOf("phone.share")
@@ -136,7 +141,7 @@ object CycloneAiAccessPolicy {
                 "Cyclone stopped at a sensitive text field. Enter credentials or verification codes yourself.",
             )
         }
-        if (tool in setOf("phone.click", "phone.long_press", "phone.tap") && consequentialTargetWords.any(target::contains)) {
+        if (tool in setOf("phone.click", "phone.long_press", "phone.tap", "phone.double_tap", "phone.drag") && consequentialTargetWords.any(target::contains)) {
             if (params.optBoolean("autofill_authorized") && LoginAutofillPolicy.isLoginSubmitLabel(target)) {
                 return CycloneAiAccessDecision(true, "LOGIN_AUTOFILL_AUTHORIZED", "User authorized login autofill.")
             }

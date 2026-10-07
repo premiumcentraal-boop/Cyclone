@@ -293,13 +293,13 @@ internal class InstagramPhonePort(private val context: Context) {
             is AndroidActionResult.Failed -> Unit
         }
         if (screen.width <= 0 || screen.height <= 0) return AndroidActionResult.Failed("No live screen dimensions for Reels gesture")
+        // Plan 52 run 7: the next reel is a thumb's swipe up, planned by the phone's hand model (varied start, travel,
+        // speed curve), instead of one fixed straight stroke.
         return mutate("phone.swipe", JSONObject()
-            .put("x1", (screen.width * 0.38).roundToLong())
-            .put("y1", (screen.height * 0.72).roundToLong())
-            .put("x2", (screen.width * 0.38).roundToLong())
-            .put("y2", (screen.height * 0.22).roundToLong())
-            .put("durationMs", 350)
-            .put("humanize", "off"))
+            .put("direction", "up")
+            .put("amount", "page")
+            .put("region", JSONObject().put("left", 0).put("top", (screen.height * 0.15).toInt())
+                .put("right", screen.width).put("bottom", (screen.height * 0.85).toInt())))
     }
 
     private fun clickFirst(selectors: List<JSONObject>): AndroidActionResult {

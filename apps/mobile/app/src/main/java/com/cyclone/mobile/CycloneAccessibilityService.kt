@@ -977,6 +977,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         commandId: String? = null,
         ending: com.cyclone.mobile.gesture.StrokeEnding? = null,
         kind: RuntimeGestureKind = RuntimeGestureKind.SWIPE,
+        shape: com.cyclone.mobile.gesture.StrokeShape? = null,
     ): Boolean {
         if (!agentCanAct()) return false
         TraceField.acted(TraceActKind.SCROLL, (x1 + x2) / 2f, (y1 + y2) / 2f, x2 - x1, y2 - y1)
@@ -991,7 +992,39 @@ class CycloneAccessibilityService : AccessibilityService() {
             kind = kind,
             commandId = commandId,
             ending = ending,
+            shape = shape,
         )
+    }
+
+    /**
+     * Plan 52 run 6: double tap, drag, pinch or draw on the main screen. The phone plans the gesture on the current
+     * screen, the approval check judges the controls it touches (a drop on Trash is a delete, a signature is consent)
+     * before anything moves, and the gesture is played with the owner's Hands.
+     */
+    fun handGesture(tool: String, params: org.json.JSONObject, commandId: String?): Boolean {
+        if (!agentCanAct()) return false
+        val snapshot = observe(markFresh = false)
+        val metrics = resources.displayMetrics
+        val viewport = com.cyclone.mobile.gesture.GestureBounds(0f, 0f, metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat())
+        val seed = com.cyclone.mobile.gesture.HumanGestureSeed.derive(commandId, tool, System.nanoTime())
+        // humanize=off asks for exact, centred geometry: Precise hands for this one gesture.
+        val style = if (params.optString("humanize").equals("off", ignoreCase = true)) com.cyclone.mobile.gesture.HandsStyle.PRECISE
+            else com.cyclone.mobile.gesture.Hands.style
+        val plan = HandGestureTools.plan(
+            tool, params, snapshot, viewport, style, com.cyclone.mobile.gesture.Hands.handedness,
+            com.cyclone.mobile.gesture.SeededGestureRng(seed),
+        )
+        val prepared = when (plan) {
+            is HandGestureTools.Plan.Refused -> throw PhoneToolException(PhoneToolError(plan.code, plan.message))
+            is HandGestureTools.Plan.Ready -> plan.prepared
+        }
+        val decision = ClickGateIntercept.decide(tool, prepared.gateLabels, OverlayChromeRuntime.snapshot().state)
+        if (!decision.performClick) {
+            if (decision.enterGate && decision.gateClass != null) OverlayChromeRuntime.enterGate(decision.gateClass)
+            throw GateBlockedException(decision.gateClass)
+        }
+        TraceField.acted(TraceActKind.TAP, prepared.firstTouch.x, prepared.firstTouch.y)
+        return HumanGestureDispatch.gesture(this, prepared.gesture, commandId)
     }
 
     fun goBack(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_BACK)

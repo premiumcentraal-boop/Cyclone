@@ -186,6 +186,7 @@ object ModeRouter {
         "flashlight_on" to (InstantIntent.FLASHLIGHT to "on"), "flashlight_off" to (InstantIntent.FLASHLIGHT to "off"),
         "volume_up" to (InstantIntent.VOLUME to "up"), "volume_down" to (InstantIntent.VOLUME to "down"),
         "media_play_pause" to (InstantIntent.MEDIA to "play_pause"), "media_next" to (InstantIntent.MEDIA to "next"),
+        "zoom_in" to (InstantIntent.ZOOM to "in"), "zoom_out" to (InstantIntent.ZOOM to "out"),
         "none" to null,
     )
 

@@ -38,6 +38,10 @@ interface InstantHands {
     fun volume(up: Boolean): InstantMove
     fun media(action: String): InstantMove
     fun stopped(): Boolean
+    /** Plan 52 run 6: zoom the screen with two fingers. */
+    fun zoom(zoomIn: Boolean): InstantMove = InstantMove(false, false, "zooming isn't available here")
+    /** Plan 52 run 6: press, carry and drop the control labelled [from] onto the one labelled [to]. */
+    fun drag(from: String, to: String): InstantMove = InstantMove(false, false, "dragging isn't available here")
 }
 
 /**
@@ -96,6 +100,11 @@ object InstantRun {
                 if (step(move, "took the photo")) done() else promote(Mode.FLASH, "the shutter didn't work: ${move.note}")
             }
             InstantIntent.CALL -> call(command, hands, box, bar, lines, { moves++ }, ::promote) ?: done()
+            InstantIntent.ZOOM -> {
+                val move = hands.zoom(command.direction == "in")
+                if (step(move, describe(command))) done() else promote(Mode.FLASH, "the zoom didn't happen: ${move.note}")
+            }
+            InstantIntent.DRAG -> drag(command, hands, lines, { moves++ }, ::promote) ?: done()
         }
     }
 
@@ -110,6 +119,27 @@ object InstantRun {
         val move = hands.tapLabel(label)
         if (!move.ok) return promote(Mode.FLASH, "the tap on \"$label\" didn't happen: ${move.note}", emptyList())
         lines += "tapped \"$label\""
+        return null
+    }
+
+    /** Plan 52 run 6: a drop that can't be undone (Trash, Delete) goes to the Mind, which asks the owner. */
+    private fun drag(command: InstantCommand, hands: InstantHands, lines: MutableList<String>, count: () -> Unit,
+                     promote: (Mode, String, List<String>) -> InstantOutcome): InstantOutcome? {
+        val from = command.target.orEmpty()
+        val to = command.destination.orEmpty()
+        if (from.isBlank() || to.isBlank()) return promote(Mode.FLASH, "the drag needs something to move and a place to drop it", emptyList())
+        val screen = hands.look() ?: return promote(Mode.FLASH, "the screen couldn't be read", emptyList())
+        if (screen.sensitive) return promote(Mode.MIND, "this screen shows a password, code or card field, or the app is kept out of quick actions", emptyList())
+        if (Pilot.irreversible(to) || Pilot.irreversible(from) || Regex("(?i)\\b(trash|bin|prullenbak)\\b").containsMatchIn(to)) {
+            return promote(Mode.MIND, "dropping on \"$to\" can't be undone, so it needs your approval", emptyList())
+        }
+        if (screen.labels.none { it == from } || screen.labels.none { it == to }) {
+            return promote(Mode.FLASH, "\"$from\" or \"$to\" is no longer on the screen", emptyList())
+        }
+        count()
+        val move = hands.drag(from, to)
+        if (!move.ok) return promote(Mode.FLASH, "the drag didn't happen: ${move.note}", emptyList())
+        lines += "moved \"$from\" to \"$to\""
         return null
     }
 
@@ -164,6 +194,7 @@ object InstantRun {
         InstantIntent.BACK -> "pressed Back"
         InstantIntent.HOME -> "went Home"
         InstantIntent.RECENTS -> "opened recent apps"
+        InstantIntent.ZOOM -> "zoomed ${command.direction}"
         else -> command.intent.name.lowercase()
     }
 }

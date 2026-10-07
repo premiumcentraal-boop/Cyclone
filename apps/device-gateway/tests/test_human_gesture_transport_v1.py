@@ -192,7 +192,10 @@ def test_exact_mobile_capability_registry_shape_is_normalized_truthfully():
         "phone.long_press": "semantic_or_touch",
         "phone.scroll": "semantic_or_touch",
         "phone.swipe": "synthesized_touch",
+        "phone.double_tap": "unsupported",
         "phone.drag": "unsupported",
+        "phone.pinch": "unsupported",
+        "phone.draw": "unsupported",
     }
     assert gesture["execution_planes"] == {
         "foreground": "full_fidelity",
@@ -377,6 +380,8 @@ def test_phone_hands_facts_are_projected_in_a_fixed_vocabulary():
         "touchFirstClicks": True,
         "keystrokeTyping": False,
         "pacing": True,
+        "naturalPlacement": False,
+        "swipeStyles": False,
     }
     odd = Bridge(ready_status(humanGesture={
         "runtimeAvailable": True,
@@ -392,3 +397,43 @@ def test_old_phones_without_hands_report_none():
         "controlVersion": "cyclone.human_gesture.control.v1",
     }))
     assert CapabilityRegistry().discover(bridge).model_dump()["human_gesture"]["hands"] is None
+
+
+def test_run6_gestures_follow_the_phone_and_stay_unsupported_on_old_phones():
+    actions = {
+        "doubleTap": {"supported": True, "foregroundMode": "synthesized_touch", "backgroundDisplays": True, "rawPoints": False},
+        "drag": {"supported": True, "foregroundMode": "synthesized_touch", "backgroundDisplays": True, "rawPoints": False},
+        "pinch": {"supported": True, "foregroundMode": "synthesized_touch", "backgroundDisplays": False, "rawPoints": False},
+        "draw": {"supported": False, "foregroundMode": "unsupported", "backgroundDisplays": False, "rawPoints": False},
+    }
+    bridge = Bridge(ready_status(humanGesture={
+        "runtimeAvailable": True,
+        "controlVersion": "cyclone.human_gesture.control.v1",
+        "actions": actions,
+        "hands": {"style": "natural", "handedness": "right", "naturalPlacement": True, "swipeStyles": True,
+                  "gestures": ["double_tap", "drag", "pinch", "draw"]},
+    }))
+    gesture = CapabilityRegistry().discover(bridge).model_dump()["human_gesture"]
+    assert gesture["actions"]["phone.double_tap"] == "synthesized_touch"
+    assert gesture["actions"]["phone.drag"] == "synthesized_touch"
+    assert gesture["actions"]["phone.pinch"] == "synthesized_touch"
+    assert gesture["actions"]["phone.draw"] == "unsupported"
+    assert gesture["gesture_background_displays"] == {
+        "phone.double_tap": True, "phone.drag": True, "phone.pinch": False, "phone.draw": False,
+    }
+    assert gesture["hands"]["naturalPlacement"] is True and gesture["hands"]["swipeStyles"] is True
+    assert "gestures" not in gesture["hands"]
+
+    # The same actions without the phone's run 6 list (an older phone): nothing is claimed.
+    old = Bridge(ready_status(humanGesture={
+        "runtimeAvailable": True,
+        "controlVersion": "cyclone.human_gesture.control.v1",
+        "actions": actions,
+    }))
+    old_gesture = CapabilityRegistry().discover(old).model_dump()["human_gesture"]
+    assert {k: old_gesture["actions"][k] for k in ("phone.double_tap", "phone.drag", "phone.pinch", "phone.draw")} == {
+        "phone.double_tap": "unsupported", "phone.drag": "unsupported", "phone.pinch": "unsupported", "phone.draw": "unsupported",
+    }
+    assert old_gesture["gesture_background_displays"] == {
+        "phone.double_tap": False, "phone.drag": False, "phone.pinch": False, "phone.draw": False,
+    }
