@@ -137,7 +137,8 @@ class CommandCenterGuard(unittest.TestCase):
         assert "if (PublishGate.gates(selectedLabel)) return GateClass.SEND" in gate
         adapter = PHONE.read_text(encoding="utf-8")
         # Plan 26 §6: marked per task, so another task starting never turns a posting task's gate off.
-        assert "PublishGate.mark(id, publish == true)" in adapter
+        assert "PublishGate.mark(id, publish == true ||" in adapter
+        assert "InstagramSkills.forGoal(goal)?.listing?.id == com.cyclone.mobile.market.InstagramSkills.POST" in adapter
         center = (COMMAND / "center.py").read_text(encoding="utf-8")
         assert 'extra["publish"] = True' in center and "needs the owner's OK" in center
 

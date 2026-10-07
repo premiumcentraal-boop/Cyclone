@@ -95,7 +95,7 @@ class CycloneAppleUiContractTest {
         assertFalse(source("CycloneV32App.kt").contains("‹"))
         listOf(
             "CycloneProfilesPage.kt",
-            "CycloneRoutinesPage.kt",
+            "CycloneSkillsLibraryPage.kt",
             "CycloneV39BrainPage.kt",
         ).forEach { name ->
             val text = source(name)

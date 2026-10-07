@@ -313,7 +313,7 @@ object MindMissions {
     }
 
     fun startAssigned(context: Context, goal: String, signup: String? = null,
-                      setup: com.cyclone.mobile.mind.signup.AccountSetupPlan? = null): String? {
+                      setup: com.cyclone.mobile.mind.signup.AccountSetupPlan? = null, frontOnly: Boolean = false): String? {
         val app = context.applicationContext
         val now = System.currentTimeMillis()
         val clean = goal.trim().take(2_000)
@@ -321,7 +321,7 @@ object MindMissions {
             Crew.Admit.Front -> true
             // Mapping a sign-up or creating an account works on the owner's screen (their details, verification, the
             // final approval): never on a hidden background screen. The PC waits and tries again when the front is free.
-            Crew.Admit.Behind -> if (signup != null || setup != null) return null else false
+            Crew.Admit.Behind -> if (frontOnly || signup != null || setup != null) return null else false
             is Crew.Admit.Queue -> return null
         }
         val mission = Mission(newId(), clean, MissionStatus.RUNNING, now, now, "", "")

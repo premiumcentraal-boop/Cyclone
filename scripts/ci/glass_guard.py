@@ -50,7 +50,7 @@ def scan(root: Path = GLASS) -> list[str]:
                 continue  # documentation may name what Glass must never do
             for label, pattern in RULES:
                 if pattern.search(line):
-                    errors.append(f"{path.relative_to(root)}:{line_no}: {label}: {line.strip()[:120]}")
+                    errors.append(f"{path.relative_to(root).as_posix()}:{line_no}: {label}: {line.strip()[:120]}")
         relative = path.relative_to(src).as_posix()
         if path.suffix == ".ts" and any(relative.startswith(d + "/") for d in ORIGIN_DIRS):
             header = []
@@ -59,7 +59,7 @@ def scan(root: Path = GLASS) -> list[str]:
                     break
                 header.append(line)
             if not any(ORIGIN.match(line) for line in header):
-                errors.append(f"{path.relative_to(root)}:1: origin header: say where this component comes from (an 'Origin:' line)")
+                errors.append(f"{path.relative_to(root).as_posix()}:1: origin header: say where this component comes from (an 'Origin:' line)")
     package = json.loads((root / "package.json").read_text(encoding="utf-8"))
     if package.get("dependencies"):
         errors.append(f"package.json: runtime dependencies are not allowed in Glass: {sorted(package['dependencies'])}")

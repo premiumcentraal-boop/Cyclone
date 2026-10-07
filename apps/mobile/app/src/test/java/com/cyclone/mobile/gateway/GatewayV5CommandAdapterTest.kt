@@ -57,6 +57,24 @@ class GatewayV5CommandAdapterTest {
         assertEquals(1, started.size)
     }
 
+    @Test fun nativePhotoSkillKeepsItsShareGateWhenPublishFlagIsAbsent() {
+        val gate = com.cyclone.mobile.policy.PublishGate
+        val previousRunning = gate.running
+        try {
+            gate.missionId = null
+            gate.running = { it == "m1abcdefgh" }
+            val listing = com.cyclone.mobile.market.InstagramSkills.byId(com.cyclone.mobile.market.InstagramSkills.POST)!!.listing
+            val goal = com.cyclone.mobile.market.MarketRules.fill(listing, mapOf("media" to "example.jpg"))
+            GatewayV5CommandAdapter.start(JSONObject().put("goal", goal))
+            assertTrue("the native route's Share remains an owner approval", gate.gates("Share"))
+            gate.running = { false }
+            assertFalse("the gate ends when the run ends", gate.gates("Share"))
+        } finally {
+            gate.missionId = null
+            gate.running = previousRunning
+        }
+    }
+
     @Test fun aSignupMappingTaskStartsWithItsAppAndNothingElse() {
         val mapped = mutableListOf<Pair<String, String>>()
         GatewayV5CommandAdapter.startSignup = { goal, pkg -> mapped += goal to pkg; "m1abcdefgh" }

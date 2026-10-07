@@ -71,7 +71,7 @@ object Marketplace {
         val goal = try { MarketRules.fill(skill.listing, values) } catch (error: MarketError) {
             return RunRefusal("INVALID_REQUEST", error.message ?: "Check your inputs.")
         }
-        if (MindMissions.startAssigned(context, goal) == null) return RunRefusal("ASK_BUSY", "The phone cannot start this skill yet.")
+        if (MindMissions.startAssigned(context, goal, frontOnly = true) == null) return RunRefusal("ASK_BUSY", "The phone cannot start this skill yet.")
         changes.value++
         return null
     }
@@ -180,8 +180,12 @@ object Marketplace {
      * Runs an added recipe as a Mind mission, through the same entry as a typed Ask: same GATE, approvals, Secrets Card
      * and run trace. Refuses (never queues, never joins a running mission) when the phone is not free.
      */
-    fun run(context: Context, id: String, overrides: Map<String, String> = emptyMap()): RunRefusal? =
-        run(installs(context), id, overrides)
+    fun run(context: Context, id: String, overrides: Map<String, String> = emptyMap()): RunRefusal? {
+        if (InstagramSkills.byId(id) == null) return run(installs(context), id, overrides)
+        // PC callers keep the takeover boundary; an explicit native-sheet press uses runNative directly.
+        if (humanHasControl()) return RunRefusal("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
+        return runNative(context, id, installs(context).get(id)?.inputs.orEmpty() + overrides)
+    }
 
     internal fun run(store: MarketInstalls, id: String, overrides: Map<String, String>): RunRefusal? {
         val listing = listing(id) ?: return RunRefusal("NOT_FOUND", "That listing is not in the marketplace.")
