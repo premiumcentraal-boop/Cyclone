@@ -122,6 +122,9 @@ object AccessibilityRoles {
 
     private fun deferGenericHost(parent: UiNodeSnapshot, relative: UiNodeSnapshot): Boolean {
         if (!isStrongActivatable(relative.clickable, relative.actions)) return false
+        // A passive layout is not an activation host. Its headings, descriptions and selected-tab
+        // labels belong to that content, never to an arbitrary actionable sibling below it.
+        if (!isActivatable(parent.clickable, parent.actions)) return false
         if (isRow(parent.className, parent.resourceId)) return false
         if (isHostRole(parent.role)) return false
         return parent.role.equals("generic", ignoreCase = true) || parent.role.isBlank()

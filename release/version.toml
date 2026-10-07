@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.113 dev4: native Instagram starter skills and unified Skills library, on alpha.112. Glass 1.0.0-alpha.62.
+# Cyclone V5 alpha.113 dev5: native Instagram starter skills and unified Skills library, on alpha.112. Glass 1.0.0-alpha.62.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.113.dev4"
+product_version = "5.0.0-alpha.113.dev5"
 channel = "development"
-android_version_code = 264
+android_version_code = 265
 python_version = "5.0.0-alpha.112.dev1"
 
 [components]
-mobile = "5.0.0-alpha.113.dev4"
+mobile = "5.0.0-alpha.113.dev5"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"

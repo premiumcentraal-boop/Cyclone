@@ -5,9 +5,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -61,7 +64,11 @@ internal fun InstagramAccountSetupSheet(context: Context, onDismiss: () -> Unit)
                 Text("Cyclone reads SMS codes on this phone when available. Otherwise it asks you during verification; no code is required now.", style = MaterialTheme.typography.bodySmall)
                 Text("Instagram terms", style = MaterialTheme.typography.labelLarge)
                 Text("You review and accept Instagram's actual terms when they appear. Starting setup does not accept them.", style = MaterialTheme.typography.bodySmall)
-                Row { Checkbox(checked = reviewed, onCheckedChange = { reviewed = it }); Text("I have checked these account details", Modifier.padding(top = 12.dp)) }
+                Row(Modifier.semantics(mergeDescendants = true) { }
+                    .toggleable(value = reviewed, role = Role.Checkbox, onValueChange = { reviewed = it })) {
+                    Checkbox(checked = reviewed, onCheckedChange = null)
+                    Text("I have checked these account details", Modifier.padding(top = 12.dp))
+                }
                 errors.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 Button(enabled = reviewed && !starting, modifier = Modifier.fillMaxWidth(), onClick = {
                     errors = MobileSignupForm.errors(map, values.toMap(), password.length)
