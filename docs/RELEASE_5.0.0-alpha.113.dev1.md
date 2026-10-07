@@ -4,7 +4,7 @@ This Android owner-test candidate builds on alpha.112 and adds a ready-to-use In
 
 ## What owners see
 
-The main Routines tab is now **Skills**, with **Apps / Skills / Routines** segments. Apps combines each app's verified skills and routines, shows both counts, and puts apps with content first. Skills shows included tested routes and the owner's locally grounded skills. Routines retains the existing routines, creation tools, triggers and Run behavior.
+The main Routines tab is now **Skills**, with **Apps / Skills / Routines** segments. Apps combines each app's available skills and routines, shows both counts, and puts apps with content first. Skills shows included tested routes and the owner's locally grounded skills. Added skills awaiting verification remain visible in Apps and search with an honest status label. Routines retains the existing routines, creation tools, triggers and Run behavior.
 
 One **Search** field searches across all three kinds, independent of the selected segment, and groups its results into Apps, Skills and Routines. Home smart search also includes the starter skills and opens their native sheets. Marketplace is explicitly the place to get more skills; included starters open directly and require no install action.
 

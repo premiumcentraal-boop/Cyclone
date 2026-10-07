@@ -26,11 +26,12 @@ internal fun CycloneSkillsLibraryPage(context: Context, refreshTick: Int, routin
     onRoutine: (String) -> Unit, onAi: () -> Unit, onTeach: () -> Unit, onAdvanced: () -> Unit, onMarketplace: () -> Unit) {
     val revision by Marketplace.revision.collectAsState()
     val labels = remember(refreshTick) { Marketplace.installedApps(context) }
-    val skills = remember(refreshTick, revision) {
-        val grounded = Marketplace.skillsWithHealth(context).filter { it.third.state == SkillGroundState.GROUNDED }.map { it.first.id }.toSet()
-        Marketplace.available(context).filter { InstagramSkills.byId(it.id) != null || it.id in grounded }
+    val available = remember(refreshTick, revision) { Marketplace.available(context) }
+    val grounded = remember(refreshTick, revision) {
+        Marketplace.skillsWithHealth(context).filter { it.third.state == SkillGroundState.GROUNDED }.map { it.first.id }.toSet()
     }
-    val apps = remember(labels, skills, routines) { SkillLibrary.apps(labels, skills, routines) }
+    val skills = remember(available, grounded) { available.filter { InstagramSkills.byId(it.id) != null || it.id in grounded } }
+    val apps = remember(labels, available, routines) { SkillLibrary.apps(labels, available, routines) }
     var query by rememberSaveable { mutableStateOf("") }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var app by rememberSaveable { mutableStateOf<String?>(null) }
@@ -38,7 +39,7 @@ internal fun CycloneSkillsLibraryPage(context: Context, refreshTick: Int, routin
     var create by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(SkillsNav.pending) { SkillsNav.pending?.let { selectedSkill = it; SkillsNav.pending = null } }
     BackHandler(app != null || create) { if (create) create = false else app = null }
-    val results = SkillLibrary.search(query, apps, skills, routines)
+    val results = SkillLibrary.search(query, apps, available, routines)
     val searching = query.isNotBlank()
     val activeApp = apps.firstOrNull { it.packageName == app }
     LazyColumn(contentPadding = cyclonePageInsets(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -60,7 +61,7 @@ internal fun CycloneSkillsLibraryPage(context: Context, refreshTick: Int, routin
         if (activeApp != null && !searching) item { CycloneBackRow(activeApp.name) { app = null } }
 
         fun androidx.compose.foundation.lazy.LazyListScope.skillRows(rows: List<MarketListing>) {
-            items(rows, key = { "skill-${it.id}" }) { skill -> LibrarySkillRow(skill) { selectedSkill = skill.id } }
+            items(rows, key = { "skill-${it.id}" }) { skill -> LibrarySkillRow(skill, skill.id in grounded) { selectedSkill = skill.id } }
         }
         fun androidx.compose.foundation.lazy.LazyListScope.routineRows(rows: List<AutomationDefinition>) {
             items(rows, key = { "routine-${it.id}" }) { routine -> RoutineListCard(routine, { onRoutine(routine.id) }, { com.cyclone.mobile.automation.AutomationRuntime.router.runManual(routine.id) }) }
@@ -89,11 +90,11 @@ internal fun CycloneSkillsLibraryPage(context: Context, refreshTick: Int, routin
             activeApp != null -> {
                 if (activeApp.skills.isNotEmpty()) { item { CycloneSectionTitle("Skills") }; skillRows(activeApp.skills) }
                 if (activeApp.routines.isNotEmpty()) { item { CycloneSectionTitle("Routines") }; routineRows(activeApp.routines) }
-                if (activeApp.skills.isEmpty() && activeApp.routines.isEmpty()) item { Text("No verified skills or routines for this app yet. Add one from the Marketplace or teach Cyclone.") }
+                if (activeApp.skills.isEmpty() && activeApp.routines.isEmpty()) item { Text("No skills or routines for this app yet. Add one from the Marketplace or teach Cyclone.") }
             }
             tab == 0 -> appRows(apps)
             tab == 1 -> {
-                item { Text("Included tested routes and your locally route-verified skills. Added skills that still need verification can be managed in the Marketplace.", style = MaterialTheme.typography.bodySmall) }
+                item { Text("Included tested routes and your locally route-verified skills. Skills awaiting verification remain available under Apps and in the Marketplace.", style = MaterialTheme.typography.bodySmall) }
                 skillRows(skills)
                 if (skills.isEmpty()) item { Text("No verified skills yet. Try an included Instagram skill or complete and save a successful run.") }
             }
@@ -112,14 +113,18 @@ internal fun CycloneSkillsLibraryPage(context: Context, refreshTick: Int, routin
 }
 
 @Composable
-private fun LibrarySkillRow(listing: MarketListing, onClick: () -> Unit) {
+private fun LibrarySkillRow(listing: MarketListing, grounded: Boolean, onClick: () -> Unit) {
     CycloneSimpleCard(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             CycloneAppIcon(listing.apps.firstOrNull(), Modifier.size(36.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(listing.name, style = MaterialTheme.typography.titleSmall)
                 Text(listing.summary, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(if (InstagramSkills.byId(listing.id) != null) "Included · Tested Android route" else "Your skill · Route verified on this phone", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text(when {
+                    InstagramSkills.byId(listing.id) != null -> "Included · Tested Android route"
+                    grounded -> "Your skill · Route verified on this phone"
+                    else -> "Added · Awaiting route verification"
+                }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
             Icon(Icons.Rounded.ChevronRight, "Open skill", Modifier.size(20.dp))
         }
