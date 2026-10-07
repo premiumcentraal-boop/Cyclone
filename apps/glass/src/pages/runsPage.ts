@@ -166,6 +166,7 @@ export function runRow(run: RunSummary): HTMLAnchorElement {
   row.href = routeHref({ name: "run", runId: run.runId });
   row.setAttribute("role", "listitem");
   row.dataset.runId = run.runId;
+  row.setAttribute("data-mgr-target", `run:${run.runId}`);
   const goal = el("span", "run-goal");
   const sub = [
     run.places.length ? run.places.map((place) => appName(place.placeId)).join(" → ") : "",

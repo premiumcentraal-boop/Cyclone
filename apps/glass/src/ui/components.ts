@@ -101,6 +101,7 @@ export function segmented<T extends string>(
     const node = button("", "segment");
     node.setAttribute("role", "tab");
     node.dataset.id = item.id;
+    node.setAttribute("data-mgr-filter", item.id); // plan 55 R5: Cyber's set_filter presses this tab
     node.addEventListener("click", () => onChange(item.id));
     buttons.set(item.id, node);
     element.append(node);
@@ -124,6 +125,7 @@ export function searchInput(placeholder: string, onInput: (value: string) => voi
   wrap.append(icon("search"));
   const input = el("input", "search-input");
   input.type = "search";
+  input.setAttribute("data-mgr-search", ""); // plan 55 R5: Cyber's set_filter can type here
   input.placeholder = placeholder;
   input.setAttribute("aria-label", placeholder);
   input.addEventListener("input", () => onInput(input.value));

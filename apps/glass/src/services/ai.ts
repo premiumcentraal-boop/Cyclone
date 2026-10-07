@@ -53,6 +53,8 @@ export interface AiMessage {
   model?: string | null;
   costUsd?: number | null;
   activity: Activity[];
+  /** Plan 55 R2: sent while Cyber was answering; it is answered next. */
+  queued?: boolean;
 }
 
 export interface Proposal {
@@ -137,6 +139,7 @@ function parseMessage(raw: unknown): AiMessage | null {
   if (!("role" in r)) return null;
   return {
     seq: num(r.seq), role, text: str(r.text), at: num(r.at), model: strOrNull(r.model), costUsd: numOrNull(r.costUsd),
+    ...(r.queued === true ? { queued: true } : {}),
     activity: list(r.activity).map((a) => {
       const o = obj(a);
       return { label: str(o.label), outcome: oneOf(o.outcome, ["done", "proposed", "error"] as const, "done"), proposalId: strOrNull(o.proposalId), error: strOrNull(o.error) };
@@ -172,6 +175,32 @@ export function parseConversation(raw: unknown): Conversation {
   };
 }
 
+/** Plan 55 R4: what the dock shows beside Cyber. Counts only. */
+export interface CyberPresence {
+  ready: boolean;
+  reason: string;
+  items: Array<{ text: string; tone: "plain" | "good" | "warn" | "bad" }>;
+  approvals: number;
+  openProposals: number;
+  working: number;
+  phonesReady: number;
+  phonesTotal: number;
+  tasksRunning: number;
+}
+
+export function parsePresence(raw: unknown): CyberPresence {
+  const r = obj(raw);
+  return {
+    ready: r.ready === true, reason: str(r.reason),
+    items: list(r.items).map((i) => {
+      const o = obj(i);
+      return { text: str(o.text), tone: oneOf(o.tone, ["plain", "good", "warn", "bad"] as const, "plain") };
+    }).filter((i) => i.text).slice(0, 8),
+    approvals: num(r.approvals), openProposals: num(r.openProposals), working: num(r.working), phonesReady: num(r.phonesReady),
+    phonesTotal: num(r.phonesTotal), tasksRunning: num(r.tasksRunning),
+  };
+}
+
 // ------------------------------------------------------------------------------------------------ the API
 
 const enc = encodeURIComponent;
@@ -197,7 +226,14 @@ export const aiApi = {
   get: async (client: GatewayClient, id: string) => parseConversation(await client.get(`/v1/cc/ai/conversations/${enc(id)}`)),
   update: async (client: GatewayClient, id: string, body: { model?: string | null; title?: string }) =>
     parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}`, body)),
-  send: async (client: GatewayClient, id: string, text: string) => parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/messages`, { text })),
+  /** `where` (plan 55 R4): the Glass page the owner writes from; `view` (R5): what is on their screen. */
+  send: async (client: GatewayClient, id: string, text: string, context: { where?: string; view?: string } = {}) =>
+    parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/messages`, {
+      text, ...(context.where ? { where: context.where.slice(0, 160) } : {}), ...(context.view ? { view: context.view.slice(0, 1500) } : {}),
+    })),
+  /** Plan 55 R5: Glass could not carry out one of Cyber's ui actions. */
+  uiResult: (client: GatewayClient, body: { conversationId: string; callId: string; ok: boolean; detail?: string }) => client.post("/v1/cc/ai/ui-result", body),
+  presence: async (client: GatewayClient) => parsePresence(await client.get("/v1/cc/ai/presence")),
   stop: async (client: GatewayClient, id: string) => parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/stop`)),
   remove: (client: GatewayClient, id: string) => client.post(`/v1/cc/ai/conversations/${enc(id)}/delete`),
   apply: async (client: GatewayClient, id: string) => parseProposal(await client.post(`/v1/cc/ai/proposals/${enc(id)}/apply`)),

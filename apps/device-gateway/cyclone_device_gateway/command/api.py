@@ -6,11 +6,13 @@ The PC agent MCP servers do not call these routes (guarded in CI): approving sta
 """
 from __future__ import annotations
 
+import asyncio
+import queue
 from typing import Any
 
 import html
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 
 from ..auth import verify_bearer
@@ -491,6 +493,14 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def ai_status():
         return call(lambda: cc().ai.status())
 
+    @router.post("/v1/cc/ai/ui-result", dependencies=[Depends(auth)])
+    def ai_ui_result(body: dict[str, Any]):
+        return call(lambda: cc().ai.ui_result(body_of(body)))
+
+    @router.get("/v1/cc/ai/presence", dependencies=[Depends(auth)])
+    def ai_presence():
+        return call(lambda: cc().ai.presence())
+
     @router.post("/v1/cc/ai/settings", dependencies=[Depends(auth)])
     def ai_settings(body: dict[str, Any]):
         return call(lambda: cc().ai.update_settings(body_of(body)))
@@ -546,6 +556,50 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     @router.post("/v1/cc/ai/proposals/{proposal_id}/discard", dependencies=[Depends(auth)])
     def ai_discard(proposal_id: str):
         return call(lambda: cc().ai.discard(proposal_id))
+
+    @router.websocket("/v1/cc/ai/events")
+    async def ai_events(websocket: WebSocket, afterSeq: int = Query(default=-1, ge=-1)):  # noqa: N803 - the wire name
+        """Cyber's live events (plan 55 R2, ``cyclone.manager.events/1``). Same bearer as every route, sent as the
+        ``cyclone-token.`` subprotocol like the fleet socket. ``afterSeq`` resumes after a drop; ``hello`` says whether
+        events were lost (``gap``: reload the conversation) and carries any answer being written right now."""
+        from ..desktop_runtime.api import _accepted_subprotocol, _websocket_authorized
+        from .agent.events import PROTOCOL
+        if not _websocket_authorized(websocket, token):
+            await websocket.close(code=4401)
+            return
+        center = getattr(runtime, "command", None)
+        if center is None:
+            await websocket.close(code=4503)
+            return
+        await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
+        hub = center.ai.events
+        q = hub.subscribe()  # before the replay, so nothing falls between the two; duplicates are skipped by seq
+        try:
+            replay, gap = hub.since(afterSeq) if afterSeq >= 0 else ([], False)
+            await websocket.send_json({"type": "hello", "protocol": PROTOCOL, "seq": hub.latest, "gap": gap, "partials": hub.partials()})
+            last = afterSeq
+            for event in replay:
+                await websocket.send_json(event)
+                last = event["seq"]
+            idle = 0.0
+            while True:
+                try:
+                    item = await asyncio.to_thread(q.get, True, 1.0)
+                except queue.Empty:
+                    idle += 1.0
+                    if idle >= 15.0:  # a quiet socket still notices when Glass went away
+                        await websocket.send_json({"type": "ping", "seq": hub.latest})
+                        idle = 0.0
+                    continue
+                idle = 0.0
+                if item["seq"] <= last:
+                    continue
+                last = item["seq"]
+                await websocket.send_json(item)
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            hub.unsubscribe(q)
 
     @router.get("/v1/cc/audit", dependencies=[Depends(auth)])
     def audit(limit: int = Query(default=200, ge=1, le=1000)):

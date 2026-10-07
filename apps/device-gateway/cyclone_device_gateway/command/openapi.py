@@ -27,7 +27,9 @@ import re
 import socket
 import ssl
 import urllib.parse
-from typing import Any, Callable
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Any, Callable, Iterator
 
 from ..desktop_runtime.v5_contract import INLINE_SECRET
 from . import mcp
@@ -565,6 +567,54 @@ def request(method: str, url: str, *, headers: dict[str, str], body: bytes | Non
     finally:
         connection.close()
 
+
+
+@dataclass
+class StreamResponse:
+    """An answer read as it arrives (plan 55 R2: Cyber's streamed replies). ``lines`` yields raw lines; ``rest`` reads
+    whatever is left, for an error body."""
+    status: int
+    headers: dict[str, str]
+    lines: Iterator[bytes]
+    rest: Callable[[], bytes]
+
+
+@contextmanager
+def stream(method: str, url: str, *, headers: dict[str, str], body: bytes | None = None, timeout: float = 60.0,
+           limit: int = MAX_ANSWER) -> Iterator[StreamResponse]:
+    """Like ``request`` (a checked, pinned address; redirects returned), but the body is read line by line while the
+    caller uses it, for server-sent events. The connection closes when the block ends, also when the caller stops early."""
+    url = mcp.check_url(url, what="API address")
+    parts = urllib.parse.urlsplit(url)
+    address = resolve(url, allow_loopback=False)
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    kind = _PinnedHTTPS if parts.scheme == "https" else _PinnedHTTP
+    connection = kind(parts.hostname or "", port, address, timeout)
+    target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    size = 0
+
+    def lines(response: http.client.HTTPResponse) -> Iterator[bytes]:
+        nonlocal size
+        while True:
+            line = response.readline(256 * 1024)
+            if not line:
+                return
+            size += len(line)
+            if size > limit:
+                raise mcp.McpError("The API's answer is too large.")
+            yield line
+
+    try:
+        connection.request(method, target, body=body, headers={"User-Agent": USER_AGENT, **headers})
+        response = connection.getresponse()
+        yield StreamResponse(response.status, {k.lower(): v for k, v in response.getheaders()}, lines(response),
+                             lambda: response.read(max(0, limit - size)))
+    except ssl.SSLError as exc:
+        raise mcp.McpError("The API's https certificate could not be verified.") from exc
+    except (OSError, http.client.HTTPException) as exc:
+        raise mcp.McpError("The API could not be reached.") from exc
+    finally:
+        connection.close()
 
 def fetch_spec(url: Any, *, send: Callable[..., mcp.Response] = request) -> tuple[str, str]:
     """Download a description (https, public, up to three re-checked redirects). Returns (final url, text)."""

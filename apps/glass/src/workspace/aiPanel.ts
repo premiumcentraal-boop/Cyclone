@@ -1,5 +1,5 @@
 /**
- * Ask AI (plan 33 §7): a panel beside the workspace, like Notion's. The owner writes; the runtime's AI reads the
+ * Cyber's panel (plan 33 §7 "Ask AI", on every Glass page since plan 55 R4): a panel beside the page, like Notion's. The owner writes; the runtime's AI reads the
  * workspace and answers, and every change it wants to make arrives as a card to apply or discard (tasks and routines
  * always; page edits unless the owner let it edit directly). Glass only shows and sends: the runtime holds the key and
  * calls the model.
@@ -9,16 +9,44 @@ import {
   aiApi, formatUsd, parseAnswer, priceLabel, proposalVerb, suggestions, type AiModel, type AiStatus, type AnswerLine,
   type Conversation, type ConversationMeta, type Proposal,
 } from "../services/ai.js";
+import { connectAiEvents, type AiEvent, type AiStream, type SocketFactory } from "../services/aiStream.js";
+import { applyEvent, emptyActivity, moodOf, type Activity } from "../manager/mood.js";
+import { createCharacter } from "../ui/cyber/character.js";
 import { pagesApi } from "../services/pages.js";
 import { el, setChildren } from "../ui/dom.js";
 import { relativeTime } from "../ui/format.js";
 import { routeOfRef, workspaceBus } from "./directory.js";
 
 const POLL_MS = 900;
+/** Streamed text is drawn at most this often. */
+const LIVE_DRAW_MS = 50;
+
+export interface AiPanelDeps {
+  /** Plan 55 R2: Cyber's live events. Without it the panel polls, as before. */
+  socket?: SocketFactory;
+  /** Plan 55 R4: the Glass page the owner is on ("Runs", "Lab"), sent with each message. */
+  where?: () => string;
+  /** Plan 55 R5: what is on the owner's screen (page title and the rows it shows), sent with each message. */
+  view?: () => string;
+  /** The owner is writing to Cyber (the dock listens). */
+  onListening?(on: boolean): void;
+  /** Something changed the dock should show (a proposal applied or discarded). */
+  onChange?(): void;
+  /** The key that toggles the panel, shown in its close button ("Ctrl+." or "⌘."). */
+  panelKey?: string;
+}
+
+/** What Cyber is doing right now in the open conversation, from its live events (cleared when the answer is saved). */
+interface Live {
+  text: string;
+  steps: Array<{ callId: string; label: string; state: "running" | "done" | "proposed" | "error" }>;
+}
 
 export interface AiPanel {
   element: HTMLElement;
   open(pageId: string | null): void;
+  /** Open and send a question (the palette's "Ask Cyber"). */
+  ask(question: string): void;
   close(): void;
   isOpen(): boolean;
   destroy(): void;
@@ -91,11 +119,11 @@ export function renderLines(lines: AnswerLine[], onMention: (m: { kind: string; 
   return box;
 }
 
-export function createAiPanel(context: () => GlassContext): AiPanel {
+export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {}): AiPanel {
   const ctx = new Proxy({} as GlassContext, { get: (_t, key) => context()[key as keyof GlassContext] });
   const element = el("aside", "ai-panel");
   element.setAttribute("role", "dialog");
-  element.setAttribute("aria-label", "Ask AI");
+  element.setAttribute("aria-label", "Cyber");
   element.hidden = true;
   const head = el("header", "ai-head");
   const body = el("div", "ai-body");
@@ -111,6 +139,23 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
   let pageTitle = "";
   let chosenModel: string | null = null;
   let poll: ReturnType<typeof setTimeout> | null = null;
+  let stream: AiStream | null = null;
+  let live: Live | null = null;
+  let liveDraw: ReturnType<typeof setTimeout> | null = null;
+  let reloading = false;
+  let reloadAgain = false;
+  // Plan 55 R4: the character in the header shows what Cyber is doing in this conversation.
+  const face = createCharacter({ size: 30, mood: "idle", label: "Cyber" });
+  let activity: Activity = emptyActivity();
+  let faceCheck: ReturnType<typeof setTimeout> | null = null;
+  function drawFace(): void {
+    const working = conversation?.state === "working" && !Object.keys(activity.running).length ? { running: { [conversation.id]: "think" as const }, flash: activity.flash } : activity;
+    const listening = Boolean(String(input.value ?? "").trim()) && !element.hidden;
+    const waiting = conversation?.proposals.filter((p) => p.state === "open").length ?? 0;
+    face.setMood(moodOf({ activity: working, ready: status ? Boolean(status.keySaved && status.model) : null, needsYou: waiting, listening, now: Date.now() }));
+    if (faceCheck) clearTimeout(faceCheck);
+    faceCheck = activity.flash && activity.flash.until > Date.now() ? setTimeout(drawFace, activity.flash.until - Date.now() + 20) : null;
+  }
   let problem = "";
   let sending = false;
   const openActivity = new Set<number>();
@@ -125,14 +170,14 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
 
   function drawHead(): void {
     const title = el("div", "ai-title");
-    title.append(el("span", "ai-spark", "✨"), el("span", undefined, "Ask AI"));
+    title.append(face.element, el("span", undefined, "Cyber"));
     if (pageId) {
       const about = el("button", "ai-about", `About: ${pageTitle || "this page"}`);
       about.type = "button";
       about.title = "The AI reads this page first. Press to ask about the whole workspace instead.";
       about.addEventListener("click", () => {
         pageId = null;
-        conversation = null;
+        conversation = null; live = null;
         drawAll();
       });
       title.append(about);
@@ -148,9 +193,9 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     };
     tools.append(
       mk("🕘", "Earlier conversations", () => void showHistory()),
-      mk("＋", "New conversation", () => { conversation = null; history = null; problem = ""; drawAll(); input.focus?.(); }),
+      mk("＋", "New conversation", () => { conversation = null; live = null; history = null; problem = ""; drawAll(); input.focus?.(); }),
       mk("⚙", "AI settings", () => { close(); ctx.navigate({ name: "command", tab: "ai" }); }),
-      mk("✕", "Close", () => close()),
+      mk("✕", deps.panelKey ? `Close (${deps.panelKey})` : "Close", () => close()),
     );
     setChildren(head, title, tools);
   }
@@ -193,10 +238,12 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
             workspaceBus.pageChanged(target);
           }
           if (conversation) conversation = await aiApi.get(ctx.client, conversation.id);
+          deps.onChange?.();
         } catch (err) {
           problem = (err as Error).message;
         }
         drawBody();
+        drawFace();
       };
       yes.addEventListener("click", () => void decide(true));
       no.addEventListener("click", () => void decide(false));
@@ -242,7 +289,9 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     const proposals = new Map(conversation.proposals.map((p) => [p.id, p]));
     for (const m of conversation.messages) {
       if (m.role === "user") {
-        box.append(el("div", "ai-msg ai-user", m.text));
+        const bubble = el("div", m.queued ? "ai-msg ai-user ai-queued" : "ai-msg ai-user", m.text);
+        if (m.queued) bubble.append(el("span", "ai-queued-label", "Waiting — answered next"));
+        box.append(bubble);
         continue;
       }
       if (m.role === "note") {
@@ -277,6 +326,24 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
         if (p) answer.append(proposalCard(p));
       }
       box.append(answer);
+    }
+    if (conversation.state === "working" && live && (live.text || live.steps.length)) {
+      const answer = el("div", "ai-msg ai-answer ai-live");
+      if (live.steps.length) {
+        const listing = el("ul", "ai-activity ai-live-steps");
+        for (const step of live.steps) {
+          const li = el("li", `ai-act ai-act-${step.state === "running" ? "running" : step.state}`);
+          li.append(el("span", "ai-act-mark", step.state === "running" ? "◌" : step.state === "error" ? "⚠" : step.state === "proposed" ? "✋" : "✓"),
+            el("span", undefined, step.label));
+          listing.append(li);
+        }
+        answer.append(listing);
+      }
+      if (live.text) answer.append(renderLines(parseAnswer(live.text), mention));
+      // Queued messages stay below the answer in progress.
+      const firstQueued = Array.from(box.children).find((c) => (c as HTMLElement).classList?.contains("ai-queued"));
+      if (firstQueued) box.insertBefore(answer, firstQueued);
+      else box.append(answer);
     }
     if (conversation.state === "working") {
       const busy = el("div", "ai-working");
@@ -343,10 +410,12 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     const action = el("button", working ? "btn btn-ghost btn-small" : "btn btn-primary btn-small", working ? "Stop" : "Send");
     action.type = "button";
     action.addEventListener("click", () => {
-      if (conversation?.state === "working") void aiApi.stop(ctx.client, conversation.id).then((c) => { conversation = c; drawAll(); });
+      if (conversation?.state === "working") void aiApi.stop(ctx.client, conversation.id).then((c) => { conversation = c; live = null; drawAll(); });
       else void send(String(input.value ?? ""));
     });
     row.append(select, spend, action);
+    // Plan 55 R2: while Cyber answers, Enter (or this button) queues the message for the next turn.
+    input.placeholder = working ? "Write the next message; it is answered after this one…" : "Ask anything, or tell it what to plan…";
     setChildren(foot, input, row);
   }
 
@@ -354,13 +423,120 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     drawHead();
     drawBody();
     drawFoot();
+    drawFace();
   }
 
   function schedulePoll(): void {
     if (poll) clearTimeout(poll);
     poll = null;
-    if (conversation?.state !== "working" || element.hidden) return;
+    // With live events the socket says when something changed; polling is only the fallback while it is down.
+    if (conversation?.state !== "working" || element.hidden || stream?.isUp()) return;
     poll = setTimeout(() => void refresh(), POLL_MS);
+  }
+
+  function drawLiveSoon(): void {
+    if (liveDraw) return;
+    liveDraw = setTimeout(() => {
+      liveDraw = null;
+      drawBody();
+    }, LIVE_DRAW_MS);
+  }
+
+  /** One reload at a time; a reload asked for while one runs happens once more after it. */
+  async function reload(): Promise<void> {
+    if (reloading) {
+      reloadAgain = true;
+      return;
+    }
+    reloading = true;
+    try {
+      do {
+        reloadAgain = false;
+        await refresh();
+      } while (reloadAgain);
+    } finally {
+      reloading = false;
+    }
+  }
+
+  function onEvent(event: AiEvent): void {
+    if (!conversation || event.conversationId !== conversation.id) return;
+    activity = applyEvent(activity, event, Date.now());
+    if (event.type === "text.delta") face.talk();
+    drawFace();
+    const d = event.data;
+    switch (event.type) {
+      case "run.started":
+        live = { text: "", steps: [] };
+        conversation = { ...conversation, state: "working" };
+        drawAll();
+        break;
+      case "text.delta":
+        live ??= { text: "", steps: [] };
+        live.text += typeof d.text === "string" ? d.text : "";
+        drawLiveSoon();
+        break;
+      case "tool.started":
+        live ??= { text: "", steps: [] };
+        live.steps.push({ callId: String(d.callId ?? ""), label: String(d.label ?? d.name ?? ""), state: "running" });
+        drawLiveSoon();
+        break;
+      case "tool.finished": {
+        const step = live?.steps.find((s) => s.callId === String(d.callId ?? ""));
+        const outcome = d.outcome === "proposed" || d.outcome === "error" ? d.outcome : "done";
+        if (step) {
+          step.state = outcome;
+          step.label = String(d.label ?? step.label);
+        }
+        drawLiveSoon();
+        break;
+      }
+      case "state":
+        conversation = { ...conversation, state: d.state === "working" || d.state === "failed" ? d.state : "idle", detail: String(d.detail ?? "") };
+        drawLiveSoon();
+        break;
+      case "message.added":
+        // A saved answer replaces the live text; owner messages and notes simply appear.
+        if (d.role === "assistant") live = live ? { text: "", steps: live.steps } : null;
+        if (d.role !== "tool") void reload();
+        break;
+      case "run.finished":
+      case "run.failed":
+        live = null;
+        void reload();
+        break;
+      case "proposal.created":
+      case "proposal.resolved":
+      case "context.compressed":
+        void reload();
+        break;
+    }
+  }
+
+  function startStream(): void {
+    if (stream || !deps.socket) return;
+    stream = connectAiEvents(ctx.client, {
+      onEvent,
+      onHello: (hello) => {
+        if (conversation && hello.partials[conversation.id]) live = { text: hello.partials[conversation.id], steps: live?.steps ?? [] };
+        // Events were missed (or this is a fresh link): the conversation is reloaded once.
+        if (conversation) void reload();
+      },
+      onLink: (up) => {
+        if (!up) schedulePoll();
+        else if (poll) {
+          clearTimeout(poll);
+          poll = null;
+        }
+      },
+    }, deps.socket);
+  }
+
+  function stopStream(): void {
+    stream?.close();
+    stream = null;
+    if (liveDraw) clearTimeout(liveDraw);
+    liveDraw = null;
   }
 
   async function refresh(): Promise<void> {
@@ -368,6 +544,7 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     try {
       const before = conversation.state;
       conversation = await aiApi.get(ctx.client, conversation.id);
+      if (conversation.state !== "working") live = null;
       if (before === "working" && conversation.state !== "working") {
         status = await aiApi.status(ctx.client).catch(() => status);
         // Edits the AI made directly show up in open pages.
@@ -386,7 +563,7 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
 
   async function send(text: string): Promise<void> {
     const message = text.trim();
-    if (!message || sending || conversation?.state === "working") return;
+    if (!message || sending) return;
     sending = true;
     problem = "";
     try {
@@ -394,7 +571,8 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
         conversation = await aiApi.create(ctx.client, { ...(pageId ? { pageId } : {}), ...(chosenModel ? { model: chosenModel } : {}) });
       }
       input.value = "";
-      conversation = await aiApi.send(ctx.client, conversation.id, message);
+      deps.onListening?.(false);
+      conversation = await aiApi.send(ctx.client, conversation.id, message, { where: deps.where?.(), view: deps.view?.() });
     } catch (err) {
       problem = (err as Error).message;
     } finally {
@@ -408,6 +586,7 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
   async function load(id: string): Promise<void> {
     try {
       conversation = await aiApi.get(ctx.client, id);
+      live = null;
       pageId = conversation.pageId;
       pageTitle = pageId ? (await pagesApi.get(ctx.client, pageId).catch(() => null))?.title ?? "" : "";
       history = null;
@@ -428,6 +607,11 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     drawBody();
   }
 
+  input.addEventListener("input", () => {
+    const writing = Boolean(String(input.value ?? "").trim());
+    deps.onListening?.(writing);
+    drawFace();
+  });
   input.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -448,7 +632,7 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     element.parentElement?.classList.add("ai-docked");
     if (!samePlace) {
       pageId = target;
-      conversation = null;
+      conversation = null; live = null;
       history = null;
       problem = "";
       pageTitle = target ? (await pagesApi.get(ctx.client, target).catch(() => null))?.title ?? "" : "";
@@ -460,6 +644,7 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     } catch (err) {
       problem = (err as Error).message;
     }
+    startStream();
     drawAll();
     schedulePoll();
     queueMicrotask(() => input.focus?.());
@@ -471,15 +656,25 @@ export function createAiPanel(context: () => GlassContext): AiPanel {
     element.parentElement?.classList.remove("ai-docked");
     if (poll) clearTimeout(poll);
     poll = null;
+    stopStream();
+    deps.onListening?.(false);
+  }
+
+  async function ask(question: string): Promise<void> {
+    await open(pageId);
+    await send(question);
   }
 
   return {
     element,
     open: (target) => void open(target),
+    ask: (question) => void ask(question),
     close,
     isOpen: () => !element.hidden,
     destroy() {
       close();
+      if (faceCheck) clearTimeout(faceCheck);
+      face.destroy();
       element.remove();
     },
   };

@@ -17,6 +17,7 @@ import { createHomePage } from "./pages/homePage.js";
 import { createDevicesPage } from "./pages/devicesPage.js";
 import { createAppKnowledgePage } from "./pages/appKnowledgePage.js";
 import { createKnowledgePage } from "./pages/knowledgePage.js";
+import { createCyberGallery } from "./pages/cyberGallery.js";
 import { createLabPage } from "./pages/labPage.js";
 import { createMarketPage } from "./pages/marketPage.js";
 import { createRemotePage } from "./pages/remotePage.js";
@@ -30,6 +31,13 @@ import { createWorkspaceSidebar, type WorkspaceSidebar } from "./workspace/sideb
 import { createWorkspaceHome } from "./workspace/home.js";
 import { createPageView } from "./workspace/pageView.js";
 import { createTrashPage } from "./workspace/trash.js";
+import type { SocketLike } from "./services/aiStream.js";
+import { isMacLike, shortcutLabel, shortcutOf } from "./core/keys.js";
+import { createDock, type Dock } from "./manager/dock.js";
+import { createPalette, type Palette } from "./manager/palette.js";
+import { createUiActions, screenSummary, type UiActions } from "./manager/uiActions.js";
+import { pagesApi } from "./services/pages.js";
+import { aiApi, suggestions } from "./services/ai.js";
 import { createAiPanel, type AiPanel } from "./workspace/aiPanel.js";
 import { createAiSettings } from "./workspace/aiSettings.js";
 import { workspaceBus } from "./workspace/directory.js";
@@ -59,6 +67,8 @@ export interface GlassAppOptions {
   onHashChange(listener: () => void): () => void;
   setInterval(fn: () => void, ms: number): unknown;
   clearInterval(handle: unknown): void;
+  /** Plan 55 R2/R4: opens Cyber's live event socket (the browser's WebSocket); without it Cyber polls. */
+  cyberSocket?: (url: string, protocols: string[]) => SocketLike;
 }
 
 type PageFactory = (ctx: GlassContext, route: Route) => GlassPage;
@@ -89,6 +99,7 @@ const PAGES: Record<Route["name"], PageFactory> = {
   remote: (ctx) => createRemotePage(ctx),
   attach: (ctx) => createAttachPage(ctx),
   settings: (ctx) => createSettingsPage(ctx),
+  dev: (ctx) => createCyberGallery(ctx),
 };
 
 const NAV: Array<{ section: "home" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market"; label: string; icon: IconName; route: Route }> = [
@@ -113,6 +124,11 @@ export class GlassApp {
   private glassSidebar: HTMLElement | null = null;
   private workspace: WorkspaceSidebar | null = null;
   private aiPanel: AiPanel | null = null;
+  /** Plan 55 R4: Cyber on every page — the dock at the foot of the sidebar and the palette. */
+  private dock: Dock | null = null;
+  private palette: Palette | null = null;
+  private uiActions: UiActions | null = null;
+  private readonly mac = isMacLike();
   private mode: Mode = "glass";
   private readonly last: Record<Mode, Route> = { glass: { name: "home" }, command: { name: "command", tab: "home" } };
   private unlistenKeys: (() => void) | null = null;
@@ -138,15 +154,17 @@ export class GlassApp {
   async start(): Promise<void> {
     this.renderShell();
     this.unlistenHash = this.options.onHashChange(() => this.onHashChange());
+    // Plan 55 R4: Ctrl on Windows, ⌘ on a Mac, on every page. Ctrl/⌘K opens Cyber's palette; Ctrl/⌘. (or J where
+    // the browser allows it) opens or closes Cyber's panel.
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === "k" && this.mode === "command") {
+      const shortcut = shortcutOf(event, this.mac);
+      if (shortcut === "palette") {
         event.preventDefault();
-        this.workspace?.find();
-      }
-      if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === "j" && this.mode === "command") {
+        if (this.palette?.isOpen()) this.palette.close();
+        else this.palette?.open();
+      } else if (shortcut === "panel") {
         event.preventDefault();
-        if (this.aiPanel?.isOpen()) this.aiPanel.close();
-        else this.showAi(this.route.name === "command" && this.route.tab === "page" ? this.route.pageId ?? null : null);
+        this.toggleAi();
       }
     };
     workspaceBus.handleAskAi((pageId) => this.showAi(pageId));
@@ -183,6 +201,12 @@ export class GlassApp {
     workspaceBus.handleAskAi(null);
     this.aiPanel?.destroy();
     this.aiPanel = null;
+    this.dock?.destroy();
+    this.dock = null;
+    this.palette?.destroy();
+    this.palette = null;
+    this.uiActions?.destroy();
+    this.uiActions = null;
     this.page?.destroy();
     this.page = null;
   }
@@ -288,12 +312,109 @@ export class GlassApp {
     this.options.setHash(routeHref(target));
   }
 
-  /** Ask AI: the panel beside the workspace, about one page or the whole workspace. */
-  private showAi(pageId: string | null): void {
-    if (this.mode !== "command") return;
-    this.aiPanel ??= createAiPanel(() => this.context());
+  private socketFactory() {
+    // Plan 55 R2: Cyber's live events over the same local socket auth as the fleet view; without one it polls.
+    return this.options.cyberSocket;
+  }
+
+  /** Cyber's panel, on every page (plan 55 R4): about one workspace page, or about Cyclone as a whole. */
+  private ensureAi(): AiPanel {
+    this.aiPanel ??= createAiPanel(() => this.context(), {
+      socket: this.socketFactory(),
+      where: () => this.where(),
+      view: () => screenSummary(this.main),
+      onListening: (on) => this.dock?.setListening(on),
+      onChange: () => void this.dock?.refresh(),
+      panelKey: shortcutLabel("panel", this.mac),
+    });
     if (!this.aiPanel.element.parentNode) this.options.root.append(this.aiPanel.element);
-    this.aiPanel.open(pageId);
+    return this.aiPanel;
+  }
+
+  private currentPageId(): string | null {
+    return this.route.name === "command" && this.route.tab === "page" ? this.route.pageId ?? null : null;
+  }
+
+  private showAi(pageId: string | null): void {
+    this.ensureAi().open(pageId);
+  }
+
+  private toggleAi(): void {
+    if (this.aiPanel?.isOpen()) this.aiPanel.close();
+    else this.showAi(this.currentPageId());
+  }
+
+  /** The page the owner is on, in Glass's own words, sent with each message to Cyber. */
+  where(): string {
+    const r = this.route;
+    const nav = NAV.find((n) => n.section === sectionOf(r));
+    switch (r.name) {
+      case "run":
+        return `Runs · run ${r.runId}`;
+      case "app":
+        return `Apps · ${r.placeId} · ${r.tab}`;
+      case "lab":
+        return r.experimentId ? `Lab · ${r.experimentId}` : "Lab";
+      case "command":
+        return r.tab === "page" ? `Command Center · workspace page ${r.pageId ?? ""}`.trim() : `Command Center · ${r.tab}`;
+      case "remote":
+        return "Remote MCP";
+      case "attach":
+        return "ChatGPT Attach";
+      case "settings":
+        return "Settings";
+      case "dev":
+        return "Cyber components preview";
+      default:
+        return nav?.label ?? r.name;
+    }
+  }
+
+  private createCyber(): void {
+    // Plan 55 R5: Cyber's ui actions move this Glass — pages, filters, a ring around a row — only inside the page area.
+    this.uiActions = createUiActions({
+      scope: () => this.main,
+      navigate: (route) => this.options.setHash(routeHref(route)),
+      report: (result) => void aiApi.uiResult(this.options.client, result).catch(() => undefined),
+    });
+    this.dock = createDock({
+      client: this.options.client, socket: this.socketFactory(), panelKey: shortcutLabel("panel", this.mac),
+      onOpen: () => this.toggleAi(),
+      onAnyEvent: (event) => this.uiActions?.handle(event),
+      every: (fn, ms) => this.options.setInterval(fn, ms), cancelEvery: (h) => this.options.clearInterval(h),
+    });
+    const goTo = [
+      ...NAV.map((n) => ({ label: n.label, route: n.route, keywords: n.section === "devices" ? "phones pair connect" : n.section === "lab" ? "tests experiments testbench" : "" })),
+      { label: "Command Center", hint: "Workspace", route: { name: "command", tab: "home" } as Route, keywords: "workspace pages" },
+      { label: "Approvals", hint: "Command Center", route: { name: "command", tab: "approvals" } as Route, keywords: "waiting ok" },
+      { label: "Tasks", hint: "Command Center", route: { name: "command", tab: "tasks" } as Route },
+      { label: "Routines", hint: "Command Center", route: { name: "command", tab: "routines" } as Route, keywords: "schedule" },
+      { label: "Results", hint: "Command Center", route: { name: "command", tab: "results" } as Route },
+      { label: "Accounts", hint: "Command Center", route: { name: "command", tab: "accounts" } as Route },
+      { label: "Fleet", hint: "Command Center", route: { name: "command", tab: "fleet" } as Route, keywords: "phones overview" },
+      { label: "Settings", route: { name: "settings" } as Route },
+      { label: "Remote MCP", route: { name: "remote" } as Route },
+      { label: "ChatGPT Attach", route: { name: "attach" } as Route },
+    ];
+    this.palette = createPalette({
+      goTo,
+      paletteKey: shortcutLabel("palette", this.mac),
+      navigate: (route) => this.options.setHash(routeHref(route)),
+      ask: (question) => this.ensureAi().ask(question),
+      searchPages: async (q) => (await pagesApi.search(this.options.client, q)).map((p) => ({ id: p.id, title: p.title })),
+      onListening: (on) => this.dock?.setListening(on),
+      suggestions: suggestions(false).slice(0, 3),
+      actions: [
+        { label: "Open Cyber", hint: shortcutLabel("panel", this.mac), keywords: "chat panel ai", run: () => this.showAi(this.currentPageId()) },
+        { label: "New conversation with Cyber", keywords: "chat ai fresh", run: () => this.showAi(null) },
+        { label: "Cyber settings", hint: "Key, model, limits", keywords: "ai model limits spending", run: () => this.options.setHash(routeHref({ name: "command", tab: "ai" })) },
+        { label: "Search the workspace", keywords: "find pages", run: () => {
+          if (this.mode !== "command") this.options.setHash(routeHref({ name: "command", tab: "home" }));
+          queueMicrotask(() => this.workspace?.find());
+        } },
+      ],
+    });
+    this.options.root.append(this.palette.element);
   }
 
   /** Swap the sidebar when the face changes: the Glass nav, or the Command Center's workspace sidebar. */
@@ -317,10 +438,11 @@ export class GlassApp {
       sidebar = this.glassSidebar!;
     }
     this.options.root.className = `glass-app mode-${mode}`;
-    if (mode !== "command") this.aiPanel?.close();
-    if (!this.aiPanel?.isOpen()) this.options.root.classList.remove("ai-docked");
-    const panel = mode === "command" && this.aiPanel ? [this.aiPanel.element] : [];
-    setChildren(this.options.root, sidebar, this.main, ...panel, ...(this.welcomeCard ? [this.welcomeCard] : []));
+    if (this.aiPanel?.isOpen()) this.options.root.classList.add("ai-docked");
+    // Cyber's dock sits at the foot of whichever sidebar is showing.
+    if (this.dock) sidebar.append(this.dock.element);
+    const panel = this.aiPanel ? [this.aiPanel.element] : [];
+    setChildren(this.options.root, sidebar, this.main, ...panel, ...(this.palette ? [this.palette.element] : []), ...(this.welcomeCard ? [this.welcomeCard] : []));
   }
 
   private renderShell(): void {
@@ -344,6 +466,7 @@ export class GlassApp {
 
     const note = el("p", "sidebar-note", "Cyclone thinks on the phone. Glass shows what it knows and did.");
     sidebar.append(brand, this.picker, this.nav, el("div", "sidebar-spacer"), this.footerNav, note);
+    this.createCyber();
     this.renderPicker();
     this.applyMode();
   }

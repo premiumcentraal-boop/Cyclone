@@ -62,6 +62,30 @@
   --scrim: rgba(18, 18, 24, 0.36);
   --shadow-lg: 0 24px 64px rgba(20, 20, 30, 0.22), 0 2px 8px rgba(20, 20, 30, 0.08);
   --hero-glow: radial-gradient(120% 140% at 0% 0%, rgba(91, 91, 214, 0.14), transparent 60%);
+
+  /* Cyber, the Glass Manager (plan 54 §4): the character, states, trail, ring and pulse heatmap. */
+  --cy-shell-top: #ffffff;
+  --cy-shell-bottom: #e3e5f6;
+  --cy-shell-edge: #c9cce6;
+  --cy-visor-top: #1d2140;
+  --cy-visor-bottom: #121426;
+  --cy-eye: #8ff0ff;
+  --mgr-working: #0d9488;
+  --mgr-attention: #d97706;
+  --mgr-trail-line: #d2d2db;
+  --mgr-ring: rgba(91, 91, 214, 0.9);
+  --mgr-ring-glow: rgba(91, 91, 214, 0.22);
+  --mgr-heat-0: #ececf1;
+  --mgr-heat-1: #c7ebd6;
+  --mgr-heat-2: #8fd9ae;
+  --mgr-heat-3: #45bd7c;
+  --mgr-heat-4: #1f9d5c;
+  --mgr-glass: rgba(255, 255, 255, 0.82);
+  /* Motion (plan 54 §4); styles/cyber.css turns all of it off under prefers-reduced-motion. */
+  --mgr-spring: 320ms cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  --mgr-ease: 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --mgr-reel: 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --mgr-reveal: 120ms ease-out;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -93,6 +117,23 @@
     --scrim: rgba(0, 0, 0, 0.55);
     --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
     --hero-glow: radial-gradient(120% 140% at 0% 0%, rgba(124, 124, 240, 0.18), transparent 60%);
+    --cy-shell-top: #3a3d55;
+    --cy-shell-bottom: #23253a;
+    --cy-shell-edge: #4a4e6c;
+    --cy-visor-top: #12152a;
+    --cy-visor-bottom: #07080f;
+    --cy-eye: #8ff0ff;
+    --mgr-working: #2dd4bf;
+    --mgr-attention: #f59e0b;
+    --mgr-trail-line: #3a3a48;
+    --mgr-ring: rgba(144, 144, 244, 0.95);
+    --mgr-ring-glow: rgba(124, 124, 240, 0.28);
+    --mgr-heat-0: #1d1d25;
+    --mgr-heat-1: #143524;
+    --mgr-heat-2: #1d5c3a;
+    --mgr-heat-3: #2b9a5f;
+    --mgr-heat-4: #3ccf86;
+    --mgr-glass: rgba(23, 23, 29, 0.82);
   }
 }
 
@@ -124,4 +165,21 @@
   --scrim: rgba(0, 0, 0, 0.55);
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
   --hero-glow: radial-gradient(120% 140% at 0% 0%, rgba(124, 124, 240, 0.18), transparent 60%);
+  --cy-shell-top: #3a3d55;
+  --cy-shell-bottom: #23253a;
+  --cy-shell-edge: #4a4e6c;
+  --cy-visor-top: #12152a;
+  --cy-visor-bottom: #07080f;
+  --cy-eye: #8ff0ff;
+  --mgr-working: #2dd4bf;
+  --mgr-attention: #f59e0b;
+  --mgr-trail-line: #3a3a48;
+  --mgr-ring: rgba(144, 144, 244, 0.95);
+  --mgr-ring-glow: rgba(124, 124, 240, 0.28);
+  --mgr-heat-0: #1d1d25;
+  --mgr-heat-1: #143524;
+  --mgr-heat-2: #1d5c3a;
+  --mgr-heat-3: #2b9a5f;
+  --mgr-heat-4: #3ccf86;
+  --mgr-glass: rgba(23, 23, 29, 0.82);
 }

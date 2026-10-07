@@ -17,6 +17,7 @@ class GlassGuardTest(unittest.TestCase):
         (root / "src").mkdir()
         (root / "package.json").write_text(json.dumps({"name": "g", "dependencies": deps or {}}), encoding="utf-8")
         for name, text in files.items():
+            (root / "src" / name).parent.mkdir(parents=True, exist_ok=True)
             (root / "src" / name).write_text(text, encoding="utf-8")
         return root
 
@@ -44,6 +45,17 @@ class GlassGuardTest(unittest.TestCase):
             "b.ts": '/** Never write to localStorage. */\nconst DENY = ["password", "api_key"];',
         })
         self.assertEqual([], glass_guard.scan(root))
+
+    def test_cyber_components_say_where_they_come_from(self):
+        root = self.tree({
+            "ui/cyber/good.ts": "/**\n * The orb.\n *\n * Origin: original Cyclone code.\n */\nexport const x = 1;",
+            "ui/cyber/bad.ts": "/** The reel. */\nexport const y = 2;",
+            "ui/cyber/late.ts": "export const z = 3;\n// Origin: written after the code, so it does not count",
+            "ui/other.ts": "export const w = 4;",
+        })
+        errors = glass_guard.scan(root)
+        self.assertEqual(sorted(e.split(":")[0] for e in errors), ["src/ui/cyber/bad.ts", "src/ui/cyber/late.ts"])
+        self.assertTrue(all("origin header" in e for e in errors))
 
 
 if __name__ == "__main__":

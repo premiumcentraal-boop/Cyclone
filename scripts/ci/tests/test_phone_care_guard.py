@@ -36,8 +36,11 @@ def test_no_model_facing_tool_can_start_a_phone_update():
         for path in tools.rglob("*.py"):
             body = text(path)
             assert "care/update" not in body and "start_update" not in body, path
-    ai = ROOT / "apps/device-gateway/cyclone_device_gateway/command/ai.py"
-    assert "care" not in re.findall(r'"name":\s*"([a-z_]+)"', text(ai))
+    command = ROOT / "apps/device-gateway/cyclone_device_gateway/command"
+    # Plan 55 R1: the Manager's tools are registered in command/agent/ (ai.py is its facade).
+    ai = "\n".join(text(p) for p in [command / "ai.py", *sorted((command / "agent").rglob("*.py"))])
+    assert "care" not in re.findall(r'"name":\s*"([a-z_]+)"', ai)
+    assert not any("care" in name for name in re.findall(r'^\s+"([a-z_]+)": \("(?:read|workspace|phone)"', ai, re.M))
 
 
 def test_health_report_is_registered_read_only_on_both_sides():
