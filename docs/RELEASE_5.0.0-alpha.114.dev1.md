@@ -4,7 +4,8 @@ Developer alpha for owner testing. It builds on alpha.113 dev6 (native Instagram
 includes it.
 
 - **Mobile:** `5.0.0-alpha.114.dev1` (version code 267).
-- **PC runtime:** gateway and MCP `5.0.0-alpha.114.dev1`. The gateway reports the new gestures truthfully.
+- **PC runtime:** gateway and MCP `5.0.0-alpha.114.dev1`. The gateway reports the new gestures truthfully. It also
+  fixes a Port Hub race (below).
 - **Glass:** `1.0.0-alpha.62` (unchanged).
 
 This alpha finishes plan 52 (`Cyclone V5 plan/52-human-hands.md`).
@@ -64,6 +65,15 @@ None of these takes screen coordinates from a caller: the phone plans every poin
   by the hand model.
 - **Kept, on purpose.** The PC's desktop manual control keeps its `off` pin, because there the owner picks the exact
   pixel themselves.
+
+## Fix: a code delivered by the PC is never missed
+
+- **The problem.** When a Port plugin delivered a sign-in code, the hub marked the wait "delivered" a moment before it
+  stored the code. A run that looked at exactly that moment was told a code had come, then found nothing to take.
+- **The fix.** The hub now stores the code first and only then marks the wait delivered.
+- **How it was found.** CI caught it in `test_ports_traffic`.
+- **Test:** `test_a_delivered_value_is_held_before_the_wait_reads_as_delivered`. It fails on the old order and passes
+  on the new one.
 
 ## Tests
 

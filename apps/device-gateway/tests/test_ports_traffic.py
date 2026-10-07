@@ -247,3 +247,24 @@ def test_owner_test_runs(gateway, quiet):
     assert [s["state"] for s in run["steps"]] == ["skipped", "ok", "skipped"]  # no plugin serves run.event here
     assert "a value" in run["steps"][1]["detail"]
     assert gateway.call("POST", "/v1/ports/test-runs", {"scenario": "nope"})[0] == 400
+
+
+def test_a_delivered_value_is_held_before_the_wait_reads_as_delivered(gateway, quiet):
+    """A run that sees "delivered" must find the code or value already held (CI caught take_code racing the store)."""
+    server, asked, _ = quiet
+    traffic = gateway.hub.traffic
+    wait = traffic.wait("run_race1", "value.in", {"ask": "a caption"}, 30)
+    traffic.flush()
+    request = asked[-1]
+    seen = []
+    finish = traffic.store.finish_wait
+
+    def finish_and_look(await_id, *args, **kwargs):
+        seen.append(await_id in traffic._held)
+        return finish(await_id, *args, **kwargs)
+
+    traffic.store.finish_wait = finish_and_look
+    url = f"http://127.0.0.1:{gateway.port}/v1/ports/run_race1/value.in/deliver"
+    assert deliver(url, request["token"], {"v": 1, "value": "held first", "deliveryId": "dl_race0001"}, attempts=1)[0] == 200
+    assert seen == [True]
+    assert traffic.result(wait["awaitId"])["value"] == "held first"

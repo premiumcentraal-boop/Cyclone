@@ -408,11 +408,16 @@ class Traffic:
             result = {"bytes": len(raw.encode())}
             held["value"] = body["value"]
             note = f"value, {result['bytes']} bytes"
-        if not self.store.finish_wait(wait["awaitId"], "delivered", result, body.get("deliveryId")):
-            return 409, kit.error_body("already_delivered")
+        # Hold the code (or value, or link) before the wait reads as delivered: a run that sees "delivered" must find
+        # it already there (take_code raced the store update and got nothing).
         with self._lock:
             if len(held) > 1:
                 self._held[wait["awaitId"]] = held
+        if not self.store.finish_wait(wait["awaitId"], "delivered", result, body.get("deliveryId")):
+            with self._lock:
+                if self._held.get(wait["awaitId"]) is held:
+                    self._held.pop(wait["awaitId"], None)
+            return 409, kit.error_body("already_delivered")
         self._wake(wait["awaitId"])
         self.store.log(wait["plugin"], "deliver", ok=True, port=port, run_id=run_id, status=200, detail=note)
         return 200, {"accepted": True, "awaitId": wait["awaitId"]}

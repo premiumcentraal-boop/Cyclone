@@ -1,5 +1,5 @@
 # Cyclone V5 alpha.114 dev1: Human Hands final (plan 52 runs 6-7: drag, pinch, double tap, draw; natural placement and pacing; Natural default), on alpha.113 dev6. Glass 1.0.0-alpha.62.
-# Owner-requested developer release; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
+# Owner-requested developer release (with a Port Hub delivery-order fix); physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
 product_version = "5.0.0-alpha.114.dev1"
 channel = "development"
