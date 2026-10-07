@@ -60,7 +60,10 @@ def test_the_share_gate_stays_on_while_any_posting_task_runs():
     gate = read(MOBILE / "policy/PublishGate.kt")
     assert "fun active(): Boolean = posting.any(::isRunning)" in gate
     adapter = read(MOBILE / "gateway/GatewayV5CommandAdapter.kt")
-    assert "PublishGate.mark(id, publish == true)" in adapter
+    # Native post skills require the gate even when a PC caller omits or clears publish.
+    assert ("PublishGate.mark(id, publish == true || "
+            "com.cyclone.mobile.market.InstagramSkills.forGoal(goal)?.listing?.id == "
+            "com.cyclone.mobile.market.InstagramSkills.POST)") in adapter
     assert "PublishGate.missionId = if (publish" not in adapter
 
 
