@@ -8,7 +8,9 @@ The original V0.3 engine landed on `integration/human-gesture-v0.3` (`0239ecd7`)
 
 Human Gesture remains downstream of Cyclone authorization. `PhoneToolExecutor` remains the phone mutation authority; the runtime does not bypass GATE, human ownership, MutationGrounding, `nodeAtTaskPath`, duplicate suppression, confirmation, Session Contract identity, Layer2 ownership, or Fast Path settle (300 then +500/+1000; Unchanged is not a second click).
 
-Named virtual displays stay endpoint+duration. Instagram stock `phone.swipe` is pinned `humanize=off` until Pixel smoke. Physical Pixel 8 remains **UNVERIFIED**.
+Named virtual displays use the same cubic `dispatchGesture` path through `setDisplayId` (since `0c3a34b3`); the helper's straight `input -d` stroke is only the fallback when Android never queued a gesture. Instagram stock `phone.swipe` is pinned `humanize=off` until Pixel smoke. Physical Pixel 8 remains **UNVERIFIED**.
+
+**Human Hands (plan 52, 5.0.0-alpha.111):** the owner's Hands style (Precise / Natural / Relaxed) now sits on top of this runtime. See the section at the end of this document.
 
 ## Public `humanize` boundary
 
@@ -154,3 +156,26 @@ No Android phone is available for this run. The lane therefore finishes source, 
 ## Fast Path
 
 No humanization sleeps were added to semantic actions. Semantic `ACTION_CLICK` is not delayed for appearance. Coordinate Human Gesture waits for Android `GestureResultCallback` (stroke duration + 500ms slack) before Fast Path starts. Fast Path itself remains settle 300ms then +500/+1000; Unchanged is not a second click. Overlay chrome is `FLAG_NOT_TOUCHABLE` only while that stroke runs.
+
+## Human Hands (plan 52, alpha.111)
+
+The owner picks a Hands style in Cyclone AI settings (`HandsSettings`, prefs `cyclone_hands`). It is applied to
+`gesture/Hands.kt` when the Accessibility service connects and whenever it changes. The in-process default is
+**Precise** until the stored choice loads; the stored default is **Natural**. The style changes only *how* an
+already-authorized action is performed.
+
+| Piece | Where | Natural / Relaxed | Precise |
+| --- | --- | --- | --- |
+| Speed curves and shapes | `gesture/HumanMotion.kt`, `HumanGestureDispatch.naturalSwipe` | Minimum-jerk glide, late-peak flick or hold ending. Thumb arc, bow, S-curve, or overshoot (hold only). Played as up to 14 chained `continueStroke` pieces. If a piece is refused, the finger lifts, `Hands.segmentedStrokesSupported` turns off and one polyline stroke is used. | The V0.3 single cubic stroke |
+| Finger roll | `HumanMotion.liftPoint` | 0–2.5 px (tap) or 0–1.8 px (press) drift between down and up, inside the target | A stationary point |
+| Swipe intents | `gesture/HandModel.kt`, `SwipeIntents`, executor `swipeStroke` | `phone.swipe {direction, amount, speed, region}`. The hand model chooses start, travel, duration and ending, clear of the system gesture edges. The approval check classifies the chosen start point. | Fixed geometry (centred, middle of the range, 350 ms) |
+| Thumb scroll | `NaturalScroll` (in `TouchFirst.kt`), executor `naturalScrollPlan` | A large upright visible list is scrolled by a hand-model swipe that does not start on a nested scrollable or under another window. One channel, chosen before acting. | Semantic scroll first, as before |
+| Finger presses | `TouchFirst.decide`, `clickResolved` | After GATE: a visible, enabled, clickable, on-screen target of at least 32 px, not covered in-app or by another window, and without an inner control under the probe points, is pressed by touch (`dispatchMode = touch_first`). Otherwise the semantic click path runs. | Semantic click first |
+| Keyboard and keys | `PhoneTypeEngine.perform`, `AccessibilityTypeLive.raiseKeyboard/typeKeys`, `gesture/typing/KeystrokePlanner.kt`, `flagInputMethodEditor` | Touch the field (middle-left zone), wait up to 700 ms for an input-method window, touch once more if needed. Type with `AccessibilityInputConnection.commitText` per key (letter-pair gaps, bursts, symbol-layer switches, hesitations; capped at 9 s, or 14 s Relaxed). Only into the touched app's focused, non-password editor; stops if the owner takes control. Ladder: keys → set-text → paste. Result `method: keys`, `keyboard: shown/not_shown`. | Set-text → paste |
+| Pauses | `gesture/Pacing.kt`, `PhoneMindToolbox.humanPause` | 0.12–0.9 s (Relaxed up to 2.2 s) before each Mind action. Time since the page was read counts toward it; a stop ends it. | None |
+
+Secrets (Vault fills, `redactObservedText`) never take the keys path. Named and background displays keep set-text
+(no keyboard touch there). Capability: `phone.capabilities` → `human_gesture.hands`; the gateway projects it with a
+fixed vocabulary.
+
+PHYSICAL DEVICE: UNVERIFIED for every Human Hands behaviour.

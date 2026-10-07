@@ -193,6 +193,8 @@ class HumanGestureDiscovery(BaseModel):
         "session_kernel_vd": "runtime_unreported",
         "layer2_workspace": "runtime_unreported",
     })
+    # Plan 52: the phone's Human Hands facts (style, hand, five booleans), already reduced to a fixed vocabulary.
+    hands: dict[str, str | bool] | None = None
 
 
 class CapabilityDiscoveryResponse(BaseModel):

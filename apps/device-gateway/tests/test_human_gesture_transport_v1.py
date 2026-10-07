@@ -350,3 +350,45 @@ def test_incomplete_queued_gesture_projects_completed_false():
     assert projected["gesture"]["profileRequested"] == "auto"
     assert "reason" not in projected["gesture"]
     assert "points" not in projected.get("gesture", {})
+
+
+def test_phone_hands_facts_are_projected_in_a_fixed_vocabulary():
+    bridge = Bridge(ready_status(humanGesture={
+        "runtimeAvailable": True,
+        "controlVersion": "cyclone.human_gesture.control.v1",
+        "profiles": ["auto", "off", "light", "normal"],
+        "hands": {
+            "style": "natural",
+            "handedness": "left",
+            "speedCurves": True,
+            "swipeIntents": True,
+            "touchFirstClicks": True,
+            "keystrokeTyping": "yes",
+            "pacing": True,
+            "secretPayload": "never projected",
+        },
+    }))
+    gesture = CapabilityRegistry().discover(bridge).model_dump()["human_gesture"]
+    assert gesture["hands"] == {
+        "style": "natural",
+        "handedness": "left",
+        "speedCurves": True,
+        "swipeIntents": True,
+        "touchFirstClicks": True,
+        "keystrokeTyping": False,
+        "pacing": True,
+    }
+    odd = Bridge(ready_status(humanGesture={
+        "runtimeAvailable": True,
+        "controlVersion": "cyclone.human_gesture.control.v1",
+        "hands": {"style": "turbo"},
+    }))
+    assert CapabilityRegistry().discover(odd).model_dump()["human_gesture"]["hands"]["style"] == "unknown"
+
+
+def test_old_phones_without_hands_report_none():
+    bridge = Bridge(ready_status(humanGesture={
+        "runtimeAvailable": True,
+        "controlVersion": "cyclone.human_gesture.control.v1",
+    }))
+    assert CapabilityRegistry().discover(bridge).model_dump()["human_gesture"]["hands"] is None

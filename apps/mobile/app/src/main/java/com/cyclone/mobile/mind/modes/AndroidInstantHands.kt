@@ -56,19 +56,12 @@ internal class AndroidInstantHands(
             InstantIntent.SWIPE -> {
                 val width = card.pageEvidence.optInt("captureWidth").takeIf { it > 0 } ?: 1080
                 val height = card.pageEvidence.optInt("captureHeight").takeIf { it > 0 } ?: 2400
-                val cx = width / 2
-                val cy = height / 2
-                val dx = (width * 0.3).toInt()
-                val dy = (height * 0.21).toInt()
-                // "up" moves the finger up (the next video, the next page), like the owner's own thumb.
-                val (x1, y1, x2, y2) = when (direction) {
-                    "left" -> listOf(cx + dx, cy, cx - dx, cy)
-                    "right" -> listOf(cx - dx, cy, cx + dx, cy)
-                    "down" -> listOf(cx, cy - dy, cx, cy + dy)
-                    else -> listOf(cx, cy + dy, cx, cy - dy)
-                }
-                move(env.act("phone.swipe", JSONObject().put("x1", x1).put("y1", y1).put("x2", x2).put("y2", y2)
-                    .put("durationMs", 300).put("guard", true), "Instant: swipe $direction"))
+                // "up" moves the finger up (the next video, the next page), like the owner's own thumb. Plan 52: the
+                // phone's hand model picks where the thumb lands and how it moves, inside the middle of the screen.
+                val region = JSONObject().put("left", 0).put("top", (height * 0.15).toInt())
+                    .put("right", width).put("bottom", (height * 0.85).toInt())
+                move(env.act("phone.swipe", JSONObject().put("direction", direction ?: "up").put("amount", "page").put("region", region)
+                    .put("guard", true), "Instant: swipe $direction"))
             }
             else -> InstantMove(false, false, "Cyclone can't do ${intent.name.lowercase()} with a quick action yet")
         }

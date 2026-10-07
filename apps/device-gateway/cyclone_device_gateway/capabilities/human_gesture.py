@@ -242,6 +242,28 @@ def discovery_from_bridge_status(status: Any) -> dict[str, Any]:
     }
     if isinstance(synthesis, str) and _SAFE_TOKEN.fullmatch(synthesis):
         out["synthesis_version"] = synthesis
+    hands = _hands(_read(block, "hands"))
+    if hands is not None:
+        out["hands"] = hands
+    return out
+
+
+_HANDS_STYLES = frozenset({"precise", "natural", "relaxed"})
+_HANDS_FLAGS = ("speedCurves", "swipeIntents", "touchFirstClicks", "keystrokeTyping", "pacing")
+
+
+def _hands(value: Any) -> dict[str, Any] | None:
+    """Plan 52: the phone's Human Hands facts, reduced to a fixed vocabulary (style, hand, five booleans)."""
+    if not isinstance(value, dict):
+        return None
+    style = value.get("style")
+    hand = value.get("handedness")
+    out: dict[str, Any] = {
+        "style": style if style in _HANDS_STYLES else "unknown",
+        "handedness": hand if hand in ("right", "left") else "unknown",
+    }
+    for flag in _HANDS_FLAGS:
+        out[flag] = value.get(flag) is True
     return out
 
 

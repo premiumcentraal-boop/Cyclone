@@ -1,6 +1,6 @@
 # 52 · Human Hands: moving and typing like the owner
 
-Status: **plan (2026-10-07, at alpha.98 + Ports run 4 WIP)**. Nothing in this plan is built yet. It picks up the
+Status: **runs 1–4 built in alpha.111** (2026-10-07; speed curves, shapes, finger roll, swipe intents with the hand model, touch-first presses and thumb scrolls, the keyboard on screen with key-by-key typing, pauses, Settings › Hands, capability `hands`). Runs 5–7 remain. Physical phone: UNVERIFIED. It picks up the
 Human Gesture project (V0.3, shipped in 4.7.6–4.7.8) and finishes it.
 
 ## 0. Why

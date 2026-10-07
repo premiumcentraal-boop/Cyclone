@@ -28,6 +28,14 @@ object PhoneToolRegistry {
             .put("unknownValues", "reject"),
     )
 
+    /** Plan 52: phone.swipe takes an intent; the phone, never the caller, turns it into a path. */
+    private fun swipeParameters(): JSONObject = humanizeParameters()
+        .put("direction", JSONObject().put("type", "string").put("enum", JSONArray(listOf("up", "down", "left", "right")))
+            .put("description", "The way the finger travels (up shows what is below)."))
+        .put("amount", JSONObject().put("type", "string").put("enum", JSONArray(listOf("peek", "half", "page", "far"))).put("default", "page"))
+        .put("speed", JSONObject().put("type", "string").put("enum", JSONArray(listOf("gentle", "normal", "flick"))).put("default", "normal"))
+        .put("region", JSONObject().put("type", "object").put("description", "Optional {left, top, right, bottom} to swipe inside; default the screen."))
+
     val definitions: List<PhoneToolDefinition> = listOf(
         PhoneToolDefinition("workspace.list", false, description = "List durable Layer 2 profiles, armed jobs and global mutation owner"),
         PhoneToolDefinition("workspace.register", true, description = "Register id, label, appPackage, androidUserId; display 0 only"),
@@ -46,7 +54,7 @@ object PhoneToolRegistry {
         PhoneToolDefinition("phone.type", true, "accessibility", "Set text on a selected or focused editable element"),
         PhoneToolDefinition("phone.replace_text", true, "accessibility", "Replace text on a selected or focused editable element"),
         PhoneToolDefinition("phone.scroll", true, "accessibility", "Scroll semantically first; when unsupported, safe grounded coordinate fallback uses auto=NORMAL Human Gesture", humanizeParameters()),
-        PhoneToolDefinition("phone.swipe", true, "accessibility", "Dispatch a coordinate swipe gesture; auto resolves to NORMAL Human Gesture and off preserves the straight compatibility path", humanizeParameters()),
+        PhoneToolDefinition("phone.swipe", true, "accessibility", "Swipe by intent (direction, amount, speed, region: the phone's hand model picks where the thumb lands, how far and how fast) or by x1,y1,x2,y2; auto resolves to NORMAL Human Gesture and off preserves the straight compatibility path", swipeParameters()),
         PhoneToolDefinition("phone.back", true, "accessibility", "Perform Android Back"),
         PhoneToolDefinition("phone.home", true, "accessibility", "Perform Android Home"),
         PhoneToolDefinition("phone.open_app", true, "app_launch", "Planner landing: launch an installed package through its launcher intent before hunting icons"),

@@ -24,7 +24,14 @@ class HumanGestureSemanticSafetyContractTest {
     fun `semantic click and select stay ahead of coordinate fallback`() {
         val click = slice(service, "fun click(", "private fun activateNode")
         assertOrdered(click, "ClickGateIntercept.decide", "HumanGestureDispatch.tap(")
-        assertOrdered(click, "activateNode(targetLive", "HumanGestureDispatch.tap(")
+        // Plan 52: the only finger ahead of the semantic click is the touch-first press, chosen after the approval
+        // check and only when TouchFirst says it is as safe; the profile fallback tap stays behind ACTION_CLICK.
+        assertOrdered(click, "ClickGateIntercept.decide", "TouchFirst.decide(")
+        assertOrdered(click, "TouchFirst.decide(", "TouchFirst.Verdict.TOUCH")
+        assertOrdered(click, "TouchFirst.Verdict.TOUCH", "HumanGestureDispatch.tap(")
+        assertTrue("mode = \"touch_first\"" in click)
+        val afterTouchFirst = click.substring(click.indexOf("mode = \"touch_first\""))
+        assertOrdered(afterTouchFirst, "activateNode(targetLive", "HumanGestureDispatch.tap(")
         assertFalse("HumanGestureRuntimePolicy.resolve" in click)
 
         val activate = slice(service, "private fun activateNode", "private fun clickActivatableRelative")
@@ -42,9 +49,17 @@ class HumanGestureSemanticSafetyContractTest {
     @Test
     fun `semantic scroll stays ahead of safely grounded synthesized fallback`() {
         val scroll = slice(executor, "private fun foregroundScroll(", "private fun workspaceGestureEvidence")
-        assertOrdered(scroll, "s.scroll(selector, forward)", "s.swipe(")
-        assertOrdered(scroll, "firstOrNull { it.scrollable }", "s.swipe(")
-        assertOrdered(scroll, "node.bounds.height < 96", "s.swipe(")
+        // Plan 52: a thumb scroll may come first, but only through NaturalScroll's checks and as the one channel.
+        assertOrdered(scroll, "naturalScrollPlan(", "s.scroll(selector, forward)")
+        assertTrue("return@actionWithConfirmation s.swipe(" in scroll)
+        val fallback = scroll.substring(scroll.indexOf("s.scroll(selector, forward)"))
+        assertOrdered(fallback, "s.scroll(selector, forward)", "s.swipe(")
+        assertOrdered(fallback, "firstOrNull { it.scrollable }", "s.swipe(")
+        assertOrdered(fallback, "node.bounds.height < 96", "s.swipe(")
+        val natural = slice(executor, "private fun naturalScrollPlan(", "private fun swipeIntentError(")
+        assertTrue("Hands.style.natural" in natural)
+        assertTrue("HumanizePreference.OFF" in natural)
+        assertTrue("NaturalScroll.plan(" in natural)
     }
 
     @Test
