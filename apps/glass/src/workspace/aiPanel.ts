@@ -26,6 +26,8 @@ export interface AiPanelDeps {
   socket?: SocketFactory;
   /** Plan 53 R4: the Glass page the owner is on ("Runs", "Lab"), sent with each message. */
   where?: () => string;
+  /** Plan 53 R5: what is on the owner's screen (page title and the rows it shows), sent with each message. */
+  view?: () => string;
   /** The owner is writing to Cyber (the dock listens). */
   onListening?(on: boolean): void;
   /** Something changed the dock should show (a proposal applied or discarded). */
@@ -570,7 +572,7 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
       }
       input.value = "";
       deps.onListening?.(false);
-      conversation = await aiApi.send(ctx.client, conversation.id, message, deps.where?.());
+      conversation = await aiApi.send(ctx.client, conversation.id, message, { where: deps.where?.(), view: deps.view?.() });
     } catch (err) {
       problem = (err as Error).message;
     } finally {

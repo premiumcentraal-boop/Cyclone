@@ -6,7 +6,8 @@ event has ``seq`` (one counter for the whole hub, so one socket can follow every
 ``afterSeq``; when the gap is older than the ring, it says so and Glass reloads the conversation instead.
 
 Event types: ``run.started``, ``run.finished``, ``run.failed``, ``state``, ``text.delta``, ``tool.started``,
-``tool.finished``, ``message.added``, ``proposal.created``, ``proposal.resolved``, ``context.compressed``.
+``tool.finished``, ``message.added``, ``proposal.created``, ``proposal.resolved``, ``context.compressed``,
+``ui.action`` (plan 53 R5: open a page, set a filter, highlight something in Glass).
 
 Nothing secret is ever published: events carry what Glass already shows (answer text, tool labels, proposals).
 """
@@ -21,7 +22,7 @@ PROTOCOL = "cyclone.manager.events/1"
 RING = 2_000
 SUBSCRIBER_QUEUE = 1_000
 TYPES = ("run.started", "run.finished", "run.failed", "state", "text.delta", "tool.started", "tool.finished",
-         "message.added", "proposal.created", "proposal.resolved", "context.compressed")
+         "message.added", "proposal.created", "proposal.resolved", "context.compressed", "ui.action")
 RESERVED = frozenset({"seq", "type", "conversationId", "at"})
 
 

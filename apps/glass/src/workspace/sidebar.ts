@@ -118,6 +118,7 @@ export function createWorkspaceSidebar(context: () => GlassContext, brand: HTMLE
     const wrap = el("div", "ws-page");
     wrap.setAttribute("role", "treeitem");
     wrap.dataset.pageId = page.id;
+    wrap.setAttribute("data-mgr-target", `page:${page.id}`);
     wrap.style.setProperty("--depth", String(depth));
     wrap.draggable = true;
     const caret = el("button", "ws-caret");

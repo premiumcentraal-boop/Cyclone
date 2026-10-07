@@ -1,6 +1,6 @@
 # Plan 53: The Glass Manager — build runs
 
-Status: **R1–R4 built (2026-10-06/07, alpha.111 / Glass alpha.62, unreleased); R5–R10 planned. Owner decisions taken (design §11): Cyber, own loop, `openai/gpt-6-luna` for checks, GitHub read access, build now as part of V5.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [52](52-glass-manager-design.md).
+Status: **R1–R5 built (2026-10-06/07, alpha.111 / Glass alpha.62, unreleased); R6–R10 planned. Owner decisions taken (design §11): Cyber, own loop, `openai/gpt-6-luna` for checks, GitHub read access, build now as part of V5.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [52](52-glass-manager-design.md).
 Ten runs, about 6–7 weeks at one run per 2–4 days. Each run is one PR, one alpha, green CI, and states physical
 verification honestly.
 
@@ -110,7 +110,7 @@ verification honestly.
   Tests: `test_agent_presence.py` (4), `cyber-presence.test.mjs` (6), character tests in `cyber-components.test.mjs`.
   Panel-open timing was not measured; the palette and dock were checked in Chromium (light, dark, 400 px).
 
-## R5 — The Manager can move Glass · alpha.112 (Glass alpha.63)
+## R5 — The Manager can move Glass · built, rides in alpha.111 (unreleased)
 
 **Goal:** it points at what it talks about.
 
@@ -121,8 +121,20 @@ verification honestly.
 - The current page's visible summary (title, filters, top rows) is sent as context with each message.
 - Tests: every route in the list resolves; unknown targets fail quietly; ring removed after 2.4 s; reduced motion
   shows the ring without animation.
+- **Built:** `agent/toolsets/glass_ui.py` (kind `ui`, new in the registry): `open_page` (26 published pages; run,
+  experiment, app and workspace_page need an id), `set_filter` (a filter tab and/or the search box on the open page),
+  `highlight` (kind:id for run, app, phone, experiment, page, task, routine, account; it scrolls there too, so no
+  separate `scroll_to`) and `open_run`. Every argument is checked against what Glass publishes (no "..", no other
+  kinds). Each call publishes `ui.action`; nothing is written or audited. `POST /v1/cc/ai/ui-result` takes Glass's
+  "could not" (a quiet note the model reads next turn). Messages also carry `view`: the page title, active filter and
+  up to 12 marked rows (≤ 1,500 characters, secret-masked), shown to the model for the newest message only.
+  Glass: `manager/uiActions.ts` runs the actions in order, waits up to 3 s for a page to draw, touches only elements
+  marked `data-mgr-target` / `data-mgr-filter` / `data-mgr-search` inside the page area, rings for 2.4 s; the marks are
+  on Runs, Apps, Devices, Fleet, Lab, the workspace sidebar, Command Center tasks, routines, results and accounts, every
+  filter tab (`segmented`) and every search box (`searchInput`). Actions arrive on the dock's live socket.
+  Tests: `test_agent_glass_ui.py` (15), `cyber-ui.test.mjs` (5); the ring was checked in Chromium.
 
-## R6 — Project sight · alpha.113
+## R6 — Project sight · alpha.112
 
 **Goal:** it can answer "how close are we to V5?" with numbers.
 
@@ -134,7 +146,7 @@ verification honestly.
 - Outside text (run summaries, PR bodies, notes) reaches the model as tool results marked as information.
 - Tests per toolset with fixtures; GitHub tool refuses any repo but the configured one and any write verb.
 
-## R7 — Proactive: heartbeat, alerts, brief, pulse · alpha.114 (Glass alpha.64)
+## R7 — Proactive: heartbeat, alerts, brief, pulse · alpha.113 (Glass alpha.63)
 
 **Goal:** it speaks up only when it should.
 
@@ -146,7 +158,7 @@ verification honestly.
 - Glass: alerts tab (§5.7), brief card, pulse on Home, orb `attention`.
 - Tests: silence on nothing, dedup, quiet hours, caps cover heartbeat spend, brief shown once per day.
 
-## R8 — Memory and session search · alpha.115 (Glass alpha.65)
+## R8 — Memory and session search · alpha.114 (Glass alpha.64)
 
 **Goal:** it remembers you and the project.
 
@@ -157,7 +169,7 @@ verification honestly.
 - Glass: memory chips with undo; Settings → Manager → Memory (view, edit, clear).
 - Tests: caps enforced, secret-shaped text refused, undo restores, snapshot frozen mid-conversation, search ranking.
 
-## R9 — Playbooks · alpha.116 (Glass alpha.66)
+## R9 — Playbooks · alpha.115 (Glass alpha.65)
 
 **Goal:** it gets better at recurring work.
 
@@ -169,7 +181,7 @@ verification honestly.
 - Glass: playbook chips, Settings → Manager → Playbooks (draft / approved, diff of each patch, approve, delete).
 - Tests: progressive loading, drafts never used, patch diff, Lab gate, secret screen on content.
 
-## R10 — Overnight pass and polish · alpha.117 (Glass alpha.67)
+## R10 — Overnight pass and polish · alpha.116 (Glass alpha.66)
 
 **Goal:** it learns while you sleep and the whole thing feels finished.
 

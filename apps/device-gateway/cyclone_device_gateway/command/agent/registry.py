@@ -7,7 +7,8 @@ the Command Center once and dispatches calls through it.
 
 Rules the registry enforces at registration, so a bad tool fails at import and in CI, never in a turn:
 - **Known kinds only.** ``read`` runs at once; ``workspace`` edits pages, cards and rows (a proposal unless the owner
-  lets the AI edit the workspace); ``phone`` may start phone work and is always a proposal.
+  lets the AI edit the workspace); ``phone`` may start phone work and is always a proposal; ``ui`` only moves the
+  owner's Glass (plan 53 R5) and changes nothing in Cyclone.
 - **No forbidden powers.** A name that reads as shell, file, network, delete, approve, vault, password or key access
   is refused: those tools must not exist at all.
 - **Strict schemas.** Every schema is an object with ``additionalProperties: false`` whose required fields exist.
@@ -18,7 +19,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
-KINDS = ("read", "workspace", "phone")
+KINDS = ("read", "workspace", "phone", "ui")
 NAME = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 #: Words no tool name may contain: these powers stay outside the Manager (AGENTS.md: no generic shell or root control).
 FORBIDDEN = ("shell", "exec", "command", "terminal", "file", "http", "fetch", "url", "download", "upload", "delete",

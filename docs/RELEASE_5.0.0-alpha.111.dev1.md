@@ -20,6 +20,15 @@ Setup is unchanged: your OpenRouter key and a model in Command Center → AI.
   do something quick (open Cyber, its settings, search the workspace), or ask Cyber — a question opens the panel and is
   sent from the page you are on.
 
+### Cyber shows you what it means
+
+When Cyber talks about something you can see in Glass, it shows it: it **opens the page**, **presses the filter**
+("Failed") or types into the page's search box, and **rings the exact row** it means for a moment (a run, a phone, an
+app, a Lab experiment, a task, a routine, an account or a workspace page). It only changes what you see — nothing is
+changed, started or approved — so it does this without asking. If something is not on the page, Glass tells Cyber, and
+Cyber says so. Each message also gives Cyber a short summary of your screen (the page, the filter and the rows shown),
+so "this one" means the row in front of you.
+
 ### Keys, on Windows and on a Mac
 
 | | Windows | Mac |
@@ -59,6 +68,10 @@ free components (MIT) as a reference; no Space UI code is copied.
   order and the instructions the model gets are unchanged.
 - New live event socket `/v1/cc/ai/events` (`cyclone.manager.events/1`): the same local bearer as every route, sent
   like the fleet socket's; resume with `afterSeq`; a `gap` says when events were missed and Glass reloads.
+- New Glass tools for Cyber (`open_page`, `set_filter`, `highlight`, `open_run`; kind `ui`): every argument is checked
+  against the pages and marks Glass publishes, each call is a `ui.action` event, and nothing is written or audited.
+  Glass acts only on elements marked for Cyber inside the page area. `POST /v1/cc/ai/ui-result` carries Glass's
+  "could not". Messages accept an optional `view` (the screen summary, at most 1,500 characters, masked for secrets).
 - New `GET /v1/cc/ai/presence` for the dock: counts only (approvals, proposals, phones ready, tasks running, spending),
   never task or page text. Messages accept an optional `where` (the Glass page, at most 160 characters, screened for
   secrets).
@@ -77,9 +90,9 @@ still makes no model calls and holds no key.
 - Product / Android / gateway / MCP: **5.0.0-alpha.111.dev1**; Android version code **259**. The Android app has no
   code change in this alpha.
 - Glass: **1.0.0-alpha.62**. The retired desktop-window component remains unchanged.
-- Validation for this exact source: gateway tests (including `test_agent_registry.py`, `test_agent_stream.py` and
-  `test_agent_presence.py`), Glass tests (including `ai-stream.test.mjs`, `cyber-components.test.mjs` and
-  `cyber-presence.test.mjs`), CI guards, release-version and product guards; recorded in the release PR and its CI runs.
-  The character, dock and palette were also checked in Chromium in light and dark and at phone width.
+- Validation for this exact source: gateway tests (including `test_agent_registry.py`, `test_agent_stream.py`,
+  `test_agent_presence.py` and `test_agent_glass_ui.py`), Glass tests (including `ai-stream.test.mjs`,
+  `cyber-components.test.mjs`, `cyber-presence.test.mjs` and `cyber-ui.test.mjs`), CI guards, release-version and product guards; recorded in the release PR and its CI runs.
+  The character, dock, palette and highlight ring were also checked in Chromium in light and dark and at phone width.
 - Physical acceptance: **UNVERIFIED.** Cyber has not yet been used in Glass against a real OpenRouter key on the
   owner's PC, on Windows or on a Mac; scripted providers in the tests stand in for it.

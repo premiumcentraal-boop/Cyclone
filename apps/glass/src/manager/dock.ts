@@ -18,6 +18,8 @@ export interface DockDeps {
   client: GatewayClient;
   socket?: SocketFactory;
   onOpen(): void;
+  /** Every live event, for others that follow Cyber (plan 53 R5: its ui actions). */
+  onAnyEvent?(event: AiEvent): void;
   /** The key that opens the panel, shown in the tooltip ("Ctrl+." or "⌘."). */
   panelKey: string;
   setTimer?: (fn: () => void, ms: number) => unknown;
@@ -112,6 +114,7 @@ export function createDock(deps: DockDeps): Dock {
   }
 
   function onEvent(event: AiEvent): void {
+    deps.onAnyEvent?.(event);
     activity = applyEvent(activity, event, now());
     if (event.type === "text.delta") character.talk();
     if (["run.finished", "run.failed", "proposal.created", "proposal.resolved"].includes(event.type)) refreshAfterEvent();

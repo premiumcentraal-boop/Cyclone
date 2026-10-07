@@ -500,6 +500,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     table.append(headRow("Task", "Phone", "Account", "Status", "Detail", ""));
     for (const t of data.tasks) {
       const row = el("tr");
+      row.setAttribute("data-mgr-target", `task:${t.id}`);
       const open = ["scheduled", "making", "waiting_device", "running", "needs_you"].includes(t.status);
       const due = t.dueAt && t.status === "scheduled" ? `Starts ${new Date(t.dueAt).toLocaleString()}` : "";
       const detail = open ? t.cause || due || t.run?.summary || "" : t.run?.summary || t.cause;
@@ -661,6 +662,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       remove.addEventListener("click", () => void act("Deleting", () => command.deleteRoutine(ctx.client, r.id)));
       actions.append(run, pause, remove);
       const row = el("tr");
+      row.setAttribute("data-mgr-target", `routine:${r.id}`);
       row.append(
         cell(r.title, [r.goal.slice(0, 120), r.make ? (r.make.steps.length > 1 ? `${r.make.steps.length} steps: ${r.make.steps.map((s) => s.tool).join(" → ")}` : `Makes with ${r.make.tool}`) : "",
           r.vaultItemId ? (r.preauth ? `${r.prepared.filter((p) => p.ready).length} of ${r.prepared.length} runs sealed ahead` : "Signs in while Glass is open") : ""].filter(Boolean).join(" · ")),
@@ -685,6 +687,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     table.append(headRow("When", "Task", "Phone", "Outcome", "What happened", "Steps", "Time", "Cost"));
     for (const r of data.results) {
       const row = el("tr");
+      row.setAttribute("data-mgr-target", `task:${r.taskId}`);
       row.append(
         cell(relativeTime(r.startedAt)),
         cell(r.title),
@@ -768,6 +771,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       remove.addEventListener("click", () => void act("Removing", () => command.deleteAccount(ctx.client, a.id)));
       actions.append(pause, remove);
       const row = el("tr");
+      row.setAttribute("data-mgr-target", `account:${a.id}`);
       row.append(
         cell(a.handle, a.notes || undefined),
         cell(a.service),

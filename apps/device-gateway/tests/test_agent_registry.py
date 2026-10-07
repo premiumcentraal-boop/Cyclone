@@ -30,11 +30,16 @@ class Nothing:
         self.center = center
 
 
+GLASS_UI_TOOLS = ["open_page", "set_filter", "highlight", "open_run"]
+
+
 def test_the_workspace_tools_are_registered_in_their_old_order():
-    assert REGISTRY.names() == WORKSPACE_TOOLS
-    assert list(ai.TOOLS) == WORKSPACE_TOOLS
+    assert REGISTRY.names() == WORKSPACE_TOOLS + GLASS_UI_TOOLS
+    assert list(ai.TOOLS) == WORKSPACE_TOOLS + GLASS_UI_TOOLS
     assert ai.TOOLS == {t.name: (t.kind, t.description, t.parameters) for t in REGISTRY.tools()}
-    assert {t.toolset for t in REGISTRY.tools()} == {"workspace"}
+    assert {t.toolset for t in REGISTRY.tools()} == {"workspace", "glass_ui"}
+    # Plan 53 R5: the Glass tools only move the owner's view; nothing else is of kind ui.
+    assert [t.name for t in REGISTRY.tools() if t.kind == "ui"] == GLASS_UI_TOOLS
 
 
 def test_every_tool_has_a_known_kind_a_strict_schema_and_no_forbidden_power():

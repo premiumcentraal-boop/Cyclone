@@ -187,6 +187,24 @@ class StoreMixin:
         if spent_month >= monthly:
             raise AiError(f"This month's AI limit (${monthly:.2f}) is reached. Raise it in AI settings.")
 
+    # ------------------------------------------------------------------ Glass reports back (plan 53 R5)
+
+    def ui_result(self, body: Any) -> dict[str, Any]:
+        """Glass could not carry out a ui action (a row not on the page, a tab that does not exist). Kept as a quiet note
+        the model reads on its next turn; the owner already saw what happened on their screen."""
+        if not isinstance(body, dict):
+            raise CommandError("Send {conversationId, callId, ok, detail?}.")
+        _only(body, {"conversationId", "callId", "ok", "detail"}, "ui result")
+        call_id = body.get("callId")
+        if not isinstance(call_id, str) or not 0 < len(call_id) <= 120 or not isinstance(body.get("ok"), bool):
+            raise CommandError("callId is the tool call's id and ok is true or false.")
+        detail = openapi.hide_secrets(str(body.get("detail") or ""))[:200]
+        with self._c._lock:
+            row = self._row(body.get("conversationId"))
+            if not body["ok"]:
+                self._add(row["id"], "note", {"text": f"Glass could not show that ({call_id}): {detail or 'not on the page'}.", "quiet": True})
+        return {"ok": True}
+
     # ------------------------------------------------------------------ presence (plan 53 R4)
 
     def presence(self) -> dict[str, Any]:

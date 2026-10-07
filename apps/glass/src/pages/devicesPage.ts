@@ -356,6 +356,7 @@ function section(title: string, cards: HTMLElement[]): HTMLElement {
 function deviceCard(device: GlassDevice, status: HTMLElement): HTMLElement {
   const card = el("article", "card device-card");
   card.dataset.deviceId = device.id;
+  card.setAttribute("data-mgr-target", `phone:${device.id}`);
   const top = el("div", "device-card-top");
   const badge = el("div", "device-badge");
   badge.append(icon("phone"));

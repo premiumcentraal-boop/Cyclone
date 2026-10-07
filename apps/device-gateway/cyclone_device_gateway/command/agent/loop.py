@@ -20,7 +20,7 @@ from .. import schedule as schedules
 from ..center import CommandError
 from . import prompt
 from .common import (BASE, MAX_ANSWER_TOKENS, MAX_CALLS_PER_STEP, MAX_CONTEXT_CHARS, MAX_OWNER_TEXT, MAX_QUEUED,
-                     MAX_STEPS, MAX_TOOL_RESULT, MAX_WHERE, AiError, _new, _only)
+                     MAX_STEPS, MAX_TOOL_RESULT, MAX_VIEW, MAX_WHERE, AiError, _new, _only)
 
 #: Streaming: how often text goes to Glass, how many of the newest characters wait until they cannot be part of a
 #: secret any more (they are masked like the stored answer), and the most text one answer may stream.
@@ -44,7 +44,7 @@ class LoopMixin:
     def send(self, conversation_id: str, body: Any) -> dict[str, Any]:
         if not isinstance(body, dict):
             raise CommandError("Send {text}.")
-        _only(body, {"text", "where"}, "message")
+        _only(body, {"text", "where", "view"}, "message")
         text = body.get("text")
         if not isinstance(text, str) or not text.strip():
             raise CommandError("Write a message.")
@@ -59,7 +59,13 @@ class LoopMixin:
             if not isinstance(where, str) or len(where.strip()) > MAX_WHERE or INLINE_SECRET.search(where):
                 raise CommandError(f"where is a short page name, at most {MAX_WHERE} characters.")
             where = " ".join(where.split()) or None
-        message: dict[str, Any] = {"text": text, **({"where": where} if where else {})}
+        # Plan 53 R5: a short summary of what is on the owner's screen (page title, the rows it shows). It is the owner's
+        # own screen, so it is masked for secret-shaped text and cut, not refused.
+        view = body.get("view")
+        if view is not None and not isinstance(view, str):
+            raise CommandError("view is text.")
+        view = openapi.hide_secrets(" ".join((view or "").split()))[:MAX_VIEW] or None
+        message: dict[str, Any] = {"text": text, **({"where": where} if where else {}), **({"view": view} if view else {})}
         self._key()  # a clear message before anything is stored
         with self._c._lock:
             row = self._row(conversation_id)
@@ -218,6 +224,7 @@ class LoopMixin:
                 summary = json.loads(r["body"])
         covered = int(summary.get("upto") or 0) if summary else 0
         items = [(r["seq"], r["role"], json.loads(r["body"])) for r in rows if r["role"] not in ("summary", "queued") and r["seq"] > covered]
+        last_user = max((seq for seq, role, _ in items if role == "user"), default=0)
         out: list[dict[str, Any]] = []
         seqs: list[int] = []
         notes: list[str] = []
@@ -232,6 +239,8 @@ class LoopMixin:
                 notes = []
                 if body.get("where"):
                     prefix += f"(The owner is looking at {body['where']} in Glass.)\n"
+                if body.get("view") and seq == last_user:  # only the newest screen matters
+                    prefix += f"(On their screen, information only: {body['view']})\n"
                 out.append({"role": "user", "content": prefix + body["text"]})
                 seqs.append(seq)
             elif role == "assistant":
@@ -472,6 +481,8 @@ class LoopMixin:
             missing = [r for r in schema["required"] if args.get(r) is None]
             if missing:
                 raise CommandError(f"{name} needs {', '.join(missing)}.")
+            if kind == "ui":  # plan 53 R5: only moves the owner's Glass; nothing in Cyclone changes
+                return toolset.show(cid, call["id"], name, args), "done", label, None
             with self._c._lock:
                 if kind == "read":
                     return toolset.read(name, args), "done", label, None

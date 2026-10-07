@@ -264,6 +264,14 @@
 .cyber-palette-empty { margin: 12px; color: var(--text-muted); font-size: var(--text-sm); }
 .cyber-palette-foot { display: flex; justify-content: space-between; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--border); font-size: var(--text-xs); color: var(--text-faint); }
 
+/* ---------------------------------------------------------------- the highlight ring (manager/uiActions.ts) */
+/* Cyber points at one row: a ring and a soft glow for 2.4 s, then it fades. */
+.mgr-highlight { outline: 2px solid var(--mgr-ring) !important; outline-offset: 2px; box-shadow: 0 0 0 6px var(--mgr-ring-glow) !important;
+  border-radius: var(--radius-sm); animation: mgr-ring 2.4s ease-out both; position: relative; z-index: 1; }
+tr.mgr-highlight { outline-offset: -2px; }
+@keyframes mgr-ring { 0% { outline-color: transparent; box-shadow: 0 0 0 0 var(--mgr-ring-glow); } 12% { outline-color: var(--mgr-ring); }
+  80% { outline-color: var(--mgr-ring); } 100% { outline-color: transparent; box-shadow: 0 0 0 10px transparent; } }
+
 /* ---------------------------------------------------------------- the developer gallery (#/dev/cyber) */
 .cyber-gallery { display: grid; gap: var(--space-6); }
 .cyber-gallery-section { display: grid; gap: var(--space-3); padding: var(--space-5); border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); min-width: 0; }
@@ -284,7 +292,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cyber-palette { animation: none; }
+  .cyber-palette, .mgr-highlight { animation: none; }
   .cyber-reel-in, .cyber-reel-out, .cyber-dot-live, .cyber-step-running .cyber-step-dot { animation: none; }
   .cyber-reel-out { display: none; }
   .cyber-switch, .cyber-switch-knob, .cyber-alert { transition: none; }

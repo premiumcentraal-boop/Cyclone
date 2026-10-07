@@ -35,8 +35,9 @@ import type { SocketLike } from "./services/aiStream.js";
 import { isMacLike, shortcutLabel, shortcutOf } from "./core/keys.js";
 import { createDock, type Dock } from "./manager/dock.js";
 import { createPalette, type Palette } from "./manager/palette.js";
+import { createUiActions, screenSummary, type UiActions } from "./manager/uiActions.js";
 import { pagesApi } from "./services/pages.js";
-import { suggestions } from "./services/ai.js";
+import { aiApi, suggestions } from "./services/ai.js";
 import { createAiPanel, type AiPanel } from "./workspace/aiPanel.js";
 import { createAiSettings } from "./workspace/aiSettings.js";
 import { workspaceBus } from "./workspace/directory.js";
@@ -126,6 +127,7 @@ export class GlassApp {
   /** Plan 53 R4: Cyber on every page — the dock at the foot of the sidebar and the palette. */
   private dock: Dock | null = null;
   private palette: Palette | null = null;
+  private uiActions: UiActions | null = null;
   private readonly mac = isMacLike();
   private mode: Mode = "glass";
   private readonly last: Record<Mode, Route> = { glass: { name: "home" }, command: { name: "command", tab: "home" } };
@@ -203,6 +205,8 @@ export class GlassApp {
     this.dock = null;
     this.palette?.destroy();
     this.palette = null;
+    this.uiActions?.destroy();
+    this.uiActions = null;
     this.page?.destroy();
     this.page = null;
   }
@@ -318,6 +322,7 @@ export class GlassApp {
     this.aiPanel ??= createAiPanel(() => this.context(), {
       socket: this.socketFactory(),
       where: () => this.where(),
+      view: () => screenSummary(this.main),
       onListening: (on) => this.dock?.setListening(on),
       onChange: () => void this.dock?.refresh(),
       panelKey: shortcutLabel("panel", this.mac),
@@ -366,9 +371,16 @@ export class GlassApp {
   }
 
   private createCyber(): void {
+    // Plan 53 R5: Cyber's ui actions move this Glass — pages, filters, a ring around a row — only inside the page area.
+    this.uiActions = createUiActions({
+      scope: () => this.main,
+      navigate: (route) => this.options.setHash(routeHref(route)),
+      report: (result) => void aiApi.uiResult(this.options.client, result).catch(() => undefined),
+    });
     this.dock = createDock({
       client: this.options.client, socket: this.socketFactory(), panelKey: shortcutLabel("panel", this.mac),
       onOpen: () => this.toggleAi(),
+      onAnyEvent: (event) => this.uiActions?.handle(event),
       every: (fn, ms) => this.options.setInterval(fn, ms), cancelEvery: (h) => this.options.clearInterval(h),
     });
     const goTo = [

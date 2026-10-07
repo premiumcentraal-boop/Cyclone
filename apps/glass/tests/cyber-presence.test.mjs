@@ -220,34 +220,37 @@ function shell(hash = "#/runs") {
 
 test("Cyber is on every page: the dock in the sidebar, the palette and the panel from any page", async () => {
   const { app, root, sent } = shell("#/runs");
-  await app.start();
-  await flush(8);
-  const dock = root.querySelector(".glass-sidebar .cyber-dock");
-  assert.ok(dock, "the dock sits in the Glass sidebar");
-  assert.match(dock.textContent, /Cyber/);
-  // Ctrl on Windows and Linux, ⌘ on a Mac: send the one this machine's shell expects.
-  const mac = /mac/i.test(globalThis.navigator?.platform ?? "");
-  const press = (k) => document.dispatchEvent({ type: "keydown", key: k, ctrlKey: !mac, metaKey: mac, preventDefault() {} });
-  press("k");
-  const palette = root.querySelector(".cyber-palette-scrim");
-  assert.equal(palette.hidden, false, "Ctrl/⌘K opens the palette outside the Command Center too");
-  press("k");
-  assert.equal(palette.hidden, true);
-  press(".");
-  await flush(10);
-  const panel = root.querySelector(".ai-panel");
-  assert.ok(panel && !panel.hidden, "Ctrl/⌘. opens Cyber's panel on a Glass page");
-  assert.match(panel.querySelector(".ai-title").textContent, /Cyber/);
-  assert.equal(app.where(), "Runs");
-  const input = panel.querySelector(".ai-input");
-  input.value = "Why did the last run fail?";
-  input.dispatchEvent({ type: "keydown", key: "Enter", shiftKey: false, preventDefault() {} });
-  await flush(12);
-  assert.deepEqual(sent, [{ text: "Why did the last run fail?", where: "Runs" }], "the message says which page it came from");
-  press(".");
-  assert.equal(panel.hidden, true);
-  dock.click();
-  await flush(6);
-  assert.equal(panel.hidden, false, "the dock opens the panel");
-  app.stop();
+  try {
+    await app.start();
+    await flush(8);
+    const dock = root.querySelector(".glass-sidebar .cyber-dock");
+    assert.ok(dock, "the dock sits in the Glass sidebar");
+    assert.match(dock.textContent, /Cyber/);
+    // Ctrl on Windows and Linux, ⌘ on a Mac: send the one this machine's shell expects.
+    const mac = /mac/i.test(globalThis.navigator?.platform ?? "");
+    const press = (k) => document.dispatchEvent({ type: "keydown", key: k, ctrlKey: !mac, metaKey: mac, preventDefault() {} });
+    press("k");
+    const palette = root.querySelector(".cyber-palette-scrim");
+    assert.equal(palette.hidden, false, "Ctrl/⌘K opens the palette outside the Command Center too");
+    press("k");
+    assert.equal(palette.hidden, true);
+    press(".");
+    await flush(10);
+    const panel = root.querySelector(".ai-panel");
+    assert.ok(panel && !panel.hidden, "Ctrl/⌘. opens Cyber's panel on a Glass page");
+    assert.match(panel.querySelector(".ai-title").textContent, /Cyber/);
+    assert.equal(app.where(), "Runs");
+    const input = panel.querySelector(".ai-input");
+    input.value = "Why did the last run fail?";
+    input.dispatchEvent({ type: "keydown", key: "Enter", shiftKey: false, preventDefault() {} });
+    await flush(12);
+    assert.deepEqual(sent, [{ text: "Why did the last run fail?", where: "Runs", view: "Runs" }], "the message says which page it came from and what is on it");
+    press(".");
+    assert.equal(panel.hidden, true);
+    dock.click();
+    await flush(6);
+    assert.equal(panel.hidden, false, "the dock opens the panel");
+  } finally {
+    app.stop();  // even when an assertion fails, so no timer keeps the test run open
+  }
 });

@@ -8,7 +8,7 @@ import type { GatewayClient } from "./gateway.js";
 
 export type AiEventType =
   | "run.started" | "run.finished" | "run.failed" | "state" | "text.delta" | "tool.started" | "tool.finished"
-  | "message.added" | "proposal.created" | "proposal.resolved" | "context.compressed";
+  | "message.added" | "proposal.created" | "proposal.resolved" | "context.compressed" | "ui.action";
 
 export interface AiEvent {
   seq: number;
@@ -48,7 +48,7 @@ export interface AiStream {
 }
 
 const TYPES: readonly AiEventType[] = ["run.started", "run.finished", "run.failed", "state", "text.delta", "tool.started", "tool.finished",
-  "message.added", "proposal.created", "proposal.resolved", "context.compressed"];
+  "message.added", "proposal.created", "proposal.resolved", "context.compressed", "ui.action"];
 const OWN = new Set(["seq", "type", "conversationId", "at"]);
 
 export function parseAiEvent(raw: unknown): AiEvent | null {

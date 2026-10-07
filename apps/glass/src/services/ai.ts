@@ -226,9 +226,13 @@ export const aiApi = {
   get: async (client: GatewayClient, id: string) => parseConversation(await client.get(`/v1/cc/ai/conversations/${enc(id)}`)),
   update: async (client: GatewayClient, id: string, body: { model?: string | null; title?: string }) =>
     parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}`, body)),
-  /** `where` (plan 53 R4): the Glass page the owner writes from, so Cyber knows what they look at. */
-  send: async (client: GatewayClient, id: string, text: string, where?: string) =>
-    parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/messages`, where ? { text, where: where.slice(0, 160) } : { text })),
+  /** `where` (plan 53 R4): the Glass page the owner writes from; `view` (R5): what is on their screen. */
+  send: async (client: GatewayClient, id: string, text: string, context: { where?: string; view?: string } = {}) =>
+    parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/messages`, {
+      text, ...(context.where ? { where: context.where.slice(0, 160) } : {}), ...(context.view ? { view: context.view.slice(0, 1500) } : {}),
+    })),
+  /** Plan 53 R5: Glass could not carry out one of Cyber's ui actions. */
+  uiResult: (client: GatewayClient, body: { conversationId: string; callId: string; ok: boolean; detail?: string }) => client.post("/v1/cc/ai/ui-result", body),
   presence: async (client: GatewayClient) => parsePresence(await client.get("/v1/cc/ai/presence")),
   stop: async (client: GatewayClient, id: string) => parseConversation(await client.post(`/v1/cc/ai/conversations/${enc(id)}/stop`)),
   remove: (client: GatewayClient, id: string) => client.post(`/v1/cc/ai/conversations/${enc(id)}/delete`),

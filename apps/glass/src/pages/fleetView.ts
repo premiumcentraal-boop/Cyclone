@@ -284,6 +284,7 @@ export function createFleetView(deps: FleetViewDeps): FleetView {
 
   const search = el("input", "cc-input fx-search");
   search.type = "search";
+  search.setAttribute("data-mgr-search", "");
   search.placeholder = "Search phones";
   search.setAttribute("aria-label", "Search phones");
   search.addEventListener("input", () => {
@@ -358,6 +359,7 @@ export function createFleetView(deps: FleetViewDeps): FleetView {
       else if (entry.item.getAttribute(name) !== value) entry.item.setAttribute(name, value);
     };
     attr("data-device", phone.deviceId);
+    attr("data-mgr-target", `phone:${phone.deviceId}`);
     attr("data-presence", phone.presence);
     attr("data-color", phone.color);
     attr("data-root", phone.root);

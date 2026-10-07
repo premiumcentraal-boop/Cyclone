@@ -262,6 +262,7 @@ function appRow(app: PhoneApp, known: AppKnowledge, facts: FleetFacts): HTMLAnch
   row.href = routeHref({ name: "app", placeId: app.placeId, tab: "map" });
   row.setAttribute("role", "listitem");
   row.dataset.placeId = app.placeId;
+  row.setAttribute("data-mgr-target", `app:${app.placeId}`);
   row.dataset.knowledge = known;
 
   const who = el("span", "col-app");

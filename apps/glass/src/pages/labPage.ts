@@ -356,6 +356,7 @@ function historyList(experiments: LabExperiment[], ctx: () => GlassContext): HTM
   }
   for (const experiment of experiments) {
     const row = link("", routeHref({ name: "lab", experimentId: experiment.id }), "lab-row");
+    row.setAttribute("data-mgr-target", `experiment:${experiment.id}`);
     const main = el("div", "lab-row-main");
     main.append(el("span", "lab-row-name", experiment.name), el("span", "lab-row-meta",
       `${plural(experiment.missions.length, "mission")} · ${plural(experiment.variants.length, "variant")} · ${relativeTime(experiment.createdAt)}`));
