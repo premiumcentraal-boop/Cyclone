@@ -17,6 +17,21 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class ClickGateInterceptTest {
+    @Test fun genericTaggedCardWithDecorativeChildrenKeepsTheWholeCardAsItsActivationTarget() {
+        val card = node("card", "0/1", "0", "", "generic", true)
+            .copy(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"), childIds = listOf("icon", "title"))
+        val icon = node("icon", "0/1/0", "card", "", "image", false)
+        val title = node("title", "0/1/1", "card", "Prepare an Instagram post", "text", false)
+        val folded = com.cyclone.mobile.AccessibilityRoles.foldTalkBackHosts(listOf(card, icon, title))
+        val observed = folded.first { it.id == "card" }
+        assertTrue(observed.clickable)
+        assertEquals(card.resourceId, observed.resourceId)
+        assertEquals("Prepare an Instagram post", observed.text)
+        val activation = com.cyclone.mobile.AccessibilityRoles.resolveActivationTarget(folded, observed)
+        assertEquals("card", activation.id)
+        assertNull(GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(observed, activation, packageName = "com.cyclone.mobile")))
+    }
+
     @Test fun labeledSkillButtonKeepsItsObservedNavigationIdentityWhenIconChildrenAreFolded() {
         val card = node("card", "0/1", "0", "", "button", true)
             .copy(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"), childIds = listOf("icon", "title"))
