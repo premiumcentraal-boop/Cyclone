@@ -45,6 +45,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -233,7 +235,8 @@ fun CycloneSegmentedControl(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .selectable(selected = active, role = Role.Tab, onClick = { onSelect(index) }),
+                            .selectable(selected = active, role = Role.Tab, onClick = { onSelect(index) })
+                            .semantics(mergeDescendants = true) { contentDescription = label },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(

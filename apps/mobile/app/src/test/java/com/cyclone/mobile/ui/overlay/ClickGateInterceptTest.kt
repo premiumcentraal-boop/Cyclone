@@ -17,6 +17,23 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class ClickGateInterceptTest {
+    @Test fun labeledSkillButtonKeepsItsObservedNavigationIdentityWhenIconChildrenAreFolded() {
+        val card = node("card", "0/1", "0", "", "button", true)
+            .copy(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"), childIds = listOf("icon", "title"))
+        // The Pixel 8's AndroidView icon advertises ACTION_CLICK. A generic host was demoted onto this icon.
+        val icon = node("icon", "0/1/0", "card", "", "image", true)
+        val title = node("title", "0/1/1", "card", "Prepare an Instagram post", "text", false)
+        val folded = com.cyclone.mobile.AccessibilityRoles.foldTalkBackHosts(listOf(card, icon, title))
+        val observed = folded.first { it.id == "card" }
+        assertTrue(observed.clickable)
+        assertEquals(card.resourceId, observed.resourceId)
+        assertEquals("Prepare an Instagram post", observed.text)
+        val activation = com.cyclone.mobile.AccessibilityRoles.resolveActivationTarget(folded, observed)
+        assertEquals("card", activation.id)
+        assertNull(GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(observed, activation, packageName = "com.cyclone.mobile")))
+        assertEquals(GateClass.SEND, GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(observed, activation, packageName = "com.instagram.android")))
+    }
+
     @Test fun nativeSkillDetailsAreNavigationButTheActualInstagramPostStillNeedsApproval() {
         val card = node("card", "0/1", "0", "Prepare an Instagram post", "button", true)
             .copy(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"))
