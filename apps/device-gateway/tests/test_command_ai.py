@@ -347,7 +347,7 @@ def test_a_turn_interrupted_by_a_restart_is_marked_and_stop_works(tmp_path, rout
     ready(cc)
     conv = cc.ai.create_conversation({})
     assert cc.ai.send(conv["id"], {"text": "Plan"})["state"] == "working"
-    # Plan 53 R2: a message sent while Cyber answers waits for the next turn; Stop drops what waits and says so.
+    # Plan 55 R2: a message sent while Cyber answers waits for the next turn; Stop drops what waits and says so.
     waiting = cc.ai.send(conv["id"], {"text": "Again"})
     assert waiting["messages"][-1] == {**waiting["messages"][-1], "role": "user", "text": "Again", "queued": True}
     cc.ai.stop(conv["id"])

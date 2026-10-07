@@ -1,5 +1,5 @@
 /**
- * The status reel beside the orb (plan 52 §5.2): one short line at a time — "Needs you: 1 approval", "3 phones
+ * The status reel beside the orb (plan 54 §5.2): one short line at a time — "Needs you: 1 approval", "3 phones
  * online", "Testbench 81% (↑6)" — rolling to the next every few seconds, most urgent first. It stops while hovered or
  * focused, and under prefers-reduced-motion it swaps lines without rolling.
  *

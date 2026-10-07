@@ -23,7 +23,7 @@ export type Route =
   | { name: "remote" }
   | { name: "attach" }
   | { name: "settings" }
-  /** Plan 53 R3: developer previews, not in the sidebar (#/dev/cyber). */
+  /** Plan 55 R3: developer previews, not in the sidebar (#/dev/cyber). */
   | { name: "dev"; view: "cyber" };
 
 export const DEFAULT_ROUTE: Route = { name: "home" };

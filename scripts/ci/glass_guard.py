@@ -7,7 +7,7 @@ Fails when apps/glass/src grows intelligence or unsafe habits:
 - Tauri or other desktop-only runtimes (Glass is a local website)
 - innerHTML / eval / new Function (all UI is built with DOM APIs)
 - runtime npm dependencies (Glass ships as static files; dev tooling only)
-- a Cyber component (src/ui/cyber/*) without an "Origin:" line in its header comment (plan 53 R3: where its code and
+- a Cyber component (src/ui/cyber/*) without an "Origin:" line in its header comment (plan 55 R3: where its code and
   design come from, so a port of outside code always carries its source and licence)
 """
 

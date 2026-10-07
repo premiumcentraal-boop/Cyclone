@@ -1,4 +1,4 @@
-"""Where the Manager keeps things (plan 53 R1, moved unchanged from ``command/ai.py``): its settings, the write-only
+"""Where the Manager keeps things (plan 55 R1, moved unchanged from ``command/ai.py``): its settings, the write-only
 OpenRouter key, spending, OpenRouter's model list, conversations, messages and proposals, all in the Command Center's
 SQLite file.
 
@@ -50,7 +50,7 @@ class StoreMixin:
                  stream: Callable[..., Any] | None = None) -> None:
         self._c = center
         self._send = send or openapi.request
-        # Plan 53 R2: answers stream from the provider. A caller that brings its own ``send`` (tests, scripted
+        # Plan 55 R2: answers stream from the provider. A caller that brings its own ``send`` (tests, scripted
         # providers) and no ``stream`` gets whole answers, published as one piece.
         self._stream = stream if stream is not None else (None if send is not None else openapi.stream)
         self._spawn = spawn or (lambda fn: threading.Thread(target=fn, name="cyclone-ai-turn", daemon=True).start())
@@ -187,7 +187,7 @@ class StoreMixin:
         if spent_month >= monthly:
             raise AiError(f"This month's AI limit (${monthly:.2f}) is reached. Raise it in AI settings.")
 
-    # ------------------------------------------------------------------ Glass reports back (plan 53 R5)
+    # ------------------------------------------------------------------ Glass reports back (plan 55 R5)
 
     def ui_result(self, body: Any) -> dict[str, Any]:
         """Glass could not carry out a ui action (a row not on the page, a tab that does not exist). Kept as a quiet note
@@ -205,7 +205,7 @@ class StoreMixin:
                 self._add(row["id"], "note", {"text": f"Glass could not show that ({call_id}): {detail or 'not on the page'}.", "quiet": True})
         return {"ok": True}
 
-    # ------------------------------------------------------------------ presence (plan 53 R4)
+    # ------------------------------------------------------------------ presence (plan 55 R4)
 
     def presence(self) -> dict[str, Any]:
         """What the dock shows beside Cyber: whether it can work, and a few short lines, most urgent first. Counts
@@ -410,7 +410,7 @@ class StoreMixin:
                             (state, detail[:300], self._c._clock(), cid))
         self.events.publish("state", cid, state=state, detail=detail[:300])
 
-    # --- the queue (plan 53 R2): a message sent while Cyber answers waits for the next turn
+    # --- the queue (plan 55 R2): a message sent while Cyber answers waits for the next turn
 
     def _queued(self, cid: str) -> list[Any]:
         return self._c._db.execute("SELECT seq, body FROM ai_message WHERE conversation_id = ? AND role = 'queued' ORDER BY seq",
@@ -520,13 +520,13 @@ class StoreMixin:
         for r in rows:
             body = json.loads(r["body"])
             if r["role"] == "queued":
-                # Plan 53 R2: shown after the answer in progress, marked as waiting for the next turn.
+                # Plan 55 R2: shown after the answer in progress, marked as waiting for the next turn.
                 waiting.append({"seq": r["seq"], "role": "user", "text": body.get("text", ""), "at": r["at"], "queued": True})
                 continue
             if r["role"] == "note" and body.get("quiet"):
                 continue
             if r["role"] == "summary":
-                # Plan 53 R2: older turns were summarized for the model; the owner still sees every message.
+                # Plan 55 R2: older turns were summarized for the model; the owner still sees every message.
                 continue
             if r["role"] == "tool":
                 for item in reversed(out):

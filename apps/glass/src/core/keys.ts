@@ -1,5 +1,5 @@
 /**
- * Shortcuts that work the same on Windows and on a Mac (plan 53 R4): Ctrl on Windows and Linux, ⌘ on a Mac, and the
+ * Shortcuts that work the same on Windows and on a Mac (plan 55 R4): Ctrl on Windows and Linux, ⌘ on a Mac, and the
  * label Glass shows follows the computer it runs on ("Ctrl+K" or "⌘K").
  *
  * Chosen to stay clear of what browsers keep for themselves on Windows: Ctrl+J opens Downloads in Chrome and Edge, so

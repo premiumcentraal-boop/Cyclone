@@ -111,6 +111,8 @@ class CycloneAccessibilityService : AccessibilityService() {
         private const val PASTE_SETTLE_MS = 150L
         /** Alpha 93: the wait before a typed field is read back a second time. */
         private const val TYPE_SETTLE_MS = 150L
+        // Plan 52: how long Cyclone waits for the keyboard (or its input connection) after touching a field.
+        private const val KEYBOARD_WAIT_MS = 700L
         /** How long the foreground task's package is reused between structural events. */
         private const val HOST_TTL_MS = 1_000L
         @Volatile var instance: CycloneAccessibilityService? = null
@@ -122,6 +124,8 @@ class CycloneAccessibilityService : AccessibilityService() {
         CycloneProcessDiagnostics.install(applicationContext)
         CycloneProcessDiagnostics.markStage(this, "primary.accessibility.onServiceConnected")
         instance = this
+        // Plan 52: the owner's Hands choice (Precise / Natural / Relaxed, hand, typos) for every gesture and key.
+        runCatching { com.cyclone.mobile.gesture.HandsSettings.apply(applicationContext) }
         DeviceState.accessibilityConnected = true
         DeviceState.addLog("Accessibility connected")
 
@@ -407,6 +411,24 @@ class CycloneAccessibilityService : AccessibilityService() {
             }
             TraceField.targeted(activation.bounds, activation.path)
             TraceField.acted(TraceActKind.TAP, activation.bounds.centerX, activation.bounds.centerY)
+            // Plan 52: with Natural hands, a plainly visible, uncovered control is pressed with a finger (after the
+            // approval check above) instead of ACTION_CLICK. The channel is chosen here, once: a press that changes
+            // nothing is never followed by a semantic click, and anything doubtful keeps the semantic path below.
+            val touchFirst = com.cyclone.mobile.gesture.TouchFirst.decide(
+                snapshot, activation, com.cyclone.mobile.gesture.Hands.style, humanize,
+            )
+            if (touchFirst == com.cyclone.mobile.gesture.TouchFirst.Verdict.TOUCH) {
+                return HumanGestureDispatch.tap(
+                    service = this,
+                    x = activation.bounds.centerX,
+                    y = activation.bounds.centerY,
+                    preference = com.cyclone.mobile.gesture.TouchFirst.touchPreference(humanize),
+                    kind = RuntimeGestureKind.FALLBACK_TAP,
+                    commandId = commandId,
+                    targetBounds = activation.bounds,
+                    mode = "touch_first",
+                )
+            }
             val targetLive = if (activation.path == snapshotNode.path) {
                 node
             } else {
@@ -707,6 +729,92 @@ class CycloneAccessibilityService : AccessibilityService() {
             Thread.sleep(TYPE_SETTLE_MS)
         }
 
+        /**
+         * Plan 52: touch the field like a person so the app opens the keyboard itself (focusing it by Accessibility
+         * never does). Main screen only; one more touch if the keyboard does not appear, then the ladder goes on.
+         */
+        override fun raiseKeyboard(handle: Any): Boolean? {
+            if (displayId != 0) return null
+            val target = handle as? AccessibilityTypeHandle ?: return null
+            val node = target.node
+            if (node.isPassword) return null
+            if (node.isFocused && keyboardOnScreen()) return true
+            val rect = Rect().also { node.getBoundsInScreen(it) }
+            if (rect.width() < 24 || rect.height() < 16) return null
+            // The middle-left of the field: clear of trailing clear/eye icons a finger could press instead.
+            val zone = UiBounds(
+                rect.left + (rect.width() * 0.2f).toInt(), rect.top + (rect.height() * 0.25f).toInt(),
+                rect.left + (rect.width() * 0.6f).toInt(), rect.bottom - (rect.height() * 0.25f).toInt(),
+            )
+            if (keyboardCovers(zone)) return null
+            repeat(2) { attempt ->
+                val tapped = HumanGestureDispatch.tap(
+                    service = this@CycloneAccessibilityService,
+                    x = zone.centerX,
+                    y = zone.centerY,
+                    preference = HumanizePreference.LIGHT,
+                    kind = RuntimeGestureKind.FALLBACK_TAP,
+                    targetBounds = zone,
+                    mode = "keyboard_touch",
+                )
+                if (!tapped) return if (attempt == 0) null else false
+                if (waitForKeyboard(KEYBOARD_WAIT_MS)) return true
+            }
+            return false
+        }
+
+        /**
+         * Plan 52: key-by-key typing through the Accessibility input method (Android 13+), with the owner's own
+         * keyboard on screen. Only into the field Cyclone touched (same app, focused, not a password editor), and
+         * only while the agent may act. The value never leaves this process; nothing about the keys is recorded.
+         */
+        override fun typeKeys(
+            handle: Any,
+            strokes: List<com.cyclone.mobile.gesture.typing.Keystroke>,
+        ): PhoneTypeEngine.KeysOutcome {
+            if (displayId != 0) return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            val target = handle as? AccessibilityTypeHandle ?: return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            if (target.node.isPassword) return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            val method = runCatching { inputMethod }.getOrNull()
+            if (method == null) {
+                com.cyclone.mobile.gesture.Hands.keystrokesSupported = false
+                return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            }
+            val expectedPackage = target.node.packageName?.toString()
+            fun connection(): android.accessibilityservice.InputMethod.AccessibilityInputConnection? {
+                if (!method.currentInputStarted) return null
+                val info = method.currentInputEditorInfo ?: return null
+                if (expectedPackage != null && info.packageName != expectedPackage) return null
+                if (secretEditor(info.inputType)) return null
+                return method.currentInputConnection
+            }
+            var input = connection()
+            var waited = 0L
+            while (input == null && waited < KEYBOARD_WAIT_MS) {
+                Thread.sleep(50L)
+                waited += 50L
+                input = connection()
+            }
+            if (input == null) return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            if (!target.node.refresh() || !target.node.isFocused) return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+            val rect = Rect().also { target.node.getBoundsInScreen(it) }
+            TraceField.acted(TraceActKind.TYPE, rect.exactCenterX(), rect.exactCenterY())
+            // Replace whatever the field holds, as set-text does: the first key overwrites the selection.
+            input.performContextMenuAction(android.R.id.selectAll)
+            for (stroke in strokes) {
+                Thread.sleep(stroke.delayMs)
+                if (!agentCanAct()) return PhoneTypeEngine.KeysOutcome.STOPPED
+                val live = connection() ?: return PhoneTypeEngine.KeysOutcome.UNAVAILABLE
+                if (stroke.backspace) {
+                    live.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_DEL))
+                    live.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_DEL))
+                } else {
+                    live.commitText(stroke.text!!, 1, null)
+                }
+            }
+            return PhoneTypeEngine.KeysOutcome.DONE
+        }
+
         override fun readText(handle: Any): CharSequence? {
             val target = handle as? AccessibilityTypeHandle ?: return null
             if (target.node.isPassword) return null
@@ -752,6 +860,39 @@ class CycloneAccessibilityService : AccessibilityService() {
                 runCatching { if (previous != null) clipboard.setPrimaryClip(previous) else clipboard.clearPrimaryClip() }
             }
         }
+    }
+
+    /** Plan 52: the owner's keyboard (an input-method window) is on screen. */
+    fun keyboardOnScreen(): Boolean = runCatching {
+        windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+    }.getOrDefault(false)
+
+    /** Plan 52: the keyboard covers any part of [bounds]; a finger there would press a key, not the target. */
+    fun keyboardCovers(bounds: UiBounds): Boolean = runCatching {
+        windows.any { window ->
+            window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
+                Rect().also { window.getBoundsInScreen(it) }.intersects(bounds.left, bounds.top, bounds.right, bounds.bottom)
+        }
+    }.getOrDefault(false)
+
+    private fun waitForKeyboard(timeoutMs: Long): Boolean {
+        var waited = 0L
+        while (waited <= timeoutMs) {
+            if (keyboardOnScreen()) return true
+            Thread.sleep(50L)
+            waited += 50L
+        }
+        return false
+    }
+
+    private fun secretEditor(inputType: Int): Boolean {
+        val klass = inputType and android.text.InputType.TYPE_MASK_CLASS
+        val variation = inputType and android.text.InputType.TYPE_MASK_VARIATION
+        return (klass == android.text.InputType.TYPE_CLASS_TEXT && variation in setOf(
+            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            android.text.InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+        )) || (klass == android.text.InputType.TYPE_CLASS_NUMBER && variation == android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD)
     }
 
     fun scroll(selector: ElementSelector?, forward: Boolean = true): Boolean {
@@ -834,6 +975,8 @@ class CycloneAccessibilityService : AccessibilityService() {
         durationMs: Long = 350,
         humanize: HumanizePreference = HumanizePreference.AUTO,
         commandId: String? = null,
+        ending: com.cyclone.mobile.gesture.StrokeEnding? = null,
+        kind: RuntimeGestureKind = RuntimeGestureKind.SWIPE,
     ): Boolean {
         if (!agentCanAct()) return false
         TraceField.acted(TraceActKind.SCROLL, (x1 + x2) / 2f, (y1 + y2) / 2f, x2 - x1, y2 - y1)
@@ -845,8 +988,9 @@ class CycloneAccessibilityService : AccessibilityService() {
             y2 = y2,
             durationMs = durationMs,
             preference = humanize,
-            kind = RuntimeGestureKind.SWIPE,
+            kind = kind,
             commandId = commandId,
+            ending = ending,
         )
     }
 

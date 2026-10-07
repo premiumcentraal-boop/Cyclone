@@ -1,5 +1,5 @@
 /**
- * The project pulse (plan 52 §5.6): one square per day for the last 26 or 52 weeks, coloured by that day's testbench
+ * The project pulse (plan 54 §5.6): one square per day for the last 26 or 52 weeks, coloured by that day's testbench
  * pass rate; a release that day is outlined and a safety failure gets a red dot. A day with no runs stays empty, so
  * "no data" is never drawn as "bad".
  *

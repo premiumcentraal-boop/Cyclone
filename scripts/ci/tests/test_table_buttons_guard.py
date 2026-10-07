@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 BUTTONS = ROOT / "apps/device-gateway/cyclone_device_gateway/command/buttons.py"
-# Plan 53 R1: the workspace tools moved from command/ai.py into the Manager's workspace toolset.
+# Plan 55 R1: the workspace tools moved from command/ai.py into the Manager's workspace toolset.
 AI = ROOT / "apps/device-gateway/cyclone_device_gateway/command/agent/toolsets/workspace.py"
 
 

@@ -302,6 +302,70 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
+                // Plan 52: Hands. How Cyclone touches and types: natural motion, key-by-key typing and human pauses.
+                var hands by remember { mutableStateOf(com.cyclone.mobile.gesture.HandsSettings.read(context)) }
+                fun save(next: com.cyclone.mobile.gesture.HandsPreferences) {
+                    hands = next
+                    com.cyclone.mobile.gesture.HandsSettings.save(context, next)
+                }
+                Text("Hands", fontWeight = FontWeight.Bold)
+                Text(
+                    when (hands.style) {
+                        com.cyclone.mobile.gesture.HandsStyle.PRECISE ->
+                            "Fastest: straight-to-the-point touches and text filled in one go, like earlier versions."
+                        com.cyclone.mobile.gesture.HandsStyle.NATURAL ->
+                            "Moves like a person: swipes speed up and slow down, start in a different spot each time, buttons are " +
+                                "pressed with a finger, the keyboard opens and text is typed key by key, with short pauses to read."
+                        com.cyclone.mobile.gesture.HandsStyle.RELAXED ->
+                            "Like Natural, with slower typing and longer pauses to read each page."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.size(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.cyclone.mobile.gesture.HandsStyle.entries.forEach { style ->
+                        FilterChip(
+                            selected = hands.style == style,
+                            onClick = { save(hands.copy(style = style)) },
+                            label = { Text(style.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                        )
+                    }
+                }
+                if (hands.style.natural) {
+                    Text("The hand you hold your phone in", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.gesture.Handedness.entries.forEach { hand ->
+                            FilterChip(
+                                selected = hands.handedness == hand,
+                                onClick = { save(hands.copy(handedness = hand)) },
+                                label = { Text(if (hand == com.cyclone.mobile.gesture.Handedness.RIGHT) "Right" else "Left") },
+                            )
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Occasional typos", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Now and then a neighbouring key, fixed at once with Backspace. Only in ordinary sentences; never in " +
+                                    "names, emails, links, codes or numbers. The text always ends up exactly right.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = hands.typos, onCheckedChange = { save(hands.copy(typos = it)) })
+                    }
+                    Text(
+                        "Passwords and codes from your Vault are still filled in one step, the way a password manager does.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
                 // Plan 41: Fast mode, the Pilot. Off by default; the full Mind always takes over when the fast model is unsure.
                 var fast by remember { mutableStateOf(com.cyclone.mobile.mind.pilot.FastMode.settings(context)) }
                 fun save(next: com.cyclone.mobile.mind.pilot.FastModeSettings) {

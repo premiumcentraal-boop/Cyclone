@@ -63,7 +63,7 @@
   --shadow-lg: 0 24px 64px rgba(20, 20, 30, 0.22), 0 2px 8px rgba(20, 20, 30, 0.08);
   --hero-glow: radial-gradient(120% 140% at 0% 0%, rgba(91, 91, 214, 0.14), transparent 60%);
 
-  /* Cyber, the Glass Manager (plan 52 §4): the character, states, trail, ring and pulse heatmap. */
+  /* Cyber, the Glass Manager (plan 54 §4): the character, states, trail, ring and pulse heatmap. */
   --cy-shell-top: #ffffff;
   --cy-shell-bottom: #e3e5f6;
   --cy-shell-edge: #c9cce6;
@@ -81,7 +81,7 @@
   --mgr-heat-3: #45bd7c;
   --mgr-heat-4: #1f9d5c;
   --mgr-glass: rgba(255, 255, 255, 0.82);
-  /* Motion (plan 52 §4); styles/cyber.css turns all of it off under prefers-reduced-motion. */
+  /* Motion (plan 54 §4); styles/cyber.css turns all of it off under prefers-reduced-motion. */
   --mgr-spring: 320ms cubic-bezier(0.2, 0.9, 0.25, 1.15);
   --mgr-ease: 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
   --mgr-reel: 420ms cubic-bezier(0.2, 0.7, 0.2, 1);

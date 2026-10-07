@@ -1,5 +1,5 @@
 /**
- * Cyber moves Glass (plan 53 R5): carries out the `ui.action` events Cyber's runtime publishes — open a page, press a
+ * Cyber moves Glass (plan 55 R5): carries out the `ui.action` events Cyber's runtime publishes — open a page, press a
  * filter tab or type into the search box, ring one row — one after the other, so "open Runs, filter failed, point at
  * run 9f2c" happens in that order even while the page is still loading. What Glass cannot do (a row that is not on the
  * page) is reported back once (`POST /v1/cc/ai/ui-result`) so Cyber can say so; what works needs no reply.
@@ -179,7 +179,7 @@ export function createUiActions(deps: UiActionDeps): UiActions {
   };
 }
 
-/** What the owner sees, for Cyber (plan 53 R5): the page title and the marked rows on screen, as one short line. */
+/** What the owner sees, for Cyber (plan 55 R5): the page title and the marked rows on screen, as one short line. */
 export function screenSummary(scope: ParentNode | null, limit = 1500): string {
   if (!scope) return "";
   const title = (scope.querySelector(".page-title")?.textContent ?? "").trim();

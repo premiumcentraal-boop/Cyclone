@@ -1,5 +1,5 @@
 /**
- * Cyber's live events (plan 53 R2, `cyclone.manager.events/1`): one socket to the local runtime that says what Cyber
+ * Cyber's live events (plan 55 R2, `cyclone.manager.events/1`): one socket to the local runtime that says what Cyber
  * is doing as it happens — text as it is written, tools as they run, proposals as they appear. Glass only draws them;
  * the runtime holds the key and calls the model. When the socket drops, it reconnects with `afterSeq` so nothing is
  * missed; when the runtime says events were lost (`gap`), the caller reloads the conversation.

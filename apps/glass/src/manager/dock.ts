@@ -1,5 +1,5 @@
 /**
- * Cyber's dock (plan 52 §3, plan 53 R4): the character, its name and the status reel at the foot of the sidebar, on
+ * Cyber's dock (plan 54 §3, plan 55 R4): the character, its name and the status reel at the foot of the sidebar, on
  * every Glass page; a floating pill on narrow screens. Pressing it opens Cyber's panel. The mood follows Cyber's live
  * events (any conversation) and the dock summary (`/v1/cc/ai/presence`), which is read every 30 s and after anything
  * that changes it. Glass draws; the runtime decides.
@@ -18,7 +18,7 @@ export interface DockDeps {
   client: GatewayClient;
   socket?: SocketFactory;
   onOpen(): void;
-  /** Every live event, for others that follow Cyber (plan 53 R5: its ui actions). */
+  /** Every live event, for others that follow Cyber (plan 55 R5: its ui actions). */
   onAnyEvent?(event: AiEvent): void;
   /** The key that opens the panel, shown in the tooltip ("Ctrl+." or "⌘."). */
   panelKey: string;

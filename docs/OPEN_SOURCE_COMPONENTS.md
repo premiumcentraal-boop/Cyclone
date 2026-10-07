@@ -26,17 +26,17 @@ See `docs/MOBILERUN_PORTAL_BACKEND.md` for architecture and configuration.
 
 - Project: `NousResearch/hermes-agent`
 - License: **MIT** (checked 2026-10-06 on the project page)
-- Cyclone usage (plan 52/53): **structure only** — the Manager's layout (self-registering tool registry, tiered
+- Cyclone usage (plan 54/53): **structure only** — the Manager's layout (self-registering tool registry, tiered
   system prompt, store/loop split; later capped memory files, playbooks in `SKILL.md` form, session search,
   heartbeat) follows Hermes' design.
-- Source copied into Cyclone: **No** (as of plan 53 R1). If a later run copies code (for example the context
+- Source copied into Cyclone: **No** (as of plan 55 R1). If a later run copies code (for example the context
   compressor), record the upstream commit here and keep the MIT notice in the copied file's header.
 
 ## Space UI
 
 - Project: `adrielzimbril/space-ui` (https://spaceui.one)
 - License: **MIT** for the free components (checked 2026-10-06); some components are "Pro" and were never opened.
-- Cyclone usage (plan 52/53 R3): **design reference only** for Cyber's components in `apps/glass/src/ui/cyber/`
+- Cyclone usage (plan 54/53 R3): **design reference only** for Cyber's components in `apps/glass/src/ui/cyber/`
   (orb after Bloop Orb, status reel after Handle Reel, work trail after Timeline, project pulse after GitHub Activity,
   status dot, alert list, watch list, phone avatars).
 - Source copied into Cyclone: **No.** Each file in `apps/glass/src/ui/cyber/` says so in its `Origin:` header line,

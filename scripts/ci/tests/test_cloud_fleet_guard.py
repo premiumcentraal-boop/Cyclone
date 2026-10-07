@@ -76,6 +76,6 @@ def test_no_model_facing_tool_can_manage_cloud_phones():
             body = text(path)
             assert "/v1/cloud" not in body and "cloud_fleet" not in body, path
     command = ROOT / "apps/device-gateway/cyclone_device_gateway/command"
-    # Plan 53 R1: the Manager lives in command/agent/ (ai.py is its facade).
+    # Plan 55 R1: the Manager lives in command/agent/ (ai.py is its facade).
     ai = "\n".join(text(p) for p in [command / "ai.py", *sorted((command / "agent").rglob("*.py"))])
     assert "/v1/cloud" not in ai and "cloud_fleet" not in ai

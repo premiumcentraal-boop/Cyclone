@@ -1,4 +1,4 @@
-"""Cyber moves Glass (plan 53 R5): open a page, set a page's filter or search, highlight what it talks about.
+"""Cyber moves Glass (plan 55 R5): open a page, set a page's filter or search, highlight what it talks about.
 
 These tools change nothing in Cyclone: they only move the owner's view, so they run at once without a proposal (kind
 ``ui``). Each call is published as a ``ui.action`` event; Glass carries it out if it is open and reports back only when

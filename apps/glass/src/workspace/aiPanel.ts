@@ -1,5 +1,5 @@
 /**
- * Cyber's panel (plan 33 §7 "Ask AI", on every Glass page since plan 53 R4): a panel beside the page, like Notion's. The owner writes; the runtime's AI reads the
+ * Cyber's panel (plan 33 §7 "Ask AI", on every Glass page since plan 55 R4): a panel beside the page, like Notion's. The owner writes; the runtime's AI reads the
  * workspace and answers, and every change it wants to make arrives as a card to apply or discard (tasks and routines
  * always; page edits unless the owner let it edit directly). Glass only shows and sends: the runtime holds the key and
  * calls the model.
@@ -22,11 +22,11 @@ const POLL_MS = 900;
 const LIVE_DRAW_MS = 50;
 
 export interface AiPanelDeps {
-  /** Plan 53 R2: Cyber's live events. Without it the panel polls, as before. */
+  /** Plan 55 R2: Cyber's live events. Without it the panel polls, as before. */
   socket?: SocketFactory;
-  /** Plan 53 R4: the Glass page the owner is on ("Runs", "Lab"), sent with each message. */
+  /** Plan 55 R4: the Glass page the owner is on ("Runs", "Lab"), sent with each message. */
   where?: () => string;
-  /** Plan 53 R5: what is on the owner's screen (page title and the rows it shows), sent with each message. */
+  /** Plan 55 R5: what is on the owner's screen (page title and the rows it shows), sent with each message. */
   view?: () => string;
   /** The owner is writing to Cyber (the dock listens). */
   onListening?(on: boolean): void;
@@ -144,7 +144,7 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
   let liveDraw: ReturnType<typeof setTimeout> | null = null;
   let reloading = false;
   let reloadAgain = false;
-  // Plan 53 R4: the character in the header shows what Cyber is doing in this conversation.
+  // Plan 55 R4: the character in the header shows what Cyber is doing in this conversation.
   const face = createCharacter({ size: 30, mood: "idle", label: "Cyber" });
   let activity: Activity = emptyActivity();
   let faceCheck: ReturnType<typeof setTimeout> | null = null;
@@ -414,7 +414,7 @@ export function createAiPanel(context: () => GlassContext, deps: AiPanelDeps = {
       else void send(String(input.value ?? ""));
     });
     row.append(select, spend, action);
-    // Plan 53 R2: while Cyber answers, Enter (or this button) queues the message for the next turn.
+    // Plan 55 R2: while Cyber answers, Enter (or this button) queues the message for the next turn.
     input.placeholder = working ? "Write the next message; it is answered after this one…" : "Ask anything, or tell it what to plan…";
     setChildren(foot, input, row);
   }

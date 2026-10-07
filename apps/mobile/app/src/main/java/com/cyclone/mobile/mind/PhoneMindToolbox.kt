@@ -87,6 +87,9 @@ class PhoneMindToolbox(
     private var screen: AgentPageCard? = null
     private var controlsById: Map<String, AgentElementCandidate> = emptyMap()
     private var fresh = false
+    /** Plan 52: when the current page was read and how much text it shows, for the human pause before acting. */
+    private var observedAtMs = 0L
+    private var pageTextChars = 0
     private var finishRejections = 0
     private var plan: List<MindPlanStep> = emptyList()
     /** Screen pixels per screenshot pixel of the last screen_look; tap_point is only possible after one. */
@@ -297,7 +300,25 @@ class PhoneMindToolbox(
     private var fieldValues: Map<String, String> = emptyMap()
     private var notificationKeys: Map<String, String> = emptyMap()
 
+    /**
+     * Plan 52: a short human pause before acting (Natural / Relaxed hands): time to read the page and find the control.
+     * The time the model already spent thinking counts toward it; a stop ends it at once.
+     */
+    private fun humanPause() {
+        val pause = com.cyclone.mobile.gesture.Pacing.pauseMs(
+            com.cyclone.mobile.gesture.Hands.style, pageTextChars,
+            System.currentTimeMillis() - observedAtMs, com.cyclone.mobile.gesture.SeededGestureRng(System.nanoTime()),
+        )
+        var left = pause
+        while (left > 0 && !cancelled()) {
+            val slice = minOf(left, 50L)
+            Thread.sleep(slice)
+            left -= slice
+        }
+    }
+
     private fun bind(page: AgentPageCard): List<MindRef> {
+        observedAtMs = System.currentTimeMillis()
         screen = page
         runCatching { trail?.screen(page.legacyPage) }
         // The page card is a shortlist; the Mind reads every control of the observation when the environment has them.
@@ -305,6 +326,7 @@ class PhoneMindToolbox(
         controlsById = controls.associateBy { it.elementId }
         fresh = true
         val bound = refs.bind(page, controls)
+        pageTextChars = bound.sumOf { it.label.length }
         fieldValues = bound.filter { it.editable && !it.password }
             .mapNotNull { ref -> env.fieldValue(ref.elementId)?.let { ref.elementId to it } }.toMap()
         workspace?.let { ws -> runCatching { ws.observe(facts(page, bound)) } }
@@ -1164,6 +1186,8 @@ class PhoneMindToolbox(
                 params.put("elementId", again.elementId)
             }
         }
+        humanPause()
+        if (cancelled()) return MindToolResult("NOT RUN: the owner stopped the mission.", ok = false)
         owner.status(workspace?.narrate(done) ?: done)
         fresh = false
         // Read before the tap: what is in the message box now is what a send tap sends.
@@ -1336,20 +1360,13 @@ class PhoneMindToolbox(
         }
         val (left, top, right, bottom) = area.toList()
         if (right - left < 20 || bottom - top < 20) return MindToolResult.error("That area is too small to swipe.")
-        val fraction = if (arguments.optString("distance") == "short") 0.3 else 0.6
-        val cx = (left + right) / 2
-        val cy = (top + bottom) / 2
-        val dx = ((right - left) * fraction / 2).toInt()
-        val dy = ((bottom - top) * fraction / 2).toInt()
-        // "left" moves the content left: the finger travels from right to left.
-        val (x1, y1, x2, y2) = when (direction) {
-            "left" -> listOf(cx + dx, cy, cx - dx, cy)
-            "right" -> listOf(cx - dx, cy, cx + dx, cy)
-            "up" -> listOf(cx, cy + dy, cx, cy - dy)
-            else -> listOf(cx, cy - dy, cx, cy + dy)
-        }
-        return act("phone.swipe", JSONObject().put("x1", x1).put("y1", y1).put("x2", x2).put("y2", y2)
-            .put("durationMs", 350).put("guard", true), "Swiped $direction on $where")
+        // Plan 52: the content moves with the finger, so the direction is the finger's. The phone's hand model picks
+        // where the thumb lands, how far it goes and how fast, so no two swipes are the same; the executor's approval
+        // check still classifies the start point it picked.
+        val amount = if (arguments.optString("distance") == "short") "peek" else "page"
+        val region = JSONObject().put("left", left).put("top", top).put("right", right).put("bottom", bottom)
+        return act("phone.swipe", JSONObject().put("direction", direction).put("amount", amount).put("region", region)
+            .put("guard", true), "Swiped $direction on $where")
     }
 
     private fun notifications(): MindToolResult {

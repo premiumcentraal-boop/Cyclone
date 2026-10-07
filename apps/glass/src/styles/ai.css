@@ -48,7 +48,7 @@
 .ai-act-mark { width: 16px; text-align: center; }
 .ai-act-error .ai-act-mark, .ai-act-error { color: var(--warning); }
 .ai-act-error { flex-basis: 100%; padding-left: 22px; font-size: 12px; }
-/* Plan 53 R2: Cyber's answer as it is written, its tools as they run, and messages waiting for the next turn. */
+/* Plan 55 R2: Cyber's answer as it is written, its tools as they run, and messages waiting for the next turn. */
 .ai-live .ai-md > :last-child::after { content: "▍"; color: var(--accent); margin-left: 1px; animation: ai-pulse 1s steps(2, start) infinite; }
 .ai-act-running .ai-act-mark { color: var(--accent); animation: ai-pulse 1.2s ease-in-out infinite; }
 .ai-act-running { color: var(--text); }

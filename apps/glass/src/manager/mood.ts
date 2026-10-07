@@ -1,5 +1,5 @@
 /**
- * Which mood Cyber shows (plan 53 R4), from its live events and the dock summary. Pure, so the rules are tested once
+ * Which mood Cyber shows (plan 55 R4), from its live events and the dock summary. Pure, so the rules are tested once
  * and the dock and the panel agree:
  *
  *   offline   — Cyber cannot work (no key, no model, the day's limit) and nothing is running

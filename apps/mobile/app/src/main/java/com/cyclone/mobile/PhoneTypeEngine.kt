@@ -104,6 +104,23 @@ object PhoneTypeEngine {
         fun paste(handle: Any, value: CharSequence): Boolean = false
         /** Alpha 93: a short wait for a field that shows its new text a frame late (Settings search). Off the main thread. */
         fun settle() {}
+        /**
+         * Plan 52: touch the field with a finger so the app opens the keyboard, the way the owner starts typing.
+         * True when the keyboard is on screen afterwards, false when it did not appear, null when not possible here.
+         */
+        fun raiseKeyboard(handle: Any): Boolean? = null
+        /** Plan 52: type [strokes] key by key through the keyboard connection into the focused field, replacing its text. */
+        fun typeKeys(handle: Any, strokes: List<com.cyclone.mobile.gesture.typing.Keystroke>): KeysOutcome = KeysOutcome.UNAVAILABLE
+    }
+
+    /** Plan 52: how key-by-key typing went. */
+    enum class KeysOutcome {
+        /** Every key went in (the read-back still decides whether the field holds the text). */
+        DONE,
+        /** No keyboard connection to this field: the ladder goes on to set-text. */
+        UNAVAILABLE,
+        /** The owner took control or the field lost focus mid-way: nothing more is written. */
+        STOPPED,
     }
 
     data class LiveResult(
@@ -116,16 +133,19 @@ object PhoneTypeEngine {
         val textDigest: String? = null,
         val elementId: String? = null,
         val rawNodeId: String? = null,
-        /** How the text went in: set_text or paste (plan 21). */
+        /** How the text went in: keys (plan 52), set_text or paste (plan 21). */
         val method: String = "set_text",
+        /** Plan 52: shown / not_shown when Cyclone opened the keyboard by touching the field; null when it did not try. */
+        val keyboard: String? = null,
         /** The field was read back and holds exactly the text (normalised). False: Cyclone could not prove it. */
         val textVerified: Boolean = false,
     ) {
         fun toPayload(): JSONObject = JSONObject()
             .put("performed", ok)
             .put("setText", setTextPerformed)
-            .put("action", if (method == "paste") "ACTION_PASTE" else "ACTION_SET_TEXT")
+            .put("action", when (method) { "paste" -> "ACTION_PASTE"; "keys" -> "IME_COMMIT"; else -> "ACTION_SET_TEXT" })
             .put("method", method)
+            .put("keyboard", keyboard ?: JSONObject.NULL)
             .put("textVerified", textVerified)
             .put("focusRecovered", focusRecovered)
             .put("afterStateVerified", afterStateVerified)
@@ -249,6 +269,9 @@ object PhoneTypeEngine {
         value: CharSequence,
         host: LiveHost,
         redactObservedText: Boolean = false,
+        /** Plan 52: Natural or Relaxed hands type key by key first; Precise keeps set-text first. */
+        style: com.cyclone.mobile.gesture.HandsStyle = com.cyclone.mobile.gesture.Hands.style,
+        rng: com.cyclone.mobile.gesture.GestureRng = com.cyclone.mobile.gesture.SeededGestureRng(System.nanoTime()),
     ): LiveResult {
         if (digest(value) != plan.valueDigest || value.length != plan.valueLength) {
             return fail(plan, PhoneToolErrorCode.INTERNAL_ERROR, "Type plan does not match the authorized value")
@@ -264,7 +287,21 @@ object PhoneTypeEngine {
             return fail(plan, PhoneToolErrorCode.ACTION_FAILED, "Editable target is disabled")
         }
 
+        // Plan 52: key-by-key typing for ordinary text with Natural hands. Secrets keep their single set-text fill (the
+        // way password managers and Autofill fill a field), so they never take this path.
+        val keyed = !redactObservedText && style.natural && com.cyclone.mobile.gesture.Hands.keystrokesSupported &&
+            com.cyclone.mobile.gesture.typing.KeystrokePlanner.eligible(value)
+        var keyboard: String? = null
         var focusRecovered = false
+        if (keyed) {
+            // Touch the field like a person: the app focuses it and opens the keyboard itself.
+            host.raiseKeyboard(handle)?.let { shown ->
+                keyboard = if (shown) "shown" else "not_shown"
+                handle = host.refresh(handle) ?: handle
+                view = host.view(handle, redactObservedText) ?: view
+                if (view.focused) focusRecovered = true
+            }
+        }
         if (!view.focused) {
             focusRecovered = host.focus(handle)
             handle = host.refresh(handle) ?: handle
@@ -288,6 +325,7 @@ object PhoneTypeEngine {
         // text, paste it and read again. Long drafts go straight to paste. Secret fields keep the set-text-only path.
         val order = when {
             redactObservedText -> listOf("set_text")
+            keyed && keyboard == "shown" -> listOf("keys", "set_text", "paste")
             value.length > PASTE_FIRST_CHARS -> listOf("paste", "set_text")
             else -> listOf("set_text", "paste")
         }
@@ -297,8 +335,22 @@ object PhoneTypeEngine {
         var after: LiveView? = null
         var strict = false
         for (attempt in order) {
-            val performed = if (attempt == "paste") host.paste(afterHandle, value) else host.setText(afterHandle, value)
-            if (!performed && attempt == "paste") continue
+            val performed = when (attempt) {
+                "keys" -> {
+                    val strokes = com.cyclone.mobile.gesture.typing.KeystrokePlanner.plan(
+                        value, style, com.cyclone.mobile.gesture.Hands.typos, rng,
+                    )
+                    when (host.typeKeys(afterHandle, strokes)) {
+                        KeysOutcome.DONE -> true
+                        KeysOutcome.UNAVAILABLE -> false
+                        KeysOutcome.STOPPED -> return fail(plan, PhoneToolErrorCode.HUMAN_HAS_CONTROL,
+                            "Typing stopped: the owner took control or the field lost focus")
+                    }
+                }
+                "paste" -> host.paste(afterHandle, value)
+                else -> host.setText(afterHandle, value)
+            }
+            if (!performed && attempt != "set_text") continue
             set = set || performed
             method = attempt
             afterHandle = host.refresh(afterHandle) ?: afterHandle
@@ -349,6 +401,7 @@ object PhoneTypeEngine {
                 elementId = plan.elementId,
                 rawNodeId = plan.rawNodeId,
                 method = method,
+                keyboard = keyboard,
             )
         }
         if (!verified) {
@@ -366,6 +419,7 @@ object PhoneTypeEngine {
                 elementId = plan.elementId,
                 rawNodeId = plan.rawNodeId,
                 method = method,
+                keyboard = keyboard,
             )
         }
         return LiveResult(
@@ -379,6 +433,7 @@ object PhoneTypeEngine {
             rawNodeId = plan.rawNodeId,
             method = method,
             textVerified = strict || exactRedactedMatch,
+            keyboard = keyboard,
         )
     }
 

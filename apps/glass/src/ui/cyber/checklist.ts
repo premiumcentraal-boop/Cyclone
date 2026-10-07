@@ -1,6 +1,6 @@
 /**
- * What Cyber watches (plan 52 §5.8): plain-language lines, each with an on/off switch and when it was last checked.
- * The heartbeat (plan 53 R7) reads this list; nothing here checks anything itself.
+ * What Cyber watches (plan 54 §5.8): plain-language lines, each with an on/off switch and when it was last checked.
+ * The heartbeat (plan 55 R7) reads this list; nothing here checks anything itself.
  *
  * Origin: original Cyclone code; after Space UI's Interactive Checklist (MIT, https://github.com/adrielzimbril/space-ui);
  * no Space UI source is copied.
@@ -20,7 +20,7 @@ export interface ChecklistOptions {
   onToggle(item: WatchItem, on: boolean): void;
 }
 
-/** The six things Cyber watches from the start (plan 52 §7). */
+/** The six things Cyber watches from the start (plan 54 §7). */
 export const DEFAULT_WATCH: WatchItem[] = [
   { id: "phone-offline", text: "Tell me when a phone is offline for more than 1 hour", on: true },
   { id: "testbench-drop", text: "Tell me when the testbench pass rate drops more than 5 points", on: true },

@@ -1,5 +1,5 @@
 /**
- * Cyber's palette (plan 52 §5.3, plan 53 R4): Ctrl+K on Windows, ⌘K on a Mac, from any Glass page. Type to
+ * Cyber's palette (plan 54 §5.3, plan 55 R4): Ctrl+K on Windows, ⌘K on a Mac, from any Glass page. Type to
  * **go to** a page (Glass screens and workspace pages), **do** a quick thing (open Cyber, its settings, the
  * approvals), or **ask** Cyber — the question opens Cyber's panel and is sent from the page you are on.
  * Our own design: arrow keys, Enter and Esc; nothing here talks to a model.

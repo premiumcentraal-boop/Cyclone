@@ -1,5 +1,5 @@
 /**
- * Cyber's alerts inbox (plan 52 §5.7): what the heartbeat found, newest first and grouped by day, with an unread dot.
+ * Cyber's alerts inbox (plan 54 §5.7): what the heartbeat found, newest first and grouped by day, with an unread dot.
  * Swipe a row left (or press ✕) to dismiss it; dismissing the same kind three times offers "Stop telling me about
  * this", which the caller turns into a checklist change.
  *

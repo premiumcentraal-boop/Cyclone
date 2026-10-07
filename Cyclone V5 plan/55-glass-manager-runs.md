@@ -1,6 +1,6 @@
-# Plan 53: The Glass Manager — build runs
+# Plan 55: The Glass Manager — build runs
 
-Status: **R1–R5 built (2026-10-06/07, alpha.111 / Glass alpha.62, unreleased); R6–R10 planned. Owner decisions taken (design §11): Cyber, own loop, `openai/gpt-6-luna` for checks, GitHub read access, build now as part of V5.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [52](52-glass-manager-design.md).
+Status: **R1–R5 built (2026-10-06/07, alpha.112 / Glass alpha.62, unreleased); R6–R10 planned. Owner decisions taken (design §11): Cyber, own loop, `openai/gpt-6-luna` for checks, GitHub read access, build now as part of V5.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [54](54-glass-manager-design.md).
 Ten runs, about 6–7 weeks at one run per 2–4 days. Each run is one PR, one alpha, green CI, and states physical
 verification honestly.
 
@@ -17,7 +17,7 @@ verification honestly.
 - **Checks (every run).** `python -m pytest apps/device-gateway/tests -q`, Glass `npm test` and `npm run build`,
   `python scripts/ci/glass_guard.py`, `python scripts/ci/release_versions.py --check`.
 
-## R1 — The agent package (no visible change) · built, ships with alpha.111
+## R1 — The agent package (no visible change) · built, ships with alpha.112
 
 **Goal:** Hermes' layout under the existing behaviour.
 
@@ -36,7 +36,7 @@ verification honestly.
   same rules (one owner-apply path, one allowed workspace-edit path). PyInstaller lists the new modules.
   Tests: `test_agent_registry.py` (22) + the existing suites unchanged. The ``ui`` kind arrives with R5.
 
-## R2 — Streaming, queue and compression · built in alpha.111
+## R2 — Streaming, queue and compression · built in alpha.112
 
 **Goal:** replies stream; long chats stay inside context.
 
@@ -59,7 +59,7 @@ verification honestly.
   bubbles, polling only while the socket is down. Tests: `test_agent_stream.py` (8), `ai-stream.test.mjs` (3).
   Physical acceptance against a real key: UNVERIFIED.
 
-## R3 — Design foundation · built, rides in alpha.111 (unreleased)
+## R3 — Design foundation · built, rides in alpha.112 (unreleased)
 
 **Goal:** the components exist and look right before they are wired in.
 
@@ -81,11 +81,12 @@ verification honestly.
   Gallery at `#/dev/cyber` (not in the sidebar). Space UI is a design reference only: no source copied; every file
   carries an `Origin:` line and `glass_guard.py` requires it. Tests: `cyber-components.test.mjs` (9), guard test (+1).
   Checked in Chromium (WebGL2 renderer) at 1280 px light and dark and at 400 px: no console errors, no sideways scroll.
-  Since alpha.111 was not merged yet, R3 rides in it instead of taking alpha.112; later runs move up one.
+  R3 rode with R1–R2 instead of taking its own alpha. Human Hands (plan 52) then shipped as alpha.111 first, so R1–R5
+  ship together in alpha.112 and later runs move up one; these plans were numbered 52/53 until then.
   **Changed in R4:** the orb is replaced by the character (`ui/cyber/character.ts`) at the owner's request; `orb.ts`
   and its tests are removed.
 
-## R4 — Presence everywhere · built, rides in alpha.111 (unreleased)
+## R4 — Presence everywhere · built, rides in alpha.112 (unreleased)
 
 **Goal:** one Manager on every page.
 
@@ -110,7 +111,7 @@ verification honestly.
   Tests: `test_agent_presence.py` (4), `cyber-presence.test.mjs` (6), character tests in `cyber-components.test.mjs`.
   Panel-open timing was not measured; the palette and dock were checked in Chromium (light, dark, 400 px).
 
-## R5 — The Manager can move Glass · built, rides in alpha.111 (unreleased)
+## R5 — The Manager can move Glass · built, rides in alpha.112 (unreleased)
 
 **Goal:** it points at what it talks about.
 
@@ -134,7 +135,7 @@ verification honestly.
   filter tab (`segmented`) and every search box (`searchInput`). Actions arrive on the dock's live socket.
   Tests: `test_agent_glass_ui.py` (15), `cyber-ui.test.mjs` (5); the ring was checked in Chromium.
 
-## R6 — Project sight · alpha.112
+## R6 — Project sight · alpha.113
 
 **Goal:** it can answer "how close are we to V5?" with numbers.
 
@@ -146,7 +147,7 @@ verification honestly.
 - Outside text (run summaries, PR bodies, notes) reaches the model as tool results marked as information.
 - Tests per toolset with fixtures; GitHub tool refuses any repo but the configured one and any write verb.
 
-## R7 — Proactive: heartbeat, alerts, brief, pulse · alpha.113 (Glass alpha.63)
+## R7 — Proactive: heartbeat, alerts, brief, pulse · alpha.114 (Glass alpha.63)
 
 **Goal:** it speaks up only when it should.
 
@@ -158,7 +159,7 @@ verification honestly.
 - Glass: alerts tab (§5.7), brief card, pulse on Home, orb `attention`.
 - Tests: silence on nothing, dedup, quiet hours, caps cover heartbeat spend, brief shown once per day.
 
-## R8 — Memory and session search · alpha.114 (Glass alpha.64)
+## R8 — Memory and session search · alpha.115 (Glass alpha.64)
 
 **Goal:** it remembers you and the project.
 
@@ -169,7 +170,7 @@ verification honestly.
 - Glass: memory chips with undo; Settings → Manager → Memory (view, edit, clear).
 - Tests: caps enforced, secret-shaped text refused, undo restores, snapshot frozen mid-conversation, search ranking.
 
-## R9 — Playbooks · alpha.115 (Glass alpha.65)
+## R9 — Playbooks · alpha.116 (Glass alpha.65)
 
 **Goal:** it gets better at recurring work.
 
@@ -181,7 +182,7 @@ verification honestly.
 - Glass: playbook chips, Settings → Manager → Playbooks (draft / approved, diff of each patch, approve, delete).
 - Tests: progressive loading, drafts never used, patch diff, Lab gate, secret screen on content.
 
-## R10 — Overnight pass and polish · alpha.116 (Glass alpha.66)
+## R10 — Overnight pass and polish · alpha.117 (Glass alpha.66)
 
 **Goal:** it learns while you sleep and the whole thing feels finished.
 

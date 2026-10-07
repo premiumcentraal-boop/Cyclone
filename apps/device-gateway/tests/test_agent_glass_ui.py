@@ -1,4 +1,4 @@
-"""Plan 53 R5: Cyber moves the owner's Glass — open a page, set a filter or search, highlight a row.
+"""Plan 55 R5: Cyber moves the owner's Glass — open a page, set a filter or search, highlight a row.
 
 What must hold: these tools change nothing in Cyclone (no proposal, no audit of a change, no database write besides
 the conversation), they only publish a ``ui.action`` event with checked arguments; anything outside the published pages

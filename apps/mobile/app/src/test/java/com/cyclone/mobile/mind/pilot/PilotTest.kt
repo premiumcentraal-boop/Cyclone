@@ -172,7 +172,14 @@ class PilotTest {
             when {
                 q.step.action == "Open Instagram" && q.screen.app == "Launcher" -> PilotAnswer(Pilot.OPEN_APP, 0.96)
                 // The rapid model is sure the app is open; the smart model's review lands meanwhile.
-                q.step.action == "Open Instagram" -> { Thread.sleep(100); PilotAnswer(Pilot.STEP_DONE, 0.95) }
+                q.step.action == "Open Instagram" -> {
+                    // Wait until the review has really run (a busy CI runner can take longer than a fixed sleep),
+                    // then give its result a moment to land.
+                    val until = System.currentTimeMillis() + 5_000
+                    while (synchronized(reviews) { reviews.isEmpty() } && System.currentTimeMillis() < until) Thread.sleep(5)
+                    Thread.sleep(100)
+                    PilotAnswer(Pilot.STEP_DONE, 0.95)
+                }
                 q.screen.app == "Instagram" && q.screen.title == "Home" -> PilotAnswer("e2", 0.93)
                 q.step.action.startsWith("Open Direct") -> PilotAnswer(Pilot.STEP_DONE, 0.94)
                 q.done.isEmpty() -> PilotAnswer("e7", 0.92)

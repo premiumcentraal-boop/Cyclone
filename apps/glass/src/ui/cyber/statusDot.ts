@@ -1,5 +1,5 @@
 /**
- * A live status dot (plan 52 §5): green and breathing while something is live, still otherwise. Colour is never the
+ * A live status dot (plan 54 §5): green and breathing while something is live, still otherwise. Colour is never the
  * only signal: every dot carries its words for screen readers and as a tooltip.
  *
  * Origin: original Cyclone code; after Space UI's Status Badge (MIT, https://github.com/adrielzimbril/space-ui); no

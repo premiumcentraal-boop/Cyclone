@@ -19,7 +19,7 @@ PROPOSAL_ID = re.compile(r"^prp_[A-Za-z0-9_-]{6,40}$")
 AUTONOMY = ("propose", "workspace")
 DEFAULTS: dict[str, Any] = {"model": None, "dailyCapUsd": 2.0, "monthlyCapUsd": 30.0, "privateOnly": True,
                             "autonomy": "propose", "instructions": ""}
-MAX_STEPS = 25  # plan 53 R2 (was 10); the spending caps still end a turn first
+MAX_STEPS = 25  # plan 55 R2 (was 10); the spending caps still end a turn first
 MAX_QUEUED = 5
 MAX_WHERE = 160
 MAX_VIEW = 1_500

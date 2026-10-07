@@ -1,5 +1,5 @@
 /**
- * The work trail (plan 52 §5.4): what Cyber read and did for one answer, as a vertical timeline — collapsed to one
+ * The work trail (plan 54 §5.4): what Cyber read and did for one answer, as a vertical timeline — collapsed to one
  * line ("Read 3 sources · 4.2 s"), open to every step with its time, state and detail. The same trail shows a playbook
  * run or a Lab experiment's progress.
  *

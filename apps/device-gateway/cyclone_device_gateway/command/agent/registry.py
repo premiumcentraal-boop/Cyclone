@@ -1,4 +1,4 @@
-"""The Manager's tool registry (plan 53 R1; the shape follows Hermes Agent's ``tools/registry.py``, MIT).
+"""The Manager's tool registry (plan 55 R1; the shape follows Hermes Agent's ``tools/registry.py``, MIT).
 
 Each toolset module registers its tools when it is imported, so adding a toolset is one new file and one import in
 ``toolsets/__init__.py``; nothing else keeps a list. The registry holds what the model is told (name, description,
@@ -8,7 +8,7 @@ the Command Center once and dispatches calls through it.
 Rules the registry enforces at registration, so a bad tool fails at import and in CI, never in a turn:
 - **Known kinds only.** ``read`` runs at once; ``workspace`` edits pages, cards and rows (a proposal unless the owner
   lets the AI edit the workspace); ``phone`` may start phone work and is always a proposal; ``ui`` only moves the
-  owner's Glass (plan 53 R5) and changes nothing in Cyclone.
+  owner's Glass (plan 55 R5) and changes nothing in Cyclone.
 - **No forbidden powers.** A name that reads as shell, file, network, delete, approve, vault, password or key access
   is refused: those tools must not exist at all.
 - **Strict schemas.** Every schema is an object with ``additionalProperties: false`` whose required fields exist.

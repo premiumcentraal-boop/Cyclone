@@ -1,4 +1,4 @@
-"""Cyber's live event stream, ``cyclone.manager.events/1`` (plan 52 §8, plan 53 R2; AG-UI-shaped events).
+"""Cyber's live event stream, ``cyclone.manager.events/1`` (plan 54 §8, plan 55 R2; AG-UI-shaped events).
 
 The turn loop publishes what happens as it happens; Glass subscribes over ``/v1/cc/ai/events`` and draws it. Every
 event has ``seq`` (one counter for the whole hub, so one socket can follow every conversation), ``type``,
@@ -7,7 +7,7 @@ event has ``seq`` (one counter for the whole hub, so one socket can follow every
 
 Event types: ``run.started``, ``run.finished``, ``run.failed``, ``state``, ``text.delta``, ``tool.started``,
 ``tool.finished``, ``message.added``, ``proposal.created``, ``proposal.resolved``, ``context.compressed``,
-``ui.action`` (plan 53 R5: open a page, set a filter, highlight something in Glass).
+``ui.action`` (plan 55 R5: open a page, set a filter, highlight something in Glass).
 
 Nothing secret is ever published: events carry what Glass already shows (answer text, tool labels, proposals).
 """

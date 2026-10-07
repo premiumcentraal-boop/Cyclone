@@ -559,7 +559,7 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
 
     @router.websocket("/v1/cc/ai/events")
     async def ai_events(websocket: WebSocket, afterSeq: int = Query(default=-1, ge=-1)):  # noqa: N803 - the wire name
-        """Cyber's live events (plan 53 R2, ``cyclone.manager.events/1``). Same bearer as every route, sent as the
+        """Cyber's live events (plan 55 R2, ``cyclone.manager.events/1``). Same bearer as every route, sent as the
         ``cyclone-token.`` subprotocol like the fleet socket. ``afterSeq`` resumes after a drop; ``hello`` says whether
         events were lost (``gap``: reload the conversation) and carries any answer being written right now."""
         from ..desktop_runtime.api import _accepted_subprotocol, _websocket_authorized

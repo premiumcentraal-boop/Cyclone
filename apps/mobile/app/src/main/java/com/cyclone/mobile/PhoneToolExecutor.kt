@@ -387,21 +387,34 @@ object PhoneToolExecutor {
                 "phone.scroll" -> {
                     val node = chosen?.takeIf { it.scrollable } ?: snapshot.nodes.firstOrNull { it.scrollable }
                         ?: error("UNSUPPORTED: no scrollable control")
-                    val x = node.bounds.centerX
+                    val backwards = p.optString("direction") == "backward"
+                    // Plan 52: Natural hands pick the thumb's start, travel and speed; Precise keeps the fixed stroke.
+                    val natural = com.cyclone.mobile.gesture.NaturalScroll.plan(
+                        snapshot, node, !backwards, com.cyclone.mobile.gesture.Hands.style, humanize, viewport,
+                        com.cyclone.mobile.gesture.Hands.handedness,
+                        com.cyclone.mobile.gesture.SeededGestureRng(
+                            com.cyclone.mobile.gesture.HumanGestureSeed.derive(request.commandId, "workspace_scroll", System.nanoTime()),
+                        ),
+                    )
+                    val x = natural?.start?.x ?: node.bounds.centerX
+                    val x2 = natural?.end?.x ?: x
                     val top = node.bounds.top + node.bounds.height * 0.25f
                     val bottom = node.bounds.top + node.bounds.height * 0.75f
-                    val backwards = p.optString("direction") == "backward"
-                    val y1 = if (backwards) top else bottom
-                    val y2 = if (backwards) bottom else top
+                    val y1 = natural?.start?.y ?: if (backwards) top else bottom
+                    val y2 = natural?.end?.y ?: if (backwards) bottom else top
+                    val duration = natural?.durationMs ?: 350L
                     val landed = HumanGestureDispatch.swipe(
-                        service, x, y1, x, y2,
-                        350L, humanize, RuntimeGestureKind.SCROLL, request.commandId, scope.displayId, viewport,
-                    ) || shellGesture(request.commandId, scope, generation, floatArrayOf(x.toFloat(), y1, x.toFloat(), y2, 350f))
+                        service, x, y1, x2, y2,
+                        duration, humanize, RuntimeGestureKind.SCROLL, request.commandId, scope.displayId, viewport,
+                        natural?.ending,
+                    ) || shellGesture(request.commandId, scope, generation, floatArrayOf(x, y1, x2, y2, duration.toFloat()))
                     workspaceTouchFailure(request, scope, snapshot, started, landed)?.let { return it }
                 }
                 "phone.swipe" -> {
-                    val x1 = p.optDouble("x1").toFloat(); val y1 = p.optDouble("y1").toFloat()
-                    val x2 = p.optDouble("x2").toFloat(); val y2 = p.optDouble("y2").toFloat()
+                    val stroke = swipeStroke(request, viewport)
+                        ?: error("INVALID_REQUEST: ${swipeIntentError(request) ?: "swipe needs x1, y1, x2, y2 or a direction"}")
+                    val x1 = stroke.x1; val y1 = stroke.y1
+                    val x2 = stroke.x2; val y2 = stroke.y2
                     check(snapshot.nodes.any {
                         it.scrollable && it.bounds.contains(x1.toInt(), y1.toInt()) && it.bounds.contains(x2.toInt(), y2.toInt())
                     }) { "UNSUPPORTED: workspace swipes require a scrollable target" }
@@ -414,10 +427,10 @@ object PhoneToolExecutor {
                                     under.id, snapshot.fingerprint)
                             }
                     }
-                    val duration = p.optLong("durationMs", 350)
+                    val duration = stroke.durationMs
                     val landed = HumanGestureDispatch.swipe(
                         service, x1, y1, x2, y2, duration,
-                        humanize, RuntimeGestureKind.SWIPE, request.commandId, scope.displayId, viewport,
+                        humanize, RuntimeGestureKind.SWIPE, request.commandId, scope.displayId, viewport, stroke.ending,
                     ) || shellGesture(request.commandId, scope, generation, floatArrayOf(x1, y1, x2, y2, duration.coerceIn(100L, 3000L).toFloat()))
                     workspaceTouchFailure(request, scope, snapshot, started, landed)?.let { return it }
                 }
@@ -705,16 +718,21 @@ object PhoneToolExecutor {
             "phone.type", "phone.replace_text" -> typeEditable(service, request)
             "phone.scroll" -> foregroundScroll(service, request, before, humanize)
             "phone.swipe" -> {
+                // Plan 52: an intent (direction, amount, speed, region) is resolved here by the hand model, so the
+                // approval check below classifies the start point the finger will really use.
+                val stroke = swipeStroke(request, service?.let { foregroundViewport(it) })
+                    ?: return errorResult(PhoneToolErrorCode.INVALID_REQUEST, swipeIntentError(request) ?: "swipe needs x1, y1, x2, y2 or a direction")
                 val outcome = actionWithConfirmation(service, request, before) {
                     // Guarded swipes (Cyclone Mind) get the approval check of whatever sits under the start point:
                     // swipe-to-archive, swipe-to-delete and slide-to-pay are consequential.
-                    if (p.optBoolean("guard")) service?.guardPoint("phone.swipe", p.optDouble("x1").toFloat(), p.optDouble("y1").toFloat())
+                    if (p.optBoolean("guard")) service?.guardPoint("phone.swipe", stroke.x1, stroke.y1)
                     service?.swipe(
-                        p.optDouble("x1").toFloat(), p.optDouble("y1").toFloat(),
-                        p.optDouble("x2").toFloat(), p.optDouble("y2").toFloat(),
-                        p.optLong("durationMs", 350L),
+                        stroke.x1, stroke.y1,
+                        stroke.x2, stroke.y2,
+                        stroke.durationMs,
                         humanize,
                         request.commandId,
+                        stroke.ending,
                     ) == true
                 }
                 val trace = HumanGestureDispatch.consumeTrace(request.commandId)
@@ -898,6 +916,66 @@ object PhoneToolExecutor {
         }
     }
 
+    /** One swipe's coordinates, after an intent (if any) was resolved by the hand model. */
+    private data class SwipeStroke(
+        val x1: Float,
+        val y1: Float,
+        val x2: Float,
+        val y2: Float,
+        val durationMs: Long,
+        val ending: com.cyclone.mobile.gesture.StrokeEnding?,
+    )
+
+    private fun foregroundViewport(service: CycloneAccessibilityService): com.cyclone.mobile.gesture.GestureBounds {
+        val metrics = service.resources.displayMetrics
+        return com.cyclone.mobile.gesture.GestureBounds(0f, 0f, metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat())
+    }
+
+    private fun naturalScrollPlan(
+        service: CycloneAccessibilityService,
+        selector: ElementSelector?,
+        forward: Boolean,
+        humanize: HumanizePreference,
+        commandId: String?,
+    ): com.cyclone.mobile.gesture.PlannedSwipe? {
+        if (!com.cyclone.mobile.gesture.Hands.style.natural || humanize == HumanizePreference.OFF) return null
+        val snapshot = service.observe(markFresh = false)
+        val selected = selector?.let { SelectorEngine.resolve(snapshot, it, 1).firstOrNull()?.node }
+        val node = selected?.takeIf { it.scrollable } ?: snapshot.nodes.firstOrNull { it.scrollable && it.visibleToUser } ?: return null
+        val seed = com.cyclone.mobile.gesture.HumanGestureSeed.derive(commandId, "natural_scroll", System.nanoTime())
+        return com.cyclone.mobile.gesture.NaturalScroll.plan(
+            snapshot, node, forward, com.cyclone.mobile.gesture.Hands.style, humanize, foregroundViewport(service),
+            com.cyclone.mobile.gesture.Hands.handedness, com.cyclone.mobile.gesture.SeededGestureRng(seed),
+        )
+    }
+
+    private fun swipeIntentError(request: PhoneToolRequest): String? =
+        if (!com.cyclone.mobile.gesture.SwipeIntents.isIntent(request.params)) null
+        else com.cyclone.mobile.gesture.SwipeIntents.resolve(
+            request.params,
+            com.cyclone.mobile.gesture.GestureBounds(0f, 0f, 1080f, 2400f),
+            com.cyclone.mobile.gesture.Hands.handedness,
+            com.cyclone.mobile.gesture.SeededGestureRng(0L),
+        ).second
+
+    private fun swipeStroke(request: PhoneToolRequest, viewport: com.cyclone.mobile.gesture.GestureBounds?): SwipeStroke? {
+        val p = request.params
+        if (!com.cyclone.mobile.gesture.SwipeIntents.isIntent(p)) {
+            if (!p.has("x1") || !p.has("y1") || !p.has("x2") || !p.has("y2")) return null
+            return SwipeStroke(
+                p.optDouble("x1").toFloat(), p.optDouble("y1").toFloat(),
+                p.optDouble("x2").toFloat(), p.optDouble("y2").toFloat(),
+                p.optLong("durationMs", 350L), null,
+            )
+        }
+        val area = viewport ?: return null
+        val seed = com.cyclone.mobile.gesture.HumanGestureSeed.derive(request.commandId, "swipe_intent", System.nanoTime())
+        val planned = com.cyclone.mobile.gesture.SwipeIntents.resolve(
+            p, area, com.cyclone.mobile.gesture.Hands.handedness, com.cyclone.mobile.gesture.SeededGestureRng(seed),
+        ).first ?: return null
+        return SwipeStroke(planned.start.x, planned.start.y, planned.end.x, planned.end.y, planned.durationMs, planned.ending)
+    }
+
     private fun foregroundScroll(
         service: CycloneAccessibilityService?,
         request: PhoneToolRequest,
@@ -906,12 +984,22 @@ object PhoneToolExecutor {
     ): Outcome {
         val p = request.params
         var semanticSucceeded = false
+        var naturalScrolled = false
         var fallbackAttempted = false
         var fallbackUnavailableReason: String? = null
         val outcome = actionWithConfirmation(service, request, before) {
             val s = service ?: return@actionWithConfirmation false
             val selector = p.optJSONObject("selector")?.let(ElementSelector::fromJson)
             val forward = p.optString("direction", "forward") != "backward"
+            // Plan 52: with Natural hands, a large upright list is scrolled by the thumb. The channel is chosen here,
+            // before acting; a thumb scroll that changes nothing is not followed by a semantic one.
+            naturalScrollPlan(s, selector, forward, humanize, request.commandId)?.let { planned ->
+                naturalScrolled = true
+                return@actionWithConfirmation s.swipe(
+                    planned.start.x, planned.start.y, planned.end.x, planned.end.y,
+                    planned.durationMs, humanize, request.commandId, planned.ending, RuntimeGestureKind.SCROLL,
+                )
+            }
             if (s.scroll(selector, forward)) {
                 semanticSucceeded = true
                 return@actionWithConfirmation true
@@ -944,6 +1032,7 @@ object PhoneToolExecutor {
         val trace = HumanGestureDispatch.consumeTrace(request.commandId)
         val dispatchMode = when {
             semanticSucceeded -> "semantic_action"
+            naturalScrolled && trace != null -> "touch_first_${trace.dispatchMode}"
             trace != null -> trace.dispatchMode
             fallbackAttempted -> "coordinate_fallback_rejected"
             else -> "fallback_unavailable"

@@ -243,7 +243,7 @@ class CommandCenterGuard(unittest.TestCase):
             assert "cc.start" not in text and "/v1/devices/" not in text, f"{name}: the workspace never commands a phone directly"
 
     def test_the_ai_holds_a_write_only_key_fixed_tools_and_the_owner_decides(self):
-        # Plan 53 R1: the Manager lives in command/agent/ (ai.py is its facade); each toolset is one module.
+        # Plan 55 R1: the Manager lives in command/agent/ (ai.py is its facade); each toolset is one module.
         agent = COMMAND / "agent"
         ai = "\n".join(p.read_text(encoding="utf-8") for p in [COMMAND / "ai.py", *sorted(agent.rglob("*.py"))])
         tools = "\n".join(p.read_text(encoding="utf-8") for p in sorted((agent / "toolsets").glob("*.py")))

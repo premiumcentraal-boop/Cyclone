@@ -60,7 +60,7 @@ a = Analysis(
                    "cyclone_device_gateway.command.pages", "cyclone_device_gateway.command.steps",
                    # Plan 33 §7: the AI project manager and the page Markdown it reads and writes.
                    "cyclone_device_gateway.command.ai", "cyclone_device_gateway.command.pagetext",
-                   # Plan 53 R1: the Manager's agent package (registry, toolsets, prompt, store, loop).
+                   # Plan 55 R1: the Manager's agent package (registry, toolsets, prompt, store, loop).
                    "cyclone_device_gateway.command.agent", "cyclone_device_gateway.command.agent.toolsets",
                    "cyclone_device_gateway.command.agent.toolsets.workspace",
                    "cyclone_device_gateway.command.agent.toolsets.glass_ui"],

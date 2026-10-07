@@ -127,6 +127,34 @@ Therefore:
 
 `phone.swipe` is the typed explicit gesture action. Existing bounded start/end compatibility fields may remain where already supported, but raw trajectory authoring is forbidden. Android owns the path mathematics and may resolve/downgrade the requested profile according to backend fidelity.
 
+### Swipe intents (plan 52, alpha.111)
+
+`phone.swipe` may carry a typed intent instead of coordinates:
+
+```json
+{"tool": "phone.swipe", "params": {"direction": "up", "amount": "page", "speed": "normal", "region": {"left": 0, "top": 300, "right": 1080, "bottom": 2100}}}
+```
+
+- `direction` is the way the finger travels.
+- `amount` is one of `peek | half | page | far`; `speed` is one of `gentle | normal | flick`.
+- `region` is optional and bounded.
+- Android's hand model resolves the intent to a start, end, duration and lift-off, and the approval check classifies
+  the resolved start point.
+- Unknown values fail closed with `INVALID_REQUEST`.
+- This is still not a trajectory: the caller never sends points, controls or timing.
+
+### Touch-first presses and key-by-key typing (plan 52)
+
+With the owner's Hands style set to Natural or Relaxed, Android may perform a grounded click as a finger press, and
+may type ordinary text key by key with the keyboard on screen. It chooses one channel before acting and reports it in
+the bounded evidence:
+
+- `dispatchMode = touch_first`;
+- `method = keys`, `keyboard = shown | not_shown`.
+
+Callers cannot force either behaviour, and `humanize = off` keeps the semantic click. Secrets are never typed key by
+key.
+
 ### Drag
 
 There is still no dedicated grounded `phone.drag` contract. Advertise it as `unsupported`. Do not disguise drag as swipe.

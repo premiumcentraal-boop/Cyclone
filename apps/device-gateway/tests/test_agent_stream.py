@@ -1,4 +1,4 @@
-"""Plan 53 R2: Cyber's answers stream, messages queue, long conversations are summarized, and Glass follows it all
+"""Plan 55 R2: Cyber's answers stream, messages queue, long conversations are summarized, and Glass follows it all
 over ``/v1/cc/ai/events``.
 
 What must hold: text reaches the event stream as it is written but never a secret the stored answer would mask;

@@ -1,4 +1,4 @@
-"""Plan 53 R4: Cyber's dock summary (``/v1/cc/ai/presence``) and the Glass page a message is written from.
+"""Plan 55 R4: Cyber's dock summary (``/v1/cc/ai/presence``) and the Glass page a message is written from.
 
 What must hold: the dock says why Cyber cannot work (no key, no model, the day's limit) and otherwise puts what needs
 the owner first; it carries counts, never task or page text; the page name reaches the model as context, is screened

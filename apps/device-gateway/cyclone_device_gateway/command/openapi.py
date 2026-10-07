@@ -571,7 +571,7 @@ def request(method: str, url: str, *, headers: dict[str, str], body: bytes | Non
 
 @dataclass
 class StreamResponse:
-    """An answer read as it arrives (plan 53 R2: Cyber's streamed replies). ``lines`` yields raw lines; ``rest`` reads
+    """An answer read as it arrives (plan 55 R2: Cyber's streamed replies). ``lines`` yields raw lines; ``rest`` reads
     whatever is left, for an error body."""
     status: int
     headers: dict[str, str]

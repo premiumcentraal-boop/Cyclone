@@ -1,4 +1,4 @@
-"""Plan 53 R1: the Manager's tool registry and the agent package layout.
+"""Plan 55 R1: the Manager's tool registry and the agent package layout.
 
 What must hold: every tool registers itself with a known kind and a strict schema; no tool can be registered with a
 forbidden power (shell, file, network, delete, approve, vault, secrets); ``command.ai.TOOLS`` keeps its old shape and
@@ -38,7 +38,7 @@ def test_the_workspace_tools_are_registered_in_their_old_order():
     assert list(ai.TOOLS) == WORKSPACE_TOOLS + GLASS_UI_TOOLS
     assert ai.TOOLS == {t.name: (t.kind, t.description, t.parameters) for t in REGISTRY.tools()}
     assert {t.toolset for t in REGISTRY.tools()} == {"workspace", "glass_ui"}
-    # Plan 53 R5: the Glass tools only move the owner's view; nothing else is of kind ui.
+    # Plan 55 R5: the Glass tools only move the owner's view; nothing else is of kind ui.
     assert [t.name for t in REGISTRY.tools() if t.kind == "ui"] == GLASS_UI_TOOLS
 
 

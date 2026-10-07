@@ -19,7 +19,7 @@ Rules this module keeps:
 """
 from __future__ import annotations
 
-# Plan 53 R1: the service now lives in ``command/agent/`` (registry, toolsets, prompt, store, loop). This module keeps
+# Plan 55 R1: the service now lives in ``command/agent/`` (registry, toolsets, prompt, store, loop). This module keeps
 # the names the gateway, its routes and tests have always imported from here.
 from .agent import REGISTRY, AiError, AiStore
 from .agent.common import (AUTONOMY, BASE, CATALOGUE_TTL_MS, CONVERSATION_ID, DEFAULTS, GRANT, KEY, MAX_ANSWER_TOKENS,

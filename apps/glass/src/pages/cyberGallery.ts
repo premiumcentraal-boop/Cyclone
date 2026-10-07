@@ -1,5 +1,5 @@
 /**
- * #/dev/cyber (plan 53 R3): every Cyber component in every state, light and dark, for review before the components
+ * #/dev/cyber (plan 55 R3): every Cyber component in every state, light and dark, for review before the components
  * are wired into Glass (R4). Not in the sidebar. All data here is example data and says so.
  */
 import type { GlassContext } from "../app.js";
@@ -155,7 +155,7 @@ export function createCyberGallery(_ctx: GlassContext): GlassPage {
   );
 
   element.append(
-    pageHeader("Cyber components", "Plan 53 R3 · every component in every state. Example data only; nothing here is live."),
+    pageHeader("Cyber components", "Plan 55 R3 · every component in every state. Example data only; nothing here is live."),
     section("Character", "Nine moods, each with its own pose and motion. The large one walks through them and follows your pointer.", poses, bigCell),
     section("Dock", "Character and status reel at the foot of the sidebar. The reel rolls every 4 s and stops while hovered.", dock, dockAttention),
     section("Work trail", "In progress, finished (open) and finished (collapsed). Click the summary to open or close.", live, finished, collapsed),

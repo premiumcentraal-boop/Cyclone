@@ -1,98 +1,113 @@
-# Cyclone V5 Alpha 111: Meet Cyber
+# Cyclone V5 Alpha 111: Human Hands
 
-This developer alpha brings **Cyber**, the Glass Manager (plans 52 and 53): the AI that used to sit beside the
-workspace now lives on every Glass page, as a small character that shows what it is doing, and it answers live.
-Setup is unchanged: your OpenRouter key and a model in Command Center → AI.
+Cyclone now moves and types more like the person whose phone it is. This alpha builds runs 1–4 of plan 52
+(`Cyclone V5 plan/52-human-hands.md`) in one release: natural motion, swipes chosen by a hand model, finger-pressed
+buttons, the keyboard on screen with key-by-key typing, and short human pauses. Everything is controlled by one new
+setting.
 
-## Cyber on every page
+## Settings › Hands
 
-- **The dock.** Cyber sits at the foot of the sidebar on every Glass page (a floating pill on narrow windows), with a
-  rolling status line — "Needs you: 1 approval", "1 of 2 phones ready", "2 tasks running", today's spending — and a
-  badge when something waits for you. Press it to open Cyber.
-- **The character.** Cyber has its own pose and motion for each thing it does: ready (floats, blinks, follows your
-  pointer), listening (leans in while you type), thinking (looks away, hand to chin), working (code on its visor, a
-  gear turning), answering (its mouth moves with the words), needs you (hops, waves, amber badge), done (a happy jump),
-  something failed (crossed eyes, a shake) and offline (asleep). With reduced motion on, nothing moves but each pose
-  stays different.
-- **The panel** opens on any page, not just the workspace. Each message tells Cyber which page you are on ("Runs",
-  "Lab · exp-…"), so "why did this fail?" means what you are looking at.
-- **The palette.** From any page, type to go to a page (Glass screens, Command Center tabs, workspace pages by title),
-  do something quick (open Cyber, its settings, search the workspace), or ask Cyber — a question opens the panel and is
-  sent from the page you are on.
+The setting is in **Cyclone AI settings**, above Fast mode.
 
-### Cyber shows you what it means
+| Style | What Cyclone does |
+| --- | --- |
+| **Precise** | As in earlier versions: straight-to-the-point touches, text filled in one go, no pauses. |
+| **Natural** (default) | All of the changes below. |
+| **Relaxed** | Natural, with slower typing and longer pauses to read each page. |
 
-When Cyber talks about something you can see in Glass, it shows it: it **opens the page**, **presses the filter**
-("Failed") or types into the page's search box, and **rings the exact row** it means for a moment (a run, a phone, an
-app, a Lab experiment, a task, a routine, an account or a workspace page). It only changes what you see — nothing is
-changed, started or approved — so it does this without asking. If something is not on the page, Glass tells Cyber, and
-Cyber says so. Each message also gives Cyber a short summary of your screen (the page, the filter and the rows shown),
-so "this one" means the row in front of you.
+Other options:
 
-### Keys, on Windows and on a Mac
+- **Hand:** the hand you hold your phone in (right or left), which decides where the thumb rests and which way swipes
+  bend.
+- **Occasional typos:** off by default. When on, a neighbouring key is pressed now and then and fixed at once with
+  Backspace. Only in ordinary sentences, never in names, emails, links, codes or numbers, and the text always ends up
+  exactly right.
 
-| | Windows | Mac |
-|---|---|---|
-| Palette (ask or go to) | **Ctrl+K** | **⌘K** |
-| Cyber's panel | **Ctrl+.** | **⌘.** |
+## What changed
 
-Glass shows the right label for your computer. Cyber's panel moved off Ctrl+J because Chrome and Edge on Windows use
-Ctrl+J for Downloads; ⌘J / Ctrl+J still work where the browser lets the page have the key. Esc closes either one.
+**Swipes speed up and slow down.**
+- Android plays a stroke at one even speed. Cyclone now plays each swipe as up to 14 linked pieces with their own
+  timing:
+  - a controlled stroke follows a smooth bell-shaped speed curve;
+  - a flick is still accelerating when the finger lifts, so the list keeps going;
+  - a careful drag slows and rests on the glass before lifting.
+- If a phone refuses the linked pieces, Cyclone lifts the finger, uses one stroke along the same path for the rest
+  of that session, and records it.
 
-## Answers that stream
+**Swipes vary in shape.** Cyclone picks among:
+- a thumb arc around the holding hand's pivot;
+- a single bow;
+- a gentle S for long travel;
+- (drags only) a small overshoot that comes back.
 
-- **Live answers.** The answer appears word by word, with a cursor at the end. Each step it takes ("Checked the
-  phones", "Read “Weekly plan”") shows as it starts and gets a ✓, ✋ (a proposal for you) or ⚠ when it finishes.
-- **Write while it answers.** A message sent during an answer waits below it ("Waiting — answered next") and is
-  answered right after, in order. Up to five messages can wait. **Stop** ends the answer where it is and drops the
-  waiting messages, and says how many were not sent.
-- **Longer work.** One answer may take up to 25 steps (was 10). The daily and monthly spending limits still stop it
-  first.
-- **Long conversations.** When older turns no longer fit, Cyber keeps a short summary of them for itself instead of
-  forgetting them. You still see every message. If a summary cannot be made, older turns fall away as before.
-- **Fallback.** If the live connection drops, Glass reconnects (1 s, 2 s, 4 s … up to 15 s) without missing anything,
-  and checks every second in the meantime.
+Taps and long presses roll 0–3 px between finger-down and finger-up, always inside the target and far below
+Android's tap tolerance.
 
-## Preview of the parts still to come
+**Swipes start somewhere new each time.**
+- The Mind, Instant and background screens now ask for a swipe by direction, amount (peek, half, page, far) and
+  speed (gentle, normal, flick).
+- A hand model on the phone chooses where the thumb lands, how far it travels, how long it takes and how it lifts.
+  It keeps clear of the screen edges used by gesture navigation, the status bar and the "back" swipe.
+- Scrolling a large list in Natural style uses the thumb in the same way, but never starts on a carousel inside the
+  list or under another window.
+- The old `x1,y1,x2,y2` form still works.
+- The approval check still classifies the exact point the finger will start on.
 
-`#/dev/cyber` in Glass (not in the sidebar; example data only) shows Cyber's character in all nine moods and the parts
-the next runs wire in: the work trail, the project pulse (26 weeks of daily pass rates), status dots, the alerts list,
-the watch list with its six defaults and phone avatars in each phone's own colour. Their designs follow Space UI's
-free components (MIT) as a reference; no Space UI code is copied.
+**Buttons are pressed with a finger.**
+- In Natural style, a clickable control is pressed with a real touch instead of an Accessibility click when:
+  - it is plainly visible and on screen;
+  - it is at least 32 px in each direction;
+  - nothing else in the app or another window (such as the keyboard) covers it;
+  - no button of its own sits inside it.
+- Anything doubtful keeps the Accessibility click.
+- Cyclone picks one way before acting: a press that changes nothing is never followed by a second click.
 
-## Under the hood
+**The keyboard opens, and text goes in key by key.**
+- Cyclone touches the text field like a person, so the app opens your keyboard itself. Before, it focused the field
+  silently and the keyboard never appeared in Cyclone mode.
+- With the keyboard showing, text is typed through Android 13's Accessibility input method, one key at a time, at a
+  quick thumb pace (about 7–10 keys a second in Natural). The rhythm varies:
+  - gaps depend on the letter pair;
+  - short pauses come between words and before `@` and `.`;
+  - switching to the symbol keys takes extra time;
+  - there is an occasional hesitation.
+- Long messages type their opening and add the rest in one go.
+- Read-back still decides the result:
+  - if the field does not hold exactly the text, Cyclone falls back to set-text, then paste;
+  - if you take over mid-way, typing stops at once and nothing else is written.
+- Passwords and codes from your Vault are still filled in one step, the way a password manager does, and are never
+  typed key by key.
+- Typed text never appears in results, traces or diagnostics: only the length and how it went in (`method: keys`,
+  `keyboard: shown`).
 
-- The AI service moved from one file to the agent package `command/agent/` (registry, workspace toolset, tiered
-  prompt, store, loop). Tools register with a kind and a strict schema; a tool whose name reads as shell, file,
-  network, delete, approve, vault, secret, key or pay access cannot be registered. The 25 workspace tools, their
-  order and the instructions the model gets are unchanged.
-- New live event socket `/v1/cc/ai/events` (`cyclone.manager.events/1`): the same local bearer as every route, sent
-  like the fleet socket's; resume with `afterSeq`; a `gap` says when events were missed and Glass reloads.
-- New Glass tools for Cyber (`open_page`, `set_filter`, `highlight`, `open_run`; kind `ui`): every argument is checked
-  against the pages and marks Glass publishes, each call is a `ui.action` event, and nothing is written or audited.
-  Glass acts only on elements marked for Cyber inside the page area. `POST /v1/cc/ai/ui-result` carries Glass's
-  "could not". Messages accept an optional `view` (the screen summary, at most 1,500 characters, masked for secrets).
-- New `GET /v1/cc/ai/presence` for the dock: counts only (approvals, proposals, phones ready, tasks running, spending),
-  never task or page text. Messages accept an optional `where` (the Glass page, at most 160 characters, screened for
-  secrets).
-- Answers stream from OpenRouter over the same checked, pinned https connection as every API call. Streamed text is
-  masked exactly like the stored answer, and the newest 200 characters wait until they cannot be part of a password,
-  code or key. Tool calls are assembled from their streamed pieces. Hidden provider reasoning is never read or kept.
-- An answer stopped mid-stream still counts toward the spending limits (estimated from its size when the provider
-  sends no usage).
+**Short human pauses.**
+- Before each Mind action, Natural waits about 0.15–0.9 s to read the page and find the control; Relaxed waits up
+  to 2.2 s.
+- Time the model already spent thinking counts toward the pause, so a slow model adds no extra wait.
+- Stopping a task ends the pause at once.
+- Instant voice actions are not paused.
 
-No approvals, proposals or boundaries changed: tasks and routines are still proposals you apply, page edits are
-proposals unless you allowed direct edits, and phones still ask before sending, paying, deleting or signing in. Glass
-still makes no model calls and holds no key.
+**The PC sees it.** The phone's capability report carries a `hands` block (style, hand, and whether speed curves,
+swipe intents, finger presses, key-by-key typing and pauses are on). The gateway passes it on as a fixed vocabulary.
+
+## What did not change
+
+- Approval boundaries (pay, send, delete, permissions, sign-in), GATE, ownership, fresh observation and the Fast Path
+  settle are unchanged.
+- Unchanged is still never a second click.
+- The PC still cannot send raw gesture paths, and `phone.swipe` still has no MCP route.
+- An app that inspects raw touch events can still tell they come from an Accessibility service. This release does
+  not try to hide that, and natural motion cannot guarantee that an app never flags an account.
 
 ## Versions and evidence
 
-- Product / Android / gateway / MCP: **5.0.0-alpha.111.dev1**; Android version code **259**. The Android app has no
-  code change in this alpha.
-- Glass: **1.0.0-alpha.62**. The retired desktop-window component remains unchanged.
-- Validation for this exact source: gateway tests (including `test_agent_registry.py`, `test_agent_stream.py`,
-  `test_agent_presence.py` and `test_agent_glass_ui.py`), Glass tests (including `ai-stream.test.mjs`,
-  `cyber-components.test.mjs`, `cyber-presence.test.mjs` and `cyber-ui.test.mjs`), CI guards, release-version and product guards; recorded in the release PR and its CI runs.
-  The character, dock, palette and highlight ring were also checked in Chromium in light and dark and at phone width.
-- Physical acceptance: **UNVERIFIED.** Cyber has not yet been used in Glass against a real OpenRouter key on the
-  owner's PC, on Windows or on a Mac; scripted providers in the tests stand in for it.
+- Product / Android / gateway / MCP: **5.0.0-alpha.111.dev1**; Android version code **259**.
+- Glass is unchanged (**1.0.0-alpha.61**).
+- Tests:
+  - New unit tests: speed curves, shapes and finger roll (11); hand model and swipe intents (7); finger-press and
+    thumb-scroll safety (6); typing rhythm and pauses (6); typing ladder with the keyboard (6).
+  - Updated: the source-order safety contract and the Mind swipe test.
+  - The gateway projects `hands` with a fixed vocabulary (2 new tests).
+- Physical phone: **UNVERIFIED**. Nobody has yet checked on a Pixel how chained stroke pieces play back, keyboard
+  coverage across apps (WebView, Compose, games) or finger presses in real apps. Precise style keeps the previous
+  behaviour if anything misbehaves.

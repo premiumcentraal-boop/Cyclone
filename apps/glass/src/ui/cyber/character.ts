@@ -1,5 +1,5 @@
 /**
- * Cyber, the character (plan 53 R4; replaces R3's orb at the owner's request): a small glass-and-visor robot with its
+ * Cyber, the character (plan 55 R4; replaces R3's orb at the owner's request): a small glass-and-visor robot with its
  * own pose and motion for every action, so what Cyber is doing reads at a glance, even at the size of a sidebar icon.
  *
  * Origin: original Cyclone code (an SVG built with DOM APIs, animated by styles/cyber.css). The approach was chosen

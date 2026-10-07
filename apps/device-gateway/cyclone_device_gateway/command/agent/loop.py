@@ -1,4 +1,4 @@
-"""One Manager turn (plan 53 R1, moved unchanged from ``command/ai.py``; the loop shape follows Hermes Agent, MIT).
+"""One Manager turn (plan 55 R1, moved unchanged from ``command/ai.py``; the loop shape follows Hermes Agent, MIT).
 
 The owner's message is stored, then a background turn asks the model, runs the tools it calls and asks again, until
 the model answers without tools, the owner stops it, a budget is reached or ``MAX_STEPS`` pass. Read tools run at
@@ -27,7 +27,7 @@ from .common import (BASE, MAX_ANSWER_TOKENS, MAX_CALLS_PER_STEP, MAX_CONTEXT_CH
 FLUSH_SECONDS = 0.08
 HOLD_BACK = 200
 MAX_STREAM_TEXT = 40_000
-#: Summaries of older turns (plan 53 R2).
+#: Summaries of older turns (plan 55 R2).
 MAX_COMPRESS_INPUT = 60_000
 MAX_SUMMARY = 3_000
 COMPRESS_PROMPT = ("You keep the memory of a long conversation between the owner of Cyclone and Cyber, the project "
@@ -53,13 +53,13 @@ class LoopMixin:
             raise CommandError(f"A message is at most {MAX_OWNER_TEXT} characters.")
         if INLINE_SECRET.search(text):
             raise CommandError("Leave passwords, codes and keys out of messages; the vault keeps them.")
-        # Plan 53 R4: the Glass page the owner writes from ("Runs", "Lab · exp-…"), so Cyber knows what they look at.
+        # Plan 55 R4: the Glass page the owner writes from ("Runs", "Lab · exp-…"), so Cyber knows what they look at.
         where = body.get("where")
         if where is not None:
             if not isinstance(where, str) or len(where.strip()) > MAX_WHERE or INLINE_SECRET.search(where):
                 raise CommandError(f"where is a short page name, at most {MAX_WHERE} characters.")
             where = " ".join(where.split()) or None
-        # Plan 53 R5: a short summary of what is on the owner's screen (page title, the rows it shows). It is the owner's
+        # Plan 55 R5: a short summary of what is on the owner's screen (page title, the rows it shows). It is the owner's
         # own screen, so it is masked for secret-shaped text and cut, not refused.
         view = body.get("view")
         if view is not None and not isinstance(view, str):
@@ -74,7 +74,7 @@ class LoopMixin:
                 raise CommandError("Pick a model in AI settings first.")
             waiting = row["state"] == "working"
             if waiting:
-                # Plan 53 R2: the owner may write while Cyber answers; the message waits for the next turn.
+                # Plan 55 R2: the owner may write while Cyber answers; the message waits for the next turn.
                 if len(self._queued(row["id"])) >= MAX_QUEUED:
                     raise CommandError(f"{MAX_QUEUED} messages are already waiting. Wait for the answer, or stop it.")
                 self._add(row["id"], "queued", message)
@@ -202,7 +202,7 @@ class LoopMixin:
         return self._window(cid)[0]
 
     def _context_for_turn(self, cid: str, model: str) -> list[dict[str, Any]]:
-        """The model's context. When older turns no longer fit, they are summarized once (plan 53 R2; Hermes'
+        """The model's context. When older turns no longer fit, they are summarized once (plan 55 R2; Hermes'
         context compressor idea) instead of silently falling away; if summarizing fails, they fall away as before."""
         messages, dropped_upto, covered_upto = self._window(cid, with_cover=True)
         if dropped_upto > covered_upto:
@@ -481,7 +481,7 @@ class LoopMixin:
             missing = [r for r in schema["required"] if args.get(r) is None]
             if missing:
                 raise CommandError(f"{name} needs {', '.join(missing)}.")
-            if kind == "ui":  # plan 53 R5: only moves the owner's Glass; nothing in Cyclone changes
+            if kind == "ui":  # plan 55 R5: only moves the owner's Glass; nothing in Cyclone changes
                 return toolset.show(cid, call["id"], name, args), "done", label, None
             with self._c._lock:
                 if kind == "read":

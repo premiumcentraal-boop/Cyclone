@@ -67,7 +67,7 @@ export interface GlassAppOptions {
   onHashChange(listener: () => void): () => void;
   setInterval(fn: () => void, ms: number): unknown;
   clearInterval(handle: unknown): void;
-  /** Plan 53 R2/R4: opens Cyber's live event socket (the browser's WebSocket); without it Cyber polls. */
+  /** Plan 55 R2/R4: opens Cyber's live event socket (the browser's WebSocket); without it Cyber polls. */
   cyberSocket?: (url: string, protocols: string[]) => SocketLike;
 }
 
@@ -124,7 +124,7 @@ export class GlassApp {
   private glassSidebar: HTMLElement | null = null;
   private workspace: WorkspaceSidebar | null = null;
   private aiPanel: AiPanel | null = null;
-  /** Plan 53 R4: Cyber on every page — the dock at the foot of the sidebar and the palette. */
+  /** Plan 55 R4: Cyber on every page — the dock at the foot of the sidebar and the palette. */
   private dock: Dock | null = null;
   private palette: Palette | null = null;
   private uiActions: UiActions | null = null;
@@ -154,7 +154,7 @@ export class GlassApp {
   async start(): Promise<void> {
     this.renderShell();
     this.unlistenHash = this.options.onHashChange(() => this.onHashChange());
-    // Plan 53 R4: Ctrl on Windows, ⌘ on a Mac, on every page. Ctrl/⌘K opens Cyber's palette; Ctrl/⌘. (or J where
+    // Plan 55 R4: Ctrl on Windows, ⌘ on a Mac, on every page. Ctrl/⌘K opens Cyber's palette; Ctrl/⌘. (or J where
     // the browser allows it) opens or closes Cyber's panel.
     const onKey = (event: KeyboardEvent) => {
       const shortcut = shortcutOf(event, this.mac);
@@ -313,11 +313,11 @@ export class GlassApp {
   }
 
   private socketFactory() {
-    // Plan 53 R2: Cyber's live events over the same local socket auth as the fleet view; without one it polls.
+    // Plan 55 R2: Cyber's live events over the same local socket auth as the fleet view; without one it polls.
     return this.options.cyberSocket;
   }
 
-  /** Cyber's panel, on every page (plan 53 R4): about one workspace page, or about Cyclone as a whole. */
+  /** Cyber's panel, on every page (plan 55 R4): about one workspace page, or about Cyclone as a whole. */
   private ensureAi(): AiPanel {
     this.aiPanel ??= createAiPanel(() => this.context(), {
       socket: this.socketFactory(),
@@ -371,7 +371,7 @@ export class GlassApp {
   }
 
   private createCyber(): void {
-    // Plan 53 R5: Cyber's ui actions move this Glass — pages, filters, a ring around a row — only inside the page area.
+    // Plan 55 R5: Cyber's ui actions move this Glass — pages, filters, a ring around a row — only inside the page area.
     this.uiActions = createUiActions({
       scope: () => this.main,
       navigate: (route) => this.options.setHash(routeHref(route)),

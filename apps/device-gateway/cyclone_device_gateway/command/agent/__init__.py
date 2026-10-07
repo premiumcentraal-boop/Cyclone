@@ -1,4 +1,4 @@
-"""The Glass Manager's runtime service (plan 52 design, plan 53 R1 layout; structure after Hermes Agent, MIT).
+"""The Glass Manager's runtime service (plan 54 design, plan 55 R1 layout; structure after Hermes Agent, MIT).
 
     common.py     provider, limits, AiError, argument checks
     registry.py   tools register themselves with a kind and a strict schema; no shell, file or network powers

@@ -1,6 +1,6 @@
-# Plan 52: The Glass Manager — design
+# Plan 54: The Glass Manager — design
 
-Status: **Design, not built.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Build runs: [53](53-glass-manager-runs.md).
+Status: **Design; R1–R5 built in alpha.112 (unreleased).** Numbered 52 until Human Hands took 52 in alpha.111. Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Build runs: [55](55-glass-manager-runs.md).
 The owner named it **Cyber** (2026-10-06, §11). "Manager" below means Cyber; code keeps the package name `agent`.
 
 ## 0. The idea in one paragraph

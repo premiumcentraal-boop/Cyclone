@@ -703,11 +703,18 @@ class PhoneMindToolboxTest {
         val params = env.acts.last().second
         assertEquals("phone.swipe", env.acts.last().first)
         assertTrue(params.getBoolean("guard"))
-        assertTrue("finger moves right to left", params.getInt("x1") > params.getInt("x2"))
-        assertEquals(params.getInt("y1"), params.getInt("y2"))
+        // Plan 52: an intent the phone's hand model turns into a varied stroke; the finger travels left.
+        assertEquals("left", params.getString("direction"))
+        assertEquals("page", params.getString("amount"))
+        assertFalse("no fixed coordinates", params.has("x1"))
+        val screenArea = params.getJSONObject("region")
+        assertTrue(screenArea.getInt("right") > screenArea.getInt("left") && screenArea.getInt("bottom") > screenArea.getInt("top"))
         box.run("swipe", """{"direction":"up","ref":"e3","distance":"short"}""")
         val onRef = env.acts.last().second
-        assertTrue(onRef.getInt("y1") > onRef.getInt("y2"))
+        assertEquals("up", onRef.getString("direction"))
+        assertEquals("peek", onRef.getString("amount"))
+        val refArea = onRef.getJSONObject("region")
+        assertTrue("the region is the element's box", refArea.getInt("right") > refArea.getInt("left") && refArea.getInt("bottom") > refArea.getInt("top"))
         assertFalse(box.run("swipe", """{"direction":"sideways"}""").ok)
     }
 
