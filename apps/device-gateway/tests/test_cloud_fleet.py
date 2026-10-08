@@ -1,6 +1,7 @@
 """Plan 44 run 1 (alpha 90): cloud phones joined to this PC's fleet and kept connected on Cyclone's terms."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,8 @@ from cyclone_device_gateway.cloud_fleet import lease as L
 from cyclone_device_gateway.cloud_fleet.models import AdbLink, CloudPhone, ProviderError, normalize_address
 from cyclone_device_gateway.cloud_fleet.providers import make_provider
 from cyclone_device_gateway.cloud_fleet.providers.duoplus import DuoPlus
-from cyclone_device_gateway.cloud_fleet.providers.vmos import VmosCloud, parse_adb_answer, parse_ssh_command, parse_time_ms, sign
+from cyclone_device_gateway.cloud_fleet.providers.vmos import (VmosCloud, parse_adb_answer, parse_ssh_command, parse_time_ms, sign,
+                                                               sign_v2, v2_headers)
 from cyclone_device_gateway.cloud_fleet.service import CloudFleetService
 from cyclone_device_gateway.cloud_fleet.tunnel import ASKPASS_MODE, ASKPASS_SECRET, SshTunnel, askpass_main, explain, ssh_argv
 from cyclone_device_gateway.cloud_fleet.vault import CloudVault
@@ -69,7 +71,7 @@ def vmos_routes(**over):
 
 # Providers ----------------------------------------------------------------------------------------------------
 
-def test_vmos_signs_every_call_and_never_sends_the_secret_key():
+def test_vmos_signs_every_call_with_v2_and_never_sends_the_secret_key():
     http = FakeHttp(vmos_routes())
     vmos = VmosCloud(AK, SK, transport=http, clock=Clock())
     phones = vmos.list_phones()
@@ -77,14 +79,107 @@ def test_vmos_signs_every_call_and_never_sends_the_secret_key():
         ("AC32010230001", "Shop 1", "15", "running"), ("AC32010230002", "AC32010230002", None, "abnormal")]
     path, headers, body = http.calls[0]
     assert body == {"page": 1, "rows": 100}
-    assert headers["x-host"] == "api.vmoscloud.com"
-    assert headers["x-date"] == "20260921T141320Z"
-    assert headers["authorization"].startswith(f"HMAC-SHA256 Credential={AK}, SignedHeaders=content-type;host;x-content-sha256;x-date, Signature=")
-    assert SK not in json.dumps(headers)
-    # Pure and deterministic, so it can be checked against VMOS's own example once run 0 records one.
+    assert headers["X-Access-Key"] == AK and headers["X-Timestamp"] == str(int(NOW))
+    assert headers["X-Sign"] == sign_v2(SK, str(int(NOW)), "/vcpcloud/api/padApi/infos", '{"page":1,"rows":100}')
+    assert SK not in json.dumps(headers) and vmos.signing == "v2"
+    # The older HMAC scheme stays pure and deterministic for the fallback.
     assert sign(AK, SK, "api.vmoscloud.com", "{}", "20260921T141320Z") == sign(AK, SK, "api.vmoscloud.com", "{}", "20260921T141320Z")
     assert sign(AK, SK, "api.vmoscloud.com", "{}", "20260921T141320Z")["authorization"] != \
         sign(AK, SK + "x", "api.vmoscloud.com", "{}", "20260921T141320Z")["authorization"]
+
+
+def test_the_v2_signature_matches_the_example_in_vmos_guide():
+    # OpenAPI "Getting Started": signString = SK + X-Timestamp + path + body, X-Sign = lowerHex(SHA-256(signString)).
+    sk, ts, path, body = "9cucpjoyn4xxmkhj3q9el3ce", "1747555200", "/vcpcloud/api/padApi/padInfo", '{"padCode":"AC32010601132"}'
+    expected = hashlib.sha256(("9cucpjoyn4xxmkhj3q9el3ce1747555200/vcpcloud/api/padApi/padInfo"
+                               '{"padCode":"AC32010601132"}').encode()).hexdigest()
+    assert sign_v2(sk, ts, path, body) == expected == "483a4999d303307ef1b8b078b51e03fa0556547729c8a3c1470d2caf63e5f350"
+    # The few endpoints VMOS signs without their body (none of which Cyclone calls today).
+    assert v2_headers("ak", sk, ts, path, body, sign_body=False)["X-Sign"] == sign_v2(sk, ts, path, "")
+    assert v2_headers("ak", sk, ts, path, body)["X-Sign"] == expected
+
+
+def v2_only(answer):
+    """A route that answers like VMOS's legacy gateway would: refuses the V2 headers, accepts HMAC."""
+    def route(_method, _url, headers, _body, _timeout):
+        if "X-Sign" in headers:
+            return 401, json.dumps({"code": 2019, "msg": "Signature verification failed"}).encode()
+        return 200, json.dumps(answer).encode()
+    return route
+
+
+def test_a_refused_v2_signature_is_tried_once_with_hmac_and_the_working_scheme_is_kept():
+    calls = []
+
+    def transport(method, url, headers, body, timeout):
+        calls.append(headers)
+        return v2_only({"code": 200, "data": {"pageData": [{"padCode": "AC1", "padStatus": 10}]}})(method, url, headers, body, timeout)
+
+    vmos = VmosCloud(AK, SK, transport=transport, clock=Clock())
+    assert [p.remote_id for p in vmos.list_phones()] == ["AC1"]
+    assert "X-Sign" in calls[0] and "authorization" in calls[1] and vmos.signing == "hmac"
+    # Remembered: an account known to use HMAC starts with it.
+    calls.clear()
+    VmosCloud(AK, SK, transport=transport, clock=Clock(), signing="hmac").list_phones()
+    assert len(calls) == 1 and "authorization" in calls[0]
+
+
+@pytest.mark.parametrize("code,words", [(2033, "clock"), (2031, "access key"), (1116, "IP address")])
+def test_clock_key_and_ip_refusals_are_named_and_not_retried(code, words):
+    calls = []
+
+    def transport(method, url, headers, body, timeout):
+        calls.append(url)
+        return 401, json.dumps({"code": code, "msg": "x"}).encode()
+
+    with pytest.raises(ProviderError) as exc:
+        VmosCloud(AK, SK, transport=transport, clock=Clock()).list_phones()
+    assert exc.value.code == "PROVIDER_AUTH" and not exc.value.retryable and words in exc.value.message
+    assert len(calls) == 1
+
+
+def test_an_incomplete_adb_answer_switches_adb_on_and_asks_again():
+    asked = {"n": 0}
+
+    def adb(_body):
+        asked["n"] += 1
+        if asked["n"] == 1:
+            return {"code": 200, "data": {"padCode": "AC32010230001", "enable": True}}  # no command, no key yet
+        return vmos_routes()["/vcpcloud/api/padApi/adb"]
+
+    http = FakeHttp(vmos_routes(**{"/vcpcloud/api/padApi/adb": adb,
+                                   "/vcpcloud/api/padApi/openOnlineAdb": {"code": 200, "data": [{"taskStatus": 3}]}}))
+    link = VmosCloud(AK, SK, transport=http, clock=Clock()).open_adb(CloudPhone("vmos", "AC32010230001", "Shop 1"))
+    assert [c[0].rsplit("/", 1)[1] for c in http.calls] == ["adb", "openOnlineAdb", "adb"]
+    assert http.calls[1][2] == {"padCodes": ["AC32010230001"], "openStatus": 1}
+    assert link.kind == "ssh" and link.secret == SSH_PASSWORD
+    # VMOS's documented range is 1–7 days.
+    VmosCloud(AK, SK, transport=http, clock=Clock()).open_adb(CloudPhone("vmos", "AC32010230001", "Shop 1"), 5)
+    assert http.calls[-1][2]["expireMinutes"] == 1440
+
+
+def test_vmos_reads_details_moves_installed_version_and_asks_keep_alive():
+    http = FakeHttp(vmos_routes(**{
+        "/vcpcloud/api/padApi/userPadList": {"code": 200, "data": [
+            {"padCode": "AC32010230001", "padName": "Shop phone", "androidVersion": "13", "signExpirationTimeTamp": 1_800_000_000_000},
+            {"padCode": "OTHER", "padName": "Not asked"}]},
+        "/vcpcloud/api/padApi/queryPadIdChangeRecords": {"code": 200, "data": [
+            {"oldPadCode": "B", "newPadCode": "C"}, {"oldPadCode": "A", "newPadCode": "B"}, {"oldPadCode": "X", "newPadCode": "X"}]},
+        "/vcpcloud/api/padApi/listInstalledApp": {"code": 200, "data": [{"padCode": "AC32010230001", "apps": [
+            {"packageName": "com.other", "versionName": "1"},
+            {"packageName": "com.cyclone.mobile", "versionName": "5.0.0-alpha.114.dev1", "versionCode": "267", "appState": 0}]}]},
+        "/vcpcloud/api/padApi/setKeepAliveApp": {"code": 200, "data": None},
+    }))
+    vmos = VmosCloud(AK, SK, transport=http, clock=Clock())
+    phone = CloudPhone("vmos", "AC32010230001", "Shop 1")
+    assert vmos.phone_details(["AC32010230001"]) == {
+        "AC32010230001": {"name": "Shop phone", "android": "13", "paidUntilMs": 1_800_000_000_000}}
+    assert vmos.pad_code_changes() == {"B": "C", "A": "C"}  # a phone that moved twice is followed to its newest code
+    assert vmos.installed_version(phone) == {"versionName": "5.0.0-alpha.114.dev1", "versionCode": 267, "state": "installed"}
+    assert vmos.installed_version(phone, "com.missing") is None
+    vmos.keep_alive([phone])
+    assert http.calls[-1][2] == {"padCodes": ["AC32010230001"], "applyAllInstances": False,
+                                 "appInfos": [{"serverName": "com.cyclone.mobile/com.cyclone.mobile.CycloneAccessibilityService"}]}
 
 
 def test_vmos_remote_adb_asks_for_seven_days_and_reads_the_ssh_link():
@@ -353,6 +448,60 @@ def test_a_kept_vmos_phone_opens_adb_starts_its_tunnel_connects_and_gets_cyclone
     assert env.care.updates == ["dev_cloud1"] and len(env.spawned) == 1  # once, and the tunnel is left alone
 
 
+def test_a_phone_with_cyclone_gets_vmos_keep_alive_once(tmp_path):
+    env = make_service(tmp_path, routes=vmos_routes(**{"/vcpcloud/api/padApi/setKeepAliveApp": {"code": 200, "data": None}}))
+    account = add_vmos(env)
+    env.service.set_phone(account["id"], "AC32010230001", keep=True)
+    env.service.tick()
+    serial = phone_of(env.service.account_public(account["id"]), "AC32010230001")["serial"]
+    env.fleet.sessions[serial] = SimpleNamespace(device_id="dev_cloud1", adb=SimpleNamespace(
+        shell=lambda *a, **k: "versionName=5.0.0-alpha.114.dev1\nversionCode=267"))
+    run(env)
+    run(env)
+    asks = [c for c in env.http.calls if c[0].endswith("/setKeepAliveApp")]
+    assert len(asks) == 1 and asks[0][2]["padCodes"] == ["AC32010230001"]
+    assert env.care.updates == []  # Cyclone was already there
+
+
+def test_a_kept_phone_whose_padcode_changed_follows_it_on_the_same_serial(tmp_path):
+    listing = {"rows": [{"padCode": "AC32010230001", "padStatus": 10}]}
+    routes = vmos_routes(**{
+        "/vcpcloud/api/padApi/infos": lambda _b: {"code": 200, "data": {"pageData": listing["rows"]}},
+        "/vcpcloud/api/padApi/userPadList": {"code": 200, "data": [{"padCode": "AC32010230001", "padName": "Shop phone"},
+                                                                  {"padCode": "AC32010239999", "padName": "Shop phone"}]},
+        "/vcpcloud/api/padApi/queryPadIdChangeRecords": {"code": 200, "data": [{"oldPadCode": "AC32010230001", "newPadCode": "AC32010239999"}]},
+    })
+    env = make_service(tmp_path, routes=routes)
+    account = add_vmos(env)
+    assert phone_of(account, "AC32010230001")["name"] == "Shop phone"  # the owner's own name, from userPadList
+    env.service.set_phone(account["id"], "AC32010230001", keep=True)
+    env.service.tick()
+    run(env)
+    serial = phone_of(env.service.account_public(account["id"]), "AC32010230001")["serial"]
+    listing["rows"] = [{"padCode": "AC32010239999", "padStatus": 10}]
+    env.service.refresh_phones(account["id"])
+    public = env.service.account_public(account["id"])
+    assert [p["remoteId"] for p in public["phones"]] == ["AC32010239999"]
+    assert phone_of(public, "AC32010239999")["keep"] is True
+    saved = env.service.vault.account(account["id"])["phones"]["AC32010239999"]
+    assert saved["movedFrom"] == "AC32010230001" and saved["localPort"] == int(serial.rsplit(":", 1)[1])
+    run(env)
+    assert phone_of(env.service.account_public(account["id"]), "AC32010239999")["serial"] == serial
+
+
+def test_the_signing_scheme_that_worked_is_remembered_for_the_account(tmp_path):
+    answer = {"code": 200, "data": {"pageData": [{"padCode": "AC1", "padStatus": 10}]}}
+
+    def transport(method, url, headers, body, timeout):
+        return v2_only(answer)(method, url, headers, body, timeout) if url.endswith("/infos") else (404, b"{}")
+
+    env = make_service(tmp_path)
+    env.service.transport = transport
+    account = add_vmos(env)
+    assert env.service.vault.account(account["id"])["signing"] == "hmac"
+    assert "secrets" not in json.dumps(env.service.account_public(account["id"]))
+
+
 def test_the_key_is_renewed_before_it_expires_on_the_same_local_port(tmp_path):
     env = make_service(tmp_path)
     account = add_vmos(env)
@@ -500,6 +649,6 @@ def test_vmos_pad_status_follows_the_documented_codes():
     assert power(10) == "running"
     assert power(14) == "abnormal"
     assert power(18) == power(19) == "stopped"
-    assert power(11) == power(12) == power(15) == power(20) == "starting"
+    assert power(11) == power(12) == power(15) == power(16) == power(20) == "starting"
     assert power(25) == power(-1) == "gone"
     assert power(99) == power(None) == "unknown"

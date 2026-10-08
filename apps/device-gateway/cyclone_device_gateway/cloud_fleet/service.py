@@ -8,7 +8,7 @@ import socket
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -28,7 +28,8 @@ MAX_KEPT = 32  # the fleet's own limit
 LEASE_MINUTES = 7 * 24 * 60
 SECRET_LIMIT = 400
 PRINTABLE = re.compile(r"^[\x21-\x7e]+$")
-ENDPOINT_KEYS = {"vmos": {"list", "adb"}, "duoplus": {"list"}, "adb": set()}
+ENDPOINT_KEYS = {"vmos": {"list", "adb", "openAdb", "padList", "padCodeChanges", "installedApps", "keepAlive"},
+                 "duoplus": {"list"}, "adb": set()}
 
 
 @dataclass
@@ -48,6 +49,7 @@ class Link:
     connected_since_ms: int | None = None
     error_code: str | None = None
     installed_checked: bool = False
+    keep_alive_asked: bool = False
 
 
 def _port_free(port: int) -> bool:
@@ -163,13 +165,19 @@ class CloudFleetService:
 
     def refresh_phones(self, account_id: str) -> list[dict[str, Any]]:
         account = self._require(account_id)
+        provider = self._provider(account)
         try:
-            phones = self._provider(account).list_phones()
+            phones = provider.list_phones()
         except ProviderError as exc:
             with self._lock:
                 self._account_errors[account_id] = exc.to_dict()
             self._listed_at[account_id] = self.clock()
             raise
+        signing = getattr(provider, "signing", None)
+        if signing and signing != account.get("signing"):
+            self.vault.update(account_id, lambda a: a.update({"signing": signing}))
+        phones = self._with_details(provider, phones)
+        self._follow_moves(account, provider, {p.remote_id for p in phones})
         with self._lock:
             self._phones[account_id] = {p.remote_id: p for p in phones}
             self._account_errors.pop(account_id, None)
@@ -177,6 +185,46 @@ class CloudFleetService:
         names = {p.remote_id: p.name for p in phones}
         self.vault.update(account_id, lambda a: [a["phones"][r].update({"name": names[r]}) for r in a.get("phones", {}) if r in names])
         return [p.public() for p in phones]
+
+    @staticmethod
+    def _with_details(provider: Any, phones: list[CloudPhone]) -> list[CloudPhone]:
+        """The owner's own names, Android versions and paid-until times, where the provider has a second list."""
+        if not phones or not hasattr(provider, "phone_details"):
+            return phones
+        try:
+            details = provider.phone_details([p.remote_id for p in phones])
+        except ProviderError:
+            return phones
+        out = []
+        for phone in phones:
+            extra = details.get(phone.remote_id) or {}
+            out.append(replace(phone, name=extra.get("name") or phone.name, android=phone.android or extra.get("android"),
+                               paid_until_ms=extra.get("paidUntilMs") or phone.paid_until_ms))
+        return out
+
+    def _follow_moves(self, account: dict[str, Any], provider: Any, listed: set[str]) -> None:
+        """A kept phone whose padCode VMOS changed is the same phone: its keep, name and local port move to the new
+        code, so it reconnects on the same serial and stays the same fleet phone."""
+        saved = account.get("phones") or {}
+        missing = [r for r, p in saved.items() if p.get("keep") and r not in listed]
+        if not missing or not hasattr(provider, "pad_code_changes"):
+            return
+        try:
+            moves = provider.pad_code_changes()
+        except ProviderError:
+            return
+        for old in missing:
+            new = moves.get(old)
+            if not new or new not in listed or new in saved:
+                continue
+
+            def move(a: dict[str, Any], old: str = old, new: str = new) -> None:
+                a["phones"][new] = {**a["phones"].pop(old), "movedFrom": old}
+                if old in a.get("addresses", {}):
+                    a["addresses"][new] = a["addresses"].pop(old)
+
+            self.vault.update(account["id"], move)
+            self._release(phone_key(account["provider"], account["id"], old))
 
     def add_address(self, account_id: str, address: str, name: str | None = None) -> dict[str, Any]:
         """Remote ADB: add a phone by address (it's kept connected). DuoPlus: the address pasted for a listed phone."""
@@ -348,6 +396,7 @@ class CloudFleetService:
                     raise ProviderError("ADB_CONNECT_FAILED", "adb couldn't reach the phone yet.")
                 adb_states[serial] = "device"
             self._connected(link, account, now)
+            self._ask_keep_alive(link, account, phone)
         except ProviderError as exc:
             link.attempts += 1
             wait = L.backoff_s(link.attempts) if exc.retryable else L.NEEDS_YOU_RETRY_S
@@ -390,6 +439,22 @@ class CloudFleetService:
         self._set(link, "connected", "Connected" + left, wait_s=TICK_S)
         if account.get("installCyclone", True) and not link.installed_checked:
             self._install_if_missing(link)
+
+    def _ask_keep_alive(self, link: Link, account: dict[str, Any], phone: CloudPhone) -> None:
+        """Once Cyclone is on a provider phone, ask the provider to keep Cyclone's service running (VMOS
+        `setKeepAliveApp`), once per connection. Best effort: a phone without it still works, it may only be stopped
+        under memory pressure."""
+        if link.keep_alive_asked or not link.installed_checked or not account.get("installCyclone", True):
+            return
+        provider = self._provider(account)
+        if not hasattr(provider, "keep_alive"):
+            link.keep_alive_asked = True
+            return
+        try:
+            provider.keep_alive([phone])
+            link.keep_alive_asked = True
+        except ProviderError as exc:
+            link.keep_alive_asked = not exc.retryable
 
     def _install_if_missing(self, link: Link) -> None:
         """A cloud phone without Cyclone gets this PC's verified build through phone care, once."""

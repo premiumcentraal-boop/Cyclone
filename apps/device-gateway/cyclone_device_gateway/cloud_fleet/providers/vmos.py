@@ -1,8 +1,15 @@
-"""VMOS Cloud OpenAPI: list the account's cloud phones and open remote ADB on one.
+"""VMOS Cloud OpenAPI: list the account's cloud phones, open remote ADB on one, and keep it fit for Cyclone.
 
-Signing follows VMOS's OpenAPI guide (HMAC-SHA256 over host, x-date, content-type and the body's SHA-256, credential
-scope `<date>/armcloud-paas/request`). The paths are the documented defaults and can be overridden per account
-(`endpoints`), so a change on VMOS's side is a settings fix, not a release.
+Signing is VMOS's V2 scheme (OpenAPI "Getting Started"): three headers, `X-Access-Key`, `X-Timestamp` (unix seconds)
+and `X-Sign` = lowerHex(SHA-256(SK + timestamp + path + body)). The older HMAC scheme (credential scope
+`<date>/armcloud-paas/request`) is kept as a fallback for accounts that still use it: when V2 is refused as a bad
+signature, the same call is tried once with HMAC, and the scheme that worked is reported back (`signing`) so the
+service can remember it. The paths are the documented defaults and can be overridden per account (`endpoints`), so a
+change on VMOS's side is a settings fix, not a release.
+
+Only connectors that serve Cyclone's own rules are here (plan 56 §2): reading phones and their state, opening ADB,
+following a changed padCode, checking Cyclone's installed version and keeping its service alive. Nothing here taps,
+types, spoofs a device or reaches an app's accounts: Cyclone acts on the phone only through its own executor.
 
 Remote ADB answers with an SSH command (`ssh … user@host -p port -L local:adb-proxy:port -Nf`), a key (the SSH
 password) and an expiry. Cyclone asks for the longest lease VMOS allows (7 days) and renews it before it ends.
@@ -25,7 +32,24 @@ BASE_URL = "https://api.vmoscloud.com"
 ENDPOINTS = {
     "list": "/vcpcloud/api/padApi/infos",
     "adb": "/vcpcloud/api/padApi/adb",
+    "openAdb": "/vcpcloud/api/padApi/openOnlineAdb",
+    "padList": "/vcpcloud/api/padApi/userPadList",
+    "padCodeChanges": "/vcpcloud/api/padApi/queryPadIdChangeRecords",
+    "installedApps": "/vcpcloud/api/padApi/listInstalledApp",
+    "keepAlive": "/vcpcloud/api/padApi/setKeepAliveApp",
 }
+# Cyclone's own service, which VMOS's keep-alive guards against being stopped (Android 13–15 images).
+CYCLONE_PACKAGE = "com.cyclone.mobile"
+CYCLONE_SERVICE = "com.cyclone.mobile/com.cyclone.mobile.CycloneAccessibilityService"
+# V2 auth answers (HTTP 401 with one of these codes). Only a signature problem is worth one HMAC try.
+AUTH_WORDS = {
+    2019: "VMOS didn't accept the request signature.",
+    2031: "VMOS doesn't know this access key. Copy it again from Developer → API.",
+    2032: "VMOS says a sign-in header is missing.",
+    2033: "VMOS says this PC's clock is off. Set Windows to set the time automatically, then try again.",
+    1116: "VMOS refused this PC's IP address. Add it to the API IP allow list in the VMOS console.",
+}
+SIGNATURE_CODES = {2019, 2032}
 SERVICE = "armcloud-paas"
 CONTENT_TYPE = "application/json;charset=UTF-8"
 SIGNED_HEADERS = "content-type;host;x-content-sha256;x-date"
@@ -35,19 +59,32 @@ MAX_PAGES = 20
 # VMOS reports times as Beijing time when it gives no zone; reading them that way is also the earlier (safer) guess.
 PROVIDER_TZ = timezone(timedelta(hours=8))
 # `padStatus` as VMOS documents it (OpenAPI instance status): 10 running, 11 restarting, 12 resetting, 13 upgrading,
-# 14 abnormal, 15 not ready, 17 restoring, 18 shut down, 19 shutting down, 20 booting, 23 deleting, 24 delete failed,
-# 25 deleted, 26 cloning, -1 deleted. Before 2026-10-08 Cyclone read 14 as "stopped" and did not know 18.
+# 14 abnormal, 15 not ready, 16 backing up, 17 restoring, 18 shut down, 19 shutting down, 20 booting, 23 deleting,
+# 24 delete failed, 25 deleted, 26 cloning, -1 deleted. Before 2026-10-08 Cyclone read 14 as "stopped" and did not know 18.
 RUNNING = {
     10: "running",
-    11: "starting", 12: "starting", 13: "starting", 15: "starting", 17: "starting", 20: "starting", 26: "starting",
+    11: "starting", 12: "starting", 13: "starting", 15: "starting", 16: "starting", 17: "starting", 20: "starting", 26: "starting",
     14: "abnormal",
     18: "stopped", 19: "stopped",
     23: "gone", 24: "abnormal", 25: "gone", -1: "gone",
 }
 
 
+def sign_v2(secret_key: str, timestamp: str, path: str, body_or_query: str) -> str:
+    """X-Sign: lowerHex(SHA-256(SK + timestamp + path + bodyOrQuery)), plain concatenation. Pure; checked against
+    the example in VMOS's own guide."""
+    return hashlib.sha256((secret_key + timestamp + path + body_or_query).encode("utf-8")).hexdigest()
+
+
+def v2_headers(access_key: str, secret_key: str, timestamp: str, path: str, body: str, *, sign_body: bool = True) -> dict[str, str]:
+    """VMOS signs a few endpoints (its file upload and command ones) without their body; Cyclone calls none of them
+    today, so every call here signs its body."""
+    return {"Content-Type": "application/json", "X-Access-Key": access_key, "X-Timestamp": timestamp,
+            "X-Sign": sign_v2(secret_key, timestamp, path, body if sign_body else "")}
+
+
 def sign(access_key: str, secret_key: str, host: str, body: str, x_date: str) -> dict[str, str]:
-    """The request headers for one signed call. Pure, so the signature can be checked against VMOS's own example."""
+    """The older HMAC scheme's headers for one call (the fallback). Pure."""
     short_date = x_date[:8]
     content_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
     canonical = (f"host:{host}\nx-date:{x_date}\ncontent-type:{CONTENT_TYPE}\nsignedHeaders:{SIGNED_HEADERS}\n"
@@ -73,7 +110,7 @@ class VmosCloud:
     name = "VMOS Cloud"
 
     def __init__(self, access_key: str, secret_key: str, *, base_url: str | None = None, endpoints: dict[str, str] | None = None,
-                 transport: Transport = urllib_transport, clock: Callable[[], float] = time.time):
+                 transport: Transport = urllib_transport, clock: Callable[[], float] = time.time, signing: str | None = None):
         if not access_key or not secret_key:
             raise ProviderError("PROVIDER_AUTH", "Add the VMOS access key and secret key.", retryable=False)
         self._ak, self._sk = access_key, secret_key
@@ -81,14 +118,45 @@ class VmosCloud:
         self.endpoints = {**ENDPOINTS, **{k: v for k, v in (endpoints or {}).items() if k in ENDPOINTS and str(v).startswith("/")}}
         self.transport = transport
         self.clock = clock
+        # "v2" (VMOS's current scheme) unless this account is known to use the older HMAC one.
+        self.signing = "hmac" if signing == "hmac" else "v2"
 
     def _call(self, endpoint: str, payload: dict[str, Any]) -> Any:
+        try:
+            return self._signed_call(endpoint, payload, self.signing)
+        except _SignatureRefused as refused:
+            other = "hmac" if self.signing == "v2" else "v2"
+            try:
+                data = self._signed_call(endpoint, payload, other)
+            except _SignatureRefused:
+                raise refused.error from None
+            self.signing = other
+            return data
+
+    def _signed_call(self, endpoint: str, payload: dict[str, Any], scheme: str) -> Any:
         body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-        x_date = datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        host = urlparse(self.base_url).netloc
-        headers = sign(self._ak, self._sk, host, body, x_date)
-        return call_json(self.transport, "POST", self.base_url + self.endpoints[endpoint], headers, body.encode("utf-8"),
-                         provider=self.name)
+        path = self.endpoints[endpoint]
+        if scheme == "v2":
+            headers = v2_headers(self._ak, self._sk, str(int(self.clock())), path, body)
+        else:
+            x_date = datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            headers = sign(self._ak, self._sk, urlparse(self.base_url).netloc, body, x_date)
+        answer: dict[str, Any] = {}
+
+        def tap(method: str, url: str, sent: dict[str, str], raw_body: bytes, timeout: float) -> tuple[int, bytes]:
+            status, raw = self.transport(method, url, sent, raw_body, timeout)
+            answer["code"] = _answer_code(raw)
+            return status, raw
+
+        try:
+            return call_json(tap, "POST", self.base_url + path, headers, body.encode("utf-8"), provider=self.name)
+        except ProviderError as exc:
+            code = answer.get("code")
+            if code in AUTH_WORDS:
+                exc = ProviderError("PROVIDER_AUTH", AUTH_WORDS[code], retryable=False)
+            if exc.code == "PROVIDER_AUTH" and code not in AUTH_WORDS.keys() - SIGNATURE_CODES:
+                raise _SignatureRefused(exc) from None
+            raise exc from None
 
     def list_phones(self) -> list[CloudPhone]:
         phones: list[CloudPhone] = []
@@ -102,16 +170,95 @@ class VmosCloud:
         return phones
 
     def open_adb(self, phone: CloudPhone, minutes: int = MAX_LEASE_MINUTES) -> AdbLink:
-        minutes = max(60, min(int(minutes), MAX_LEASE_MINUTES))
+        """A 1–7 day remote-ADB link. When VMOS answers without a complete link, its guide says to switch ADB on
+        (`openOnlineAdb`) first: Cyclone does that once and asks again."""
+        minutes = max(24 * 60, min(int(minutes), MAX_LEASE_MINUTES))
+        link = self._adb_link(phone, minutes)
+        if link is None:
+            self._call("openAdb", {"padCodes": [phone.remote_id], "openStatus": 1})
+            link = self._adb_link(phone, minutes)
+        if link is None:
+            raise ProviderError("ADB_NOT_OPEN", "VMOS didn't open ADB for this phone. Check that remote ADB is allowed for the account.")
+        return link
+
+    def _adb_link(self, phone: CloudPhone, minutes: int) -> AdbLink | None:
         issued = int(self.clock() * 1000)
         data = self._call("adb", {"padCode": phone.remote_id, "enable": True, "expireMinutes": minutes})
         item = data[0] if isinstance(data, list) and data else data
         if not isinstance(item, dict):
-            raise ProviderError("PROVIDER_ANSWER", "VMOS didn't return an ADB link for this phone.")
-        link = parse_adb_answer(item, issued_ms=issued, requested_minutes=minutes)
-        if link is None:
-            raise ProviderError("ADB_NOT_OPEN", "VMOS didn't open ADB for this phone. Check that remote ADB is allowed for the account.")
-        return link
+            return None
+        return parse_adb_answer(item, issued_ms=issued, requested_minutes=minutes)
+
+    def phone_details(self, remote_ids: list[str] | None = None) -> dict[str, dict[str, Any]]:
+        """Per padCode: the owner's name for it, its Android version and when its paid time ends (`userPadList`).
+        `infos` carries none of these. Best effort: the list works without it."""
+        data = self._call("padList", {})
+        out: dict[str, dict[str, Any]] = {}
+        for row in _rows(data):
+            code = str(row.get("padCode") or "").strip()
+            if not code or (remote_ids is not None and code not in remote_ids):
+                continue
+            ends = row.get("signExpirationTimeTamp")
+            out[code] = {
+                "name": str(row.get("padName") or "").strip()[:80] or None,
+                "android": str(row.get("androidVersion") or "").strip()[:24] or None,
+                "paidUntilMs": int(ends) if isinstance(ends, (int, float)) and ends > 0 else parse_time_ms(row.get("signExpirationTime")),
+            }
+        return out
+
+    def pad_code_changes(self) -> dict[str, str]:
+        """old padCode → new padCode for the last three days (VMOS can move a phone to a new code; the phone and its
+        data stay the same). Followed to the newest code when it moved twice."""
+        data = self._call("padCodeChanges", {})
+        moves: dict[str, str] = {}
+        for row in _rows(data):
+            old, new = str(row.get("oldPadCode") or "").strip(), str(row.get("newPadCode") or "").strip()
+            if old and new and old != new and len(new) <= 64:
+                moves.setdefault(old, new)  # newest first, as VMOS orders them
+        for old in list(moves):
+            seen, new = {old}, moves[old]
+            while new in moves and new not in seen:
+                seen.add(new)
+                new = moves[new]
+            moves[old] = new
+        return moves
+
+    def installed_version(self, phone: CloudPhone, package: str = CYCLONE_PACKAGE) -> dict[str, Any] | None:
+        """`{versionName, versionCode, state}` for one package as VMOS sees it right now, or None if it is not there."""
+        data = self._call("installedApps", {"padCodes": [phone.remote_id], "appName": ""})
+        for row in _rows(data) if isinstance(data, list) else ([data] if isinstance(data, dict) else []):
+            if str(row.get("padCode") or phone.remote_id) != phone.remote_id:
+                continue
+            for app in row.get("apps") or []:
+                if isinstance(app, dict) and app.get("packageName") == package:
+                    state = {0: "installed", 1: "installing", 2: "downloading"}.get(app.get("appState"), "installed")
+                    return {"versionName": str(app.get("versionName") or "")[:40] or None,
+                            "versionCode": _int(str(app.get("versionCode") or ""), 0) or None, "state": state}
+        return None
+
+    def keep_alive(self, phones: list[CloudPhone], service: str = CYCLONE_SERVICE) -> None:
+        """Ask VMOS to keep Cyclone's service running on these phones (Android 13–15 images)."""
+        if phones:
+            self._call("keepAlive", {"padCodes": [p.remote_id for p in phones], "applyAllInstances": False,
+                                     "appInfos": [{"serverName": service}]})
+
+
+class _SignatureRefused(Exception):
+    def __init__(self, error: ProviderError):
+        super().__init__(error.message)
+        self.error = error
+
+
+def _answer_code(raw: bytes) -> int | None:
+    try:
+        value = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeDecodeError, ValueError):
+        return None
+    code = value.get("code") if isinstance(value, dict) else None
+    try:
+        return int(code) if code is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _rows(data: Any) -> list[dict[str, Any]]:

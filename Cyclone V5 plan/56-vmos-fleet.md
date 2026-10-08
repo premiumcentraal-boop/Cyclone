@@ -35,7 +35,8 @@ here around the owner's priorities:
 
 | Piece | State | Where |
 | --- | --- | --- |
-| VMOS signing (HMAC-SHA256, `armcloud-paas`) | **Built** | `cloud_fleet/providers/vmos.py` |
+| VMOS signing: **V2** (SHA-256, three headers), with the older HMAC as a remembered fallback | **Built** (V2 since 2026-10-08) | `cloud_fleet/providers/vmos.py` |
+| ADB switched on when needed (`openOnlineAdb`), padCode moves followed, keep-alive for Cyclone, owner names and paid-until dates | **Built** (2026-10-08) | `cloud_fleet/providers/vmos.py`, `service.py` |
 | Account keys in the vault (DPAPI) | **Built** | `cloud_fleet/vault.py` |
 | Phone list, 7-day ADB lease, SSH tunnel, `adb connect`, renew 1/5 before the end, repair | **Built** | `cloud_fleet/service.py`, `lease.py`, `tunnel.py` |
 | Cyclone installed on a cloud phone that lacks it (verified build) | **Built** (through `adb install`) | `phone_care/` |
@@ -49,85 +50,125 @@ here around the owner's priorities:
 | Groups, staged updates, fleet health | **Not built** | — |
 | Any run against a real VMOS account | **Never** (UNVERIFIED since alpha.90) | — |
 
-## 2. What the VMOS OpenAPI offers (deep dive, 2026-10-08)
+## 2. The VMOS OpenAPI, from VMOS's own docs (2026-10-08)
 
-### 2.1 How this was checked
+### 2.1 Sources
 
-**Reading the pages.** The VMOS documentation hosts are blocked from the build environment's network:
-`cloud.vmoscloud.com`, `www.vmoscloud.com`, `api.vmoscloud.com`, `cloud.vsphone.com` and `docs.armcloud.net` all
-answer `403 CONNECT`. The pages were read through web search, which quotes them directly.
+The owner opened the network, so this section is read from VMOS's own pages, not from search quotes. It replaces the
+earlier search-based reading.
 
-**Sources, most trusted first:**
-1. **VMOS** (official): `cloud.vmoscloud.com/vmoscloud/doc/zh/server/OpenAPI.html`, its English pages, and the
-   `www.vmoscloud.com/help/…` articles.
-2. **vsPhone** (`cloud.vsphone.com/vsphone/doc/en/server/OpenAPI.html`): the same ArmCloud platform under another
-   brand, with the same `padApi` names. Only the path prefix differs: `/vsphone/api/padApi/` instead of
-   `/vcpcloud/api/padApi/`.
-3. **ArmCloud** (`docs.armcloud.net`): the underlying PaaS.
+| Page | What it settles |
+| --- | --- |
+| `cloud.vmoscloud.com/vmoscloud/doc/en/server/OpenAPI.html` | Every endpoint, its body and its answer |
+| `…/server/example.html` (OpenAPI Getting Started) | **V2 signing**, with a worked example |
+| `…/server/ErrorCode.html` | Error codes, including the sign-in ones |
+| `…/server/callback.html` | Callback types and their JSON |
+| The OpenAPI spec (`openapi.yaml`) and `llms.txt` | The same endpoints as data |
 
-**Status words used below:**
-- **Confirmed (VMOS):** seen on a VMOS page.
-- **Confirmed (vsPhone):** seen on the sibling page only.
-- **Ours:** proven by our own client code.
-
-Run 0 still checks every row on the owner's account, because a VMOS account can differ from its sibling's docs.
-
-**Machine-readable spec.** VMOS's English docs list an **OpenAPI spec** ("for AI & tools") and an **LLMs.txt** quick
-reference in the OpenAPI sidebar of `cloud.vmoscloud.com/vmoscloud/doc/en/`. Run 0 downloads both on the owner's PC.
-With the spec, the endpoint table becomes data, not guesses.
+**Status words below:**
+- **Built** is in the code now, with tests against VMOS's documented answers.
+- **Run Vn** is planned for that run.
+- Anything VMOS marks "Pending Launch" says so.
+- Nothing here has met a real VMOS account yet: **UNVERIFIED** until run 0.
 
 ### 2.2 Basics
 
-| Item | Finding | Source |
+| Item | Finding |
+| --- | --- |
+| Base | `https://api.vmoscloud.com` + `/vcpcloud/api/padApi/<name>`. Mostly POST with a JSON body; a few lists are GET. |
+| Keys | Access Key ID + Secret Access Key, from the console's Developer → API |
+| **Signing (V2)** | Three headers: `X-Access-Key`, `X-Timestamp` (unix **seconds**, ±5 minutes) and `X-Sign` = lowerHex(SHA-256(SK + timestamp + path + bodyOrQuery)), plain concatenation. bodyOrQuery is the exact body sent, the raw query for a GET, and **empty** for `uploadFile`, `uploadFileV3`, `asyncCmd` and `syncCmd`. **Built:** checked against the guide's own example. |
+| Old signing | Our alpha.90 client used the older HMAC scheme (`armcloud-paas` scope). VMOS's guide now documents only V2. **Built:** V2 first. If VMOS refuses the signature, the same call is tried once with HMAC, and the scheme that worked is remembered per account. |
+| Sign-in errors | HTTP 401 with: 2019 signature mismatch · 2031 unknown key · 2032 missing header · 2033 timestamp expired · 1116 IP not on the allow list. **Built:** the last three each get their own fix in Cyclone's words ("this PC's clock is off", "add this PC's IP in the console"), and are not retried. |
+| Answer shape | `{code, msg, ts, traceId, data}`; `code` 200 is success. Business refusals come back as HTTP 200 with another code. |
+| Limits | No global rate limit is documented. Per-endpoint limits: reset at most once per 3 minutes (1219); auto-renew calls are throttled; some calls refuse a repeat within 2 s. Batches: `openOnlineAdb` takes 1–200 phones, `batch/adb` 10, `padDetail` up to 1000 rows a page. |
+| Callbacks | A URL set in VMOS's web console; POST JSON. Codes 999 phone status, 1000 restart, 1001 reset, 1002 command, 1003 install, 1004 uninstall, 1005/1007 app stop/start, 1009 file upload, 1012 image upgrade, 1124 new device, 1403 backup size, 4001 image upload, plus the event `padCodeChange`. **They carry no signature**, so Cyclone treats a callback only as a hint to re-read the API, never as a fact. |
+| `padStatus` | 10 running · 11 restarting · 12 resetting · 13 upgrading · 14 abnormal · 15 not ready · 16 backing up · 17 restoring · 18 shut down · 19 shutting down · 20 booting · 23 deleting · 24 delete failed · 25 deleted · 26 cloning · −1 deleted. **Built.** |
+
+### 2.3 The connector set Cyclone uses
+
+Picked for the owner's goal: phones that are easy to add, arrive with Cyclone and our skills, stay connected over ADB,
+and sit at the owner's fingertips. Every connector runs in the PC gateway, inside the cloud-fleet keeper or behind an
+owner button in Glass. **None of them is a model, MCP or agent tool.**
+
+**A. Connect and stay connected**
+
+| Connector | What Cyclone does with it | State |
 | --- | --- | --- |
-| Base | `https://api.vmoscloud.com` + `/vcpcloud/api/padApi/<name>`, POST with a JSON body. The VMOS H5 SDK calls `https://api.vmoscloud.com/vcpcloud/api/padApi/stsToken`. | Confirmed (VMOS); ours |
-| Other host | The SDK examples also name an overseas ArmCloud host, `https://openapi-hk.armcloud.net`. Which host an account answers on is checked in run 0. | Confirmed (VMOS H5 page) |
-| Keys | Access Key ID + Secret Access Key, from the key pair under user management | Confirmed (VMOS) |
-| Signing | HMAC-SHA256. Headers `x-date` (`YYYYMMDD'T'HHMMSS'Z'`, UTC), `x-host`, `authorization`. The canonical string covers host, x-date, content type, signed headers and the body's SHA-256. The scope is `<date>/armcloud-paas/request`. The key is HMAC chained over date → `armcloud-paas` → `request`. | Confirmed (vsPhone; VMOS names the same scheme); ours matches |
-| **Open: signing version** | The docs recommend a **"V2 simplified signature" for new customers**. ArmCloud's v1 page writes the credential as `Credential={AK}/{date}/armcloud-paas/request`; our client sends `Credential={AK}`. Run 0 tries ours first, then the other forms. | To check |
-| Answer shape | `{code, msg, traceId, ts, data}`; `code` 200 is success | Confirmed (VMOS) |
-| Limits | No rate limit or QPS rule was found in any doc | Not found |
+| `infos` | The phone list and each phone's state | Built (alpha.90) |
+| `userPadList` | The owner's own name for each phone, its Android version and when its paid time ends (`signExpirationTime`). `infos` has none of these. | **Built** |
+| `adb` | The 1–7 day SSH link (`command`, `key`, `expireTime`). Cyclone asks for 7 days and renews early. | Built; the shortest lease is now 1 day, as documented |
+| `openOnlineAdb` | Switches ADB on. VMOS's own instruction: when `adb` answers without `key` or `command`, switch ADB on first. Cyclone does that once and asks again. | **Built** |
+| `queryPadIdChangeRecords` (+ `padCodeChange` callback) | VMOS can move a phone to a new padCode while keeping its data. Cyclone follows the move: the phone keeps its "keep connected", name and **local port**, so it comes back on the same serial as the same fleet phone. A phone that moved twice is followed to its newest code. | **Built** |
+| `setKeepAliveApp` | Asks VMOS to keep Cyclone's service (`CycloneAccessibilityService`) running, on Android 13–15 images. Asked once per connection, after Cyclone is confirmed on the phone. | **Built** |
+| `padDetail` | Online/offline, board status and compute use, with filters (only abnormal, only offline). Feeds the health board. | Run V4 |
+| `restartApp`, `startApp` | A rung on the repair ladder: restart Cyclone without restarting the phone | Run V1 |
+| `restart` | The next rung (an owner setting, off by default) | Run V1 |
+| `batch/adb` | Renew 10 phones' links in one call | Run V4, once VMOS launches it ("Pending Launch") |
 
-### 2.3 Endpoints
+**B. Arrive ready**
 
-| Need | Endpoint | What the docs say | Source |
-| --- | --- | --- | --- |
-| **Phone list** | `infos` | Paged: `page` and `rows` (required), optional `padType`, `padCodes`. Rows carry `padCode`, `padStatus`, `androidVersion`, `goodId`, `goodName` (e.g. `i18n_Android13-V08`). | Ours; fields Confirmed (vsPhone) |
-| **Phone status codes** | `padStatus` | 10 running · 11 restarting · 12 resetting · 13 upgrading · 14 **abnormal** · 15 not ready · 17 restoring · 18 **shut down** · 19 shutting down · 20 booting · 23 deleting · 24 delete failed · 25 deleted · 26 cloning · −1 deleted | Confirmed (VMOS zh + vsPhone). **Our client had 14 = "stopped" and no 18; fixed 2026-10-08.** |
-| Phone properties | `padProperties`, `updatePadProperties` (live), `updatePadAndroidProp` (needs a restart) | System and settings properties | Confirmed (VMOS zh) |
-| Time zone, language | `updateTimeZone`, `updateLanguage` | Paths shown as `/vcpcloud/api/padApi/updateTimeZone` and `/updateLanguage` | Confirmed (VMOS zh) |
-| Wi-Fi, GPS, smart IP | `setWifiList`, `gpsInjectInfo`, `smartIp` | `smartIp` changes the exit IP, SIM info and GPS together | `setWifiList`, `smartIp`: Confirmed (VMOS zh); `gpsInjectInfo`: Confirmed (vsPhone) |
-| **Remote ADB** | `adb` | `padCode`, `enable` (required); `expireMinutes` 1–7 days, default 1440 (example 2880). Answer: `padCode`, `command` (SSH tunnel line), `key`, `expireTime` (e.g. `2025-01-16 14:32:00`), `enable`, `adb` (`adb connect localhost:8577`). If `key` or `adb` come back empty, call the endpoint again. | Confirmed (VMOS zh); ours |
-| ADB batch | `batch/adb` (≤ 10 phones; `successList` / `failedList`, e.g. `PAD_NOT_RUNNING`); `openOnlineAdb` (on/off) | Batch is marked "pending launch" on vsPhone | Batch answer: Confirmed (VMOS zh); `openOnlineAdb`: Confirmed (vsPhone) |
-| **ADB must be switched on** | — | "ADB permission must be opened by customer service" (online chat or `start@vmoscloud.com`). In the web or PC client, Local Debugging → ADB keeps a connection for **24 h**; the API allows up to 7 days. | Confirmed (VMOS help) |
-| **ADB commands** | `asyncCmd` | `padCodes`, `scriptContent` (ADB commands separated by `;`, e.g. `cd /root;ls`). Answer `data[]`: `taskId`, `padCode`, `vmStatus` (0 offline, 1 online). | Confirmed (VMOS zh + vsPhone) |
-| Task results | `padTaskDetail`, `getTaskStatus` | `taskStatus`: −1 all failed, −2 partly failed, −3 cancelled, −4 timeout, −5 abnormal, 1 pending, 2 running, 3 done (9 queued in `padTaskDetail`). Plus `taskResult`, `errorMsg`, `endTime`. | Confirmed (vsPhone) |
-| **Install from a link** | `uploadFileV3` | `padCodes` (required); optional `url`, `md5`, `packageName`, `fileName`, `fileUniqueId`, `customizeFilePath`, `autoInstall` (1/0, APK only; needs `packageName`), `isAuthorization` (default: grant all permissions), `iconPath`. A file VMOS already has (by md5 or id) is reused; otherwise VMOS downloads the URL. Asynchronous. | Confirmed (vsPhone; listed on VMOS) |
-| Installed apps | Installed-app query | `padCodes`, optional `appName`. Answer: `packageName`, `versionCode`, `versionName`, `appState` (0 installed, 1 installing, 2 downloading). | Confirmed (vsPhone) |
-| Root | `switchRoot` | `padCodes`, `rootStatus` (required), `globalRoot`, `packageName` (comma list; needed when global root is off; error 110089 without it). VMOS advises per-app root, not global. | Confirmed (vsPhone); VMOS help: Toolbox → Root Management |
-| **Restart, reset** | `restart`, `reset` | Reset wipes the phone. Answer: `taskId`, `padCode`, `vmStatus`, `taskStatus` (−1 already queued, 1 added). Results arrive by callback (1000 / 1001). | Confirmed (vsPhone) |
-| One-key new device | `replacePad` (+ `country`) | `padCodes`; optional `countryCode` (default: a Singapore SIM), `realPhoneTemplateId`, `androidProp`, `wipeData` (default true), … **Erases all data**; "use with caution". | Confirmed (vsPhone + VMOS help) |
-| **Create a phone** | `getCloudGoodList` (GET, SKUs), `createMoneyOrder` | `goodId` (from the SKU list), `autoRenew` (required). Pre-sale: `createMoneyProOrder`, `queryProOrderList`. | Confirmed (vsPhone); no renewal endpoint found |
-| **Callbacks** | URL set in VMOS's web console | Types: 999 phone status (`padStatus`, `padConnectStatus` 1/0); 1000 restart; 1001 reset; 1002 ADB command (output + `taskStatus`); 1003 app install (per app `result`, `failMsg`, e.g. a blacklisted app); 1004 uninstall; 1005–1007 app stop / restart / start; 1009 file upload; 1012 image upgrade; 1124 one-key new device; 4001 user image upload | Confirmed (vsPhone; VMOS lists a "callback task business type codes" page) |
-| Live view | `stsToken` | Server-side token for the H5 viewer. Errors `INVALID_TOKEN` / `TOKEN_EXPIRED` mean fetch a new one; API errors 100006–100008 mean missing or invalid token. Lifetime not documented. | Confirmed (VMOS) |
-| Backup / restore, script info, restart-task info | — | Marked **"Pending Launch"** | vsPhone |
-| Error codes | — | 110031 instance not ready (wait), 220029 instance not running, 110089 no package for single-app root | VMOS ErrorCode page + vsPhone |
+| Connector | What Cyclone does with it | State |
+| --- | --- | --- |
+| `uploadFileV3` | Install the signed release APK straight from its GitHub URL, with `md5`, `packageName` and `autoInstall=1`. VMOS downloads it, so the PC uploads nothing. The body is not signed. | Run V1 |
+| `listInstalledApp` | Cyclone's installed version on the phone, read live, and whether it is still downloading or installing. Confirms an install even before ADB is up. | **Built** (provider); wired in V1 |
+| `fileTaskDetail`, `padTaskDetail` | Follow an install or command task to done or failed | Run V1 |
+| `asyncCmd` | The fallback path for the fixed provisioning catalogue (§3.1) when ADB is down. Commands come only from code; the body is not signed. | Run V1 |
+| `updateTimeZone`, `updateLanguage` | Set the owner's time zone and language | Run V1 |
+| `selectFiles` (cloud space) | Reuse an APK already stored in the account's cloud space | Run V1, optional |
+| Pre-installation Management (console, 6 slots) | Cyclone in one slot means every new or reset phone arrives with it | Owner question 2 |
 
-### 2.4 VMOS features outside the OpenAPI
+**C. A golden phone, cloned (backup and clone are live now)**
 
-- **Pre-installation Management** (VMOS console):
-  - Pick up to **6 apps**; they are "automatically installed when a cloud machine is reset or a new one is
-    purchased" and marked "Pre-installed".
-  - **This is the cleanest way to make every new VMOS phone arrive with Cyclone.** Run 0 checks whether
-    "one-key new device" also triggers it.
-  - Confirmed (VMOS help, "Pre-installed applications").
-- **One-key new device is not the same as reset.** On a virtual phone it keeps the device id but changes the virtual
-  machine's properties. Replacing a device wipes data (VMOS suggests Clone & Backup first). Confirmed (VMOS help).
-- **VMOS's own control API** (the "Android Control API" on Edge images, `127.0.0.1:18185` inside the phone):
-  - It offers taps, swipes, a root shell, installs and screenshots, and VMOS also offers an MCP.
-  - **Cyclone does not use either**, by §0: it is the provider's own hands and shell.
-  - It also means any app inside the phone could reach a root shell on that port. Run 0 checks whether VMOS Cloud
-    images expose it. If they do, the doctor warns.
+| Connector | What Cyclone does with it | State |
+| --- | --- | --- |
+| `backupCalculate` → `queryBackupCalculateResult` (or callback 1403) → `addBackup` within 5 minutes → `queryBackupBatch` | Back up a freshly provisioned, Ready phone as the **golden phone**: Cyclone, settings and fleet skills, but no app accounts | Run V3 |
+| `listPadBackups`, `listPadBackupIds` | Pick the golden backup | Run V3 |
+| `clonePadBackup` | Clone the golden onto new phones in one batch. **Every clone then re-enrolls:** Cyclone notices it is a copy (a new padCode under an old install id), drops the copied pairing and keys, and gets its own grant (§3.1 step 5). A clone never inherits another phone's trust. | Run V3 |
+| `imageVersionList` | Offer only Android 13+ images | Run V3 |
+| `upgradeImage` | Image upgrades: owner-confirmed, staged | Run V4 |
+
+**D. New phones and cost (owner-only buttons, GATE pay)**
+
+| Connector | What Cyclone does with it | State |
+| --- | --- | --- |
+| `getCloudGoodList` | The SKUs | Run V3 |
+| `createMoneyOrder` | Buy a phone or renew one, owner-confirmed every time | Run V3 |
+| `openAutoRenew`, `closeAutoRenew` | Auto-renew per phone; the card warns before the paid time ends | Run V3 |
+| `selectPaidOrderList` | The bills, in Glass | Run V4 |
+| Timing devices: `timingDeviceModels`, `createByTimingOrder`, `timingPadOn`, `timingPadOff` (keeps the environment), `timingPadPowerLogList` | Pay-for-time phones: power one on for a scheduled job, off afterwards, everything kept | Run V4 (owner question 7) |
+
+**E. At the owner's fingertips (Glass)**
+
+| Connector | What Cyclone does with it | State |
+| --- | --- | --- |
+| `getLongGenerateUrl` | A live thumbnail on every phone card, in batches, scaled and compressed. The gateway fetches it and never stores it. | Run V1 |
+| `updatePadName` | Renaming a phone in Glass renames it at VMOS, so it has one name everywhere | Run V1 |
+| `padGroupList`, `padGroupDevices` | Bring the owner's VMOS console groups in as Cyclone groups | Run V4 |
+| `stsTokenByPadCode`, `clearStsToken` | The VMOS live viewer, view-only, and ending a share | Run V4 |
+| `dissolveRoom` | End a stuck viewer stream | Run V4 |
+
+### 2.4 Not used, on purpose
+
+| Endpoints | Why not |
+| --- | --- |
+| `simulateTouch`, `simulateClick`, `simulateSwipe`, `simulateLongPress`, `inputText`, the Edge control API on `127.0.0.1:18185`, VMOS's MCP | The provider's own hands. Cyclone acts only through `PhoneToolExecutor` (§0). |
+| `syncCmd`, `asyncCmd` with any outside input, global `switchRoot` | A shell for someone other than Cyclone's fixed catalogue |
+| `replacePad`, `padReplaceNew`, `updateSIM*`, `updatePadAndroidProp`, `updatePadProperties`, `resetGAID`, `setWifiList`, `gpsInjectInfo`, `smartIp`, `setProxy`, `replaceRealAdiTemplate`, `virtualRealSwitch` | Changing what device a phone claims to be. That is fingerprint spoofing, outside the scope guard. A wipe ("new device") stays an owner button in VMOS's own console. |
+| `setHideAppList`, `setHideAccessibilityAppList` | Hiding automation from apps: defeating anti-automation checks, outside the scope guard |
+| Cloud numbers, `simulateSendSms`, `enableSmsSendCallback`, `addPhoneRecord`, `updateContacts` | Number and SMS farms, outside the scope guard |
+| Social accounts (`socialAccount*`) | Bulk third-party accounts, outside the scope guard |
+| `injectAudioToMic`, `unmannedLive`, `injectPicture` | Faking the camera, microphone or a live stream |
+| `authorizePad`, `confirmTransfer`, `replacement` | Handing a phone to another account: the owner does that in VMOS's console |
+
+### 2.5 Still to see on the owner's account (run 0)
+
+- V2 signing against the real account. It is tested against the guide's example only.
+- Whether ADB still needs VMOS customer service, now that `openOnlineAdb` exists.
+- Whether `setKeepAliveApp` accepts an accessibility service (the docs say "service").
+- Whether "one-key new device" also re-installs the pre-installed apps.
+- What a clone keeps of Cyclone's per-phone keys. The answer must be "nothing usable" after re-enrollment.
+- Whether port 18185 is open inside the phone. If it is, the doctor warns.
 
 ## 3. The design
 
@@ -139,9 +180,9 @@ idempotent, so a stop part-way resumes where it left off.
 
 | Step | How | Done when |
 | --- | --- | --- |
-| 1. Running and Android 13+ | `padInfo`; if it is stopped, `restart` (owner setting). An older image is refused, with the fix. | The status says running |
-| 2. Link | Built: `adb` 7 days, SSH tunnel, `adb connect` on a stable local port | `adb get-state` says `device` |
-| 3. Cyclone installed | **New or reset phones:** Cyclone is one of VMOS's 6 pre-installed apps, so it is already there. **Existing phones:** `uploadFileV3` with the signed release APK's GitHub URL, its md5, `packageName` and `autoInstall=1`, so VMOS downloads it and the PC uploads nothing. **Fallback:** phone care's `adb install` (built). | Version and signing certificate are read back over ADB and match the release manifest. An older pre-installed Cyclone is updated the same way. |
+| 1. Running and Android 13+ | `infos` + `userPadList`; if it is stopped, `restart` (owner setting). An older image is refused, with the fix. | The status says running |
+| 2. Link | Built: `adb` 7 days (ADB switched on with `openOnlineAdb` if needed), SSH tunnel, `adb connect` on a stable local port | `adb get-state` says `device` |
+| 3. Cyclone installed | **New or reset phones:** Cyclone is one of VMOS's 6 pre-installed apps, so it is already there. **Existing phones:** `uploadFileV3` with the signed release APK's GitHub URL, its md5, `packageName` and `autoInstall=1`, so VMOS downloads it and the PC uploads nothing. `listInstalledApp` follows it while VMOS downloads. **Fallback:** phone care's `adb install` (built). Then `setKeepAliveApp` (built). | Version and signing certificate are read back over ADB and match the release manifest. An older pre-installed Cyclone is updated the same way. |
 | 4. Set up (provisioning) | A fixed catalogue over ADB, each item read back (below) | Every item reads back as set |
 | 5. Trusted (enrollment) | A one-time enrollment grant, bound to this PC's key, sent by `adb shell am broadcast` to a receiver only the shell user may call. No tap needed. | The phone reports the PC as trusted; the bridge works |
 | 6. Skills | Starter skills come with the APK. The fleet library syncs next (§3.3). | The library version on the phone matches the PC |
@@ -183,6 +224,13 @@ The owner chose ADB as the way in, so ADB stays the primary link. The keeper bui
 - restarts a dead tunnel;
 - gets a new key after a refused one;
 - makes a fresh link after three failed connects.
+
+Built on 2026-10-08:
+- **ADB switched on by API** when VMOS hands back an incomplete link (`openOnlineAdb`).
+- **A moved phone is followed.** When VMOS gives a phone a new padCode, it keeps its local port, so it is the same
+  serial and the same fleet phone.
+- **Keep-alive.** VMOS is asked to keep Cyclone's service running.
+- **Sign-in problems in plain words**, for example this PC's clock being off or its IP missing from the allow list.
 
 This plan adds:
 - **Batch renewal:** one `adb` batch call for all phones on an account, so a fleet doesn't make one call per phone.
@@ -243,7 +291,9 @@ format.
 ### 3.4 At the owner's fingertips
 
 Glass → Devices → **Cloud phones** gets one card per phone:
-- name and Android version;
+- a live thumbnail (`getLongGenerateUrl`);
+- name (renaming here renames at VMOS) and Android version;
+- paid until, with a warning before it ends;
 - state: Ready, Working, Reconnecting, Stopped, Needs you;
 - the skill-library version;
 - the last task.
@@ -255,19 +305,20 @@ Glass → Devices → **Cloud phones** gets one card per phone:
 - **Remove from fleet.** This removes the phone from the fleet but keeps the VMOS phone.
 - **Reset / new device.** Owner only, with a confirm. It erases the phone.
 
-**Groups:** tag phones ("instagram", "test"), then run a skill or a mission on a phone or a group. The MCP asks which
+**Groups:** tag phones ("instagram", "test"), or bring in the VMOS console's groups, then run a skill or a mission on a phone or a group. The MCP asks which
 phone; approvals name the phone.
 
 ## 4. The runs
 
 | Run | Alpha (next free) | What ships | Done when |
 | --- | --- | --- | --- |
-| **0 Probe** (with the owner's account, not a release) | — | A small probe in `scripts/pc/cloud_probe.py` (it exists; extend it) calls each _confirm_ endpoint once on one test phone and records the answers with keys removed, as test fixtures. It also downloads VMOS's OpenAPI spec and LLMs.txt and checks: the signing form (§2.2); whether ADB is enabled for the account; 7-day `expireMinutes`; `uploadFileV3` from a GitHub URL; `asyncCmd` + `padTaskDetail`; `getCloudGoodList`; Pre-installation Management; callbacks; and whether port 18185 is open inside the phone. | Fixtures are committed. Every table row in §2 is marked confirmed or changed. |
-| **V1 Ready in one click** | alpha.115 | The provisioning catalogue with read-back; `FleetEnrollReceiver` and the gateway's grant; install via `uploadFileV3` with `adb install` as fallback; the ready check; Glass card states; the doctor lines | An existing VMOS phone goes from "Add" to Ready with no tap, and runs a starter skill |
+| **Connectors** (built 2026-10-08, ships in alpha.115) | — | V2 signing with HMAC fallback; named sign-in errors; `openOnlineAdb`; padCode following; `setKeepAliveApp`; `userPadList` names and paid-until; `listInstalledApp`; status 16 | Gateway tests pass (done) |
+| **0 Probe** (with the owner's account, not a release) | — | A small probe in `scripts/pc/cloud_probe.py` (it exists; extend it) calls each §2.3 connector once on one test phone and records the answers with keys removed, as test fixtures. It checks the list in §2.5, plus 7-day `expireMinutes`, `uploadFileV3` from a GitHub URL, `asyncCmd` + `padTaskDetail`, `getCloudGoodList`, Pre-installation Management and callbacks. | Fixtures are committed. Every row in §2.3 is marked confirmed or changed. |
+| **V1 Ready in one click** | alpha.115 | The provisioning catalogue with read-back; `FleetEnrollReceiver` and the gateway's grant; install via `uploadFileV3` with `adb install` as fallback; the ready check; Glass card states, thumbnails and rename; the `restartApp` repair rung; the doctor lines | An existing VMOS phone goes from "Add" to Ready with no tap, and runs a starter skill |
 | **V2 Skills in sync** | alpha.116 | `cyclone.skillpack/1`; phone ops `skills.export` / `skills.import`; "Share with my phones"; the PC library; sync on join, on change and on reconnect; Glass Skills → Fleet | A skill saved on phone A runs on VMOS phones B and C after one Share |
-| **V3 Spin up new** | alpha.117 | SKU and image list (Android 13+ only); owner-confirmed purchase; wait until running; chains into V1; restart and reset buttons; the callback receiver (else polling) | "New VMOS phone" in Glass gives a Ready phone with skills, the purchase confirmed by the owner |
-| **V4 Run the fleet** | alpha.118 | Groups; run on a group; staged Cyclone updates (canary → 10 % → all, stop if health drops); batch ADB renewal; the repair ladder; a health board | Five VMOS phones updated, synced and kept connected for a week without the owner |
-| **V5 (only if needed)** | later | Plan 44's relay link (runs 3–4) if the SSH ADB proves flaky; golden-phone cloning once VMOS backup leaves "Pending Launch" | — |
+| **V3 Spin up new** | alpha.117 | SKU and image list (Android 13+ only); owner-confirmed purchase and auto-renew; wait until running; chains into V1; **the golden phone**: back up a Ready phone, clone it onto new ones, each clone re-enrolls; restart and reset buttons; the callback receiver as a hint (else polling) | "New VMOS phone" in Glass gives a Ready phone with skills, the purchase confirmed by the owner; three clones of a golden are Ready, each with its own trust |
+| **V4 Run the fleet** | alpha.118 | Groups (with the VMOS console's); run on a group; `padDetail` health; timing devices on a schedule; bills; staged Cyclone updates (canary → 10 % → all, stop if health drops); batch ADB renewal; the repair ladder; a health board | Five VMOS phones updated, synced and kept connected for a week without the owner |
+| **V5 (only if needed)** | later | Plan 44's relay link (runs 3–4) if the SSH ADB proves flaky | — |
 
 Each run ships with:
 - tests (provider fixtures from run 0, provisioning read-back fakes, enrollment security tests, the skill-pack
@@ -279,9 +330,9 @@ Each run ships with:
 
 ## 5. Questions for the owner
 
-1. **Account and ADB.** VMOS confirms that customer service must open ADB permission for the account (online chat or
-   `start@vmoscloud.com`). Has that been done? Which host does the account answer on: `api.vmoscloud.com`, or the
-   ArmCloud overseas host?
+1. **Account and ADB.** Cyclone can now switch ADB on by API (`openOnlineAdb`). VMOS's help still says customer
+   service opens ADB permission for an account (online chat or `start@vmoscloud.com`); if run 0 is refused, that is
+   the fix. Does the account use an API IP allow list? If so, this PC's IP must be on it.
 2. **Pre-install.** Should Cyclone be put into VMOS's Pre-installation Management (one of the 6 slots), so every new or
    reset phone has it?
 3. **Images.** Android 13, 14 or 15? Is there a preferred SKU?
@@ -290,3 +341,6 @@ Each run ships with:
 5. **Buying.** May Glass buy new phones (owner-confirmed every time), or should Cyclone only adopt phones bought in
    the VMOS console?
 6. **Size.** How many phones? The fleet's limit is 32 today; raising it is part of V4 if needed.
+7. **Timing devices.** Should some phones be pay-for-time ones that Cyclone powers on only for scheduled jobs?
+8. **Golden phone.** May Cyclone back up one Ready phone and clone it to new ones (V3)? Backups use the account's
+   cloud storage.

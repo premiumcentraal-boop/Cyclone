@@ -26,7 +26,8 @@ def make_provider(account: dict[str, Any], *, transport: Transport = urllib_tran
     if kind == "vmos":
         from .vmos import VmosCloud
 
-        return VmosCloud(str(secrets.get("accessKey") or ""), str(secrets.get("secretKey") or ""), **options)
+        return VmosCloud(str(secrets.get("accessKey") or ""), str(secrets.get("secretKey") or ""),
+                         signing=account.get("signing"), **options)
     if kind == "duoplus":
         from .duoplus import DuoPlus
 

@@ -1,7 +1,11 @@
 """Plan 44 run 1 (alpha 90): cloud phones, kept connected within fixed limits.
 
-- The provider is only the way in: Cyclone asks it for a phone list and a remote-ADB link, nothing else. No
-  provider-native taps, typing or shell (VMOS asyncCmd / simulated touch, DuoPlus command) in this run.
+- The provider is only the way in: Cyclone asks it for a phone list and a remote-ADB link. No provider-native taps,
+  typing or shell (VMOS asyncCmd / simulated touch, DuoPlus command).
+- Plan 56 (2026-10-08) adds only VMOS reads and upkeep: switch ADB on (`openOnlineAdb`), the owner's names and paid
+  time (`userPadList`), follow a moved padCode (`queryPadIdChangeRecords`), read Cyclone's installed version
+  (`listInstalledApp`) and keep Cyclone's own service alive (`setKeepAliveApp`). Still no taps, typing, shell or
+  installs through the provider.
 - adb is used for connect, disconnect and the device list only; ssh only as a foreground tunnel on 127.0.0.1.
 - Provider keys never reach a response: they live in the DPAPI vault (memory only off Windows) and reach ssh only
   through its askpass environment, never a command line or a plain file.
@@ -27,10 +31,27 @@ def source() -> str:
 def test_providers_only_list_phones_and_open_adb():
     body = source()
     endpoints = re.findall(r'"(/[A-Za-z0-9/_\-.]+)"', "\n".join(text(p) for p in (CLOUD / "providers").glob("*.py")))
-    assert set(endpoints) == {"/vcpcloud/api/padApi/infos", "/vcpcloud/api/padApi/adb", "/api/v1/cloudPhone/list"}, endpoints
+    assert set(endpoints) == {
+        "/vcpcloud/api/padApi/infos", "/vcpcloud/api/padApi/adb", "/api/v1/cloudPhone/list",
+        # Plan 56: reads and upkeep only.
+        "/vcpcloud/api/padApi/openOnlineAdb", "/vcpcloud/api/padApi/userPadList",
+        "/vcpcloud/api/padApi/queryPadIdChangeRecords", "/vcpcloud/api/padApi/listInstalledApp",
+        "/vcpcloud/api/padApi/setKeepAliveApp",
+    }, endpoints
     for forbidden in ("asyncCmd", "syncCmd", "simulateTouch", "inputText", "cloudPhone/command", "switchRoot", "installApp",
-                      "uploadFile", "shell=True", "os.system"):
+                      "uploadFile", "simulateClick", "simulateSwipe", "replacePad", "padReplaceNew", "updateSIM",
+                      "updatePadAndroidProp", "setHideAppList", "setHideAccessibilityAppList", "resetGAID", "smartIp",
+                      "cloudNumber", "socialAccount", "shell=True", "os.system"):
         assert forbidden not in body, forbidden
+
+
+def test_keep_alive_names_only_cyclone_s_own_service():
+    vmos = text(CLOUD / "providers/vmos.py")
+    assert 'CYCLONE_SERVICE = "com.cyclone.mobile/com.cyclone.mobile.CycloneAccessibilityService"' in vmos
+    keep = vmos[vmos.index("def keep_alive"):vmos.index("class _SignatureRefused")]
+    assert '"applyAllInstances": False' in keep and "service: str = CYCLONE_SERVICE" in keep
+    service = text(CLOUD / "service.py")
+    assert "provider.keep_alive([phone])" in service and "keep_alive([phone]," not in service
 
 
 def test_adb_is_connect_disconnect_and_devices_only():

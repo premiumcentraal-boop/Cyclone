@@ -34,10 +34,12 @@ class CloudPhone:
     power: str = "unknown"
     # A remote-ADB address the provider listed or the owner pasted (DuoPlus, plain remote ADB).
     address: str | None = None
+    # When the phone's paid time at the provider ends, if the provider says.
+    paid_until_ms: int | None = None
 
     def public(self) -> dict[str, Any]:
         return {"provider": self.provider, "remoteId": self.remote_id, "name": self.name, "android": self.android,
-                "power": self.power, "address": self.address}
+                "power": self.power, "address": self.address, "paidUntilMs": self.paid_until_ms}
 
 
 @dataclass(frozen=True)
