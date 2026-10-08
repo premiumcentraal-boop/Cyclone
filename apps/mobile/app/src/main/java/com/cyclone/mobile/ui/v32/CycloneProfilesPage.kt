@@ -21,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.Button
@@ -29,6 +31,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -80,6 +83,17 @@ internal data class ProfileCluster(
     val waiting: Boolean,
     val current: Boolean = false,
     val owner: Boolean = false,
+    val parentUserId: Int? = null,
+    val cloakBindings: List<com.cyclone.mobile.connector.CycloneCloakBindingReference> = emptyList(),
+) {
+    val rootedByCloak: Boolean get() = cloakBindings.isNotEmpty()
+}
+
+private data class ProfilePageSnapshot(
+    val workspaces: List<Workspace>,
+    val waiting: Set<String>,
+    val records: List<CycloneProfileRecord>,
+    val cloakBindings: List<com.cyclone.mobile.connector.CycloneCloakBindingReference>,
 )
 
 private data class AppProfileGroup(
@@ -98,6 +112,7 @@ internal fun buildProfileClusters(
     ownerUser: Int?,
     verifiedCurrentUser: Int?,
     foregroundExecuting: Boolean,
+    cloakBindings: List<com.cyclone.mobile.connector.CycloneCloakBindingReference> = emptyList(),
 ): List<ProfileCluster> {
     // Plan 40 P1: profiles in Recently deleted are hidden everywhere but the trash.
     val trashedUsers = allRecords.filter { it.inTrash }.mapNotNull { it.androidUserId }.toSet()
@@ -125,6 +140,8 @@ internal fun buildProfileClusters(
             waiting = isWaiting,
             current = ProfilePresentationPolicy.isCurrent(userId, verifiedCurrentUser),
             owner = userId == ownerUser,
+            parentUserId = record?.parentUserId,
+            cloakBindings = cloakBindings.filter { it.profileId == record?.id },
         )
     }.toMutableList()
 
@@ -139,6 +156,7 @@ internal fun buildProfileClusters(
             packages = record.packages,
             active = false,
             waiting = false,
+            parentUserId = record.parentUserId,
         )
     }
     return clusters.distinctBy { it.key }
@@ -155,6 +173,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(ProfilesTab.ALL) }
     var selectedProfileKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var showProfileIdentifiers by rememberSaveable { mutableStateOf(false) }
     var selectedGroupPackage by rememberSaveable { mutableStateOf<String?>(null) }
     var waiting by remember { mutableStateOf(emptySet<String>()) }
     var busy by remember { mutableStateOf(false) }
@@ -162,6 +181,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     var setup by remember { mutableStateOf(false) }
     var workspaces by remember { mutableStateOf(emptyList<Workspace>()) }
     var records by remember { mutableStateOf(emptyList<CycloneProfileRecord>()) }
+    var cloakBindings by remember { mutableStateOf(emptyList<com.cyclone.mobile.connector.CycloneCloakBindingReference>()) }
     var error by remember { mutableStateOf("") }
     // Plan 40 P1: Recently deleted, the automatic backups, and which dialog is open.
     var backups by remember { mutableStateOf(emptyList<com.cyclone.mobile.runtime.workspaces.ProfileBackup>()) }
@@ -195,17 +215,27 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
             val loaded = withContext(Dispatchers.IO) {
                 runCatching {
                     Layer2Workspaces.initialize(context)
-                    Triple(
+                    val saved = ProfileRegistryStore.records(context)
+                    ProfilePageSnapshot(
                         Layer2Workspaces.engine.snapshot(),
                         Layer2Workspaces.engine.queue().toSet(),
-                        ProfileRegistryStore.records(context),
+                        saved,
+                        com.cyclone.mobile.connector.CycloneCloakProfileBinding.readBindings(saved) { key ->
+                            com.cyclone.mobile.connector.ProfileConfigStore.get(
+                                context,
+                                com.cyclone.mobile.connector.CycloneCloakProfileBinding.CONNECTOR_ID,
+                                processUser,
+                                key,
+                            )
+                        },
                     )
                 }
             }
-            loaded.onSuccess { (spaces, queued, saved) ->
-                workspaces = spaces
-                waiting = queued
-                records = saved
+            loaded.onSuccess { snapshot ->
+                workspaces = snapshot.workspaces
+                waiting = snapshot.waiting
+                records = snapshot.records
+                cloakBindings = snapshot.cloakBindings
                 error = ""
             }.onFailure {
                 error = "Profiles couldn't load. Open profile setup to repair."
@@ -217,16 +247,20 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
 
     LaunchedEffect(refreshTick, revision, profileSetup.ready, setup) { refreshProfiles() }
 
-    val clusters = remember(workspaces, records, waiting, task?.workspaceId, ownerUser, verifiedCurrentUser, foregroundExecuting) {
-        buildProfileClusters(workspaces, records, waiting, task?.workspaceId, processUser, ownerUser, verifiedCurrentUser, foregroundExecuting)
+    val clusters = remember(workspaces, records, waiting, cloakBindings, task?.workspaceId, ownerUser, verifiedCurrentUser, foregroundExecuting) {
+        buildProfileClusters(workspaces, records, waiting, task?.workspaceId, processUser, ownerUser, verifiedCurrentUser, foregroundExecuting, cloakBindings)
     }
     val activeProfiles = clusters.filter { it.active }.sortedBy { it.label.lowercase() }
     val allProfiles = clusters.sortedWith(compareByDescending<ProfileCluster> { it.current }.thenByDescending { it.active }.thenBy { it.label.lowercase() })
     val appGroups = remember(clusters) { buildAppGroups(clusters) }
     val selectedProfile = clusters.firstOrNull { it.key == selectedProfileKey }
 
-    BackHandler(selectedProfileKey != null || selectedGroupPackage != null) {
-        if (selectedProfileKey != null) selectedProfileKey = null else selectedGroupPackage = null
+    BackHandler(showProfileIdentifiers || selectedProfileKey != null || selectedGroupPackage != null) {
+        when {
+            showProfileIdentifiers -> showProfileIdentifiers = false
+            selectedProfileKey != null -> selectedProfileKey = null
+            else -> selectedGroupPackage = null
+        }
     }
 
     fun openProfile(profile: ProfileCluster) {
@@ -327,23 +361,31 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     }
 
     if (selectedProfile != null) {
-        val exactTask = task?.takeIf { current -> selectedProfile.workspaces.any { it.id == current.workspaceId } }
-        ProfileDetail429(
-            context = context,
-            profile = selectedProfile,
-            task = exactTask,
-            busy = busy,
-            switchMessage = switchMessage,
-            error = error,
-            onBack = { selectedProfileKey = null },
-            onOpenProfile = { openProfile(selectedProfile) },
-            onManage = { manageProfile(selectedProfile) },
-            canStartTask = ProfilePresentationPolicy.canStartTask(selectedProfile.androidUserId, processUser, verifiedCurrentUser, busy),
-            onAsk = onAsk,
-            onRename = selectedProfile.recordId?.let { id -> { looking = id } },
-            // The main profile and the one you're in can't be removed; the runtime checks again with root.
-            onRemove = selectedProfile.recordId?.takeIf { !selectedProfile.owner && !selectedProfile.current }?.let { id -> { confirm = "remove" to id } },
-        )
+        if (showProfileIdentifiers) {
+            ProfileIdentityDetails429(
+                profile = selectedProfile,
+                onBack = { showProfileIdentifiers = false },
+            )
+        } else {
+            val exactTask = task?.takeIf { current -> selectedProfile.workspaces.any { it.id == current.workspaceId } }
+            ProfileDetail429(
+                context = context,
+                profile = selectedProfile,
+                task = exactTask,
+                busy = busy,
+                switchMessage = switchMessage,
+                error = error,
+                onBack = { selectedProfileKey = null },
+                onOpenProfile = { openProfile(selectedProfile) },
+                onManage = { manageProfile(selectedProfile) },
+                canStartTask = ProfilePresentationPolicy.canStartTask(selectedProfile.androidUserId, processUser, verifiedCurrentUser, busy),
+                onAsk = onAsk,
+                onIdentifiers = { showProfileIdentifiers = true },
+                onRename = selectedProfile.recordId?.let { id -> { looking = id } },
+                // The main profile and the one you're in can't be removed; the runtime checks again with root.
+                onRemove = selectedProfile.recordId?.takeIf { !selectedProfile.owner && !selectedProfile.current }?.let { id -> { confirm = "remove" to id } },
+            )
+        }
         if (setup) ProfileSetupPage { setup = false; refreshProfiles() }
         return
     }
@@ -479,7 +521,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                     items(allProfiles, key = { "all-${it.key}" }) { profile ->
                         ProfileIdentityCard429(
                             profile = profile,
-                            onOpen = { selectedProfileKey = profile.key },
+                            onOpen = { selectedProfileKey = profile.key; showProfileIdentifiers = false },
+                            onInfo = { selectedProfileKey = profile.key; showProfileIdentifiers = true },
                         )
                     }
                 }
@@ -585,14 +628,18 @@ private fun ActiveProfileCard429(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        task?.subtitle?.takeIf { it.isNotBlank() }
-                            ?: if (profile.waiting) "Waiting for its next turn" else "Working in this profile",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text(
+                            task?.subtitle?.takeIf { it.isNotBlank() }
+                                ?: if (profile.waiting) "Waiting for its next turn" else "Working in this profile",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        ProfileSourcePill429(profile.rootedByCloak)
+                    }
                 }
                 ProfileStatePill429(status)
             }
@@ -615,7 +662,7 @@ private fun ActiveProfileCard429(
 }
 
 @Composable
-private fun ProfileIdentityCard429(profile: ProfileCluster, onOpen: () -> Unit) {
+private fun ProfileIdentityCard429(profile: ProfileCluster, onOpen: () -> Unit, onInfo: () -> Unit) {
     Card(
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth(),
@@ -632,14 +679,19 @@ private fun ProfileIdentityCard429(profile: ProfileCluster, onOpen: () -> Unit) 
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(profile.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        "${profile.packages.size} ${if (profile.packages.size == 1) "app" else "apps"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text(
+                            "${profile.packages.size} ${if (profile.packages.size == 1) "app" else "apps"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        ProfileSourcePill429(profile.rootedByCloak)
+                    }
                 }
                 ProfileStatePill429(if (profile.current) "Current" else if (!profile.ready) "Setup" else if (profile.active) "Live" else "Ready")
-                Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f))
+                IconButton(onClick = onInfo, modifier = Modifier.size(38.dp)) {
+                    Icon(Icons.Rounded.Info, "Profile identifiers", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                }
             }
             if (profile.packages.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -762,7 +814,10 @@ private fun AppGroupDetail429(
                     }
                     Column(Modifier.weight(1f)) {
                         Text(profile.label, style = MaterialTheme.typography.titleSmall)
-                        Text(if (profile.active) "Working now" else "Ready", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Text(if (profile.active) "Working now" else "Ready", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            ProfileSourcePill429(profile.rootedByCloak)
+                        }
                     }
                     TextButton(enabled = profile.ready, onClick = { onOpenProfile(profile) }) { Text("Open") }
                 }
@@ -784,6 +839,7 @@ private fun ProfileDetail429(
     onManage: () -> Unit,
     canStartTask: Boolean,
     onAsk: () -> Unit,
+    onIdentifiers: () -> Unit,
     onRename: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null,
 ) {
@@ -803,13 +859,21 @@ private fun ProfileDetail429(
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(profile.label, style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        "${profile.packages.size} ${if (profile.packages.size == 1) "app" else "apps"} in this phone space",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text(
+                            "${profile.packages.size} ${if (profile.packages.size == 1) "app" else "apps"} in this phone space",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        ProfileSourcePill429(profile.rootedByCloak)
+                    }
                 }
                 ProfileStatePill429(if (profile.current) "Current" else if (!profile.ready) "Setup" else if (profile.active) "Live" else "Ready")
+                IconButton(onClick = onIdentifiers, modifier = Modifier.size(38.dp)) {
+                    Icon(Icons.Rounded.Info, "Profile identifiers", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                }
             }
         }
 
@@ -902,6 +966,165 @@ private fun ProfileDetail429(
         }
         if (localMessage.isNotBlank()) item { Text(localMessage, style = MaterialTheme.typography.bodySmall) }
         if (error.isNotBlank()) item { Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+@Composable
+private fun ProfileIdentityDetails429(
+    profile: ProfileCluster,
+    onBack: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var copyMessage by remember(profile.key) { mutableStateOf("") }
+    fun copy(label: String, value: String) {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        if (clipboard == null) {
+            copyMessage = "Clipboard isn't available."
+            return
+        }
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText(label, value))
+        copyMessage = "$label copied."
+    }
+
+    LazyColumn(
+        contentPadding = cyclonePageInsets(top = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item { CycloneBackRow("Profile", onBack) }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("Profile identifiers", style = MaterialTheme.typography.headlineSmall)
+                Text(profile.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ProfileSourcePill429(profile.rootedByCloak)
+            }
+        }
+        item { CycloneSectionTitle("Cyclone profile") }
+        item {
+            ProfileIdentifierRow429(
+                label = "Cyclone profile ID",
+                value = profile.recordId,
+                status = if (profile.recordId == null) "Not registered in Cyclone" else "Managed by Cyclone",
+                onCopy = profile.recordId?.let { { copy("Cyclone profile ID", it) } },
+            )
+        }
+        item {
+            val androidUser = profile.androidUserId.takeIf { it >= 0 }
+            ProfileIdentifierRow429(
+                label = "Android user ID",
+                value = androidUser?.toString(),
+                status = if (androidUser == null) "Unavailable for this profile" else "System-assigned Android user",
+                onCopy = androidUser?.let { { copy("Android user ID", it.toString()) } },
+            )
+        }
+        profile.parentUserId?.let { parent ->
+            item {
+                ProfileIdentifierRow429(
+                    label = "Parent Android user ID",
+                    value = parent.toString(),
+                    status = "Parent recorded by Cyclone",
+                    onCopy = { copy("Parent Android user ID", parent.toString()) },
+                )
+            }
+        }
+
+        item { CycloneSectionTitle("Cyclone Cloak") }
+        if (profile.cloakBindings.isEmpty()) {
+            item {
+                ProfileIdentifierRow429(
+                    label = "Cloak profile ID",
+                    value = null,
+                    status = "No Cloak binding is stored in Cyclone",
+                )
+            }
+        } else {
+            items(
+                profile.cloakBindings.sortedBy { it.packageName },
+                key = { "cloak-${it.packageName}-${it.cloakProfileId}" },
+            ) { binding ->
+                ProfileIdentifierRow429(
+                    label = "Cloak profile ID",
+                    value = binding.cloakProfileId,
+                    status = "Configured for ${binding.packageName}; check Cyclone Cloak for live binding status",
+                    onCopy = { copy("Cloak profile ID", binding.cloakProfileId) },
+                )
+            }
+        }
+        item {
+            Text(
+                "Cyclone receives only the selected Cloak profile reference. Cloak's generated device values and live root/module status aren't shared with Cyclone.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        item { CycloneSectionTitle("Not collected by Cyclone") }
+        listOf("Android ID", "IMEI", "Device serial number").forEach { identifier ->
+            item {
+                ProfileIdentifierRow429(
+                    label = identifier,
+                    value = "Unavailable",
+                    status = "Cyclone doesn't read or store this identifier",
+                )
+            }
+        }
+        if (copyMessage.isNotBlank()) {
+            item { Text(copyMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        }
+    }
+}
+
+@Composable
+private fun ProfileIdentifierRow429(
+    label: String,
+    value: String?,
+    status: String,
+    onCopy: (() -> Unit)? = null,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Row(
+            Modifier.padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(label, style = MaterialTheme.typography.labelLarge)
+                Text(
+                    value ?: "Unavailable",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (value == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (onCopy != null) {
+                IconButton(onClick = onCopy, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Rounded.ContentCopy, "Copy $label", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileSourcePill429(rootedByCloak: Boolean) {
+    val colorScheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = if (rootedByCloak) colorScheme.primaryContainer else colorScheme.surfaceVariant,
+        contentColor = if (rootedByCloak) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
+    ) {
+        Text(
+            if (rootedByCloak) "Rooted" else "Native",
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 

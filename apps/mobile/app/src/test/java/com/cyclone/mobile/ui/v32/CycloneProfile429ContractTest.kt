@@ -2,6 +2,7 @@ package com.cyclone.mobile.ui.v32
 
 import java.io.File
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,6 +47,56 @@ class CycloneProfile429ContractTest {
         assertTrue(source.contains("private fun ProfileIdentityCard429"))
         assertTrue(source.contains("profile.packages.take(5).forEach"))
         assertTrue(source.contains("if (profile.packages.size == 1) \"app\" else \"apps\""))
+    }
+
+    @Test fun rootedAndNativePillsFollowStoredCloakProfileBindings() {
+        val page = source("ui/v32/CycloneProfilesPage.kt")
+        assertTrue(page.contains("CycloneCloakProfileBinding.readBindings(saved)"))
+        assertTrue(page.contains("ProfileSourcePill429(profile.rootedByCloak)"))
+        assertTrue(page.contains("if (rootedByCloak) \"Rooted\" else \"Native\""))
+        assertTrue(page.contains("cloakBindings = cloakBindings.filter { it.profileId == record?.id }"))
+        assertTrue(page.contains("onInfo = { selectedProfileKey = profile.key; showProfileIdentifiers = true }"))
+    }
+
+    @Test fun profileInfoPageShowsManagedIdsAndCopiesValuesWithoutInventingDeviceIds() {
+        val page = source("ui/v32/CycloneProfilesPage.kt")
+        assertTrue(page.contains("ProfileIdentityDetails429("))
+        assertTrue(page.contains("ProfileIdentifierRow429("))
+        assertTrue(page.contains("Cyclone profile ID"))
+        assertTrue(page.contains("Android user ID"))
+        assertTrue(page.contains("Parent Android user ID"))
+        assertTrue(page.contains("Cloak profile ID"))
+        assertTrue(page.contains("Device serial number"))
+        assertTrue(page.contains("clipboard.setPrimaryClip"))
+        assertTrue(page.contains("Cloak's generated device values and live root/module status aren't shared with Cyclone."))
+    }
+
+    @Test fun profileClustersMarkOnlyRecordsWithCloakBindingReferencesAsRooted() {
+        val rooted = com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord(
+            "Cyclone_aaaaaaaaaaaaaaaa", "Rooted work", 10, 0, true, setOf("com.example.social"), "READY", true,
+        )
+        val native = com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord(
+            "Cyclone_bbbbbbbbbbbbbbbb", "Native work", 11, 0, true, setOf("com.example.video"), "READY", true,
+        )
+        val clusters = buildProfileClusters(
+            allWorkspaces = emptyList(),
+            allRecords = listOf(rooted, native),
+            waiting = emptySet(),
+            activeWorkspaceId = null,
+            processUser = 0,
+            ownerUser = 0,
+            verifiedCurrentUser = 0,
+            foregroundExecuting = false,
+            cloakBindings = listOf(
+                com.cyclone.mobile.connector.CycloneCloakBindingReference(
+                    rooted.id, 10, "com.example.social", "pixel-identity-7",
+                ),
+            ),
+        )
+
+        assertTrue(clusters.single { it.recordId == rooted.id }.rootedByCloak)
+        assertFalse(clusters.single { it.recordId == native.id }.rootedByCloak)
+        assertEquals(0, clusters.single { it.recordId == native.id }.cloakBindings.size)
     }
 
     @Test fun groupsAreAppCentricAndReportProfileCounts() {
