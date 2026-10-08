@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.114 dev1: Human Hands final (plan 52 runs 6-7: drag, pinch, double tap, draw; natural placement and pacing; Natural default), on alpha.113 dev6. Glass 1.0.0-alpha.62.
-# Owner-requested developer release (with a Port Hub delivery-order fix); physical phone and Windows PC acceptance remain UNVERIFIED until tested.
+# Cyclone V5 alpha.115 dev1: source-aware profile identities and profile identifier details, on alpha.114 dev1.
+# Owner authorized developer-alpha publication; physical phone acceptance remains UNVERIFIED.
 schema = 1
-product_version = "5.0.0-alpha.114.dev1"
+product_version = "5.0.0-alpha.115.dev1"
 channel = "development"
-android_version_code = 267
+android_version_code = 268
 python_version = "5.0.0-alpha.114.dev1"
 
 [components]
-mobile = "5.0.0-alpha.114.dev1"
+mobile = "5.0.0-alpha.115.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -17,13 +17,12 @@ device_gateway = "5.0.0-alpha.114.dev1"
 mcp = "5.0.0-alpha.114.dev1"
 
 [release]
-previous_mobile_version = "4.8.0"
-# The owner explicitly authorized publication through the protected V5 publisher.
-# Final-artifact physical acceptance remains separate from candidate UI acceptance.
+previous_mobile_version = "5.0.0-alpha.114.dev1"
+# The owner explicitly authorized publishing this developer alpha on 2026-10-08.
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha114-human-hands-final"
+candidate_generation = "cyclone-v5-alpha115-profile-source-identifiers"
