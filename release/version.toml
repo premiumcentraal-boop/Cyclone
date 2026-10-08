@@ -1,5 +1,5 @@
 # Cyclone V5 alpha.115 dev1: source-aware profile identities and profile identifier details, on alpha.114 dev1.
-# Android candidate only; physical phone acceptance remains UNVERIFIED and publication is not authorized.
+# Owner authorized developer-alpha publication; physical phone acceptance remains UNVERIFIED.
 schema = 1
 product_version = "5.0.0-alpha.115.dev1"
 channel = "development"
@@ -18,8 +18,8 @@ mcp = "5.0.0-alpha.114.dev1"
 
 [release]
 previous_mobile_version = "5.0.0-alpha.114.dev1"
-# The owner asked for a locally prepared candidate and explicitly said not to publish a GitHub release.
-publication_authorized = false
+# The owner explicitly authorized publishing this developer alpha on 2026-10-08.
+publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"

@@ -4,7 +4,7 @@ Android developer candidate based on Cyclone 5.0.0-alpha.114.dev1.
 
 - **Mobile:** `5.0.0-alpha.115.dev1` (version code 268).
 - **Other components:** unchanged from alpha.114.dev1.
-- **Publication:** not authorized; this candidate is prepared locally only.
+- **Publication:** owner-authorized developer alpha; physical device acceptance remains unverified.
 - **Physical device:** UNVERIFIED.
 
 ## Profile source labels
