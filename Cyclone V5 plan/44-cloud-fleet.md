@@ -3,6 +3,9 @@
 Goal: a fleet of cloud phones (VMOS Cloud, DuoPlus, any remote-ADB phone) that Cyclone installs, sets up, keeps
 connected and teaches, without depending on the provider's temporary links.
 
+**2026-10-08:** runs 2–6 below were not built. They are re-planned around the owner's priorities in
+[56 · VMOS fleet](56-vmos-fleet.md) (ready in one click, skills in sync, spin up new phones, run the fleet).
+
 Principle: **the provider is only the way in.** Its API opens a remote-ADB link once (and repairs things when needed);
 the lasting connection is Cyclone's own. `vmos/architecture.py` already fixes the rest: `PhoneToolExecutor` on the
 phone stays the only thing that acts, no provider-native taps, no generic shell for the model.

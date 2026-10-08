@@ -1,0 +1,248 @@
+# 56 · VMOS fleet: cloud phones that arrive ready to work
+
+**Owner's goal (2026-10-08):**
+- Adding a few VMOS Cloud phones to the fleet is easy.
+- Each one arrives with Cyclone and our skills, so it can get straight to work.
+- Each one stays connected over ADB.
+- Skills stay in sync across the fleet.
+
+This plan picks up plan 44 (cloud fleet). Run 1 of plan 44 (alpha.90) is built. Plan 44's runs 2–6 are re-ordered
+here around the owner's priorities:
+1. ready in one click;
+2. skills in sync;
+3. spin up new phones;
+4. run the fleet.
+
+## 0. Rules that do not move
+
+- **VMOS is only the way in.** The VMOS OpenAPI opens remote ADB, installs, and powers phones on and off. Every action
+  inside a phone is Cyclone's: `PhoneToolExecutor`, GATE, fresh observation, one screen-changing action per turn. This
+  is already enforced by `vmos/architecture.py`: no VMOS-native taps, and no VMOS or ADB shell for the model.
+- **No shell for the model.** The gateway uses VMOS's command API (`asyncCmd`) and ADB only through a fixed,
+  read-back provisioning catalogue in code. No field anywhere takes a command, argv or URL from a model, MCP or PC
+  agent.
+- **Money and wiping are the owner's.**
+  - Buying or renewing a phone, "one-key new device" and reset are owner-only buttons in Glass, with a confirm.
+  - They are never tools for an agent or MCP. Buying counts as GATE pay; a wipe counts as GATE delete.
+- **Secrets stay in place.**
+  - The VMOS keys stay in the DPAPI vault (built).
+  - Skill packs never carry passwords, codes, tokens, pairing, the Vault, chats or people memory.
+- **Android 13 or newer.** Cyclone's `minSdk` is 33, so VMOS phones must run an Android 13, 14 or 15 image.
+- **The owner's own work.** The fleet runs the owner's own accounts and tasks. The plan 52 scope guard still holds: no
+  bulk sign-ups, SMS farms, CAPTCHA solving, fingerprint spoofing or engagement manipulation.
+
+## 1. Where we stand (checked in the code, 2026-10-08)
+
+| Piece | State | Where |
+| --- | --- | --- |
+| VMOS signing (HMAC-SHA256, `armcloud-paas`) | **Built** | `cloud_fleet/providers/vmos.py` |
+| Account keys in the vault (DPAPI) | **Built** | `cloud_fleet/vault.py` |
+| Phone list, 7-day ADB lease, SSH tunnel, `adb connect`, renew 1/5 before the end, repair | **Built** | `cloud_fleet/service.py`, `lease.py`, `tunnel.py` |
+| Cyclone installed on a cloud phone that lacks it (verified build) | **Built** (through `adb install`) | `phone_care/` |
+| Glass → Devices → Cloud phones (add account, keep connected, status line) | **Built** | `apps/glass/src/pages/cloudPhonesView.ts` |
+| Starter skills (10 Instagram) | **Built**, shipped inside the APK, so a new phone has them at install | `market/InstagramSkills.kt` |
+| Market installs to one phone from the PC | **Built** (`market.install` per device) | `market/api.py`, `MarketInstalls.kt` |
+| Accessibility, permissions and battery set up without hands (provisioning) | **Not built** | — |
+| Trust without a tap ("Connect this PC?" needs a tap in VMOS's viewer today) | **Not built** | `GatewayTrustPrompt.kt` |
+| Skills shared across phones (owner skills are "never shared" today; app maps and routines stay per phone) | **Not built** | `OwnerSkills.kt`, `applearner/` |
+| Buy or create a phone, restart, reset from Cyclone | **Not built** | — |
+| Groups, staged updates, fleet health | **Not built** | — |
+| Any run against a real VMOS account | **Never** (UNVERIFIED since alpha.90) | — |
+
+## 2. What the VMOS OpenAPI offers
+
+**Source.** The owner's link (`cloud.vmoscloud.com/…/OpenAPI.html`) and its mirrors are blocked from the build
+environment: `cloud.vmoscloud.com`, `cloud.vsphone.com` and `docs.armcloud.net` all return
+`EGRESS_BLOCKED`. What follows comes from search results over those same pages:
+- VMOS Cloud and vsPhone run on the same ArmCloud PaaS, with the same `padApi` paths and the same signing;
+- our own working client confirms the signing, `infos` and `adb`.
+
+**Every row marked _confirm_ is checked against the owner's account in run 0** before anything is built on it.
+
+- **Base:** `https://api.vmoscloud.com`.
+- **Path prefix:** `/vcpcloud/api/padApi/`.
+- **Requests:** POST with JSON bodies. Instances are named by `padCode` (one) or `padCodes` (a list).
+
+| Need | Endpoint | What it does | Status |
+| --- | --- | --- | --- |
+| List phones | `infos` (and `userPadList`) | Phones on the account, with status and Android version | `infos` used today |
+| One phone | `padInfo` | Details and status of one instance | _confirm_ |
+| Android images | `imageVersionList` | The Android images on offer (pick 13+) | _confirm_ |
+| What can be bought | `getCloudGoodList` | SKU packages | _confirm_ |
+| **Create a phone** | `createMoneyOrder` | Buy a new cloud phone. Pre-sale when stock runs out: `createMoneyProOrder` + `queryProOrderList`. | _confirm_. Renewal was not found in the docs. |
+| **Remote ADB** | `adb` | `padCode`, `enable`, `expireMinutes` (1 to 7 days, default 1440). Returns an SSH command, a key, `expireTime` and the `adb connect` line. A batch on/off form takes 1–200 phones. | Built (single). VMOS may need support to switch ADB on for the account: _confirm_. |
+| **Run an ADB command** | `asyncCmd` | Runs a command on one or more phones, asynchronously | _confirm_ |
+| Task result | `padTaskDetail` | The result of an instance operation task (pairs with `asyncCmd` and `installApp`) | _confirm_ |
+| **Install from a URL** | `uploadFileV3` | VMOS fetches a URL (or reuses a file it already has, by md5 or file id) and can auto-install it. Auto-install needs `packageName`. All permissions are granted unless `isAuthorization` turns that off. | _confirm_. **Key for a fast install.** |
+| Install / app list | `installApp` (async), `getListInstalledApp`, plus uninstall / start / stop | App management | _confirm_ |
+| Root | `switchRoot` | `padCodes`, `rootStatus`, `globalRoot`, `packageName`. Per-app root is recommended; error 110089 means a package name is missing. | _confirm_ |
+| Power and wipe | `restart`, `reset`, `replacePad` (one-key new device: **erases all data** and resets the Android properties) | Lifecycle | _confirm_ |
+| Phone settings | Wi-Fi, time zone, language, GPS, smart IP / proxy | Instance properties | _confirm_ |
+| Backup and restore | Listed as **"Pending Launch"** | Would allow a golden-phone clone later | Not yet usable |
+| Script results | `executeScriptInfo`, listed as **"Pending Launch"** | — | Not yet usable |
+| Callbacks | A callback URL set in VMOS's web console; documented for one-key new device (`taskStatus`) | Push instead of polling | _confirm_ |
+| Live view | `stsToken`, for the VMOS H5 viewer | The owner looks; Cyclone never acts through it | _confirm_ |
+
+**Also worth knowing:**
+- VMOS has its own MCP and automation tools. Cyclone does not use them, by the rules in §0.
+- VMOS's console may offer "pre-installation" of apps on purchase or reset. If run 0 confirms it, it is the cheapest
+  way to have Cyclone on every new phone.
+
+## 3. The design
+
+### 3.1 "Add a VMOS phone": one button to Ready
+
+Glass → Devices → Cloud phones → **Add a VMOS phone**. The owner picks an existing phone on the account; in run V3,
+they can also buy a new one. Cyclone then does every step below, with one status line per phone. Each step is
+idempotent, so a stop part-way resumes where it left off.
+
+| Step | How | Done when |
+| --- | --- | --- |
+| 1. Running and Android 13+ | `padInfo`; if it is stopped, `restart` (owner setting). An older image is refused, with the fix. | The status says running |
+| 2. Link | Built: `adb` 7 days, SSH tunnel, `adb connect` on a stable local port | `adb get-state` says `device` |
+| 3. Cyclone installed | **Fast path:** `uploadFileV3` with the signed release APK's GitHub URL, its md5 and `autoInstall`, so VMOS downloads it and the PC uploads nothing. **Fallback:** phone care's `adb install` (built). | Version and signing certificate are read back over ADB and match the release manifest |
+| 4. Set up (provisioning) | A fixed catalogue over ADB, each item read back (below) | Every item reads back as set |
+| 5. Trusted (enrollment) | A one-time enrollment grant, bound to this PC's key, sent by `adb shell am broadcast` to a receiver only the shell user may call. No tap needed. | The phone reports the PC as trusted; the bridge works |
+| 6. Skills | Starter skills come with the APK. The fleet library syncs next (§3.3). | The library version on the phone matches the PC |
+| 7. Ready check | Phone care health, then a read-only smoke mission (open Settings, read the Android version) | The card shows **Ready** |
+
+**The provisioning catalogue** is code, never input. Each item is applied over ADB, then read back:
+- **Accessibility:** turn on Cyclone's accessibility service (`settings put secure enabled_accessibility_services …` and
+  `accessibility_enabled 1`).
+- **Notification listener:** turn on Cyclone's listener.
+- **Permissions:** `pm grant` for the runtime permissions Cyclone declares (notifications, microphone only if Drive is
+  used, …), and `appops` for drawing over other apps.
+- **Battery:** add Cyclone to the battery whitelist (`dumpsys deviceidle whitelist +com.cyclone.mobile`); stay awake
+  while plugged in.
+- **Hands:** Hands = Natural (the default already).
+- **Time and language:** time zone and language set to the owner's, using VMOS's own property endpoints.
+
+**Never in the catalogue:**
+- disabling security features;
+- global root (per-app root only, as an owner toggle, for a skill that needs it);
+- anything that takes a value from a model.
+
+**Enrollment (trust with no tap).**
+- **The receiver.** `FleetEnrollReceiver` is guarded by a permission that only the shell user holds (`DUMP`). It
+  accepts one grant:
+  - signed by this PC's pairing key;
+  - single use;
+  - valid for 10 minutes.
+- **What the phone shows.** A permanent notice: "Managed by <PC name> · Remove". The owner can revoke it on the phone
+  or in Glass.
+- **Who it is for.** It only works over ADB, which on a cloud phone only the owner's PC has. A personal phone keeps the
+  "Connect this PC?" tap.
+
+**Target:** about 3–5 minutes from click to Ready on an existing phone. This is an estimate, measured in run 0.
+
+### 3.2 Staying connected over ADB
+
+The owner chose ADB as the way in, so ADB stays the primary link. The keeper built in alpha.90 already:
+- renews the 7-day lease when a fifth of it is left;
+- restarts a dead tunnel;
+- gets a new key after a refused one;
+- makes a fresh link after three failed connects.
+
+This plan adds:
+- **Batch renewal:** one `adb` batch call for all phones on an account, so a fleet doesn't make one call per phone.
+- **A repair ladder:**
+  1. wake the bridge (60 s);
+  2. restart the tunnel (3 min);
+  3. VMOS `restart` (10 min, an owner setting, off by default);
+  4. "needs you".
+- **A stopped phone says so.** It is not shown as "reconnecting".
+- **The bridge over ADB** stays exactly as for USB phones: `adb forward` to Cyclone's local gateway. A VMOS phone is
+  just serial `127.0.0.1:<stable port>`.
+- **An honest doctor line per phone:** link up / renewing / VMOS stopped / Cyclone not set up.
+
+**Plan 44's own relay link** (runs 3–4: a WebSocket from the phone, end-to-end encrypted) stays as **V5, only if run 0
+or real use shows the VMOS SSH ADB is not reliable enough.**
+
+### 3.3 Skills in sync: the fleet library
+
+**What a "skill" is on a phone today:**
+- the **starter skills** inside the APK;
+- **Market installs** (a listing plus its inputs);
+- the owner's **saved skills** ("Save skill", stored locally and *never shared* today), with their **anchors** (where
+  the skill lives on the app's map);
+- **app maps** and the **App Manual**;
+- **routines**.
+
+**The fleet library** sits on the PC (`fleet_skills/`) and holds versioned packs in a new `cyclone.skillpack/1`
+format.
+
+- **A pack holds:**
+  - the listings;
+  - the saved skills the owner chose to share, with their anchors;
+  - for the apps those skills touch, the app map and manual entries;
+  - routines.
+- **Every item is tagged** with the app version it was learned on.
+- **Packs are checked on both ends.** Each pack is checked against its schema, kept to a size cap, and scanned for
+  secret-shaped text (the existing `MarketRules.SECRET_SHAPE`). It holds no typed values, no screenshots and no people
+  memory.
+
+**How skills move:**
+1. **Share.** On any phone or in Glass, the owner marks a skill **Share with my phones**, so nothing is shared by
+   default.
+2. **Collect.** The PC takes the skill with a new bridge op `skills.export`.
+3. **Send.** The PC sends the pack with `skills.import`, using the pairing it already has:
+   - to every fleet phone, or to a group;
+   - to a phone joining the fleet, in step 6 of §3.1;
+   - to a phone coming back online, which catches up.
+4. **Install.** The phone stores the pack's items as source **Fleet**, kept apart from its own skills.
+
+**Sync rules:**
+- **Newer wins.** A newer version from the library replaces the phone's Fleet copy. A phone's own re-grounded copy is
+  kept, and the library is offered the newer one.
+- **A different app version** marks a skill **re-check**: the phone re-grounds it on its first run.
+- **Proven:** a skill that succeeded on three phones is marked **proven** (plan 44 run 5).
+- **Glass → Skills → Fleet** shows each skill × phone with a tick, an out-of-date mark or "re-check", and a **Sync
+  now** button.
+
+### 3.4 At the owner's fingertips
+
+Glass → Devices → **Cloud phones** gets one card per phone:
+- name and Android version;
+- state: Ready, Working, Reconnecting, Stopped, Needs you;
+- the skill-library version;
+- the last task.
+
+**Card buttons:**
+- **Live view.** The VMOS H5 viewer via `stsToken`, view only, or Cyclone's own Live Phone.
+- **Restart.**
+- **Sync skills.**
+- **Remove from fleet.** This removes the phone from the fleet but keeps the VMOS phone.
+- **Reset / new device.** Owner only, with a confirm. It erases the phone.
+
+**Groups:** tag phones ("instagram", "test"), then run a skill or a mission on a phone or a group. The MCP asks which
+phone; approvals name the phone.
+
+## 4. The runs
+
+| Run | Alpha (next free) | What ships | Done when |
+| --- | --- | --- | --- |
+| **0 Probe** (with the owner's account, not a release) | — | A small probe in `scripts/pc/cloud_probe.py` (it exists; extend it) calls each _confirm_ endpoint once on one test phone and records the answers with keys removed, as test fixtures. It also checks whether ADB is enabled for the account, 7-day `expireMinutes`, `uploadFileV3` from a GitHub URL, `asyncCmd` + `padTaskDetail`, `getCloudGoodList`, `imageVersionList` and callbacks. | Fixtures are committed. Every table row in §2 is marked confirmed or changed. |
+| **V1 Ready in one click** | alpha.115 | The provisioning catalogue with read-back; `FleetEnrollReceiver` and the gateway's grant; install via `uploadFileV3` with `adb install` as fallback; the ready check; Glass card states; the doctor lines | An existing VMOS phone goes from "Add" to Ready with no tap, and runs a starter skill |
+| **V2 Skills in sync** | alpha.116 | `cyclone.skillpack/1`; phone ops `skills.export` / `skills.import`; "Share with my phones"; the PC library; sync on join, on change and on reconnect; Glass Skills → Fleet | A skill saved on phone A runs on VMOS phones B and C after one Share |
+| **V3 Spin up new** | alpha.117 | SKU and image list (Android 13+ only); owner-confirmed purchase; wait until running; chains into V1; restart and reset buttons; the callback receiver (else polling) | "New VMOS phone" in Glass gives a Ready phone with skills, the purchase confirmed by the owner |
+| **V4 Run the fleet** | alpha.118 | Groups; run on a group; staged Cyclone updates (canary → 10 % → all, stop if health drops); batch ADB renewal; the repair ladder; a health board | Five VMOS phones updated, synced and kept connected for a week without the owner |
+| **V5 (only if needed)** | later | Plan 44's relay link (runs 3–4) if the SSH ADB proves flaky; golden-phone cloning once VMOS backup leaves "Pending Launch" | — |
+
+Each run ships with:
+- tests (provider fixtures from run 0, provisioning read-back fakes, enrollment security tests, the skill-pack
+  privacy scan);
+- a Glass test;
+- the CI guards: no provider-native mutation, no shell for the model, no secret in a pack.
+
+**Physical results stay UNVERIFIED until they are seen on the owner's VMOS account.**
+
+## 5. Questions for the owner
+
+1. **Account and ADB.** Is remote ADB enabled on the VMOS account? Their docs say support may need to switch it on.
+   Which region or host does the account use?
+2. **Images.** Android 13, 14 or 15? Is there a preferred SKU?
+3. **Sharing.** Should the owner's own saved skills be shareable to the fleet (one tap per skill), or only Market and
+   starter skills?
+4. **Buying.** May Glass buy new phones (owner-confirmed every time), or should Cyclone only adopt phones bought in
+   the VMOS console?
+5. **Size.** How many phones? The fleet's limit is 32 today; raising it is part of V4 if needed.
