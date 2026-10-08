@@ -10,13 +10,37 @@ internal data class CycloneCloakBindingReference(
     val cloakProfileId: String,
 )
 
+/** Display-safe projection of a Cloak identity, grouped from its per-app Cyclone bindings. */
+internal data class CycloneCloakProfileIdentity(
+    val profileId: String,
+    val androidUserId: Int,
+    val identityVersion: Int?,
+    val name: String?,
+    val manufacturer: String?,
+    val model: String?,
+    val androidRelease: String?,
+    val sdkInt: Int?,
+    val boundApps: Int,
+    val conflictingApps: Int,
+)
+
 /** Reads Cyclone Cloak's namespaced per-app binding marker without guessing from labels or device state. */
 internal object CycloneCloakProfileBinding {
     const val CONNECTOR_ID = "cyclone-cloak"
 
+    private data class IdentitySnapshot(
+        val cloakProfileId: String,
+        val identityVersion: Int?,
+        val name: String?,
+        val manufacturer: String?,
+        val model: String?,
+        val androidRelease: String?,
+        val sdkInt: Int?,
+    )
+
     /**
-     * Cloak writes `{ "cloakProfileId": ... }` as the value for each bound profile/app tuple. Cyclone stores that
-     * value inside its opaque config envelope; validate the envelope tuple before treating it as a binding.
+     * Cloak writes its profile reference and identity summary as the value for each bound profile/app tuple. Cyclone
+     * stores it inside an opaque config envelope; validate the envelope tuple before treating it as a binding.
      */
     fun readBindings(
         records: List<CycloneProfileRecord>,
@@ -33,6 +57,80 @@ internal object CycloneCloakProfileBinding {
             }
         }
         .toList()
+
+    /** Read only the versioned, public identity fields and choose the most common per-app binding. */
+    fun readIdentities(
+        records: List<CycloneProfileRecord>,
+        readConfig: (ProfileConfigKey) -> String?,
+    ): List<CycloneCloakProfileIdentity> = records.asSequence()
+        .filter { it.ready && !it.inTrash && it.androidUserId != null }
+        .mapNotNull { record ->
+            val userId = record.androidUserId ?: return@mapNotNull null
+            val snapshots = record.packages.asSequence().mapNotNull { packageName ->
+                val key = ProfileConfigKey(record.id, userId, packageName)
+                val text = runCatching { readConfig(key) }.getOrNull() ?: return@mapNotNull null
+                identitySnapshot(text, key)
+            }.toList()
+            val winner = snapshots.groupingBy { it }.eachCount().entries
+                .sortedWith(
+                    compareByDescending<Map.Entry<IdentitySnapshot, Int>> { it.value }
+                        .thenBy { it.key.cloakProfileId }
+                        .thenBy { it.key.name.orEmpty() }
+                        .thenBy { it.key.manufacturer.orEmpty() }
+                        .thenBy { it.key.model.orEmpty() }
+                        .thenBy { it.key.androidRelease.orEmpty() }
+                        .thenBy { it.key.sdkInt ?: -1 },
+                ).firstOrNull() ?: return@mapNotNull null
+            val selected = winner.key
+            val hasMajority = winner.value > snapshots.size - winner.value
+            CycloneCloakProfileIdentity(
+                profileId = record.id,
+                androidUserId = userId,
+                identityVersion = selected.identityVersion.takeIf { hasMajority },
+                name = selected.name.takeIf { hasMajority },
+                manufacturer = selected.manufacturer.takeIf { hasMajority },
+                model = selected.model.takeIf { hasMajority },
+                androidRelease = selected.androidRelease.takeIf { hasMajority },
+                sdkInt = selected.sdkInt.takeIf { hasMajority },
+                boundApps = winner.value,
+                conflictingApps = snapshots.size - winner.value,
+            )
+        }
+        .sortedWith(compareBy<CycloneCloakProfileIdentity> { it.profileId }.thenBy { it.androidUserId })
+        .toList()
+
+    private fun identitySnapshot(text: String, key: ProfileConfigKey): IdentitySnapshot? = runCatching {
+        val config = JSONObject(text)
+        if (config.opt("profileId") != key.profileId ||
+            jsonInt(config.opt("androidUserId")) != key.androidUserId ||
+            config.opt("packageName") != key.packageName
+        ) return@runCatching null
+        val value = config.optJSONObject("value") ?: return@runCatching null
+        val cloakProfileId = cleanText(value.opt("cloakProfileId"), 160) ?: return@runCatching null
+        val version = jsonInt(value.opt("identityVersion"))?.takeIf { it > 0 }
+        // Unknown schemas remain visibly bound but their fields are never interpreted or forwarded.
+        val supported = version == 1
+        IdentitySnapshot(
+            cloakProfileId = cloakProfileId,
+            identityVersion = version.takeIf { supported },
+            name = cleanText(value.opt("name"), 80).takeIf { supported },
+            manufacturer = cleanText(value.opt("manufacturer"), 80).takeIf { supported },
+            model = cleanText(value.opt("model"), 80).takeIf { supported },
+            androidRelease = cleanText(value.opt("androidRelease"), 40).takeIf { supported },
+            sdkInt = jsonInt(value.opt("sdkInt"))?.takeIf { supported && it in 1..1000 },
+        )
+    }.getOrNull()
+
+    private fun jsonInt(value: Any?): Int? = (value as? Number)?.toDouble()?.takeIf {
+        it.isFinite() && it % 1.0 == 0.0 && it in Int.MIN_VALUE.toDouble()..Int.MAX_VALUE.toDouble()
+    }?.toInt()
+
+    private fun cleanText(value: Any?, limit: Int): String? = (value as? String)
+        ?.trim()
+        ?.replace(Regex("[\\p{Cntrl}]+"), " ")
+        ?.replace(Regex("\\s+"), " ")
+        ?.take(limit)
+        ?.takeIf { it.isNotBlank() }
 
     private fun cloakProfileId(text: String, key: ProfileConfigKey): String? = runCatching {
         val config = JSONObject(text)

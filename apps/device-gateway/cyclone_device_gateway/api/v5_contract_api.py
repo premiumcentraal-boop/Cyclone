@@ -34,6 +34,10 @@ def create_v5_contract_router(runtime: Any, token: str) -> APIRouter:
     def profiles_list(device_id: str):
         return _call(lambda: service.profiles_list(device_id))
 
+    @router.get("/v1/devices/{device_id}/profiles/cloak-identities", dependencies=[Depends(auth)])
+    def profiles_cloak_identities(device_id: str):
+        return _call(lambda: service.profiles_cloak_identities(device_id))
+
     @router.get("/v1/devices/{device_id}/profiles/{profile_id}/apps", dependencies=[Depends(auth)])
     def profiles_apps(device_id: str, profile_id: str):
         return _call(lambda: service.profiles_apps(device_id, profile_id))

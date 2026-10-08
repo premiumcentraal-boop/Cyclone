@@ -66,6 +66,7 @@ V5_OPS = frozenset({
     "profiles.apps",
     "profiles.switch",
     "profiles.app",
+    "profiles.cloak",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -1585,7 +1586,7 @@ def _setup_values(values: Any) -> dict[str, str]:
     return out
 
 
-PROFILE_OPS = frozenset({"profiles.list", "profiles.apps", "profiles.switch", "profiles.app"})
+PROFILE_OPS = frozenset({"profiles.list", "profiles.apps", "profiles.switch", "profiles.app", "profiles.cloak"})
 PROFILE_ID = re.compile(r"^(main|Cyclone_[a-f0-9]{16})$")
 PROFILE_COLOR = re.compile(r"^#[0-9A-F]{8}$")
 
@@ -1600,22 +1601,70 @@ def _bad_profiles(message: str) -> DesktopRuntimeError:
     return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android profiles result is malformed: {message}.")
 
 
+def _validate_profile_roster(profiles: Any, current: Any, *, require_android_user: bool = False) -> None:
+    if not isinstance(profiles, list) or len(profiles) > 20:
+        raise _bad_profiles("list")
+    for profile in profiles:
+        old_keys = {"id", "label", "emoji", "color", "ready", "current", "inTrash"}
+        expected = old_keys | {"androidUserId"}
+        if not isinstance(profile, dict) or (set(profile) != expected if require_android_user else set(profile) not in (old_keys, expected)):
+            raise _bad_profiles("profile keys")
+        if not PROFILE_ID.match(str(profile["id"])) or not _short_text(profile["label"], 40) or not _short_text(profile["emoji"], 8, nullable=True):
+            raise _bad_profiles("profile identity")
+        if profile["color"] is not None and not (isinstance(profile["color"], str) and PROFILE_COLOR.match(profile["color"])):
+            raise _bad_profiles("profile colour")
+        if not all(isinstance(profile[key], bool) for key in ("ready", "current", "inTrash")):
+            raise _bad_profiles("profile facts")
+        if profile.get("androidUserId") is not None and not _is_int(profile["androidUserId"]):
+            raise _bad_profiles("Android user")
+    if current is not None and not PROFILE_ID.match(str(current)):
+        raise _bad_profiles("current")
+
+
 def _validate_profiles_response(op: str, value: dict[str, Any], args: dict[str, Any]) -> None:
-    """Plan 43 T4: profiles (labels, looks, which is in front) and a profile's apps (packages and labels only)."""
+    """Plan 43 T4: profiles/apps plus the narrow Cyclone Cloak identity projection."""
     if op == "profiles.list":
-        if set(value) != {"profiles", "current"} or not isinstance(value["profiles"], list) or len(value["profiles"]) > 20:
+        if set(value) != {"profiles", "current"}:
             raise _bad_profiles("list")
-        for p in value["profiles"]:
-            if not isinstance(p, dict) or set(p) != {"id", "label", "emoji", "color", "ready", "current", "inTrash"}:
-                raise _bad_profiles("profile keys")
-            if not PROFILE_ID.match(str(p["id"])) or not _short_text(p["label"], 40) or not _short_text(p["emoji"], 8, nullable=True):
-                raise _bad_profiles("profile identity")
-            if p["color"] is not None and not (isinstance(p["color"], str) and PROFILE_COLOR.match(p["color"])):
-                raise _bad_profiles("profile colour")
-            if not all(isinstance(p[k], bool) for k in ("ready", "current", "inTrash")):
-                raise _bad_profiles("profile facts")
-        if value["current"] is not None and not PROFILE_ID.match(str(value["current"])):
-            raise _bad_profiles("current")
+        _validate_profile_roster(value["profiles"], value["current"])
+        return
+    if op == "profiles.cloak":
+        if set(value) != {"schemaVersion", "profiles", "current", "identities"} or value["schemaVersion"] != 1:
+            raise _bad_profiles("Cloak identity envelope")
+        _validate_profile_roster(value["profiles"], value["current"], require_android_user=True)
+        identities = value["identities"]
+        keys = {"profileId", "androidUserId", "identityVersion", "name", "manufacturer", "model", "androidRelease", "sdkInt", "boundApps", "conflictingApps"}
+        if not isinstance(identities, list) or len(identities) > 20:
+            raise _bad_profiles("Cloak identities")
+        seen: set[tuple[str, int]] = set()
+        for identity in identities:
+            if not isinstance(identity, dict) or set(identity) != keys:
+                raise _bad_profiles("Cloak identity keys")
+            profile_id, user_id = identity["profileId"], identity["androidUserId"]
+            if not isinstance(profile_id, str) or not PROFILE_ID.match(profile_id) or profile_id == "main" or not _is_int(user_id):
+                raise _bad_profiles("Cloak identity binding")
+            pair = (profile_id, user_id)
+            if pair in seen:
+                raise _bad_profiles("duplicate Cloak identity")
+            seen.add(pair)
+            version = identity["identityVersion"]
+            if version is not None and (type(version) is not int or version != 1):
+                raise _bad_profiles("Cloak identity version")
+            for key, limit in (("name", 80), ("manufacturer", 80), ("model", 80), ("androidRelease", 40)):
+                item = identity[key]
+                if item is not None and (not _short_text(item, limit) or not item.strip() or INLINE_SECRET.search(item)
+                                         or any(ord(char) < 32 or ord(char) == 127 for char in item)):
+                    raise _bad_profiles("Cloak identity text")
+            if not all(identity[key] is None for key in ("name", "manufacturer", "model", "androidRelease", "sdkInt")) and version is None:
+                raise _bad_profiles("unknown Cloak identity fields")
+            if identity["sdkInt"] is not None and (not _is_int(identity["sdkInt"], minimum=1) or identity["sdkInt"] > 1000):
+                raise _bad_profiles("Cloak SDK")
+            if not _is_int(identity["boundApps"], minimum=1) or identity["boundApps"] > 500:
+                raise _bad_profiles("Cloak bound apps")
+            if not _is_int(identity["conflictingApps"]) or identity["conflictingApps"] > 500:
+                raise _bad_profiles("Cloak conflicts")
+            if identity["boundApps"] + identity["conflictingApps"] > 500:
+                raise _bad_profiles("Cloak profile app total")
         return
     if op == "profiles.apps":
         if set(value) != {"apps", "available", "truncated"} or not isinstance(value["truncated"], bool):
@@ -2023,6 +2072,10 @@ class V5ContractService:
     def profiles_list(self, device_id: str) -> dict[str, Any]:
         return self._call(device_id, "profiles.list", {})
 
+    def profiles_cloak_identities(self, device_id: str) -> dict[str, Any]:
+        """Display-safe, read-only Cyclone Cloak identities for the Profiles overview."""
+        return self._call(device_id, "profiles.cloak", {})
+
     def profiles_apps(self, device_id: str, profile_id: str) -> dict[str, Any]:
         return self._call(device_id, "profiles.apps", {"profileId": _profile_id(profile_id)})
 
@@ -2262,6 +2315,10 @@ class V5ContractService:
             if args:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "profiles.list takes no arguments.")
             return self.profiles_list(device_id)
+        if op == "profiles.cloak":
+            if args:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "profiles.cloak takes no arguments.")
+            return self.profiles_cloak_identities(device_id)
         if op in ("profiles.apps", "profiles.switch"):
             if set(args) != {"profileId"}:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, f"{op} takes profileId only.")

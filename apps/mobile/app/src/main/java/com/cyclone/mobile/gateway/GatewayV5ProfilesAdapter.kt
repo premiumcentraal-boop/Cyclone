@@ -1,7 +1,13 @@
 package com.cyclone.mobile.gateway
 
 import android.content.Context
+import com.cyclone.mobile.connector.CycloneCloakProfileBinding
+import com.cyclone.mobile.connector.CycloneCloakProfileIdentity
+import com.cyclone.mobile.connector.ProfileConfigKey
+import com.cyclone.mobile.connector.ProfileConfigStore
 import com.cyclone.mobile.runtime.workspaces.ProfileApps
+import com.cyclone.mobile.runtime.workspaces.ProfileRegistryStore
+import com.cyclone.mobile.runtime.workspaces.ProfileSetupRuntime
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -9,6 +15,7 @@ import org.json.JSONObject
  * Plan 43 (T4): the phone's profiles over the gateway.
  *
  * - `profiles.list` lists Profile A and Cyclone's profiles, and which one is in front.
+ * - `profiles.cloak` reads only the versioned, display-safe identity fields of bound Cloak profiles.
  * - `profiles.apps {profileId}` lists a profile's apps and, for a Cyclone profile, the apps Profile A could give it.
  * - `profiles.switch {profileId}` puts that profile in front.
  * - `profiles.app {profileId, package, action: install|remove}` changes one Cyclone profile's apps.
@@ -27,6 +34,17 @@ internal object GatewayV5ProfilesAdapter {
 
     /** Seams for JVM tests; production is [ProfileApps] on this phone. */
     internal var profiles: () -> List<ProfileApps.Profile> = { ProfileApps.profiles(app()) }
+    internal var cloakIdentities: (List<ProfileApps.Profile>) -> List<CycloneCloakProfileIdentity> = { profileSnapshot ->
+        val context = app()
+        val validProfiles = profileSnapshot.asSequence()
+            .filter { it.ready && !it.inTrash && it.androidUserId != null }
+            .map { it.id to it.androidUserId!! }
+            .toSet()
+        val processUser = ProfileSetupRuntime.currentUserId()
+        CycloneCloakProfileBinding.readIdentities(ProfileRegistryStore.records(context)) { key: ProfileConfigKey ->
+            ProfileConfigStore.get(context, CycloneCloakProfileBinding.CONNECTOR_ID, processUser, key)
+        }.filter { (it.profileId to it.androidUserId) in validProfiles }
+    }
     internal var apps: (String) -> Pair<List<ProfileApps.App>, List<ProfileApps.App>> = { ProfileApps.apps(app(), it) }
     internal var switchTo: (String) -> Unit = { ProfileApps.switchTo(app(), it) }
     internal var install: (String, String) -> Unit = { id, pkg -> ProfileApps.install(app(), id, pkg) }
@@ -38,6 +56,15 @@ internal object GatewayV5ProfilesAdapter {
                 only(args, emptySet())
                 val all = profiles()
                 JSONObject().put("profiles", JSONArray(all.map(::profileJson))).put("current", all.firstOrNull { it.current }?.id ?: JSONObject.NULL)
+            }
+            "profiles.cloak" -> {
+                only(args, emptySet())
+                val all = profiles()
+                JSONObject()
+                    .put("schemaVersion", 1)
+                    .put("profiles", JSONArray(all.map(::profileJson)))
+                    .put("current", all.firstOrNull { it.current }?.id ?: JSONObject.NULL)
+                    .put("identities", JSONArray(cloakIdentities(all).map(::cloakIdentityJson)))
             }
             "profiles.apps" -> {
                 only(args, setOf("profileId"))
@@ -93,6 +120,19 @@ internal object GatewayV5ProfilesAdapter {
         .put("id", p.id).put("label", p.label.take(40)).put("emoji", p.emoji?.take(8) ?: JSONObject.NULL)
         .put("color", p.color?.let { String.format("#%08X", it) } ?: JSONObject.NULL)
         .put("ready", p.ready).put("current", p.current).put("inTrash", p.inTrash)
+        .put("androidUserId", p.androidUserId ?: JSONObject.NULL)
+
+    private fun cloakIdentityJson(identity: CycloneCloakProfileIdentity): JSONObject = JSONObject()
+        .put("profileId", identity.profileId)
+        .put("androidUserId", identity.androidUserId)
+        .put("identityVersion", identity.identityVersion ?: JSONObject.NULL)
+        .put("name", identity.name ?: JSONObject.NULL)
+        .put("manufacturer", identity.manufacturer ?: JSONObject.NULL)
+        .put("model", identity.model ?: JSONObject.NULL)
+        .put("androidRelease", identity.androidRelease ?: JSONObject.NULL)
+        .put("sdkInt", identity.sdkInt ?: JSONObject.NULL)
+        .put("boundApps", identity.boundApps)
+        .put("conflictingApps", identity.conflictingApps)
 
     private fun appJson(a: ProfileApps.App): JSONObject = JSONObject().put("package", a.packageName).put("label", a.label.take(80))
 }

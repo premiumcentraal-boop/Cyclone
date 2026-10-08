@@ -7,6 +7,7 @@ import type { GlassContext } from "../app.js";
 import { routeHref } from "../core/router.js";
 import { loadApps, type PhoneApp } from "../services/apps.js";
 import { getKnowledge, type KnowledgeSummary } from "../services/knowledgeSummary.js";
+import { MAIN_PROFILE, profilesApi, type CloakIdentities } from "../services/profiles.js";
 import { appName, causeLabel, listRuns, statusLabel, statusTone, type RunSummary } from "../services/runs.js";
 import { actionButton, card, chip, loadingState, pageHeader, statTile } from "../ui/components.js";
 import { el, setChildren } from "../ui/dom.js";
@@ -144,10 +145,11 @@ export function createHomePage(ctx: GlassContext, deps: HomePageDeps = {}): Glas
   const attention = card("home-attention");
   const recent = card("home-runs");
   const known = card("home-knowledge");
+  const cloak = card("home-cloak-profiles");
   const trend = card("home-trend");
   trend.hidden = true;
   const grid = el("div", "home-grid");
-  grid.append(attention, recent, known);
+  grid.append(attention, recent, known, cloak);
   element.append(stats, trend, grid);
   let controller = new AbortController();
 
@@ -158,10 +160,12 @@ export function createHomePage(ctx: GlassContext, deps: HomePageDeps = {}): Glas
     setChildren(attention, el("h2", "card-title", "Needs attention"), loadingState("Checking apps…"));
     setChildren(recent, el("h2", "card-title", "Latest runs"), loadingState("Loading runs…"));
     setChildren(known, el("h2", "card-title", "Knowledge"), loadingState("Asking the phone…"));
-    const [apps, runs, knowledge] = await Promise.all([
+    setChildren(cloak, el("h2", "card-title", "Cyclone Cloak profiles"), loadingState("Checking profile bindings…"));
+    const [apps, runs, knowledge, cloakOverview] = await Promise.all([
       loadApps(ctx.client, device.id, signal).then((c) => c.apps).catch(() => null),
       listRuns(ctx.client, device.id, "all", 100, signal).catch(() => null),
       getKnowledge(ctx.client, device.id, signal).catch(() => null),
+      profilesApi.cloakIdentities(ctx.client, device.id, signal).catch(() => null),
     ]);
     if (signal.aborted) return;
     latest = homeReport(ctx.version, { name: device.name, mobileVersion: device.mobileVersion ?? null }, apps, runs, knowledge, Date.now());
@@ -171,7 +175,75 @@ export function createHomePage(ctx: GlassContext, deps: HomePageDeps = {}): Glas
     renderRuns(runs);
     renderTrend(runs);
     renderKnowledge(knowledge);
+    renderCloakProfiles(cloakOverview);
   };
+
+  function renderCloakProfiles(overview: CloakIdentities | null): void {
+    const title = el("h2", "card-title", "Cyclone Cloak profiles");
+    if (!overview) {
+      setChildren(cloak, title, el("p", "muted", "Update Cyclone on the phone and Cyclone Glass to view profile identity bindings."));
+      return;
+    }
+    const { profiles, identities } = overview;
+    const rows = profiles.filter((profile) => profile.id !== MAIN_PROFILE && !profile.inTrash).sort((a, b) =>
+      a.label.localeCompare(b.label) || (a.androidUserId ?? -1) - (b.androidUserId ?? -1));
+    if (!rows.length) {
+      setChildren(cloak, title, el("p", "muted", "No Cyclone profiles are available on this phone."));
+      return;
+    }
+    const byProfile = new Map(identities.map((identity) => [`${identity.profileId}\0${identity.androidUserId}`, identity]));
+    const list = el("ul", "home-list cloak-profile-list");
+    for (const profile of rows) {
+      const identity = profile.androidUserId == null ? undefined : byProfile.get(`${profile.id}\0${profile.androidUserId}`);
+      const item = el("li", "home-row cloak-profile-row");
+      const heading = el("div", "cloak-profile-heading");
+      const name = el("strong", "cloak-profile-name", `${profile.emoji ? `${profile.emoji} ` : ""}${profile.label}`);
+      const status = !profile.ready || profile.androidUserId == null
+        ? chip("Unavailable", "neutral")
+        : identity ? chip("Rooted", "success") : chip("Native", "neutral");
+      heading.append(name, status);
+      const meta = el("p", "muted cloak-profile-meta");
+      meta.textContent = profile.androidUserId == null ? "Android user unavailable" : `Android user ${profile.androidUserId}${profile.current ? " · Active" : ""}`;
+      item.append(heading, meta);
+      if (identity) {
+        const details = el("details", "cloak-profile-details");
+        details.append(el("summary", undefined, "Cloak device info"));
+        const fields = el("dl", "cloak-identity-fields");
+        const field = (label: string, value: string | number | null): void => {
+          if (value == null || value === "") return;
+          fields.append(el("dt", undefined, label), el("dd", undefined, String(value)));
+        };
+        const hasMajority = identity.boundApps > identity.conflictingApps;
+        if (identity.identityVersion === 1 && hasMajority) {
+          field("Name", identity.name);
+          field("Manufacturer", identity.manufacturer);
+          field("Model", identity.model);
+          field("Android", identity.androidRelease);
+          field("SDK", identity.sdkInt);
+        }
+        field("Bound apps", identity.boundApps);
+        if (identity.conflictingApps) field("Different identity on", `${identity.conflictingApps} ${identity.conflictingApps === 1 ? "app" : "apps"}`);
+        if (!fields.childNodes.length) {
+          fields.append(el("dd", "muted", hasMajority
+            ? "Identity details are unavailable for this Cloak version."
+            : "The app bindings disagree; no majority identity is shown."));
+        }
+        details.append(fields);
+        item.append(details);
+        if (identity.conflictingApps && hasMajority) {
+          item.append(el("p", "muted cloak-profile-note", `The most common identity is bound on ${identity.boundApps} apps; ${identity.conflictingApps} ${identity.conflictingApps === 1 ? "app differs" : "apps differ"}.`));
+        } else if (!hasMajority) {
+          item.append(el("p", "muted cloak-profile-note", "The app bindings disagree; no majority identity is shown."));
+        }
+      } else if (profile.ready && profile.androidUserId != null) {
+        item.append(el("p", "muted cloak-profile-note", "No Cyclone Cloak identity is bound to this profile."));
+      } else {
+        item.append(el("p", "muted cloak-profile-note", "Cyclone cannot confirm this profile's Android user yet."));
+      }
+      list.append(item);
+    }
+    setChildren(cloak, title, list, el("p", "muted cloak-profile-footnote", "Rooted means an identity is configured; it does not report live root, module, or route health."));
+  }
 
   function renderTrend(runs: RunSummary[] | null): void {
     if (!runs?.length) {

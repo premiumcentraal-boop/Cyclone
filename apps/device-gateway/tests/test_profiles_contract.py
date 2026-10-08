@@ -3,23 +3,35 @@ apps as packages and labels; switching, and adding or removing an app in one Cyc
 from __future__ import annotations
 
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from cyclone_device_gateway.api.v5_contract_api import create_v5_contract_router
+from cyclone_device_gateway.cyclone_bridge.protocol import ALLOWED_OPS
 from cyclone_device_gateway.desktop_runtime.models import DesktopRuntimeError
-from cyclone_device_gateway.desktop_runtime.v5_contract import V5ContractService, validate_android_response
+from cyclone_device_gateway.desktop_runtime.v5_contract import V5_OPS, V5ContractService, validate_android_response
 
 B = "Cyclone_0123456789abcdef"
 LIST = {"profiles": [
-    {"id": "main", "label": "Profile A", "emoji": None, "color": None, "ready": True, "current": False, "inTrash": False},
-    {"id": B, "label": "Brand B", "emoji": "🛍", "color": "#FF7C4DFF", "ready": True, "current": True, "inTrash": False}],
+    {"id": "main", "label": "Profile A", "emoji": None, "color": None, "ready": True, "current": False, "inTrash": False, "androidUserId": 0},
+    {"id": B, "label": "Brand B", "emoji": "🛍", "color": "#FF7C4DFF", "ready": True, "current": True, "inTrash": False, "androidUserId": 11}],
     "current": B}
+CLOAK = {"schemaVersion": 1, "profiles": LIST["profiles"], "current": B, "identities": [{
+    "profileId": B, "androidUserId": 11, "identityVersion": 1, "name": "Pixel 9", "manufacturer": "Google",
+    "model": "Pixel 9", "androidRelease": "16", "sdkInt": 36, "boundApps": 2, "conflictingApps": 1,
+}]}
 
 
 def test_profile_results_are_checked():
     assert validate_android_response("profiles.list", LIST, {}) == LIST
     apps = {"apps": [{"package": "com.instagram.android", "label": "Instagram"}], "available": [], "truncated": False}
     assert validate_android_response("profiles.apps", apps, {"profileId": B}) == apps
+    assert validate_android_response("profiles.cloak", CLOAK, {}) == CLOAK
+    legacy = {"profiles": [{k: v for k, v in LIST["profiles"][0].items() if k != "androidUserId"}], "current": None}
+    assert validate_android_response("profiles.list", legacy, {}) == legacy
     assert validate_android_response("profiles.switch", {"switched": True, "current": B}, {"profileId": B})
     assert validate_android_response("profiles.app", {"done": True}, {"profileId": B, "package": "com.x.app", "action": "install"})
     bad = [
@@ -29,6 +41,10 @@ def test_profile_results_are_checked():
         ("profiles.apps", {"apps": [{"package": "rm -rf", "label": "x"}], "available": [], "truncated": False}, {"profileId": B}),
         ("profiles.switch", {"switched": True, "current": "main"}, {"profileId": B}),
         ("profiles.app", {"done": False}, {}),
+        ("profiles.cloak", {**CLOAK, "extra": True}, {}),
+        ("profiles.cloak", {"schemaVersion": 1, "identities": [{**CLOAK["identities"][0], "cloakProfileId": "private"}]}, {}),
+        ("profiles.cloak", {"schemaVersion": 1, "identities": [{**CLOAK["identities"][0], "identityVersion": None, "name": "unknown"}]}, {}),
+        ("profiles.cloak", {"schemaVersion": 1, "identities": [{**CLOAK["identities"][0], "sdkInt": True}]}, {}),
     ]
     for op, value, args in bad:
         with pytest.raises(DesktopRuntimeError):
@@ -47,10 +63,11 @@ class Recorder(V5ContractService):
 def test_profile_requests_are_checked_before_they_reach_the_phone():
     service = Recorder()
     service.profiles_list("pixel8")
+    service.profiles_cloak_identities("pixel8")
     service.profiles_apps("pixel8", B)
     service.profiles_switch("pixel8", "main")
     service.profiles_app("pixel8", B, "com.instagram.android", "remove")
-    assert [c[1] for c in service.calls] == ["profiles.list", "profiles.apps", "profiles.switch", "profiles.app"]
+    assert [c[1] for c in service.calls] == ["profiles.list", "profiles.cloak", "profiles.apps", "profiles.switch", "profiles.app"]
     assert service.calls[-1][2] == {"profileId": B, "package": "com.instagram.android", "action": "remove"}
     for call in (lambda: service.profiles_switch("pixel8", "Cyclone_nothex"),
                  lambda: service.profiles_app("pixel8", "main", "com.x.app", "install"),
@@ -58,4 +75,23 @@ def test_profile_requests_are_checked_before_they_reach_the_phone():
                  lambda: service.profiles_app("pixel8", B, "com.x.app", "wipe")):
         with pytest.raises(DesktopRuntimeError):
             call()
-    assert len(service.calls) == 4
+    assert len(service.calls) == 5
+
+
+def test_cloak_identity_operation_is_registered_and_requires_a_no_argument_read():
+    assert "profiles.cloak" in ALLOWED_OPS and "profiles.cloak" in V5_OPS
+    service = Recorder()
+    assert service.forward("pixel8", "profiles.cloak", {}) == {}
+    with pytest.raises(DesktopRuntimeError):
+        service.forward("pixel8", "profiles.cloak", {"profileId": B})
+
+
+def test_cloak_identity_route_is_bearer_protected():
+    service = Recorder()
+    app = FastAPI()
+    app.include_router(create_v5_contract_router(SimpleNamespace(v5_contract=service, fleet=None), "secret"))
+    client = TestClient(app)
+    path = "/v1/devices/pixel8/profiles/cloak-identities"
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers={"Authorization": "Bearer secret"}).status_code == 200
+    assert service.calls == [("pixel8", "profiles.cloak", {})]

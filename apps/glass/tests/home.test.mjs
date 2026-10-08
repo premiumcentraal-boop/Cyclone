@@ -7,6 +7,7 @@ import { GatewayClient } from "../.test-dist/services/gateway.js";
 import { parseDevice } from "../.test-dist/services/devices.js";
 import { parseAppCatalog } from "../.test-dist/services/apps.js";
 import { parseRunSummary } from "../.test-dist/services/runs.js";
+import { parseCloakIdentities } from "../.test-dist/services/profiles.js";
 
 const GM = "package:com.google.android.gm";
 const CLOCK = "package:com.google.android.deskclock";
@@ -46,6 +47,14 @@ test("Home: stats, attention, latest runs and knowledge from the phone", async (
   installMiniDom();
   const gateway = fakeGateway({
     "GET /v1/devices/d1/apps": () => APPS,
+    "GET /v1/devices/d1/profiles/cloak-identities": () => ({ schemaVersion: 1, profiles: [
+      { id: "main", label: "Profile A", emoji: null, color: null, androidUserId: 0, ready: true, current: false, inTrash: false },
+      { id: "Cyclone_0123456789abcdef", label: "Shop profile", emoji: "🛍", color: null, androidUserId: 11, ready: true, current: true, inTrash: false },
+      { id: "Cyclone_abcdef0123456789", label: "Personal profile", emoji: null, color: null, androidUserId: 12, ready: true, current: false, inTrash: false },
+    ], current: "Cyclone_0123456789abcdef", identities: [{
+      profileId: "Cyclone_0123456789abcdef", androidUserId: 11, identityVersion: 1, name: "Cloak Pixel", manufacturer: "Google",
+      model: "Pixel 9", androidRelease: "16", sdkInt: 36, boundApps: 2, conflictingApps: 1,
+    }] }),
     "GET /v1/devices/d1/runs": () => RUNS,
     "GET /v1/devices/d1/knowledge": () => ({
       vault: { slotCount: 2, setCount: 1, slots: [] },
@@ -66,6 +75,12 @@ test("Home: stats, attention, latest runs and knowledge from the phone", async (
   assert.match(text, /9 rooms and 7 doors in 3 places/);
   assert.match(text, /1 of 2 secrets set/);
   assert.match(text, /3 guarded doors in 1 app, never pressed/);
+  assert.match(text, /Cyclone Cloak profiles/);
+  assert.match(text, /Native/);
+  assert.match(text, /Rooted/);
+  assert.match(text, /Cloak Pixel/);
+  assert.match(text, /The most common identity is bound on 2 apps; 1 app differs/);
+  assert.match(text, /does not report live root, module, or route health/);
   page.destroy();
 });
 
@@ -107,6 +122,10 @@ test("Home report: counts and outcomes, never slot names or values", async () =>
   const saved = [];
   const gateway = fakeGateway({
     "GET /v1/devices/d1/apps": () => APPS,
+    "GET /v1/devices/d1/profiles/cloak-identities": () => ({ schemaVersion: 1, profiles: [], current: null, identities: [{
+      profileId: "Cyclone_0123456789abcdef", androidUserId: 11, identityVersion: 1, name: "Report-only device", manufacturer: "Google",
+      model: "Pixel 9", androidRelease: "16", sdkInt: 36, boundApps: 1, conflictingApps: 0,
+    }] }),
     "GET /v1/devices/d1/runs": () => RUNS,
     "GET /v1/devices/d1/knowledge": () => ({
       vault: { slotCount: 1, setCount: 1, slots: [{ placeId: GM, persona: "live", slot: "password", set: true, updatedAt: null }] },
@@ -126,5 +145,38 @@ test("Home report: counts and outcomes, never slot names or values", async () =>
   assert.equal(report.runs.length, 3);
   assert.equal(report.knowledge.secretsSet, 1);
   assert.doesNotMatch(saved[0].text, /password/);
+  assert.doesNotMatch(saved[0].text, /Report-only device|cloakProfileId|hardwareId/);
+  page.destroy();
+});
+
+test("Cloak identity parsing keeps only the approved display fields and masks unknown versions", () => {
+  const parsed = parseCloakIdentities({ schemaVersion: 1, identities: [
+    { profileId: "Cyclone_0123456789abcdef", androidUserId: 11, identityVersion: 1, name: "Pixel", manufacturer: "Google", model: "Pixel 9", androidRelease: "16", sdkInt: 36, boundApps: 2, conflictingApps: 1, cloakProfileId: "private", hardwareId: "private" },
+    { profileId: "Cyclone_abcdef0123456789", androidUserId: 12, identityVersion: 9, name: "Unknown", manufacturer: "Vendor", model: "Device", androidRelease: "99", sdkInt: 99, boundApps: 1, conflictingApps: 0 },
+  ] });
+  assert.equal(parsed.identities.length, 2);
+  assert.equal(parsed.identities[0].model, "Pixel 9");
+  assert.equal(parsed.identities[1].identityVersion, null);
+  assert.equal(parsed.identities[1].name, null);
+  assert.doesNotMatch(JSON.stringify(parsed), /cloakProfileId|hardwareId|private/);
+});
+
+test("Home does not choose an identity when per-app bindings have no majority", async () => {
+  installMiniDom();
+  const gateway = fakeGateway({
+    "GET /v1/devices/d1/profiles/cloak-identities": () => ({ schemaVersion: 1, profiles: [
+      { id: "Cyclone_0123456789abcdef", label: "Work", emoji: null, color: null, androidUserId: 11, ready: true, current: true, inTrash: false },
+    ], current: "Cyclone_0123456789abcdef", identities: [{
+      profileId: "Cyclone_0123456789abcdef", androidUserId: 11, identityVersion: null, name: null, manufacturer: null,
+      model: null, androidRelease: null, sdkInt: null, boundApps: 1, conflictingApps: 1,
+    }] }),
+  });
+  const devices = [parseDevice({ ...READY_DEVICE, mobileVersion: "5.0.0-alpha.116.dev1" })];
+  const page = createHomePage({ client: new GatewayClient({ token: "t", fetch: gateway.fetch }), version: "x", devices, device: devices[0], devicesError: null, navigate() {}, selectDevice() {}, refreshDevices: async () => {} });
+  await flush();
+  const cloakCard = page.element.querySelector(".home-cloak-profiles");
+  assert.match(cloakCard.textContent, /Rooted/);
+  assert.match(cloakCard.textContent, /no majority identity is shown/);
+  assert.doesNotMatch(cloakCard.textContent, /Pixel|Google|Android 16/);
   page.destroy();
 });

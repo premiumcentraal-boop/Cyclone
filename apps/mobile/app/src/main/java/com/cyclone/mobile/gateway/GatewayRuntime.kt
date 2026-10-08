@@ -499,7 +499,7 @@ internal object GatewayDispatcher {
             GatewayV5PortsAdapter.dispatch(request.op, request.args)
         }
         "health.report" -> com.cyclone.mobile.runtime.health.AppHealth.report(context)
-        "profiles.list", "profiles.apps", "profiles.switch", "profiles.app" -> {
+        "profiles.list", "profiles.apps", "profiles.switch", "profiles.app", "profiles.cloak" -> {
             GatewayV5ProfilesAdapter.install(context)
             GatewayV5ProfilesAdapter.dispatch(request.op, request.args)
         }

@@ -1,6 +1,7 @@
 package com.cyclone.mobile.gateway
 
 import com.cyclone.mobile.runtime.workspaces.ProfileApps
+import com.cyclone.mobile.connector.CycloneCloakProfileIdentity
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,7 +29,20 @@ class GatewayV5ProfilesAdapterTest {
         assertEquals(b, list.getString("current"))
         val brand = list.getJSONArray("profiles").getJSONObject(1)
         assertEquals("#FF7C4DFF", brand.getString("color"))
-        assertEquals(setOf("id", "label", "emoji", "color", "ready", "current", "inTrash"), brand.keys().asSequence().toSet())
+        assertEquals(setOf("id", "label", "emoji", "color", "ready", "current", "inTrash", "androidUserId"), brand.keys().asSequence().toSet())
+        assertEquals(11, brand.getInt("androidUserId"))
+
+        GatewayV5ProfilesAdapter.cloakIdentities = { _ ->
+            listOf(CycloneCloakProfileIdentity(b, 11, 1, "Pixel 9", "Google", "Pixel 9", "16", 36, 2, 1))
+        }
+        val cloak = GatewayV5ProfilesAdapter.dispatch("profiles.cloak", JSONObject())
+        assertEquals(setOf("schemaVersion", "profiles", "current", "identities"), cloak.keys().asSequence().toSet())
+        assertEquals(1, cloak.getInt("schemaVersion"))
+        assertEquals(b, cloak.getJSONArray("profiles").getJSONObject(1).getString("id"))
+        assertEquals(b, cloak.getString("current"))
+        val identity = cloak.getJSONArray("identities").getJSONObject(0)
+        assertEquals(setOf("profileId", "androidUserId", "identityVersion", "name", "manufacturer", "model", "androidRelease", "sdkInt", "boundApps", "conflictingApps"), identity.keys().asSequence().toSet())
+        assertFalse(identity.toString().contains("cloakProfileId"))
 
         val apps = GatewayV5ProfilesAdapter.dispatch("profiles.apps", JSONObject().put("profileId", b))
         assertEquals("com.whatsapp", apps.getJSONArray("available").getJSONObject(0).getString("package"))
@@ -52,6 +66,7 @@ class GatewayV5ProfilesAdapterTest {
         assertEquals("ASK_BUSY", code { GatewayV5ProfilesAdapter.dispatch("profiles.switch", JSONObject().put("profileId", b)) })
         GatewayV5ProfilesAdapter.switchTo = { throw IllegalStateException("root denied") }
         assertEquals("CAPABILITY_UNAVAILABLE", code { GatewayV5ProfilesAdapter.dispatch("profiles.switch", JSONObject().put("profileId", b)) })
-        assertTrue(GatewayProtocol.operations.containsAll(listOf("profiles.list", "profiles.apps", "profiles.switch", "profiles.app")))
+        assertTrue(GatewayProtocol.operations.containsAll(listOf("profiles.list", "profiles.apps", "profiles.switch", "profiles.app", "profiles.cloak")))
+        assertFalse(GatewayProtocol.legacyReadOnlyOperations.contains("profiles.cloak"))
     }
 }

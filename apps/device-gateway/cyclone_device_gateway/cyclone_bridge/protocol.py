@@ -29,7 +29,7 @@ ALLOWED_OPS = {
     "numbers.list",
     "connectors.list",
     # Plan 43 T4: the phone's profiles, switching between them, and each Cyclone profile's apps.
-    "profiles.list", "profiles.apps", "profiles.switch", "profiles.app",
+    "profiles.list", "profiles.apps", "profiles.switch", "profiles.app", "profiles.cloak",
     # Alpha 87: why Cyclone stopped last time, and the freezes it caught (read only).
     "health.report",
     # Cyclone Marketplace: the phone's store of recipes and connections.

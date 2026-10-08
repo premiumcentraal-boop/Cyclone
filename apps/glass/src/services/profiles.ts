@@ -12,12 +12,33 @@ export interface PhoneProfile {
   emoji: string | null;
   /** #AARRGGBB, as the phone stores it. */
   color: string | null;
+  androidUserId: number | null;
   ready: boolean;
   current: boolean;
   inTrash: boolean;
 }
 export interface ProfileApp { packageName: string; label: string }
 export interface ProfileApps { apps: ProfileApp[]; available: ProfileApp[]; truncated: boolean }
+
+/** Version 1 contains only the human-readable fields approved for Glass; no Cloak or hardware IDs. */
+export interface CloakIdentity {
+  profileId: string;
+  androidUserId: number;
+  identityVersion: 1 | null;
+  name: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  androidRelease: string | null;
+  sdkInt: number | null;
+  boundApps: number;
+  conflictingApps: number;
+}
+export interface CloakIdentities {
+  schemaVersion: 1;
+  profiles: PhoneProfile[];
+  current: string | null;
+  identities: CloakIdentity[];
+}
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
@@ -33,9 +54,53 @@ export function parseProfiles(raw: unknown): { profiles: PhoneProfile[]; current
     return [{
       id, label: str(o.label) || (id === MAIN_PROFILE ? "Profile A" : "Profile"), emoji: str(o.emoji) || null,
       color: /^#[0-9A-F]{8}$/.test(str(o.color)) ? str(o.color) : null, ready: o.ready === true, current: o.current === true, inTrash: o.inTrash === true,
+      androidUserId: Number.isSafeInteger(o.androidUserId) && (o.androidUserId as number) >= 0 ? o.androidUserId as number : null,
     }];
   });
   return { profiles, current: ID.test(str(r.current)) ? str(r.current) : null };
+}
+
+const safeIdentityText = (value: unknown, limit: number): string | null => {
+  if (typeof value !== "string") return null;
+  const text = value.trim().slice(0, limit);
+  return text && !/[\u0000-\u001f\u007f]/.test(text) ? text : null;
+};
+
+export function parseCloakIdentities(raw: unknown): CloakIdentities {
+  const root = obj(raw);
+  if (root.schemaVersion !== 1) return { schemaVersion: 1, profiles: [], current: null, identities: [] };
+  const identities = list(root.identities).slice(0, 20).flatMap((entry): CloakIdentity[] => {
+    const row = obj(entry);
+    const profileId = str(row.profileId);
+    const androidUserId = row.androidUserId;
+    const identityVersion = row.identityVersion === 1 ? 1
+      : row.identityVersion === null || (Number.isSafeInteger(row.identityVersion) && (row.identityVersion as number) > 1) ? null
+      : undefined;
+    const boundApps = row.boundApps;
+    const conflictingApps = row.conflictingApps;
+    if (!ID.test(profileId) || profileId === MAIN_PROFILE || !Number.isSafeInteger(androidUserId) || (androidUserId as number) < 0 ||
+      identityVersion === undefined || !Number.isSafeInteger(boundApps) || (boundApps as number) < 1 || (boundApps as number) > 500 ||
+      !Number.isSafeInteger(conflictingApps) || (conflictingApps as number) < 0 || (conflictingApps as number) > 500) return [];
+    const visible = identityVersion === 1;
+    const sdkInt = visible && Number.isSafeInteger(row.sdkInt) && (row.sdkInt as number) >= 1 && (row.sdkInt as number) <= 1000
+      ? row.sdkInt as number : null;
+    return [{
+      profileId,
+      androidUserId: androidUserId as number,
+      identityVersion,
+      name: visible ? safeIdentityText(row.name, 80) : null,
+      manufacturer: visible ? safeIdentityText(row.manufacturer, 80) : null,
+      model: visible ? safeIdentityText(row.model, 80) : null,
+      androidRelease: visible ? safeIdentityText(row.androidRelease, 40) : null,
+      sdkInt,
+      boundApps: boundApps as number,
+      conflictingApps: conflictingApps as number,
+    }];
+  });
+  const unique = new Map<string, CloakIdentity>();
+  for (const identity of identities) unique.set(`${identity.profileId}\0${identity.androidUserId}`, identity);
+  const roster = parseProfiles(root);
+  return { schemaVersion: 1, profiles: roster.profiles, current: roster.current, identities: [...unique.values()] };
 }
 
 export function parseProfileApps(raw: unknown): ProfileApps {
@@ -77,6 +142,8 @@ const base = (device: string) => `/v1/devices/${encodeURIComponent(device)}/prof
 
 export const profilesApi = {
   list: async (client: GatewayClient, device: string, signal?: AbortSignal) => parseProfiles(await client.get(base(device), signal)),
+  cloakIdentities: async (client: GatewayClient, device: string, signal?: AbortSignal) =>
+    parseCloakIdentities(await client.get(`/v1/devices/${encodeURIComponent(device)}/profiles/cloak-identities`, signal)),
   connectors: async (client: GatewayClient, device: string) =>
     parseConnectors(await client.get(`/v1/devices/${encodeURIComponent(device)}/connectors`)),
   apps: async (client: GatewayClient, device: string, profile: string) =>

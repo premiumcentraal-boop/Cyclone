@@ -188,6 +188,8 @@ internal object GatewayProtocol {
         "profiles.apps",
         "profiles.switch",
         "profiles.app",
+        // Cloak identities are display-safe but private profile config; require a modern trusted session.
+        "profiles.cloak",
         // Alpha 87: why Cyclone stopped last time and the freezes it caught (read only).
         "health.report",
     )
