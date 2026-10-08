@@ -74,7 +74,7 @@ def test_vmos_signs_every_call_and_never_sends_the_secret_key():
     vmos = VmosCloud(AK, SK, transport=http, clock=Clock())
     phones = vmos.list_phones()
     assert [(p.remote_id, p.name, p.android, p.power) for p in phones] == [
-        ("AC32010230001", "Shop 1", "15", "running"), ("AC32010230002", "AC32010230002", None, "stopped")]
+        ("AC32010230001", "Shop 1", "15", "running"), ("AC32010230002", "AC32010230002", None, "abnormal")]
     path, headers, body = http.calls[0]
     assert body == {"page": 1, "rows": 100}
     assert headers["x-host"] == "api.vmoscloud.com"
@@ -488,3 +488,18 @@ def test_a_cloud_phone_that_dropped_is_being_reopened_not_a_cable_problem():
     verdict = diagnose(discovery=DiscoveryState.ABSENT, bridge=BridgeState.DEGRADED, trust=AITrustState.UNPAIRED,
                        session_ready=False, source="CLOUD")
     assert verdict.code == "CLOUD_LINK_DOWN" and verdict.working and "cable" not in verdict.message
+
+
+def test_vmos_pad_status_follows_the_documented_codes():
+    """VMOS OpenAPI instance status: 10 running, 14 abnormal, 18 shut down, 15 not ready, 25 deleted (2026-10-08)."""
+    from cyclone_device_gateway.cloud_fleet.providers.vmos import _phone
+
+    def power(status):
+        return _phone({"padCode": "AC1", "padStatus": status}).power
+
+    assert power(10) == "running"
+    assert power(14) == "abnormal"
+    assert power(18) == power(19) == "stopped"
+    assert power(11) == power(12) == power(15) == power(20) == "starting"
+    assert power(25) == power(-1) == "gone"
+    assert power(99) == power(None) == "unknown"

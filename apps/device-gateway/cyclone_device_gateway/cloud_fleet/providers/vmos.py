@@ -34,7 +34,16 @@ PAGE_ROWS = 100
 MAX_PAGES = 20
 # VMOS reports times as Beijing time when it gives no zone; reading them that way is also the earlier (safer) guess.
 PROVIDER_TZ = timezone(timedelta(hours=8))
-RUNNING = {10: "running", 11: "starting", 12: "starting", 14: "stopped", 15: "starting"}
+# `padStatus` as VMOS documents it (OpenAPI instance status): 10 running, 11 restarting, 12 resetting, 13 upgrading,
+# 14 abnormal, 15 not ready, 17 restoring, 18 shut down, 19 shutting down, 20 booting, 23 deleting, 24 delete failed,
+# 25 deleted, 26 cloning, -1 deleted. Before 2026-10-08 Cyclone read 14 as "stopped" and did not know 18.
+RUNNING = {
+    10: "running",
+    11: "starting", 12: "starting", 13: "starting", 15: "starting", 17: "starting", 20: "starting", 26: "starting",
+    14: "abnormal",
+    18: "stopped", 19: "stopped",
+    23: "gone", 24: "abnormal", 25: "gone", -1: "gone",
+}
 
 
 def sign(access_key: str, secret_key: str, host: str, body: str, x_date: str) -> dict[str, str]:

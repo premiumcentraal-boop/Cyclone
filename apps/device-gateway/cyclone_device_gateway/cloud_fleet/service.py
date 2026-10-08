@@ -311,6 +311,13 @@ class CloudFleetService:
             account["provider"], remote_id, (account.get("phones", {}).get(remote_id) or {}).get("name") or remote_id)
         if phone.power == "stopped":
             return self._set(link, "off", "This cloud phone is off. Turn it on at the provider.", wait_s=60)
+        # The provider's own state first: opening ADB on a phone that is starting, broken or deleted only fails.
+        if phone.power == "starting":
+            return self._set(link, "waiting", "The provider is still starting this cloud phone…", wait_s=30)
+        if phone.power == "abnormal":
+            return self._set(link, "off", "The provider reports this cloud phone as abnormal. Restart it there.", wait_s=60)
+        if phone.power == "gone":
+            return self._set(link, "off", "This cloud phone was deleted at the provider. Remove it here.", wait_s=300)
         try:
             renew = link.lease is not None and L.renew_at_ms(link.lease) is not None and now >= L.renew_at_ms(link.lease)
             if link.lease is None or renew:
