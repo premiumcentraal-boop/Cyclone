@@ -15,9 +15,11 @@
     cyclone-testbench soak --reads 50             read the phone's screen 50 times (gate 1: 0 may fail)
     cyclone-testbench accounts-map --package com.example.app --basis mine
     cyclone-testbench task TASK_ID                a Command Center task's state
+    cyclone-testbench profiles --rounds 17        suite `profiles`: switch through every ready profile (17 rounds of
+                                                  Main, B, C is 50 switches), then save the phone's profile debug file
 
 Results go to ./testbench-results (or --results). Nothing here approves anything, types a secret, or talks to a phone
-except through the Lab and Command Center routes of the Cyclone gateway on this PC.
+except through the Lab, Command Center and profiles routes of the Cyclone gateway on this PC.
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ from typing import Any
 
 from . import findings as ledger_ops
 from . import preflight as preflight_ops
+from . import profiles as profile_ops
 from .gateway import Gateway, GatewayError, find_connection
 from .report import dashboard, render, summarize
 from .results import Results, now_ms
@@ -428,6 +431,26 @@ def cmd_soak(args: argparse.Namespace) -> int:
     return 0 if ok else 5
 
 
+def cmd_profiles(args: argparse.Namespace) -> int:
+    """Plan 57 P3: the switch matrix. Ends where asked, or comes back by itself; never stuck."""
+    gw = _gateway(args)
+    device = _pick_device(gw, args.device)
+    result = profile_ops.run_matrix(gw, device, args.rounds, say=_out)
+    res = _results(args)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    folder = res.root / "profiles"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"matrix-{stamp}.json").write_text(json.dumps({**result, "at": now_ms()}, indent=2), encoding="utf-8")
+    debug = profile_ops.debug_file(gw, device)
+    if debug is not None:
+        (folder / f"profiles-debug-{stamp}.json").write_text(json.dumps(debug, indent=2, ensure_ascii=False), encoding="utf-8")
+    c = result["counts"]
+    _out(f"{'✓' if result['ok'] else '✗'} {len(result['switches'])} switches: {c['arrived']} ended where asked, "
+         f"{c['came_back']} came back by themselves, {c['stuck']} stuck, {c['refused']} refused. Saved to {folder}"
+         + ("" if debug is not None else " (this phone has no profile debug route yet)"))
+    return 0 if result["ok"] else 6
+
+
 def cmd_task(args: argparse.Namespace) -> int:
     task = _gateway(args).get(f"/v1/cc/tasks/{args.task}")
     run = task.get("run") or {}
@@ -502,6 +525,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--here", action="store_true", help="read the current screen instead of opening Settings > Display")
     p.add_argument("--device")
     p.set_defaults(fn=cmd_soak)
+    p = sub.add_parser("profiles", help="suite profiles: the switch matrix, then the phone's profile debug file")
+    p.add_argument("--rounds", type=int, default=17)
+    p.add_argument("--device")
+    p.set_defaults(fn=cmd_profiles)
     p = sub.add_parser("task")
     p.add_argument("task")
     p.set_defaults(fn=cmd_task)

@@ -95,3 +95,44 @@ def test_cloak_identity_route_is_bearer_protected():
     assert client.get(path).status_code == 401
     assert client.get(path, headers={"Authorization": "Bearer secret"}).status_code == 200
     assert service.calls == [("pixel8", "profiles.cloak", {})]
+
+
+DEBUG = {"schemaVersion": 1, "summary": "Cyclone x\nCyclone_0123456789abcdef has: Magisk ✓ root ✗",
+         "report": {"schema": 1, "steps": [{"command": "/system/bin/id", "output": "password: hunter2"}]},
+         "trimmedSteps": 0,
+         "health": [{"profileId": B, "label": "Brand B", "line": "Magisk ✓ root ✗", "ok": False, "checkedAt": 7}]}
+
+
+def test_the_profile_debug_file_is_checked_and_redacted_again():
+    """Plan 57 P3: Glass downloads the phone's debug file; the PC checks its shape and masks secrets once more."""
+    out = validate_android_response("profiles.debug", DEBUG, {})
+    assert out["health"] == DEBUG["health"]
+    assert "hunter2" not in str(out) and "[redacted]" in str(out)
+    keyed = validate_android_response("profiles.debug", {**DEBUG, "report": {"journal": {"session_token": "abc", "stage": "READY"}}}, {})
+    assert keyed["report"] == {"journal": {"stage": "READY"}}
+    bad = [
+        {**DEBUG, "extra": 1},
+        {**DEBUG, "schemaVersion": 2},
+        {**DEBUG, "health": [{**DEBUG["health"][0], "profileId": "main"}]},
+        {**DEBUG, "health": [{**DEBUG["health"][0], "ok": "yes"}]},
+        {**DEBUG, "summary": "x" * 20_001},
+        {**DEBUG, "report": {"steps": ["x" * 1_000_001]}},
+    ]
+    for value in bad:
+        with pytest.raises(DesktopRuntimeError):
+            validate_android_response("profiles.debug", value, {})
+
+
+def test_the_profile_debug_route_is_a_bearer_protected_no_argument_read():
+    assert "profiles.debug" in ALLOWED_OPS and "profiles.debug" in V5_OPS
+    service = Recorder()
+    assert service.forward("pixel8", "profiles.debug", {}) == {}
+    with pytest.raises(DesktopRuntimeError):
+        service.forward("pixel8", "profiles.debug", {"profileId": B})
+    app = FastAPI()
+    app.include_router(create_v5_contract_router(SimpleNamespace(v5_contract=service, fleet=None), "secret"))
+    client = TestClient(app)
+    path = "/v1/devices/pixel8/profiles/debug"
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers={"Authorization": "Bearer secret"}).status_code == 200
+    assert service.calls[-1] == ("pixel8", "profiles.debug", {})

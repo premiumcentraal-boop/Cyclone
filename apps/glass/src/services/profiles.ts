@@ -138,12 +138,32 @@ export function parseConnectors(raw: unknown): ConnectorEntry[] {
   });
 }
 
+/** Plan 57 P3: each profile's health as the phone last checked it on a switch into that profile. */
+export interface ProfileHealth { profileId: string; label: string; line: string; ok: boolean; checkedAt: number }
+/** The phone's profile debug file (redacted on the phone and again by the PC gateway), and each profile's health. */
+export interface ProfilesDebug { health: ProfileHealth[]; summary: string; trimmedSteps: number; raw: Record<string, unknown> }
+
+export function parseProfilesDebug(raw: unknown): ProfilesDebug | null {
+  const r = obj(raw);
+  if (r.schemaVersion !== 1) return null;
+  const health = list(r.health).slice(0, 30).flatMap((h): ProfileHealth[] => {
+    const o = obj(h);
+    const profileId = str(o.profileId);
+    if (!ID.test(profileId) || profileId === MAIN_PROFILE || typeof o.ok !== "boolean") return [];
+    return [{ profileId, label: str(o.label).slice(0, 60) || "A profile", line: str(o.line).slice(0, 300), ok: o.ok,
+      checkedAt: Number.isSafeInteger(o.checkedAt) ? o.checkedAt as number : 0 }];
+  });
+  return { health, summary: str(r.summary).slice(0, 20_000), trimmedSteps: Number.isSafeInteger(r.trimmedSteps) ? r.trimmedSteps as number : 0, raw: r };
+}
+
 const base = (device: string) => `/v1/devices/${encodeURIComponent(device)}/profiles`;
 
 export const profilesApi = {
   list: async (client: GatewayClient, device: string, signal?: AbortSignal) => parseProfiles(await client.get(base(device), signal)),
   cloakIdentities: async (client: GatewayClient, device: string, signal?: AbortSignal) =>
     parseCloakIdentities(await client.get(`/v1/devices/${encodeURIComponent(device)}/profiles/cloak-identities`, signal)),
+  debug: async (client: GatewayClient, device: string, signal?: AbortSignal) =>
+    parseProfilesDebug(await client.get(`/v1/devices/${encodeURIComponent(device)}/profiles/debug`, signal)),
   connectors: async (client: GatewayClient, device: string) =>
     parseConnectors(await client.get(`/v1/devices/${encodeURIComponent(device)}/connectors`)),
   apps: async (client: GatewayClient, device: string, profile: string) =>

@@ -69,4 +69,26 @@ class GatewayV5ProfilesAdapterTest {
         assertTrue(GatewayProtocol.operations.containsAll(listOf("profiles.list", "profiles.apps", "profiles.switch", "profiles.app", "profiles.cloak")))
         assertFalse(GatewayProtocol.legacyReadOnlyOperations.contains("profiles.cloak"))
     }
+
+    @Test fun theDebugFileGoesToGlassRedactedWithEachProfilesHealth() {
+        val inv = com.cyclone.mobile.runtime.workspaces.ProfileInventory(b, 7L, "x", "MAGISK", false, emptyList())
+        val steps = (1..300).map {
+            com.cyclone.mobile.runtime.workspaces.ProfileStep(it.toLong(), "BOOTSTRAP", "cmd $it", 0, 1, "x".repeat(8_000), null)
+        }
+        val facts = com.cyclone.mobile.runtime.workspaces.ProfileDebugReport.Facts(1L, mapOf("versionName" to "x"), null, null, null, null,
+            emptyList(), emptyMap(), steps, emptyList(), null, null, inventories = listOf(inv))
+        GatewayV5ProfilesAdapter.debugFacts = { facts }
+        GatewayV5ProfilesAdapter.labels = { mapOf(b to "Brand B") }
+        val answer = GatewayV5ProfilesAdapter.dispatch("profiles.debug", JSONObject())
+        assertEquals(setOf("schemaVersion", "health", "summary", "report", "trimmedSteps"), answer.keys().asSequence().toSet())
+        assertTrue(answer.toString().length < GatewayV5ProfilesAdapter.DEBUG_MAX_CHARS + 50_000)
+        assertTrue(answer.getInt("trimmedSteps") > 0)
+        val health = answer.getJSONArray("health").getJSONObject(0)
+        assertEquals("Brand B", health.getString("label"))
+        assertFalse(health.getBoolean("ok"))
+        assertTrue(health.getString("line").contains("root ✗"))
+        assertEquals("INVALID_REQUEST", code { GatewayV5ProfilesAdapter.dispatch("profiles.debug", JSONObject().put("x", 1)) })
+        assertTrue(GatewayProtocol.operations.contains("profiles.debug"))
+        assertFalse(GatewayProtocol.legacyReadOnlyOperations.contains("profiles.debug"))
+    }
 }

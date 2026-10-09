@@ -180,3 +180,40 @@ test("Home does not choose an identity when per-app bindings have no majority", 
   assert.doesNotMatch(cloakCard.textContent, /Pixel|Google|Android 16/);
   page.destroy();
 });
+
+test("Home: profiles health on demand, and the redacted debug file downloads as it came", async () => {
+  installMiniDom();
+  const saved = [];
+  const debug = {
+    schemaVersion: 1, trimmedSteps: 3, summary: "Cyclone x",
+    report: { schema: 1, steps: [{ command: "/system/bin/id", output: "[redacted]" }] },
+    health: [
+      { profileId: "Cyclone_0123456789abcdef", label: "Shop profile", line: "Cyclone x ✓ · Magisk ✓ root ✓ · Cloak ✓ approved ✓", ok: true, checkedAt: Date.now() - 60_000 },
+      { profileId: "Cyclone_abcdef0123456789", label: "Personal profile", line: "Cyclone x ✓ · Magisk ✓ root ✗", ok: false, checkedAt: Date.now() - 60_000 },
+      { profileId: "main", label: "Profile A", line: "x", ok: true, checkedAt: 1 },
+    ],
+  };
+  const gateway = fakeGateway({ "GET /v1/devices/d1/apps": () => APPS, "GET /v1/devices/d1/profiles/debug": () => debug });
+  const devices = [parseDevice({ ...READY_DEVICE, mobileVersion: "5.0.0-alpha.121.dev1" })];
+  const page = createHomePage({ client: new GatewayClient({ token: "t", fetch: gateway.fetch }), version: "x", devices, device: devices[0], devicesError: null, navigate() {}, selectDevice() {}, refreshDevices: async () => {} },
+    { saveFile: (name, text) => saved.push({ name, text }) });
+  await flush();
+  assert.match(page.element.textContent, /Profiles health/);
+  assert.doesNotMatch(page.element.textContent, /Shop profile.*Complete/, "nothing is collected until asked");
+  const check = page.element.querySelectorAll("button").find((b) => /Check profiles/.test(b.textContent));
+  check.click();
+  await flush();
+  const text = page.element.textContent;
+  assert.match(text, /Shop profile/);
+  assert.match(text, /Complete/);
+  assert.match(text, /Needs a look/);
+  assert.match(text, /root ✗/);
+  assert.doesNotMatch(text, /Profile A.*x✓/);
+  assert.match(text, /oldest 3 steps were left out/);
+  const save = page.element.querySelectorAll("button").find((b) => /Download debug file/.test(b.textContent));
+  save.click();
+  assert.equal(saved.length, 1);
+  assert.match(saved[0].name, /^cyclone-profiles-debug-.*\.json$/);
+  assert.deepEqual(JSON.parse(saved[0].text).report, debug.report);
+  page.destroy();
+});

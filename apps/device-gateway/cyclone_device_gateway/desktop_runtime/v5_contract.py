@@ -67,6 +67,7 @@ V5_OPS = frozenset({
     "profiles.switch",
     "profiles.app",
     "profiles.cloak",
+    "profiles.debug",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -881,6 +882,9 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
         # Screenshot bytes: base64 only (checked here, so padding like "...Otp=" is never read as a secret field).
         _validate_ports_blob(value)
         return value
+    if op == "profiles.debug":
+        # Plan 57 P3: redacted again first, then the same fail-closed secret check as every other answer.
+        return _validated_profiles_debug(value)
     reject_secret_payload(value)
     if op in PORTS_OPS:
         _validate_ports_response(op, value)
@@ -1586,7 +1590,7 @@ def _setup_values(values: Any) -> dict[str, str]:
     return out
 
 
-PROFILE_OPS = frozenset({"profiles.list", "profiles.apps", "profiles.switch", "profiles.app", "profiles.cloak"})
+PROFILE_OPS = frozenset({"profiles.list", "profiles.apps", "profiles.switch", "profiles.app", "profiles.cloak", "profiles.debug"})
 PROFILE_ID = re.compile(r"^(main|Cyclone_[a-f0-9]{16})$")
 PROFILE_COLOR = re.compile(r"^#[0-9A-F]{8}$")
 
@@ -1619,6 +1623,47 @@ def _validate_profile_roster(profiles: Any, current: Any, *, require_android_use
             raise _bad_profiles("Android user")
     if current is not None and not PROFILE_ID.match(str(current)):
         raise _bad_profiles("current")
+
+
+#: Plan 57 P3: anything shaped like `password: …` the phone's redaction might have left is masked again here, keyword
+#: and value together, so the general secret check below can still fail closed on anything else.
+DEBUG_SECRET_VALUE = re.compile(
+    r"(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value))\s*[:=]\s*\S*"
+)
+DEBUG_MAX_BYTES = 1_000_000
+
+
+def _redact_debug(value: Any) -> Any:
+    if isinstance(value, str):
+        return DEBUG_SECRET_VALUE.sub("[redacted]", value)
+    if isinstance(value, list):
+        return [_redact_debug(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _redact_debug(v) for k, v in value.items() if not _secret_name(str(k))}
+    return value
+
+
+def _validated_profiles_debug(value: dict[str, Any]) -> dict[str, Any]:
+    """Plan 57 P3: the phone's redacted profile debug file and each profile's health, read only, redacted once more."""
+    if set(value) != {"schemaVersion", "health", "summary", "report", "trimmedSteps"} or value["schemaVersion"] != 1:
+        raise _bad_profiles("debug envelope")
+    if not isinstance(value["summary"], str) or len(value["summary"]) > 20_000 or not isinstance(value["report"], dict) \
+            or not _is_int(value["trimmedSteps"]):
+        raise _bad_profiles("debug file")
+    health = value["health"]
+    if not isinstance(health, list) or len(health) > 30:
+        raise _bad_profiles("debug health")
+    for item in health:
+        if not isinstance(item, dict) or set(item) != {"profileId", "label", "line", "ok", "checkedAt"}:
+            raise _bad_profiles("debug health keys")
+        if not PROFILE_ID.match(str(item["profileId"])) or item["profileId"] == "main" or not _short_text(item["label"], 60) \
+                or not _short_text(item["line"], 300) or not isinstance(item["ok"], bool) or not _is_int(item["checkedAt"]):
+            raise _bad_profiles("debug health item")
+    if len(json.dumps(value)) > DEBUG_MAX_BYTES:
+        raise _bad_profiles("debug size")
+    redacted = _redact_debug(value)
+    reject_secret_payload(redacted)
+    return redacted
 
 
 def _validate_profiles_response(op: str, value: dict[str, Any], args: dict[str, Any]) -> None:
@@ -2076,6 +2121,10 @@ class V5ContractService:
         """Display-safe, read-only Cyclone Cloak identities for the Profiles overview."""
         return self._call(device_id, "profiles.cloak", {})
 
+    def profiles_debug(self, device_id: str) -> dict[str, Any]:
+        """Plan 57 P3: the phone's redacted profile debug file and each profile's health, for Glass to download."""
+        return self._call(device_id, "profiles.debug", {})
+
     def profiles_apps(self, device_id: str, profile_id: str) -> dict[str, Any]:
         return self._call(device_id, "profiles.apps", {"profileId": _profile_id(profile_id)})
 
@@ -2319,6 +2368,10 @@ class V5ContractService:
             if args:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "profiles.cloak takes no arguments.")
             return self.profiles_cloak_identities(device_id)
+        if op == "profiles.debug":
+            if args:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "profiles.debug takes no arguments.")
+            return self.profiles_debug(device_id)
         if op in ("profiles.apps", "profiles.switch"):
             if set(args) != {"profileId"}:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, f"{op} takes profileId only.")

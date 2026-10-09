@@ -7,7 +7,7 @@ import type { GlassContext } from "../app.js";
 import { routeHref } from "../core/router.js";
 import { loadApps, type PhoneApp } from "../services/apps.js";
 import { getKnowledge, type KnowledgeSummary } from "../services/knowledgeSummary.js";
-import { MAIN_PROFILE, profilesApi, type CloakIdentities } from "../services/profiles.js";
+import { MAIN_PROFILE, profilesApi, type CloakIdentities, type ProfilesDebug } from "../services/profiles.js";
 import { appName, causeLabel, listRuns, statusLabel, statusTone, type RunSummary } from "../services/runs.js";
 import { actionButton, card, chip, loadingState, pageHeader, statTile } from "../ui/components.js";
 import { el, setChildren } from "../ui/dom.js";
@@ -146,10 +146,11 @@ export function createHomePage(ctx: GlassContext, deps: HomePageDeps = {}): Glas
   const recent = card("home-runs");
   const known = card("home-knowledge");
   const cloak = card("home-cloak-profiles");
+  const health = card("home-profile-health");
   const trend = card("home-trend");
   trend.hidden = true;
   const grid = el("div", "home-grid");
-  grid.append(attention, recent, known, cloak);
+  grid.append(attention, recent, known, cloak, health);
   element.append(stats, trend, grid);
   let controller = new AbortController();
 
@@ -176,7 +177,55 @@ export function createHomePage(ctx: GlassContext, deps: HomePageDeps = {}): Glas
     renderTrend(runs);
     renderKnowledge(knowledge);
     renderCloakProfiles(cloakOverview);
+    renderHealthIdle();
   };
+
+  // Plan 57 P3: each profile's health and the phone's profile debug file. On demand: the phone collects it fresh.
+  function renderHealthIdle(): void {
+    const check = actionButton("Check profiles", { icon: "refresh" });
+    check.addEventListener("click", () => void checkHealth());
+    setChildren(health, el("h2", "card-title", "Profiles health"),
+      el("p", "muted", "What each profile has (Cyclone, root, Shizuku, Cloak, your apps) as the phone last saw it, and the debug file to download."),
+      check);
+  }
+
+  async function checkHealth(): Promise<void> {
+    setChildren(health, el("h2", "card-title", "Profiles health"), loadingState("Collecting the debug file on the phone…"));
+    const result = await profilesApi.debug(ctx.client, device.id).then((value) => ({ value }), (error: unknown) => ({ error }));
+    if ("error" in result) {
+      setChildren(health, el("h2", "card-title", "Profiles health"),
+        el("p", "muted", "The phone couldn't send its profile debug file. Update Cyclone on the phone, then try again."));
+      return;
+    }
+    renderHealth(result.value);
+  }
+
+  function renderHealth(debug: ProfilesDebug | null): void {
+    const title = el("h2", "card-title", "Profiles health");
+    if (!debug) {
+      setChildren(health, title, el("p", "muted", "Update Cyclone on the phone to see each profile's health."));
+      return;
+    }
+    const rows = el("ul", "home-list profile-health-list");
+    for (const item of debug.health) {
+      const row = el("li", "home-row profile-health-row");
+      const heading = el("div", "cloak-profile-heading");
+      heading.append(el("strong", undefined, item.label), chip(item.ok ? "Complete" : "Needs a look", item.ok ? "success" : "warning"));
+      row.append(heading, el("p", "muted profile-health-line", item.line || "Nothing checked yet."),
+        el("p", "muted", `Checked ${relativeTime(item.checkedAt)}`));
+      rows.append(row);
+    }
+    const save = actionButton("Download debug file", { icon: "download" });
+    save.addEventListener("click", () => {
+      (deps.saveFile ?? saveWithBlob)(`cyclone-profiles-debug-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`,
+        JSON.stringify(debug.raw, null, 2));
+    });
+    setChildren(health, title,
+      debug.health.length ? rows : el("p", "muted", "No profile has been switched into yet; health shows after the first switch."),
+      debug.trimmedSteps ? el("p", "muted", `The oldest ${debug.trimmedSteps} steps were left out to keep the file small.`) : el("span"),
+      save,
+      el("p", "muted cloak-profile-footnote", "The file is redacted on the phone and again by your PC: no keys, codes, passwords or app data."));
+  }
 
   function renderCloakProfiles(overview: CloakIdentities | null): void {
     const title = el("h2", "card-title", "Cyclone Cloak profiles");

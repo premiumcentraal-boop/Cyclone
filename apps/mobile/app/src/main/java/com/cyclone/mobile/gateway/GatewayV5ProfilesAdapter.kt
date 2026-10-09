@@ -16,6 +16,7 @@ import org.json.JSONObject
  *
  * - `profiles.list` lists Profile A and Cyclone's profiles, and which one is in front.
  * - `profiles.cloak` reads only the versioned, display-safe identity fields of bound Cloak profiles.
+ * - `profiles.debug` (plan 57 P3) returns the redacted profile debug file and each profile's health, read only.
  * - `profiles.apps {profileId}` lists a profile's apps and, for a Cyclone profile, the apps Profile A could give it.
  * - `profiles.switch {profileId}` puts that profile in front.
  * - `profiles.app {profileId, package, action: install|remove}` changes one Cyclone profile's apps.
@@ -45,6 +46,10 @@ internal object GatewayV5ProfilesAdapter {
             ProfileConfigStore.get(context, CycloneCloakProfileBinding.CONNECTOR_ID, processUser, key)
         }.filter { (it.profileId to it.androidUserId) in validProfiles }
     }
+    internal var debugFacts: () -> com.cyclone.mobile.runtime.workspaces.ProfileDebugReport.Facts = {
+        com.cyclone.mobile.runtime.workspaces.ProfileDebugReport.collect(app())
+    }
+    internal var labels: () -> Map<String, String> = { ProfileRegistryStore.records(app()).associate { it.id to it.label } }
     internal var apps: (String) -> Pair<List<ProfileApps.App>, List<ProfileApps.App>> = { ProfileApps.apps(app(), it) }
     internal var switchTo: (String) -> Unit = { ProfileApps.switchTo(app(), it) }
     internal var install: (String, String) -> Unit = { id, pkg -> ProfileApps.install(app(), id, pkg) }
@@ -65,6 +70,10 @@ internal object GatewayV5ProfilesAdapter {
                     .put("profiles", JSONArray(all.map(::profileJson)))
                     .put("current", all.firstOrNull { it.current }?.id ?: JSONObject.NULL)
                     .put("identities", JSONArray(cloakIdentities(all).map(::cloakIdentityJson)))
+            }
+            "profiles.debug" -> {
+                only(args, emptySet())
+                debugJson(debugFacts(), labels())
             }
             "profiles.apps" -> {
                 only(args, setOf("profileId"))
@@ -121,6 +130,33 @@ internal object GatewayV5ProfilesAdapter {
         .put("color", p.color?.let { String.format("#%08X", it) } ?: JSONObject.NULL)
         .put("ready", p.ready).put("current", p.current).put("inTrash", p.inTrash)
         .put("androidUserId", p.androidUserId ?: JSONObject.NULL)
+
+    const val DEBUG_MAX_CHARS = 900_000
+
+    /**
+     * Plan 57 P3: the debug file as the phone saves it (already redacted), each profile's health, and the readable
+     * summary. Oldest steps go first when it would be too large for one gateway answer.
+     */
+    internal fun debugJson(facts: com.cyclone.mobile.runtime.workspaces.ProfileDebugReport.Facts, labels: Map<String, String>): JSONObject {
+        val report = com.cyclone.mobile.runtime.workspaces.ProfileDebugReport.json(facts)
+        var trimmed = 0
+        report.optJSONArray("steps")?.let { steps ->
+            var size = report.toString().length
+            while (size > DEBUG_MAX_CHARS && steps.length() > 0) {
+                size -= steps.get(0).toString().length + 1
+                steps.remove(0)
+                trimmed++
+            }
+        }
+        val health = JSONArray(facts.inventories.map { inv ->
+            val ok = inv.missing.isEmpty() && inv.rootProven != false && inv.cloakApproved != false
+            JSONObject().put("profileId", inv.profileId).put("label", (labels[inv.profileId] ?: "A profile").take(60))
+                .put("line", inv.line().take(300)).put("ok", ok).put("checkedAt", inv.atMs)
+        })
+        return JSONObject().put("schemaVersion", 1).put("health", health)
+            .put("summary", com.cyclone.mobile.runtime.workspaces.ProfileDebugReport.summary(facts).take(20_000))
+            .put("report", report).put("trimmedSteps", trimmed)
+    }
 
     private fun cloakIdentityJson(identity: CycloneCloakProfileIdentity): JSONObject = JSONObject()
         .put("profileId", identity.profileId)

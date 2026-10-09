@@ -38,6 +38,11 @@ def create_v5_contract_router(runtime: Any, token: str) -> APIRouter:
     def profiles_cloak_identities(device_id: str):
         return _call(lambda: service.profiles_cloak_identities(device_id))
 
+    # Plan 57 P3: the profile debug file (redacted on the phone and again here) and each profile's health.
+    @router.get("/v1/devices/{device_id}/profiles/debug", dependencies=[Depends(auth)])
+    def profiles_debug(device_id: str):
+        return _call(lambda: service.profiles_debug(device_id))
+
     @router.get("/v1/devices/{device_id}/profiles/{profile_id}/apps", dependencies=[Depends(auth)])
     def profiles_apps(device_id: str, profile_id: str):
         return _call(lambda: service.profiles_apps(device_id, profile_id))
