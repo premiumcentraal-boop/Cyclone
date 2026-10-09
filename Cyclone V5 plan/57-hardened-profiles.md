@@ -71,6 +71,41 @@ adb shell cmd user list --all --verbose | findstr /i "partial guest PRIVATE MANA
 
 The debug file (§4) will contain exactly this, plus Android's raw answer to the create.
 
+### 1.2a Rooted phones can make room for more profiles (owner idea, 2026-10-09)
+
+**Where Android's limit comes from.** Android reads its total user limit live, on every call:
+
+```java
+// UserManager.getMaxSupportedUsers()
+Math.max(1, SystemProperties.getInt("fw.max_users", config_multiuserMaximumUsers))
+```
+
+`fw.max_users` is an ordinary (not `ro.`) system property. With root:
+- **Right away:** `resetprop fw.max_users <n>` (Magisk; KernelSU and APatch ship `resetprop` too) raises the limit
+  immediately, with no reboot. `pm get-max-users` then reads the new number.
+- **After a reboot:** a tiny module that Cyclone writes keeps it.
+  - It lives in `/data/adb/modules/cyclone_profiles/`.
+  - `module.prop` names it "Cyclone profiles".
+  - Its `system.prop` holds `fw.max_users=<n>` and `fw.show_multiuserui=1`.
+- **Undo:** remove the module and reset the property. Users already made stay; only new ones are limited again.
+
+**What it doesn't fix:**
+- **A per-type limit or a switched-off user type.** Android's "Maximum number of that type already exists" comes from
+  the user type's own limit (`config_userTypeCustomizations`) or from the type being disabled, not from
+  `fw.max_users`. Stock Android leaves full secondary users unlimited, but a ROM can cap them.
+  - If the debug file shows that this is the limit that fired, the fix is a resource overlay module. That is heavier;
+    it is built only if a phone needs it.
+- **The phone's real capacity.** Each profile uses storage (hundreds of MB before apps). Android keeps only a few users
+  running at once (`config_multiuserMaxRunningUsers`); others are stopped and started again on a switch. Cyclone
+  therefore offers a sane ceiling (8 by default, at most 16) and shows the free storage.
+
+**Rules:**
+- It changes how the phone itself behaves, so it is an **owner-approved** action (like a permission grant), never
+  automatic and never an agent tool.
+- It uses fixed, typed commands only, and every change is read back (`getprop`, `pm get-max-users`).
+- It has its own **Restore default** button.
+- The debug file records the before and after.
+
 ### 1.3 Other defects found on the way
 
 | # | Defect | Where | Effect |
@@ -223,6 +258,12 @@ owner today.
     settings**.
 - **D5:** list partial users that Cyclone made (`Cyclone_…` name) and offer **Clean up**. Cyclone never touches users
   it didn't make.
+- **Make room (rooted phones, §1.2a).** When the phone is full and root is Magisk, KernelSU or APatch, the full screen
+  offers **Allow up to 8 profiles**.
+  - The owner confirms it.
+  - Cyclone runs `resetprop`, writes the Cyclone profiles module, reads it back, then retries the create.
+  - Settings → Profiles shows the current limit and **Restore default**.
+  - If the limit that fired is a per-type one, the screen says so instead of pretending.
 - **D3:**
   - The Profiles page **+** always starts a clean plan.
   - A paused, unfinished setup shows "Finish setting up Profile X" or "Discard it".
@@ -341,3 +382,4 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
 4. **Root manager:** Magisk (hidden or not), KernelSU or APatch on this phone?
 5. **Deleting:** should **Delete now** be offered right inside the "phone is full" screen, always with its automatic
    backup first?
+6. **Room for more:** is 8 profiles a good default ceiling for "Allow more profiles" on rooted phones (16 at most)?
