@@ -238,7 +238,13 @@ object ProfileSetupRuntime {
                     ProfileCarry.noteSent(context, carried.isSuccess)
                     // Plan 57 P2: the carry's counts complete the "Profile C has" line.
                     if (profileId != null) carried.getOrNull()?.let { r ->
-                        runCatching { ProfileInventoryStore.update(context, profileId) { it.copy(settings = r.settingsInPlace, skills = r.skillsTotal, files = r.files) } }
+                        runCatching {
+                            val cloak = r.cloak?.let { name -> runCatching { com.cyclone.mobile.connector.ConnectorCarry.Outcome.valueOf(name) }.getOrNull() }
+                            ProfileInventoryStore.update(context, profileId) {
+                                it.copy(settings = r.settingsInPlace, skills = r.skillsTotal, files = r.files,
+                                    cloakApproved = cloak?.approved ?: it.cloakApproved, cloakNote = cloak?.takeIf { c -> !c.approved }?.text)
+                            }
+                        }
                     }
                     tracker.note(ProfileSwitch.Stage.CARRY, carried.isSuccess, carried.exceptionOrNull()?.message)
                 }

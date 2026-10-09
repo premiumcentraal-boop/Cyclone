@@ -39,7 +39,8 @@
           "selector.contribute",
           "events.profiles",
           "profiles.config",
-          "profiles.startup"
+          "profiles.startup",
+          "device.root.read"
         ]
       },
       "uniqueItems": true
@@ -54,7 +55,8 @@
           "selector.contribute",
           "events.profiles",
           "profiles.config",
-          "profiles.startup"
+          "profiles.startup",
+          "device.root.read"
         ]
       },
       "uniqueItems": true

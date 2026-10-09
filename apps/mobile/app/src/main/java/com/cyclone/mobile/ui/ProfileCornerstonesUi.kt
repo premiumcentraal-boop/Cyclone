@@ -71,6 +71,8 @@ internal fun ProfileCornerstonesCard(modifier: Modifier = Modifier) {
             }
             inventories.forEach { (label, inventory) ->
                 Text("$label has: ${inventory.line()}", style = MaterialTheme.typography.bodySmall)
+                inventory.cloakNote?.let { Text("  Cyclone Cloak: $it", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error) }
                 inventory.missing.forEach { app ->
                     Text("  ${app.label}: ${app.note ?: "missing"}", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error)

@@ -36,11 +36,36 @@ object ProfileConfigStore {
     @Synchronized fun revoke(context: Context, connector: String) {
         root(context).listFiles().orEmpty().forEach { File(it, connector).deleteRecursively() }
     }
+    /** Plan 57 P3: tuples go only with their profile (permanently deleted), never with an outdated app list. */
     @Synchronized fun removed(context: Context, profiles: List<com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord>) {
-        // Files use hashes, so reconcile by the tuple envelope on profile removal/package changes.
+        // Files use hashes, so reconcile by the tuple envelope.
         root(context).walkTopDown().filter { it.isFile && it.extension == "json" }.forEach { file ->
-            val o = runCatching { org.json.JSONObject(file.readText()) }.getOrNull() ?: return@forEach
-            if (profiles.none { it.id == o.optString("profileId") && it.androidUserId == o.optInt("androidUserId", -1) && o.optString("packageName") in it.packages }) AtomicFile(file).delete()
+            val text = runCatching { file.readText() }.getOrNull() ?: return@forEach
+            if (!ProfileConfigLifecycle.keep(text, profiles)) AtomicFile(file).delete()
         }
+    }
+
+    /** Plan 57 P3: removes tuples of apps Android says are gone from that profile. Returns how many went. */
+    @Synchronized fun prune(context: Context, profileId: String, androidUserId: Int, installed: Set<String>): Int {
+        var removed = 0
+        root(context).walkTopDown().filter { it.isFile && it.extension == "json" }.forEach { file ->
+            val text = runCatching { file.readText() }.getOrNull() ?: return@forEach
+            if (ProfileConfigLifecycle.stale(text, profileId, androidUserId, installed)) { AtomicFile(file).delete(); removed++ }
+        }
+        return removed
+    }
+
+    /** Plan 57 P3: a profile now under another Android user id keeps its tuples; each is rewritten and read back. */
+    @Synchronized fun migrate(context: Context, profileId: String, from: Int, to: Int): Int {
+        var moved = 0
+        root(context).walkTopDown().filter { it.isFile && it.extension == "json" }.toList().forEach { file ->
+            val text = runCatching { file.readText() }.getOrNull() ?: return@forEach
+            val (key, rewritten) = ProfileConfigLifecycle.moved(text, profileId, from, to) ?: return@forEach
+            val target = AtomicFile(File(file.parentFile, key.storageKey() + ".json"))
+            val out = target.startWrite()
+            try { out.write(rewritten.toByteArray(Charsets.UTF_8)); target.finishWrite(out) } catch (e: Exception) { target.failWrite(out); throw e }
+            if (target.openRead().use { it.readBytes().toString(Charsets.UTF_8) } == rewritten) { AtomicFile(file).delete(); moved++ }
+        }
+        return moved
     }
 }

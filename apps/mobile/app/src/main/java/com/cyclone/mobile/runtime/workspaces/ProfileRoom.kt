@@ -89,6 +89,11 @@ object ProfileRoom {
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /** Plan 57 P3: the limit Cyclone last set and whether it raised it, from its own notes. Runs no command. */
+    fun cached(context: Context): Pair<Int, Boolean>? = prefs(context).let { p ->
+        p.getInt("limit", -1).takeIf { it > 0 }?.let { it to p.getBoolean("raised", false) }
+    }
+
     fun status(context: Context): Status {
         val manager = runCatching { detect(ProfileSetupRuntime.runRequired(ProfileSetupPlan.roomListAdb())) }.getOrNull()
         val property = readNumber(ProfileSetupRuntime.runBestEffort(ProfileSetupPlan.roomReadProp()))

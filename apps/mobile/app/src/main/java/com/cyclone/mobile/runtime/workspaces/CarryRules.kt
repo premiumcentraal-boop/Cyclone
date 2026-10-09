@@ -19,15 +19,19 @@ data class CarryReport(
     val files: Int = 0,
     val settingsInPlace: Int = -1,
     val skillsTotal: Int = -1,
+    /** Plan 57 P3: what became of Cyclone Cloak's carried approval here (a ConnectorCarry.Outcome name), or null. */
+    val cloak: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().put("at", atMs).put("from", fromLabel).put("memories", memories)
         .put("forgotten", forgotten).put("skills", skills).put("settings", settings)
         .put("files", files).put("settingsInPlace", settingsInPlace).put("skillsTotal", skillsTotal)
+        .put("cloak", cloak ?: JSONObject.NULL)
 
     companion object {
         fun fromJson(json: JSONObject) = CarryReport(json.getLong("at"), json.getString("from"), json.optInt("memories"),
             json.optInt("forgotten"), json.optInt("skills"), json.optInt("settings"), json.optInt("files"),
-            json.optInt("settingsInPlace", -1), json.optInt("skillsTotal", -1))
+            json.optInt("settingsInPlace", -1), json.optInt("skillsTotal", -1),
+            json.optString("cloak").takeIf { json.has("cloak") && !json.isNull("cloak") && it.matches(Regex("[A-Z_]{1,40}")) })
     }
 }
 

@@ -8,7 +8,24 @@ internal data class CycloneCloakBindingReference(
     val androidUserId: Int,
     val packageName: String,
     val cloakProfileId: String,
+    /** Plan 57 P3: Cloak's own health report for this app (`config.status.v1`): unknown, ready, degraded or failed. */
+    val state: String = "unknown",
 )
+
+/** Plan 57 P3: how the Rooted pill reads for a profile's Cloak bindings. */
+internal enum class CloakHealth(val pill: String) {
+    NATIVE("Native"), ROOTED("Rooted"), CHECK("Rooted · check"), NOT_WORKING("Rooted · not working");
+
+    companion object {
+        /** The worst state among the bindings wins: one failed app means the profile is not working as bound. */
+        fun of(bindings: List<CycloneCloakBindingReference>): CloakHealth = when {
+            bindings.isEmpty() -> NATIVE
+            bindings.any { it.state == "failed" } -> NOT_WORKING
+            bindings.any { it.state == "degraded" } -> CHECK
+            else -> ROOTED
+        }
+    }
+}
 
 /** Display-safe projection of a Cloak identity, grouped from its per-app Cyclone bindings. */
 internal data class CycloneCloakProfileIdentity(
@@ -52,8 +69,9 @@ internal object CycloneCloakProfileBinding {
             record.packages.asSequence().mapNotNull { packageName ->
                 val key = ProfileConfigKey(record.id, userId, packageName)
                 val text = runCatching { readConfig(key) }.getOrNull() ?: return@mapNotNull null
-                val cloakProfileId = cloakProfileId(text, key) ?: return@mapNotNull null
-                CycloneCloakBindingReference(record.id, userId, packageName, cloakProfileId)
+                val (value, state) = envelope(text, key) ?: return@mapNotNull null
+                val cloakProfileId = cleanText(value.opt("cloakProfileId"), 160) ?: return@mapNotNull null
+                CycloneCloakBindingReference(record.id, userId, packageName, cloakProfileId, state)
             }
         }
         .toList()
@@ -99,13 +117,23 @@ internal object CycloneCloakProfileBinding {
         .sortedWith(compareBy<CycloneCloakProfileIdentity> { it.profileId }.thenBy { it.androidUserId })
         .toList()
 
-    private fun identitySnapshot(text: String, key: ProfileConfigKey): IdentitySnapshot? = runCatching {
+    /**
+     * Plan 57 P3: the one strict reading of a stored envelope, shared by bindings and identities: the tuple must match
+     * exactly (an integer user id, string ids), and `value` must be an object. Returns the value and Cloak's state.
+     */
+    private fun envelope(text: String, key: ProfileConfigKey): Pair<JSONObject, String>? = runCatching {
         val config = JSONObject(text)
         if (config.opt("profileId") != key.profileId ||
             jsonInt(config.opt("androidUserId")) != key.androidUserId ||
             config.opt("packageName") != key.packageName
         ) return@runCatching null
         val value = config.optJSONObject("value") ?: return@runCatching null
+        val state = (config.opt("state") as? String)?.takeIf { it in ProfileConfigRules.STATES } ?: "unknown"
+        value to state
+    }.getOrNull()
+
+    private fun identitySnapshot(text: String, key: ProfileConfigKey): IdentitySnapshot? = runCatching {
+        val (value, _) = envelope(text, key) ?: return@runCatching null
         val cloakProfileId = cleanText(value.opt("cloakProfileId"), 160) ?: return@runCatching null
         val version = jsonInt(value.opt("identityVersion"))?.takeIf { it > 0 }
         // Unknown schemas remain visibly bound but their fields are never interpreted or forwarded.
@@ -131,14 +159,4 @@ internal object CycloneCloakProfileBinding {
         ?.replace(Regex("\\s+"), " ")
         ?.take(limit)
         ?.takeIf { it.isNotBlank() }
-
-    private fun cloakProfileId(text: String, key: ProfileConfigKey): String? = runCatching {
-        val config = JSONObject(text)
-        val value = config.optJSONObject("value") ?: return@runCatching null
-        if (config.optString("profileId") != key.profileId ||
-            config.optInt("androidUserId", -1) != key.androidUserId ||
-            config.optString("packageName") != key.packageName
-        ) return@runCatching null
-        value.optString("cloakProfileId").trim().takeIf { it.isNotEmpty() }
-    }.getOrNull()
 }

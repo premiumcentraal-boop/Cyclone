@@ -21,6 +21,10 @@ data class ProfileInventory(
     val settings: Int = -1,
     val skills: Int = -1,
     val files: Int = -1,
+    /** Plan 57 P3: Cyclone Cloak approved in that profile (its approval carried and re-verified); null when unknown. */
+    val cloakApproved: Boolean? = null,
+    /** Why it isn't, in the owner's words. */
+    val cloakNote: String? = null,
 ) {
     data class App(
         val packageName: String,
@@ -46,8 +50,10 @@ data class ProfileInventory(
             val head = when { name == null -> null; installed == null -> name; else -> "$name ${mark(installed)}" }
             parts += listOfNotNull(head, "root ${mark(rootProven)}").joinToString(" ")
         }
-        apps.filter { it.role == ProfileCornerstones.Role.SUPPORT || it.role == ProfileCornerstones.Role.CLOAK }
-            .forEach { parts += "${it.label} ${mark(it.installed)}" }
+        apps.filter { it.role == ProfileCornerstones.Role.SUPPORT }.forEach { parts += "${it.label} ${mark(it.installed)}" }
+        apps.filter { it.role == ProfileCornerstones.Role.CLOAK }.forEach {
+            parts += "${it.label} ${mark(it.installed)}" + (cloakApproved?.let { ok -> " approved ${mark(ok)}" } ?: "")
+        }
         val owners = apps.filter { it.role == ProfileCornerstones.Role.OWNER }
         if (owners.isNotEmpty()) {
             val ok = owners.count { it.installed }
@@ -64,6 +70,7 @@ data class ProfileInventory(
     fun toJson(): JSONObject = JSONObject().put("profileId", profileId).put("at", atMs)
         .put("cycloneVersion", cycloneVersion ?: JSONObject.NULL).put("rootManager", rootManager ?: JSONObject.NULL)
         .put("rootProven", rootProven ?: JSONObject.NULL).put("settings", settings).put("skills", skills).put("files", files)
+        .put("cloakApproved", cloakApproved ?: JSONObject.NULL).put("cloakNote", cloakNote ?: JSONObject.NULL)
         .put("apps", JSONArray(apps.map {
             JSONObject().put("package", it.packageName).put("role", it.role.name).put("label", it.label).put("installed", it.installed)
                 .put("rootShared", it.rootShared ?: JSONObject.NULL).put("note", it.note ?: JSONObject.NULL)
@@ -85,6 +92,8 @@ data class ProfileInventory(
                         if (a.isNull("note")) null else a.optString("note"))
                 },
                 o.optInt("settings", -1), o.optInt("skills", -1), o.optInt("files", -1),
+                if (!o.has("cloakApproved") || o.isNull("cloakApproved")) null else o.optBoolean("cloakApproved"),
+                o.optString("cloakNote").takeIf { o.has("cloakNote") && !o.isNull("cloakNote") },
             )
         }.getOrNull()
     }

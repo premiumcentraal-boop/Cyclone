@@ -87,6 +87,8 @@ internal data class ProfileCluster(
     val cloakBindings: List<com.cyclone.mobile.connector.CycloneCloakBindingReference> = emptyList(),
 ) {
     val rootedByCloak: Boolean get() = cloakBindings.isNotEmpty()
+    /** Plan 57 P3: the pill follows Cloak's own health report, not only whether a binding exists. */
+    val cloakHealth: com.cyclone.mobile.connector.CloakHealth get() = com.cyclone.mobile.connector.CloakHealth.of(cloakBindings)
 }
 
 private data class ProfilePageSnapshot(
@@ -660,7 +662,7 @@ private fun ActiveProfileCard429(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        ProfileSourcePill429(profile.rootedByCloak)
+                        ProfileSourcePill429(profile.cloakHealth)
                     }
                 }
                 ProfileStatePill429(status)
@@ -707,7 +709,7 @@ private fun ProfileIdentityCard429(profile: ProfileCluster, onOpen: () -> Unit, 
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        ProfileSourcePill429(profile.rootedByCloak)
+                        ProfileSourcePill429(profile.cloakHealth)
                     }
                 }
                 ProfileStatePill429(if (profile.current) "Current" else if (!profile.ready) "Setup" else if (profile.active) "Live" else "Ready")
@@ -838,7 +840,7 @@ private fun AppGroupDetail429(
                         Text(profile.label, style = MaterialTheme.typography.titleSmall)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             Text(if (profile.active) "Working now" else "Ready", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            ProfileSourcePill429(profile.rootedByCloak)
+                            ProfileSourcePill429(profile.cloakHealth)
                         }
                     }
                     TextButton(enabled = profile.ready, onClick = { onOpenProfile(profile) }) { Text("Open") }
@@ -889,7 +891,7 @@ private fun ProfileDetail429(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        ProfileSourcePill429(profile.rootedByCloak)
+                        ProfileSourcePill429(profile.cloakHealth)
                     }
                 }
                 ProfileStatePill429(if (profile.current) "Current" else if (!profile.ready) "Setup" else if (profile.active) "Live" else "Ready")
@@ -1017,7 +1019,7 @@ private fun ProfileIdentityDetails429(
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("Profile identifiers", style = MaterialTheme.typography.headlineSmall)
                 Text(profile.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                ProfileSourcePill429(profile.rootedByCloak)
+                ProfileSourcePill429(profile.cloakHealth)
             }
         }
         item { CycloneSectionTitle("Cyclone profile") }
@@ -1134,15 +1136,17 @@ private fun ProfileIdentifierRow429(
 }
 
 @Composable
-private fun ProfileSourcePill429(rootedByCloak: Boolean) {
+private fun ProfileSourcePill429(health: com.cyclone.mobile.connector.CloakHealth) {
     val colorScheme = MaterialTheme.colorScheme
+    val rootedByCloak = health != com.cyclone.mobile.connector.CloakHealth.NATIVE
+    val warning = health == com.cyclone.mobile.connector.CloakHealth.CHECK || health == com.cyclone.mobile.connector.CloakHealth.NOT_WORKING
     Surface(
         shape = RoundedCornerShape(999.dp),
-        color = if (rootedByCloak) colorScheme.primaryContainer else colorScheme.surfaceVariant,
-        contentColor = if (rootedByCloak) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
+        color = when { warning -> colorScheme.errorContainer; rootedByCloak -> colorScheme.primaryContainer; else -> colorScheme.surfaceVariant },
+        contentColor = when { warning -> colorScheme.onErrorContainer; rootedByCloak -> colorScheme.onPrimaryContainer; else -> colorScheme.onSurfaceVariant },
     ) {
         Text(
-            if (rootedByCloak) "Rooted" else "Native",
+            health.pill,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,

@@ -108,6 +108,9 @@ class CycloneConnector private constructor(
         call("config.set.v1", tuple(profileId, androidUserId, packageName).put("value", value ?: JSONObject.NULL))
     fun configStatus(profileId: String, androidUserId: Int, packageName: String, state: String): JSONObject =
         call("config.status.v1", tuple(profileId, androidUserId, packageName).put("state", state))
+    /** Minor 2: Cyclone's own root facts (needs `device.root.read`). Check `hello().getInt("minor") >= 2` first. */
+    fun rootStatus(): JSONObject = call("root.status.v1")
+
     fun startupStatus(profileId: String, androidUserId: Int, packageName: String): JSONObject =
         call("startup.status.v1", tuple(profileId, androidUserId, packageName))
     private fun tuple(profileId: String, androidUserId: Int, packageName: String) = JSONObject()

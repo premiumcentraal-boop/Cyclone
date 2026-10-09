@@ -41,6 +41,8 @@ internal object ProfileCarry {
             .put("registry", ProfileRegistryCodec.encode(ProfileRegistryStore.records(context)))
             // Plan 57 P2: Market installs, owner skills and app manuals (see PortableFiles).
             .put("files", files(context))
+            // Plan 57 P3: Cyclone Cloak's approval, re-verified by the receiving profile before it counts.
+            .put("connectors", JSONArray(com.cyclone.mobile.connector.ConnectorRuntime.outgoing(context).map { it.toJson() }))
     }
 
     /** Takes in a bundle from another profile, and remembers what came for Profiles to show. */
@@ -55,6 +57,11 @@ internal object ProfileCarry {
         runCatching { AdaptiveBrainRuntime.store.writeMirror() }
         val (settings, inPlace) = applySettings(context, bundle.optJSONArray("settings") ?: JSONArray())
         val files = runCatching { applyFiles(context, bundle.optJSONObject("files") ?: JSONObject()) }.getOrDefault(0)
+        val connectors = runCatching {
+            val list = bundle.optJSONArray("connectors") ?: JSONArray()
+            com.cyclone.mobile.connector.ConnectorRuntime.adoptCarried(context,
+                (0 until list.length()).mapNotNull { list.optJSONObject(it)?.let(com.cyclone.mobile.connector.ConnectorApproval::fromJson) })
+        }.getOrDefault(emptyMap())
         bundle.optString("registry").takeIf { it.isNotBlank() }?.let { text ->
             runCatching {
                 val incoming = ProfileRegistryCodec.decode(text)
@@ -64,7 +71,8 @@ internal object ProfileCarry {
         }
         val report = CarryReport(System.currentTimeMillis(), bundle.optString("from_label").take(60).ifBlank { "another profile" },
             memory.added + memory.updated, memory.removed, skills, settings, files, inPlace,
-            runCatching { AdaptiveBrainRuntime.store.skillCount() }.getOrDefault(-1))
+            runCatching { AdaptiveBrainRuntime.store.skillCount() }.getOrDefault(-1),
+            connectors[com.cyclone.mobile.connector.CycloneCloakProfileBinding.CONNECTOR_ID]?.name)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_LAST, report.toJson().toString()).apply()
         return report
     }

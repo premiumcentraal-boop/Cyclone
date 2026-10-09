@@ -69,6 +69,46 @@ object ProfileConfigRules {
     }
 }
 
+/**
+ * Plan 57 P3: when a stored config tuple goes, and how it follows its profile. Pure.
+ *
+ * - A tuple goes when its profile is gone from the registry (permanently deleted), or when Android says its app is no
+ *   longer installed in that profile ([stale]). Never because the registry's app list is out of date (plan 57 D13).
+ * - A profile restored under a new Android user id takes its tuples along ([moved]).
+ */
+object ProfileConfigLifecycle {
+    private fun envelope(text: String): JSONObject? = runCatching { JSONObject(text) }.getOrNull()
+
+    /** Whether a stored tuple still has its profile. Profiles in Recently deleted keep their tuples. */
+    fun keep(text: String, profiles: List<CycloneProfileRecord>): Boolean {
+        val id = envelope(text)?.opt("profileId") as? String ?: return false
+        return profiles.any { it.id == id }
+    }
+
+    /** Whether Android's own package list for that profile shows the tuple's app is gone. */
+    fun stale(text: String, profileId: String, androidUserId: Int, installed: Set<String>): Boolean {
+        val o = envelope(text) ?: return false
+        return o.opt("profileId") == profileId && o.opt("androidUserId") == androidUserId &&
+            (o.opt("packageName") as? String)?.let { it !in installed } == true
+    }
+
+    /** The tuple rewritten for [to], or null when it isn't [profileId]'s at [from]. */
+    fun moved(text: String, profileId: String, from: Int, to: Int): Pair<ProfileConfigKey, String>? {
+        val o = envelope(text) ?: return null
+        val pkg = o.opt("packageName") as? String ?: return null
+        if (o.opt("profileId") != profileId || o.opt("androidUserId") != from || from == to || to < 0) return null
+        return ProfileConfigKey(profileId, to, pkg) to o.put("androidUserId", to).toString()
+    }
+
+    /** Profiles whose Android user id changed between two registry states: id, old user, new user. */
+    fun moves(before: List<CycloneProfileRecord>, after: List<CycloneProfileRecord>): List<Triple<String, Int, Int>> =
+        after.mapNotNull { now ->
+            val was = before.firstOrNull { it.id == now.id }?.androidUserId ?: return@mapNotNull null
+            val user = now.androidUserId ?: return@mapNotNull null
+            if (was != user) Triple(now.id, was, user) else null
+        }
+}
+
 /** Dispatch hints, not Android process lifecycle claims. Scoped separately by profile, user and package. */
 class ProfileLaunchTracker {
     private val seen = HashMap<ProfileConfigKey, Int>()

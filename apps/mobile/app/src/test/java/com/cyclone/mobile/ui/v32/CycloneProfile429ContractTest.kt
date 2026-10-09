@@ -52,8 +52,9 @@ class CycloneProfile429ContractTest {
     @Test fun rootedAndNativePillsFollowStoredCloakProfileBindings() {
         val page = source("ui/v32/CycloneProfilesPage.kt")
         assertTrue(page.contains("CycloneCloakProfileBinding.readBindings(saved)"))
-        assertTrue(page.contains("ProfileSourcePill429(profile.rootedByCloak)"))
-        assertTrue(page.contains("if (rootedByCloak) \"Rooted\" else \"Native\""))
+        // Plan 57 P3: the pill follows Cloak's health (Rooted, Rooted · check, Rooted · not working, Native).
+        assertTrue(page.contains("ProfileSourcePill429(profile.cloakHealth)"))
+        assertTrue(page.contains("health.pill"))
         assertTrue(page.contains("cloakBindings = cloakBindings.filter { it.profileId == record?.id }"))
         assertTrue(page.contains("onInfo = { selectedProfileKey = profile.key; showProfileIdentifiers = true }"))
     }

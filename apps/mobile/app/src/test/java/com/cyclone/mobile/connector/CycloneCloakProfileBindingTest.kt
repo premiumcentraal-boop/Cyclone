@@ -44,7 +44,7 @@ class CycloneCloakProfileBindingTest {
         val bindings = CycloneCloakProfileBinding.readBindings(listOf(profile)) { configs[it] }
 
         assertEquals(
-            listOf(CycloneCloakBindingReference(profile.id, 10, "com.example.social", "pixel-identity-7")),
+            listOf(CycloneCloakBindingReference(profile.id, 10, "com.example.social", "pixel-identity-7", "ready")),
             bindings,
         )
     }
@@ -134,5 +134,26 @@ class CycloneCloakProfileBindingTest {
         assertEquals(null, summary.identityVersion)
         assertEquals(null, summary.name)
         assertEquals(null, summary.model)
+    }
+
+    @Test fun `one strict reading - a string user id is not a binding, and the pill follows the worst state`() {
+        val profile = record("Cyclone_abababababababab", packages = setOf("com.example.social", "com.example.video"))
+        val social = ProfileConfigKey(profile.id, 10, "com.example.social")
+        val video = ProfileConfigKey(profile.id, 10, "com.example.video")
+        val stringUser = JSONObject(config(social, "pixel-identity-7")).put("androidUserId", "10").toString()
+        assertTrue(CycloneCloakProfileBinding.readBindings(listOf(profile)) { stringUser }.isEmpty())
+        assertTrue(CycloneCloakProfileBinding.readIdentities(listOf(profile)) { stringUser }.isEmpty())
+
+        fun withState(key: ProfileConfigKey, state: String) = JSONObject(config(key, "pixel-identity-7")).put("state", state).toString()
+        val states = mapOf(social to withState(social, "ready"), video to withState(video, "degraded"))
+        val bindings = CycloneCloakProfileBinding.readBindings(listOf(profile)) { states[it] }
+        assertEquals(setOf("ready", "degraded"), bindings.map { it.state }.toSet())
+        assertEquals(CloakHealth.CHECK, CloakHealth.of(bindings))
+        assertEquals(CloakHealth.NOT_WORKING, CloakHealth.of(bindings + bindings[0].copy(state = "failed")))
+        assertEquals(CloakHealth.ROOTED, CloakHealth.of(listOf(bindings[0].copy(state = "unknown"))))
+        assertEquals(CloakHealth.NATIVE, CloakHealth.of(emptyList()))
+        assertEquals("unknown", CycloneCloakProfileBinding.readBindings(listOf(profile)) {
+            if (it == social) JSONObject(config(social, "x")).put("state", "bogus").toString() else null
+        }.single().state)
     }
 }

@@ -61,11 +61,50 @@ object ConnectorRuntime {
         val cert = checkNotNull(found.certHistory.firstOrNull()) { "Android didn't report this app's signing key." }
         val others = approvals(context).filterNot { it.packageName == found.packageName || it.connectorId == manifest.id }
         saveApprovals(context, others + ConnectorApproval(manifest.id, found.packageName, cert, manifest.scopes, manifest.label, System.currentTimeMillis()))
+        setRevoked(context, manifest.id, null)
     }
 
-    /** Revoking forgets the approval, the connector's entries and its data on every profile. */
-    @Synchronized fun revoke(context: Context, connectorId: String) {
+    // ---- plan 57 P3: Cloak's approval follows the owner into every profile (ConnectorCarry) --------------------------
+
+    @Synchronized private fun revokedAt(context: Context, connectorId: String): Long? =
+        JSONObject(prefs(context).getString("revoked", "{}")).optLong(connectorId, -1L).takeIf { it >= 0 }
+
+    @Synchronized private fun setRevoked(context: Context, connectorId: String, at: Long?) {
+        val all = JSONObject(prefs(context).getString("revoked", "{}"))
+        if (at == null) all.remove(connectorId) else all.put(connectorId, at)
+        prefs(context).edit().putString("revoked", all.toString()).apply()
+    }
+
+    /** The approvals that travel with a carry (Cloak's only). */
+    fun outgoing(context: Context): List<ConnectorApproval> = ConnectorCarry.outgoing(approvals(context))
+
+    /** Takes in carried approvals after re-verifying each against the app installed in this profile. */
+    @Synchronized fun adoptCarried(context: Context, carried: List<ConnectorApproval>): Map<String, ConnectorCarry.Outcome> {
+        val wanted = carried.filter { it.connectorId in ConnectorCarry.CARRIED }
+        if (wanted.isEmpty()) return emptyMap()
+        val found = ConnectorDiscovery.discover(context)
+        val outcomes = linkedMapOf<String, ConnectorCarry.Outcome>()
+        wanted.forEach { approval ->
+            val here = found.firstOrNull { it.packageName == approval.packageName }
+                ?.let { ConnectorCarry.Here(it.packageName, it.manifest, it.certHistory, it.idConflict) }
+            val local = approvals(context).firstOrNull { it.connectorId == approval.connectorId && it.packageName == approval.packageName }
+            val outcome = ConnectorCarry.decide(approval, here, local, revokedAt(context, approval.connectorId))
+            if (outcome == ConnectorCarry.Outcome.ADOPTED && here != null) {
+                val others = approvals(context).filterNot { it.packageName == approval.packageName || it.connectorId == approval.connectorId }
+                saveApprovals(context, others + ConnectorCarry.adopted(approval, here))
+            }
+            outcomes[approval.connectorId] = outcome
+        }
+        return outcomes
+    }
+
+    /**
+     * Revoking forgets the approval, the connector's entries and its data on every profile. Plan 57 P3: only the owner's
+     * own revoke ([byOwner]) is remembered, so a carried approval doesn't undo it; an uninstall isn't a decision.
+     */
+    @Synchronized fun revoke(context: Context, connectorId: String, byOwner: Boolean = true) {
         saveApprovals(context, approvals(context).filterNot { it.connectorId == connectorId })
+        if (byOwner) setRevoked(context, connectorId, System.currentTimeMillis())
         ProfileConfigStore.revoke(context, connectorId)
         ProfileBehaviorRuntime.revoke(connectorId)
         setEntries(context, connectorId, emptyList())
@@ -73,7 +112,7 @@ object ConnectorRuntime {
     }
 
     @Synchronized fun revokePackage(context: Context, packageName: String) {
-        approvals(context).filter { it.packageName == packageName }.forEach { revoke(context, it.connectorId) }
+        approvals(context).filter { it.packageName == packageName }.forEach { revoke(context, it.connectorId, byOwner = false) }
     }
 
     // ---- entries -----------------------------------------------------------------------------------------------------
@@ -162,6 +201,10 @@ object ConnectorRuntime {
         override fun setConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, json: String?) = ProfileConfigStore.set(context, connectorId, callerUser, key, json)
         override fun now() = System.currentTimeMillis()
         override fun currentProfile(): String? = current(context)
+        override fun rootStatus(): JSONObject = ConnectorRootStatus.build(
+            runCatching { com.cyclone.mobile.runtime.workspaces.ProfileInventoryStore.all(context) }.getOrDefault(emptyList()),
+            runCatching { com.cyclone.mobile.runtime.workspaces.ProfileRoom.cached(context) }.getOrNull(),
+        )
     }
 
     /**
@@ -191,6 +234,8 @@ object ConnectorRuntime {
 /** Profile events from the registry and from switches (plan 51 §3.3). */
 object ConnectorEvents {
     fun changed(context: Context, before: List<CycloneProfileRecord>, after: List<CycloneProfileRecord>) {
+        // Plan 57 P3: a profile under a new Android user id keeps its connector settings; then only gone profiles lose them.
+        ProfileConfigLifecycle.moves(before, after).forEach { (id, from, to) -> runCatching { ProfileConfigStore.migrate(context, id, from, to) } }
         ProfileConfigStore.removed(context, after)
         ConnectorRuntime.record(context, ConnectorEvent.diff(before, after))
     }
@@ -229,7 +274,7 @@ object ConnectorDiscovery {
         val ids = found.mapNotNull { it.manifest?.id }
         val duplicated = ids.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         // Approvals for apps that are gone are forgotten (the uninstall receiver is the first line; this is the second).
-        approvals.filter { a -> found.none { it.packageName == a.packageName } }.forEach { ConnectorRuntime.revoke(context, it.connectorId) }
+        approvals.filter { a -> found.none { it.packageName == a.packageName } }.forEach { ConnectorRuntime.revoke(context, it.connectorId, byOwner = false) }
         return found.map { it.copy(idConflict = it.manifest?.id in duplicated) }.sortedBy { it.appLabel.lowercase() }
     }
 

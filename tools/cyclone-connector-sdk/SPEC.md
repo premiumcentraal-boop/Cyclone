@@ -1,6 +1,6 @@
 # Cyclone phone connectors `cyclone.connector/1`
 
-Status: **v1, minor 1 alpha** (Cyclone 5.0.0-alpha.106), building on alpha.105 / plan 51 K1–K4. This file is the contract. The code is
+Status: **v1, minor 2 alpha** (Cyclone 5.0.0-alpha.121; minor 1 since alpha.106), building on alpha.105 / plan 51 K1–K4. This file is the contract. The code is
 `apps/mobile/app/src/main/java/com/cyclone/mobile/connector/`. Every release carries the kit (§9):
 `Cyclone-Connector-Client-<version>.aar`, `Cyclone-Connector-Sample-<version>.apk` and
 `Cyclone-Connector-Schemas-<version>.zip` (this file, the JSON Schemas and the test vectors), each listed with its
@@ -78,6 +78,7 @@ Apps sharing a UID are refused. Limits: 20 calls per second, 64 KB per request.
 | `entries.set` | `selector.contribute` | `{entries[]}` → `{count}` (§6) |
 | `entries.get` | `selector.contribute` | → `{entries[]}` |
 | `events` | `events.profiles` | `{since}` → `{events[], next, reset, more}` (§7) |
+| `root.status.v1` | `device.root.read` | → `{version, rootManager, profileRoom, profiles[]}` (§12, minor 2) |
 
 Errors:
 
@@ -100,6 +101,7 @@ Errors:
 | `profiles.ext` | Keep its own small notes on a profile |
 | `selector.contribute` | Add its own entries to your profiles list |
 | `events.profiles` | Hear when profiles are added, changed, switched or removed |
+| `device.root.read` | See whether root works in your profiles (minor 2) |
 
 When an update asks for more scopes, the old approval keeps working for the scopes it covered. Settings shows the
 new ones until the owner approves them.
@@ -299,3 +301,45 @@ CycloneConnector.connect(context).use { cyclone ->
 
 JSON Schemas express JSON types/code-point limits; the UTF-8 byte and serialized-size limits above are also enforced
 at runtime. `vectors.json` includes config and version negotiation cases executed by Cyclone's unit tests.
+
+## 12. Root status and Cyclone Cloak (minor 2, alpha.121)
+
+Check `hello.minor >= 2` before using anything in this section; an older Cyclone answers `UNKNOWN_METHOD`.
+
+### `root.status.v1`
+
+Scope `device.root.read`, approved separately. No arguments.
+
+```json
+{"version": 1,
+ "rootManager": "magisk" | "kernelsu" | "apatch" | null,
+ "profileRoom": {"limit": 8, "raisedByCyclone": true} | null,
+ "profiles": [{"id": "Cyclone_0123456789abcdef", "rootProven": true | false | null, "checkedAt": 1760000000000 | null}]}
+```
+
+- **`rootProven`:** the last root check the profile's own Cyclone made (`su -c id`) on a switch into it. `null` means
+  it was never checked.
+- **Where it comes from:** what this Cyclone saw on its own switches, and its own profile-room notes.
+  - It runs no command and names no path, version or package.
+  - It is a fact from the last switch, not a live probe.
+- **Ignore fields you don't know.**
+
+Schema: `root.status.result.schema.json`.
+
+### Cyclone Cloak (`id="cyclone-cloak"`)
+
+- **Approval follows the owner.** The owner's approval of the connector with id `cyclone-cloak` is carried on every
+  profile switch, and re-verified in the receiving profile.
+  - **What is checked:** the same package, a valid manifest with the same id, and the approved certificate in that
+    install's signing lineage.
+  - **Scopes:** the carried ones that manifest still asks for.
+  - **A revoke wins:** a revoke the owner made in that profile after the approval was given stays a revoke.
+  - **Every other connector** is still approved in each profile.
+- **The binding envelope** (§10) is read strictly. `androidUserId` must be an integer, and the tuple must match.
+  Cloak's `state` (`config.status.v1`) drives Cyclone's pill: **Rooted** (`ready` or `unknown`), **Rooted · check**
+  (`degraded`), **Rooted · not working** (`failed`), **Native** (no binding).
+- **Stored tuples now follow their profile:**
+  - they go only when the profile is permanently deleted, or when Android says the app is gone from that profile;
+  - a profile restored under a new Android user id keeps them.
+- **The handoff:** `docs/handoff/CLOAK_CONNECTOR_COMPAT.md`.
+

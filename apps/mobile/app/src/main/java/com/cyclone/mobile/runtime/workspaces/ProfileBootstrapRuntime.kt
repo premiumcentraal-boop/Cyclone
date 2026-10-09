@@ -117,6 +117,14 @@ internal object ProfileBootstrapRuntime {
             checks[item.packageName] = ProfileInventory.App(item.packageName, item.role, label ?: "Cyclone", installed.isSuccess,
                 note = if (installed.isSuccess) null else "Android didn't install it")
         }
+        // Plan 57 P3: connector settings for apps Android says are gone from this profile go too. Only the main profile's
+        // Cyclone (the registry owner) prunes, and only from a real listing (one that shows Cyclone itself).
+        runCatching {
+            if (source == ProfileSetupRuntime.profileAUserId()) {
+                val there = ProfileSetupParser.packages(run("/system/bin/pm", "list", "packages", "--user", "$target")).toSet()
+                if (PKG in there) com.cyclone.mobile.connector.ProfileConfigStore.prune(context, profile, target, there)
+            }
+        }
         run("/system/bin/am", "start-user", "-w", "$target")
         check(run("/system/bin/am", "get-started-user-state", "$target").contains("RUNNING_UNLOCKED")) {
             "Unlock this profile once so Android can open its protected settings."
@@ -168,7 +176,8 @@ internal object ProfileBootstrapRuntime {
             val previous = ProfileInventoryStore.get(context, profile)
             ProfileInventoryStore.save(context, ProfileInventory(profile, System.currentTimeMillis(),
                 runCatching { context.packageManager.getPackageInfo(PKG, 0).versionName }.getOrNull(), manager?.name, rooted,
-                checks.values.toList(), previous?.settings ?: -1, previous?.skills ?: -1, previous?.files ?: -1))
+                checks.values.toList(), previous?.settings ?: -1, previous?.skills ?: -1, previous?.files ?: -1,
+                previous?.cloakApproved, previous?.cloakNote))
         }
         check(rooted) { ProfileSwitch.rootGuidance(manager, label) }
     }

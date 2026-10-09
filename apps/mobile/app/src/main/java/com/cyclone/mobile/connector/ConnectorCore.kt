@@ -24,6 +24,8 @@ interface ConnectorBackend {
         return updated
     }
     fun setConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, json: String?) { error("Config storage unavailable") }
+    /** Plan 57 P3: Cyclone's own root facts, from what it last saw ([ConnectorRootStatus]). Never runs a command. */
+    fun rootStatus(): JSONObject = ConnectorRootStatus.build(emptyList(), null)
 }
 
 /**
@@ -86,6 +88,7 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
                 JSONObject().put("version", 1).put("deadlineMs", 250)
             }
             "profiles" -> { need(ConnectorScope.PROFILES_READ); profiles(manifest.id, granted) }
+            "root.status.v1" -> { need(ConnectorScope.DEVICE_ROOT_READ); backend.rootStatus() }
             "ext.set" -> { need(ConnectorScope.PROFILES_EXT); setExt(manifest.id, args) }
             "entries.get" -> { need(ConnectorScope.SELECTOR_CONTRIBUTE); JSONObject().put("entries", JSONArray(backend.entries(manifest.id).map { it.toJson() })) }
             "entries.set" -> { need(ConnectorScope.SELECTOR_CONTRIBUTE); setEntries(manifest.id, args) }

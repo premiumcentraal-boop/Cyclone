@@ -103,7 +103,7 @@
         "ok": true,
         "result": {
           "contract": "cyclone.connector/1",
-          "minor": 1,
+          "minor": 2,
           "connectorId": "acme-profiles",
           "approved": true,
           "granted": [
@@ -767,6 +767,19 @@
         }
       },
       "schema": "startup.status.result.schema.json"
+    },
+    {
+      "name": "root.status.v1 needs device.root.read",
+      "request": {
+        "method": "root.status.v1",
+        "args": {}
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "SCOPE_NOT_GRANTED"
+        }
+      }
     }
   ]
 }
