@@ -654,3 +654,29 @@ def test_vmos_pad_status_follows_the_documented_codes():
     assert power(11) == power(12) == power(15) == power(16) == power(20) == "starting"
     assert power(25) == power(-1) == "gone"
     assert power(99) == power(None) == "unknown"
+
+
+def test_an_account_without_phones_is_empty_not_an_error():
+    """Seen on the owner's account (2026-10-09): `infos` answers "Instance not found" when there are no phones."""
+    not_found = {"code": 2020, "msg": "Instance not found"}
+    http = FakeHttp({"/vcpcloud/api/padApi/infos": not_found, "/vcpcloud/api/padApi/userPadList": not_found})
+    assert VmosCloud(AK, SK, transport=http, clock=Clock()).list_phones() == []
+    # Recognised by its words too, whatever the code.
+    http = FakeHttp({"/vcpcloud/api/padApi/infos": {"code": 500, "msg": "Instance does not exist"},
+                     "/vcpcloud/api/padApi/userPadList": {"code": 200, "data": [
+                         {"padCode": "AC9", "padName": "From the pad list", "androidVersion": "13", "cvmStatus": 100,
+                          "signExpirationTimeTamp": 1_800_000_000_000}]}})
+    phones = VmosCloud(AK, SK, transport=http, clock=Clock()).list_phones()
+    assert [(p.remote_id, p.name, p.android, p.power, p.paid_until_ms) for p in phones] == [
+        ("AC9", "From the pad list", "13", "running", 1_800_000_000_000)]
+    # Any other refusal still shows.
+    http = FakeHttp({"/vcpcloud/api/padApi/infos": {"code": 500, "msg": "Something else"}})
+    with pytest.raises(ProviderError):
+        VmosCloud(AK, SK, transport=http, clock=Clock()).list_phones()
+
+
+def test_adding_an_account_without_phones_shows_no_error(tmp_path):
+    not_found = {"code": 2020, "msg": "Instance not found"}
+    env = make_service(tmp_path, routes={"/vcpcloud/api/padApi/infos": not_found, "/vcpcloud/api/padApi/userPadList": not_found})
+    account = add_vmos(env)
+    assert account["error"] is None and account["phones"] == []

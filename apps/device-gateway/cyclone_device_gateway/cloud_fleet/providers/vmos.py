@@ -183,9 +183,27 @@ class VmosCloud:
                 exc = ProviderError("PROVIDER_AUTH", AUTH_WORDS[code], retryable=False)
             if exc.code == "PROVIDER_AUTH" and code not in AUTH_WORDS.keys() - SIGNATURE_CODES:
                 raise _SignatureRefused(exc) from None
+            exc.vmos_code = code  # type: ignore[attr-defined]
             raise exc from None
 
     def list_phones(self) -> list[CloudPhone]:
+        """The account's phones (`infos`). VMOS answers `infos` with an "Instance not found" error, not an empty
+        list, when it has none for the account (seen on the owner's account, 2026-10-09): then Cyclone reads the
+        account's cloud-phone list (`userPadList`) instead, and an account without phones is simply empty."""
+        try:
+            return self._list_infos()
+        except ProviderError as exc:
+            if not _no_instances(exc):
+                raise
+        try:
+            rows = _rows(self._call("padList", {}))
+        except ProviderError as exc:
+            if _no_instances(exc):
+                return []
+            raise
+        return [p for p in (_pad_list_phone(row) for row in rows) if p is not None]
+
+    def _list_infos(self) -> list[CloudPhone]:
         phones: list[CloudPhone] = []
         for page in range(1, MAX_PAGES + 1):
             data = self._call("list", {"page": page, "rows": PAGE_ROWS})
@@ -408,6 +426,35 @@ def _rows(data: Any) -> list[dict[str, Any]]:
             if isinstance(value, list):
                 return [r for r in value if isinstance(r, dict)]
     return []
+
+
+# VMOS's "this instance doesn't exist" codes; on a list call they mean "none".
+NO_INSTANCE_CODES = {2020, 110013, 110028, 120005}
+# `cvmStatus` in `userPadList`: 99 loading, 100 normal, 101 taking a screenshot, 102 rebooting, 103 resetting,
+# 104 reboot failed, 105 reset failed, 106 maintenance, 107 upgrading the image.
+CVM_STATUS = {99: "starting", 100: "running", 101: "running", 102: "starting", 103: "starting", 104: "abnormal",
+              105: "abnormal", 106: "starting", 107: "starting"}
+
+
+def _no_instances(exc: ProviderError) -> bool:
+    if exc.code != "PROVIDER_REFUSED":
+        return False
+    words = exc.message.lower()
+    return getattr(exc, "vmos_code", None) in NO_INSTANCE_CODES or (
+        "instance" in words and ("not found" in words or "does not exist" in words or "not exist" in words))
+
+
+def _pad_list_phone(row: dict[str, Any]) -> CloudPhone | None:
+    code = str(row.get("padCode") or "").strip()
+    if not code or len(code) > 64:
+        return None
+    name = str(row.get("padName") or row.get("remark") or code)[:80]
+    android = str(row.get("androidVersion") or "").strip()[:24] or None
+    status = row.get("cvmStatus")
+    power = CVM_STATUS.get(status, "unknown") if isinstance(status, int) else "unknown"
+    ends = row.get("signExpirationTimeTamp")
+    paid = int(ends) if isinstance(ends, (int, float)) and ends > 0 else parse_time_ms(row.get("signExpirationTime"))
+    return CloudPhone("vmos", code, name, android, power, paid_until_ms=paid)
 
 
 def _phone(row: dict[str, Any]) -> CloudPhone | None:
