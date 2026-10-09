@@ -455,7 +455,7 @@ or come back by themselves with a debug file.
   - guard checks in `test_profile_room_guard.py` for the return, the root proof and the user switcher.
 - **Physical: UNVERIFIED.** The 50-switch run is still owed.
 
-### P2 (alpha.120): Complete new profiles (cornerstone apps and Cyclone's full settings)
+### P2 (alpha.120): Complete new profiles (cornerstone apps and Cyclone's full settings) (**built, alpha.120.dev1**)
 
 **Cornerstone apps:**
 - **The set:** Cyclone, the detected root manager (hidden Magisk included), Shizuku, Cyclone Cloak, and any app the
@@ -482,6 +482,39 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
 - carry round-trips per file;
 - cornerstone verification;
 - the hidden-Magisk detection parser.
+
+**As built (alpha.120.dev1):**
+- **`PortableSettings`** classifies all 34 settings files: 11 CARRY, 16 PER_PROFILE, 7 NEVER.
+  - `test_portable_settings_guard.py` resolves every `getSharedPreferences` name (literal or constant) and fails on an
+    unclassified one.
+  - **Newly carried:** Hands, Modes, Fast Path, planes, setup cards, the working indicator, the owner-notes switch,
+    Automation Studio routines and skills (merged by id; runs and checkpoints stay), and the cornerstone marks.
+  - **Kept per profile,** a change from the plan: `cyclone_ai` is not carried on every switch; it still goes once at
+    setup, with the key sealed.
+- **`PortableFiles`:**
+  - Market installs: the one used last wins; secret inputs never leave.
+  - Owner skills and their anchors: only added.
+  - App manuals: added when missing; at most 200 manuals, 4 MB in all.
+
+  A carry deletes nothing. App maps (`atlas`) and Brain app notes are not carried yet.
+- **`ProfileCornerstones`:**
+  - **Required,** as before: Cyclone, the root manager (a hidden Magisk app included) and Shizuku.
+  - **Best effort, reported:** Cyclone Cloak (found by its connector id) and up to 12 apps the owner marks in Profiles →
+    Cornerstone apps.
+  - Installed with `install-existing` on every switch into a profile. Magisk grants are shared where the app had one.
+  - KernelSU and APatch grants for these apps are not set by command.
+  - "Owner skills marked shareable" became "all owner skills, through the secret filter": no shareable flag exists.
+- **`ProfileInventory`:**
+  - **The line:** "Profile C has: Cyclone … ✓ · Magisk ✓ root ✓ · Shizuku ✓ · Cloak ✓ · N of your apps · N settings ✓ ·
+    N skills ✓", with a line for each missing app.
+  - **Where:** Profiles → "What each profile has", and the debug file (`inventories`).
+  - **When:** it is filled on each switch into a profile, not at create (creation doesn't prepare the profile yet).
+  - **Not shown yet:** "Cloak approved", which needs the approval carry (P3, CC1).
+- **Tests:**
+  - `ProfileComplete57Test` (9);
+  - the existing `CarryRulesTest` passes unchanged;
+  - guards: `test_portable_settings_guard.py` (4), plus updated carry and room guards.
+- **Physical: UNVERIFIED.**
 
 ### P3 (alpha.121): Cyclone Cloak connectivity done right, and device proof
 
