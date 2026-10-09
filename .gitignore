@@ -60,3 +60,6 @@ test-results/
 # Testbench seat: local permission set and briefing (tools/cyclone-testbench/seat)
 /CLAUDE.local.md
 /.claude/settings.local.json
+
+# VMOS live test output (scripts/pc/cloud_probe.py): raw provider answers, never committed
+cloud-probe/
