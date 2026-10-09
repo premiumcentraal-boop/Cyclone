@@ -122,9 +122,9 @@ owner button in Glass. **None of them is a model, MCP or agent tool.**
 
 | Connector | What Cyclone does with it | State |
 | --- | --- | --- |
-| `backupCalculate` → `queryBackupCalculateResult` (or callback 1403) → `addBackup` within 5 minutes → `queryBackupBatch` | Back up a freshly provisioned, Ready phone as the **golden phone**: Cyclone, settings and fleet skills, but no app accounts | Run V3 |
+| `backupCalculate` → `queryBackupCalculateResult` (or callback 1403) → `addBackup` within 5 minutes → `queryBackupBatch` | Back up a phone when the owner presses **Back up** (built, alpha.117). Later: a freshly provisioned, Ready phone as the **golden phone** | **Built** (owner backup); golden: Run V3 |
 | `listPadBackups`, `listPadBackupIds` | Pick the golden backup | Run V3 |
-| `clonePadBackup` | Clone the golden onto new phones in one batch. **Every clone then re-enrolls:** Cyclone notices it is a copy (a new padCode under an old install id), drops the copied pairing and keys, and gets its own grant (§3.1 step 5). A clone never inherits another phone's trust. | Run V3 |
+| `clonePadBackup` | **Built** (alpha.117) for restoring a phone from its own backup only. V3: clone the golden onto new phones in one batch. **Every clone then re-enrolls:** Cyclone notices it is a copy (a new padCode under an old install id), drops the copied pairing and keys, and gets its own grant (§3.1 step 5). A clone never inherits another phone's trust. | Run V3 |
 | `imageVersionList` | Offer only Android 13+ images | Run V3 |
 | `upgradeImage` | Image upgrades: owner-confirmed, staged | Run V4 |
 
@@ -132,11 +132,11 @@ owner button in Glass. **None of them is a model, MCP or agent tool.**
 
 | Connector | What Cyclone does with it | State |
 | --- | --- | --- |
-| `getCloudGoodList` | The SKUs | Run V3 |
-| `createMoneyOrder` | Buy a phone or renew one, owner-confirmed every time | Run V3 |
-| `openAutoRenew`, `closeAutoRenew` | Auto-renew per phone; the card warns before the paid time ends | Run V3 |
+| `getCloudGoodList` | The SKUs: rental periods and pay-for-time rates | **Built** (alpha.117) |
+| `createMoneyOrder` | Rent a phone by the period or renew one, owner-confirmed every time | **Built** (alpha.117) |
+| `openAutoRenew`, `closeAutoRenew` | Auto-renew per phone; the card warns before the paid time ends | **Built** (alpha.117) |
 | `selectPaidOrderList` | The bills, in Glass | Run V4 |
-| Timing devices: `timingDeviceModels`, `createByTimingOrder`, `timingPadOn`, `timingPadOff` (keeps the environment), `timingPadPowerLogList` | Pay-for-time phones: power one on for a scheduled job, off afterwards, everything kept | Run V4 (owner question 7) |
+| Timing devices: `createByTimingOrder`, `timingPadOn`, `timingPadOff` (keeps the environment) | Pay-for-time phones: rent, power on and off by hand | **Built** (alpha.117); on a schedule for jobs: Run V4 |
 
 **E. At the owner's fingertips (Glass)**
 
@@ -312,12 +312,13 @@ phone; approvals name the phone.
 
 | Run | Alpha (next free) | What ships | Done when |
 | --- | --- | --- | --- |
-| **Connectors** (built 2026-10-08, ships in the next alpha) | — | V2 signing with HMAC fallback; named sign-in errors; `openOnlineAdb`; padCode following; `setKeepAliveApp`; `userPadList` names and paid-until; `listInstalledApp`; status 16 | Gateway tests pass (done) |
+| **Rent, power, backup** (built 2026-10-09, **alpha.117**) | — | Owner asked for both rentals by the period (a week, a month) and pay-for-time, plus backups the owner triggers. Glass: Rent phones (price confirmed, 1–5 per order), new phones kept by themselves; Power on/off; Renew and auto-renew; Back up; Restore a phone's own backup with a confirm | Gateway, Glass and guard tests pass (done) |
+| **Connectors** (built 2026-10-08, **alpha.117**) | — | V2 signing with HMAC fallback; named sign-in errors; `openOnlineAdb`; padCode following; `setKeepAliveApp`; `userPadList` names and paid-until; `listInstalledApp`; status 16 | Gateway tests pass (done) |
 | **0 Probe** (with the owner's account, not a release) | — | A small probe in `scripts/pc/cloud_probe.py` (it exists; extend it) calls each §2.3 connector once on one test phone and records the answers with keys removed, as test fixtures. It checks the list in §2.5, plus 7-day `expireMinutes`, `uploadFileV3` from a GitHub URL, `asyncCmd` + `padTaskDetail`, `getCloudGoodList`, Pre-installation Management and callbacks. | Fixtures are committed. Every row in §2.3 is marked confirmed or changed. |
-| **V1 Ready in one click** | alpha.117 | The provisioning catalogue with read-back; `FleetEnrollReceiver` and the gateway's grant; install via `uploadFileV3` with `adb install` as fallback; the ready check; Glass card states, thumbnails and rename; the `restartApp` repair rung; the doctor lines | An existing VMOS phone goes from "Add" to Ready with no tap, and runs a starter skill |
-| **V2 Skills in sync** | alpha.118 | `cyclone.skillpack/1`; phone ops `skills.export` / `skills.import`; "Share with my phones"; the PC library; sync on join, on change and on reconnect; Glass Skills → Fleet | A skill saved on phone A runs on VMOS phones B and C after one Share |
-| **V3 Spin up new** | alpha.119 | SKU and image list (Android 13+ only); owner-confirmed purchase and auto-renew; wait until running; chains into V1; **the golden phone**: back up a Ready phone, clone it onto new ones, each clone re-enrolls; restart and reset buttons; the callback receiver as a hint (else polling) | "New VMOS phone" in Glass gives a Ready phone with skills, the purchase confirmed by the owner; three clones of a golden are Ready, each with its own trust |
-| **V4 Run the fleet** | alpha.120 | Groups (with the VMOS console's); run on a group; `padDetail` health; timing devices on a schedule; bills; staged Cyclone updates (canary → 10 % → all, stop if health drops); batch ADB renewal; the repair ladder; a health board | Five VMOS phones updated, synced and kept connected for a week without the owner |
+| **V1 Ready in one click** | alpha.118 | The provisioning catalogue with read-back; `FleetEnrollReceiver` and the gateway's grant; install via `uploadFileV3` with `adb install` as fallback; the ready check; Glass card states, thumbnails and rename; the `restartApp` repair rung; the doctor lines | An existing VMOS phone goes from "Add" to Ready with no tap, and runs a starter skill |
+| **V2 Skills in sync** | alpha.119 | `cyclone.skillpack/1`; phone ops `skills.export` / `skills.import`; "Share with my phones"; the PC library; sync on join, on change and on reconnect; Glass Skills → Fleet | A skill saved on phone A runs on VMOS phones B and C after one Share |
+| **V3 Spin up new** | alpha.120 | SKU and image list (Android 13+ only); owner-confirmed purchase and auto-renew; wait until running; chains into V1; **the golden phone**: back up a Ready phone, clone it onto new ones, each clone re-enrolls; restart and reset buttons; the callback receiver as a hint (else polling) | "New VMOS phone" in Glass gives a Ready phone with skills, the purchase confirmed by the owner; three clones of a golden are Ready, each with its own trust |
+| **V4 Run the fleet** | alpha.121 | Groups (with the VMOS console's); run on a group; `padDetail` health; timing devices on a schedule; bills; staged Cyclone updates (canary → 10 % → all, stop if health drops); batch ADB renewal; the repair ladder; a health board | Five VMOS phones updated, synced and kept connected for a week without the owner |
 | **V5 (only if needed)** | later | Plan 44's relay link (runs 3–4) if the SSH ADB proves flaky | — |
 
 Each run ships with:
@@ -341,6 +342,7 @@ Each run ships with:
 5. **Buying.** May Glass buy new phones (owner-confirmed every time), or should Cyclone only adopt phones bought in
    the VMOS console?
 6. **Size.** How many phones? The fleet's limit is 32 today; raising it is part of V4 if needed.
-7. **Timing devices.** Should some phones be pay-for-time ones that Cyclone powers on only for scheduled jobs?
-8. **Golden phone.** May Cyclone back up one Ready phone and clone it to new ones (V3)? Backups use the account's
-   cloud storage.
+7. **Timing devices.** Answered 2026-10-09: yes, both pay-for-time phones and rentals by the period (a week, a month).
+   Built in alpha.117. Still open: should Cyclone power pay-for-time phones on for scheduled jobs by itself (V4)?
+8. **Backup.** Answered 2026-10-09: yes, triggered by the owner. Built in alpha.117. Golden-phone cloning (V3) is
+   still to confirm.

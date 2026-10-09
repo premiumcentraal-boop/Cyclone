@@ -30,6 +30,17 @@ SECRET_LIMIT = 400
 PRINTABLE = re.compile(r"^[\x21-\x7e]+$")
 ENDPOINT_KEYS = {"vmos": {"list", "adb", "openAdb", "padList", "padCodeChanges", "installedApps", "keepAlive"},
                  "duoplus": {"list"}, "adb": set()}
+# The owner's buying, power and backup buttons (alpha.117).
+MAX_ORDER = 5  # phones per order
+OFFERS_TTL_S = 300.0
+PENDING_RENTAL_S = 24 * 3600.0
+PENDING_LIST_EVERY_S = 60.0
+BACKUP_STEP_S = 15.0
+BACKUP_SIZE_WAIT_S = 240.0  # VMOS wants addBackup within 5 minutes of a ready size
+BACKUP_GIVE_UP_S = 3 * 3600.0
+KEEP_ORDERS = 20
+KEEP_BACKUPS = 50
+BILLING = ("rental", "timing")
 
 
 @dataclass
@@ -84,6 +95,8 @@ class CloudFleetService:
         self._phones: dict[str, dict[str, CloudPhone]] = {}
         self._listed_at: dict[str, float] = {}
         self._account_errors: dict[str, dict[str, Any]] = {}
+        self._details: dict[str, dict[str, dict[str, Any]]] = {}
+        self._offers: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -176,8 +189,11 @@ class CloudFleetService:
         signing = getattr(provider, "signing", None)
         if signing and signing != account.get("signing"):
             self.vault.update(account_id, lambda a: a.update({"signing": signing}))
-        phones = self._with_details(provider, phones)
+        phones, details = self._with_details(provider, phones)
+        with self._lock:
+            self._details[account_id] = details
         self._follow_moves(account, provider, {p.remote_id for p in phones})
+        self._adopt_rentals(account_id, details, {p.remote_id: p for p in phones})
         with self._lock:
             self._phones[account_id] = {p.remote_id: p for p in phones}
             self._account_errors.pop(account_id, None)
@@ -187,20 +203,47 @@ class CloudFleetService:
         return [p.public() for p in phones]
 
     @staticmethod
-    def _with_details(provider: Any, phones: list[CloudPhone]) -> list[CloudPhone]:
+    def _with_details(provider: Any, phones: list[CloudPhone]) -> tuple[list[CloudPhone], dict[str, dict[str, Any]]]:
         """The owner's own names, Android versions and paid-until times, where the provider has a second list."""
         if not phones or not hasattr(provider, "phone_details"):
-            return phones
+            return phones, {}
         try:
             details = provider.phone_details([p.remote_id for p in phones])
         except ProviderError:
-            return phones
+            return phones, {}
         out = []
         for phone in phones:
             extra = details.get(phone.remote_id) or {}
             out.append(replace(phone, name=extra.get("name") or phone.name, android=phone.android or extra.get("android"),
                                paid_until_ms=extra.get("paidUntilMs") or phone.paid_until_ms))
-        return out
+        return out, details
+
+    def _adopt_rentals(self, account_id: str, details: dict[str, dict[str, Any]], listed: dict[str, CloudPhone]) -> None:
+        """Phones the owner rented here appear on the account a little later, by equipment id: keep them connected
+        (so Cyclone and the skills arrive) and remember they are rentals."""
+        account = self._require(account_id)
+        pending = account.get("pendingRentals") or []
+        if not pending:
+            return
+        by_equipment = {d.get("equipmentId"): code for code, d in details.items() if d.get("equipmentId") and code in listed}
+        now = self._now_ms()
+
+        def change(a: dict[str, Any]) -> None:
+            kept = []
+            for order in a.get("pendingRentals") or []:
+                waiting = []
+                for equipment in order.get("equipmentIds") or []:
+                    code = by_equipment.get(equipment)
+                    if code is None:
+                        waiting.append(equipment)
+                        continue
+                    entry = a["phones"].setdefault(code, {"name": listed[code].name})
+                    entry.update({"keep": True, "billing": "rental", "autoRenew": bool(order.get("autoRenew"))})
+                if waiting and now - int(order.get("atMs") or now) < PENDING_RENTAL_S * 1000:
+                    kept.append({**order, "equipmentIds": waiting})
+            a["pendingRentals"] = kept
+
+        self.vault.update(account_id, change)
 
     def _follow_moves(self, account: dict[str, Any], provider: Any, listed: set[str]) -> None:
         """A kept phone whose padCode VMOS changed is the same phone: its keep, name and local port move to the new
@@ -243,7 +286,8 @@ class CloudFleetService:
         self.vault.update(account_id, change)
         return self.account_public(account_id)
 
-    def set_phone(self, account_id: str, remote_id: str, *, keep: bool | None = None, address: str | None = None) -> dict[str, Any]:
+    def set_phone(self, account_id: str, remote_id: str, *, keep: bool | None = None, address: str | None = None,
+                  billing: str | None = None) -> dict[str, Any]:
         account = self._require(account_id)
         known = self._phones.get(account_id, {}).get(remote_id)
         if known is None and remote_id not in (account.get("phones") or {}) and remote_id not in (account.get("addresses") or {}):
@@ -256,10 +300,15 @@ class CloudFleetService:
         if keep and sum(1 for a in self.vault.accounts().values() for p in (a.get("phones") or {}).values() if p.get("keep")) >= MAX_KEPT:
             raise _bad(f"Cyclone keeps at most {MAX_KEPT} phones connected.")
 
+        if billing is not None and billing not in BILLING:
+            raise _bad("A phone is either rented by the period or pay-for-time.")
+
         def change(a: dict[str, Any]) -> None:
             entry = a["phones"].setdefault(remote_id, {"keep": False, "name": known.name if known else remote_id})
             if keep is not None:
                 entry["keep"] = keep
+            if billing is not None:
+                entry["billing"] = billing
             if clean is not None:
                 if clean:
                     a["addresses"][remote_id] = clean
@@ -275,6 +324,235 @@ class CloudFleetService:
             if link is not None:
                 link.next_try_ms = 0
         return self.account_public(account_id)
+
+    # The owner's buttons: renting, power, renewal, backup ---------------------------------------------------
+    # Reached only from the owner's Glass page (the `/v1/cloud` routes); no model, MCP or agent tool reaches them.
+    # Money moves only when the owner confirmed the exact total VMOS asks right now.
+
+    def offers(self, account_id: str, android: int = 13, *, fresh: bool = False) -> list[dict[str, Any]]:
+        account = self._require(account_id)
+        provider = self._rent_provider(account)
+        cached = self._offers.get((account_id, android))
+        if cached and not fresh and self.clock() - cached[0] < OFFERS_TTL_S:
+            return cached[1]
+        offers = provider.offers(android)
+        self._offers[(account_id, android)] = (self.clock(), offers)
+        return offers
+
+    def rent(self, account_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Rent new phones: `kind` "rental" (a period: a day, a week, a month…) or "timing" (pay-for-time). The
+        new phones are kept connected, so Cyclone and the skills arrive on them by themselves."""
+        account = self._require(account_id)
+        provider = self._rent_provider(account)
+        kind, android = str(body.get("kind") or ""), int(body.get("android") or 13)
+        count = int(body.get("count") or 1)
+        if kind not in BILLING:
+            raise _bad("Pick a rental period or pay-for-time.")
+        if not 1 <= count <= MAX_ORDER:
+            raise _bad(f"Rent 1 to {MAX_ORDER} phones at a time.")
+        kept = sum(1 for a in self.vault.accounts().values() for p in (a.get("phones") or {}).values() if p.get("keep"))
+        if kept + count > MAX_KEPT:
+            raise _bad(f"Cyclone keeps at most {MAX_KEPT} phones connected.")
+        config, sku = self._find_sku(self.offers(account_id, android, fresh=True), kind, int(body.get("skuId") or 0))
+        total = sku["priceCents"] * count
+        self._check_price(total, body.get("expectedPriceCents"))
+        now = self._now_ms()
+        order = {"atMs": now, "kind": kind, "plan": config["name"], "period": sku["label"], "count": count,
+                 "android": android, "totalCents": total}
+        if kind == "rental":
+            auto_renew = bool(body.get("autoRenew", False))
+            equipment = provider.rent(sku["skuId"], android, count, auto_renew=auto_renew)
+
+            def change(a: dict[str, Any]) -> None:
+                a.setdefault("pendingRentals", []).append({"atMs": now, "equipmentIds": equipment, "autoRenew": auto_renew})
+                a["orders"] = ((a.get("orders") or []) + [order])[-KEEP_ORDERS:]
+        else:
+            codes = provider.rent_timing(sku["skuId"], android, count, group=int(config.get("group") or 1))
+
+            def change(a: dict[str, Any]) -> None:
+                for code in codes:
+                    a["phones"].setdefault(code, {"name": code}).update(
+                        {"keep": True, "billing": "timing", "poweredOff": False, "poweredOnAtMs": now})
+                a["orders"] = ((a.get("orders") or []) + [order])[-KEEP_ORDERS:]
+
+        self.vault.update(account_id, change)
+        try:
+            self.refresh_phones(account_id)
+        except ProviderError:
+            pass
+        return self.account_public(account_id)
+
+    def renew(self, account_id: str, remote_id: str, sku_id: int, expected_cents: Any) -> dict[str, Any]:
+        """Pay another period for one rented phone."""
+        account = self._require(account_id)
+        provider = self._rent_provider(account)
+        phone = self._listed(account_id, remote_id)
+        detail = (self._details.get(account_id) or {}).get(remote_id) or {}
+        if not detail.get("equipmentId"):
+            raise _bad("VMOS hasn't said which device this is yet. Refresh, then try again.")
+        android = _android_number(phone.android)
+        _config, sku = self._find_sku(self.offers(account_id, android, fresh=True), "rental", int(sku_id or 0))
+        self._check_price(sku["priceCents"], expected_cents)
+        entry = (account.get("phones") or {}).get(remote_id) or {}
+        provider.renew(int(detail["equipmentId"]), sku["skuId"], android, auto_renew=bool(entry.get("autoRenew")))
+        order = {"atMs": self._now_ms(), "kind": "renewal", "plan": phone.name, "period": sku["label"], "count": 1,
+                 "android": android, "totalCents": sku["priceCents"]}
+        self.vault.update(account_id, lambda a: a.update({"orders": ((a.get("orders") or []) + [order])[-KEEP_ORDERS:]}))
+        try:
+            self.refresh_phones(account_id)
+        except ProviderError:
+            pass
+        return self.account_public(account_id)
+
+    def set_auto_renew(self, account_id: str, remote_id: str, on: bool) -> dict[str, Any]:
+        account = self._require(account_id)
+        self._rent_provider(account).set_auto_renew(self._known(account, remote_id), bool(on))
+        self.vault.update(account_id, lambda a: a["phones"].setdefault(remote_id, {"keep": False, "name": remote_id})
+                          .update({"autoRenew": bool(on)}))
+        return self.account_public(account_id)
+
+    def power(self, account_id: str, remote_id: str, on: bool) -> dict[str, Any]:
+        """Power a pay-for-time phone on or off. Off keeps everything on it; Cyclone lets go of its link first."""
+        account = self._require(account_id)
+        provider = self._rent_provider(account)
+        entry = (account.get("phones") or {}).get(remote_id) or {}
+        if entry.get("billing") != "timing":
+            raise _bad("Only pay-for-time phones are powered on and off here.")
+        phone = self._known(account, remote_id)
+        key = phone_key(account["provider"], account_id, remote_id)
+        if not on:
+            self._release(key)
+        provider.power(phone, bool(on))
+        now = self._now_ms()
+        self.vault.update(account_id, lambda a: a["phones"].setdefault(remote_id, {"keep": True, "name": phone.name})
+                          .update({"poweredOff": not on, "poweredOnAtMs": now if on else None}))
+        if on:
+            self._listed_at[account_id] = 0  # look again soon: the phone is starting
+            with self._lock:
+                link = self._links.get(key)
+                if link is not None:
+                    link.next_try_ms = 0
+        return self.account_public(account_id)
+
+    def start_backup(self, account_id: str, remote_id: str, name: str | None = None) -> dict[str, Any]:
+        """Back up one phone at VMOS (cloud storage), when the owner asks. VMOS runs one backup per account at a
+        time; Cyclone sizes it first, as VMOS asks, then follows it to done."""
+        account = self._require(account_id)
+        provider = self._rent_provider(account)
+        if account.get("backupJob"):
+            raise _bad("A backup is already running on this account. VMOS does one at a time.")
+        phone = self._listed(account_id, remote_id)
+        if phone.power != "running":
+            raise _bad("The phone has to be running to be backed up.")
+        now = self._now_ms()
+        label = (name or "").strip()[:60] or f"{phone.name} · Cyclone backup"
+        provider.backup_size_start(phone)
+        job = {"remoteId": remote_id, "stage": "sizing", "startedAtMs": now, "nextMs": now + int(BACKUP_STEP_S * 1000),
+               "name": label}
+        self.vault.update(account_id, lambda a: a.update({"backupJob": job}))
+        return self.account_public(account_id)
+
+    def _advance_backup(self, account: dict[str, Any]) -> None:
+        job = dict(account.get("backupJob") or {})
+        now = self._now_ms()
+        if not job or now < int(job.get("nextMs") or 0):
+            return
+        provider = self._provider(account)
+        remote_id = str(job.get("remoteId"))
+        phone = self._phones.get(account["id"], {}).get(remote_id) or CloudPhone(account["provider"], remote_id, remote_id)
+        started = int(job.get("startedAtMs") or now)
+        try:
+            if job.get("stage") == "sizing":
+                status, size = provider.backup_size(phone)
+                if status == "calculating" and now - started < BACKUP_SIZE_WAIT_S * 1000:
+                    job["nextMs"] = now + int(BACKUP_STEP_S * 1000)
+                else:
+                    job.update({"stage": "saving", "batchId": provider.backup_start(phone, str(job.get("name") or "")),
+                                "sizeBytes": size, "nextMs": now + int(BACKUP_STEP_S * 1000)})
+            else:
+                progress = provider.backup_progress(str(job.get("batchId") or ""), phone)
+                if progress["state"] == "done":
+                    record = {"backupId": progress["backupId"], "remoteId": remote_id, "name": job.get("name"), "atMs": now,
+                              "sizeBytes": job.get("sizeBytes")}
+                    return self._finish_backup(account["id"], True, None, remote_id, record)
+                if progress["state"] == "failed":
+                    return self._finish_backup(account["id"], False, progress["message"], remote_id)
+                if now - started > BACKUP_GIVE_UP_S * 1000:
+                    return self._finish_backup(account["id"], False, "VMOS is taking very long. Check the backup in the VMOS console.", remote_id)
+                job["nextMs"] = now + int(BACKUP_STEP_S * 2000)
+        except ProviderError as exc:
+            # VMOS saying no (no storage left, phone not running) ends the backup; only a network hiccup waits.
+            if not exc.retryable or exc.code == "PROVIDER_REFUSED":
+                return self._finish_backup(account["id"], False, exc.message, remote_id)
+            job["nextMs"] = now + int(BACKUP_STEP_S * 4000)
+        self.vault.update(account["id"], lambda a: a.update({"backupJob": job}))
+
+    def _finish_backup(self, account_id: str, ok: bool, message: str | None, remote_id: str,
+                       record: dict[str, Any] | None = None) -> None:
+        now = self._now_ms()
+
+        def change(a: dict[str, Any]) -> None:
+            a["backupJob"] = None
+            a["lastBackup"] = {"remoteId": remote_id, "ok": ok, "message": message, "atMs": now}
+            if record:
+                a["backups"] = ((a.get("backups") or []) + [record])[-KEEP_BACKUPS:]
+
+        self.vault.update(account_id, change)
+
+    def restore(self, account_id: str, remote_id: str, backup_id: str) -> dict[str, Any]:
+        """Put one of this phone's own backups back onto it. It replaces what is on the phone now. A backup is never
+        put onto another phone here: that would copy one phone's Cyclone pairing onto another (plan 56 V3 does
+        clones, with re-enrollment)."""
+        account = self._require(account_id)
+        provider = self._rent_provider(account)
+        own = [b for b in account.get("backups") or [] if b.get("backupId") == backup_id and b.get("remoteId") == remote_id]
+        if not own:
+            raise _bad("Cyclone restores a phone only from a backup it made of that same phone.")
+        if account.get("backupJob"):
+            raise _bad("Wait for the backup that is running to finish.")
+        phone = self._known(account, remote_id)
+        self._release(phone_key(account["provider"], account_id, remote_id))
+        provider.restore(backup_id, phone)
+        self._listed_at[account_id] = 0
+        return self.account_public(account_id)
+
+    def _rent_provider(self, account: dict[str, Any]) -> Any:
+        provider = self._provider(account)
+        if account["provider"] != "vmos" or not hasattr(provider, "offers"):
+            raise _bad("Renting, power and backups are for VMOS Cloud accounts.")
+        return provider
+
+    def _known(self, account: dict[str, Any], remote_id: str) -> CloudPhone:
+        """A listed phone, or one this account already holds (a just-rented phone VMOS doesn't list yet)."""
+        phone = self._phones.get(account["id"], {}).get(remote_id)
+        if phone is not None:
+            return phone
+        entry = (account.get("phones") or {}).get(remote_id)
+        if entry is None:
+            return self._listed(account["id"], remote_id)
+        return CloudPhone(account["provider"], remote_id, entry.get("name") or remote_id)
+
+    def _listed(self, account_id: str, remote_id: str) -> CloudPhone:
+        phone = self._phones.get(account_id, {}).get(remote_id)
+        if phone is None:
+            self.refresh_phones(account_id)
+            phone = self._phones.get(account_id, {}).get(remote_id)
+        if phone is None:
+            raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "That cloud phone isn't in this account.")
+        return phone
+
+    @staticmethod
+    def _find_sku(offers: list[dict[str, Any]], kind: str, sku_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        for config in offers:
+            for sku in config["rentals" if kind == "rental" else "timing"]:
+                if sku["skuId"] == sku_id:
+                    return config, sku
+        raise _bad("VMOS doesn't offer that any more. Look at the offers again.")
+
+    @staticmethod
+    def _check_price(total: int, expected: Any) -> None:
+        if not isinstance(expected, int) or isinstance(expected, bool) or expected != total:
+            raise _bad(f"VMOS now asks {_money(total)}. Check the price and confirm again.")
 
     # Status ---------------------------------------------------------------------------------------------------
 
@@ -295,11 +573,30 @@ class CloudFleetService:
                                                  "address": None}
             item["address"] = (account.get("addresses") or {}).get(remote_id) or item.get("address")
             item["keep"] = bool(entry.get("keep"))
+            item.update(self._phone_extras(account, remote_id, entry))
             item.update(self._link_public(phone_key(account["provider"], account_id, remote_id), bool(entry.get("keep"))))
             phones.append(item)
         return {"id": account_id, "provider": account["provider"], "providerLabel": PROVIDER_LABELS[account["provider"]],
                 "label": account.get("label"), "installCyclone": bool(account.get("installCyclone", True)),
-                "hasKey": bool(account.get("secrets")), "error": self._account_errors.get(account_id), "phones": phones}
+                "hasKey": bool(account.get("secrets")), "error": self._account_errors.get(account_id), "phones": phones,
+                "canRent": account["provider"] == "vmos",
+                "pendingRentals": sum(len(o.get("equipmentIds") or []) for o in account.get("pendingRentals") or []),
+                "orders": list(reversed((account.get("orders") or [])[-5:]))}
+
+    @staticmethod
+    def _phone_extras(account: dict[str, Any], remote_id: str, entry: dict[str, Any]) -> dict[str, Any]:
+        job = account.get("backupJob") if (account.get("backupJob") or {}).get("remoteId") == remote_id else None
+        last = account.get("lastBackup") if (account.get("lastBackup") or {}).get("remoteId") == remote_id else None
+        return {
+            "billing": entry.get("billing") if entry.get("billing") in BILLING else None,
+            "poweredOff": bool(entry.get("poweredOff")),
+            "poweredOnAtMs": entry.get("poweredOnAtMs") if isinstance(entry.get("poweredOnAtMs"), int) else None,
+            "autoRenew": entry.get("autoRenew") if isinstance(entry.get("autoRenew"), bool) else None,
+            "backups": [{"backupId": b["backupId"], "name": b.get("name"), "atMs": b.get("atMs"), "sizeBytes": b.get("sizeBytes")}
+                        for b in reversed(account.get("backups") or []) if b.get("remoteId") == remote_id][:10],
+            "backup": {"stage": job.get("stage"), "startedAtMs": job.get("startedAtMs")} if job else None,
+            "lastBackup": {"ok": bool(last.get("ok")), "message": last.get("message"), "atMs": last.get("atMs")} if last else None,
+        }
 
     def _link_public(self, key: str, keep: bool) -> dict[str, Any]:
         with self._lock:
@@ -332,12 +629,18 @@ class CloudFleetService:
         adb_states: dict[str, str] | None = None
         for account_id, account in accounts.items():
             kept = [r for r, p in (account.get("phones") or {}).items() if p.get("keep")]
-            if account["provider"] != "adb" and (kept or account_id not in self._phones) \
-                    and self.clock() - self._listed_at.get(account_id, 0) >= LIST_EVERY_S:
+            pending = bool(account.get("pendingRentals"))
+            every = PENDING_LIST_EVERY_S if pending else LIST_EVERY_S
+            if account["provider"] != "adb" and (kept or pending or account_id not in self._phones) \
+                    and self.clock() - self._listed_at.get(account_id, 0) >= every:
                 try:
                     self.refresh_phones(account_id)
                 except ProviderError:
                     pass
+                account = self.vault.account(account_id) or account
+                kept = [r for r, p in (account.get("phones") or {}).items() if p.get("keep")]
+            if account.get("backupJob"):
+                self._advance_backup(account)
             for remote_id in kept:
                 key = phone_key(account["provider"], account_id, remote_id)
                 wanted.add(key)
@@ -357,6 +660,10 @@ class CloudFleetService:
             return
         phone = self._phones.get(account["id"], {}).get(remote_id) or CloudPhone(
             account["provider"], remote_id, (account.get("phones", {}).get(remote_id) or {}).get("name") or remote_id)
+        entry = (account.get("phones") or {}).get(remote_id) or {}
+        if entry.get("billing") == "timing" and (entry.get("poweredOff") or phone.power == "stopped"):
+            return self._set(link, "off", "Powered off: a pay-for-time phone costs nothing while it is off. Power it on here.",
+                             wait_s=60)
         if phone.power == "stopped":
             return self._set(link, "off", "This cloud phone is off. Turn it on at the provider.", wait_s=60)
         # The provider's own state first: opening ADB on a phone that is starting, broken or deleted only fails.
@@ -537,6 +844,16 @@ class CloudFleetService:
         if account is None:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "That cloud account isn't on this PC.")
         return account
+
+
+def _money(cents: int) -> str:
+    return f"${cents / 100:,.2f}"
+
+
+def _android_number(text: str | None) -> int:
+    digits = re.findall(r"\d+", text or "")
+    number = int(digits[0]) if digits else 13
+    return number if number in (13, 14, 15) else 13
 
 
 def _bad(message: str) -> DesktopRuntimeError:

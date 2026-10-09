@@ -6,6 +6,10 @@
   time (`userPadList`), follow a moved padCode (`queryPadIdChangeRecords`), read Cyclone's installed version
   (`listInstalledApp`) and keep Cyclone's own service alive (`setKeepAliveApp`). Still no taps, typing, shell or
   installs through the provider.
+- Alpha.117 adds the owner's own VMOS buttons: rent (a period or pay-for-time), renew, auto-renew, power a pay-for-time
+  phone on or off, back up and restore. Money moves only for the exact total the owner confirmed; powering off always
+  keeps the phone's data, powering on never makes a "new device", nothing destroys a phone, and a phone is restored
+  only from its own backup.
 - adb is used for connect, disconnect and the device list only; ssh only as a foreground tunnel on 127.0.0.1.
 - Provider keys never reach a response: they live in the DPAPI vault (memory only off Windows) and reach ssh only
   through its askpass environment, never a command line or a plain file.
@@ -37,11 +41,18 @@ def test_providers_only_list_phones_and_open_adb():
         "/vcpcloud/api/padApi/openOnlineAdb", "/vcpcloud/api/padApi/userPadList",
         "/vcpcloud/api/padApi/queryPadIdChangeRecords", "/vcpcloud/api/padApi/listInstalledApp",
         "/vcpcloud/api/padApi/setKeepAliveApp",
+        # Alpha.117: the owner's buttons.
+        "/vcpcloud/api/padApi/getCloudGoodList", "/vcpcloud/api/padApi/createMoneyOrder",
+        "/vcpcloud/api/padApi/createByTimingOrder", "/vcpcloud/api/padApi/timingPadOn", "/vcpcloud/api/padApi/timingPadOff",
+        "/vcpcloud/api/padApi/openAutoRenew", "/vcpcloud/api/padApi/closeAutoRenew",
+        "/vcpcloud/api/padApi/backupCalculate", "/vcpcloud/api/padApi/queryBackupCalculateResult",
+        "/vcpcloud/api/padApi/addBackup", "/vcpcloud/api/padApi/queryBackupBatch", "/vcpcloud/api/padApi/clonePadBackup",
     }, endpoints
     for forbidden in ("asyncCmd", "syncCmd", "simulateTouch", "inputText", "cloudPhone/command", "switchRoot", "installApp",
                       "uploadFile", "simulateClick", "simulateSwipe", "replacePad", "padReplaceNew", "updateSIM",
                       "updatePadAndroidProp", "setHideAppList", "setHideAccessibilityAppList", "resetGAID", "smartIp",
-                      "cloudNumber", "socialAccount", "shell=True", "os.system"):
+                      "cloudNumber", "socialAccount", "timingPadDel", "closeAllAutoRenew", "authorizePad", "shell=True",
+                      "os.system"):
         assert forbidden not in body, forbidden
 
 
@@ -86,9 +97,25 @@ def test_keys_are_kept_in_the_vault_and_never_returned():
     public_link = public_link[public_link.index("def public"):public_link.index("def normalize_address")]
     assert "secret" not in public_link
     api = text(CLOUD / "api.py")
-    assert api.count('extra="forbid"') == 3
+    assert api.count('extra="forbid"') == 8
     for word in ("command", "argv", "shell", "url"):
         assert not re.search(rf"^\s+{word}\s*:", api, re.M), word
+
+
+def test_money_power_and_backup_stay_on_the_owner_s_terms():
+    vmos = text(CLOUD / "providers/vmos.py")
+    power = vmos[vmos.index("    def power("):vmos.index("    def backup_size_start")]
+    assert '"defCode": 0' in power and '"isBackUp": 1' in power and '"defCode": 1' not in power and '"isBackUp": 0' not in power
+    service = text(CLOUD / "service.py")
+    rent = service[service.index("    def rent("):service.index("    def set_auto_renew")]
+    assert rent.count("self._check_price(") == 2 and "MAX_ORDER" in rent
+    assert "MAX_ORDER = 5" in service
+    restore = service[service.index("    def restore("):service.index("    def _rent_provider")]
+    assert 'b.get("remoteId") == remote_id' in restore
+    # A backup starts only from the owner's route, never from the keeper by itself.
+    assert service.count("provider.backup_size_start(") == 1
+    api = text(CLOUD / "api.py")
+    assert api.count("expectedPriceCents: int") == 2
 
 
 def test_no_model_facing_tool_can_manage_cloud_phones():

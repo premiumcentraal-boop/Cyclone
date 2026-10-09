@@ -43,11 +43,12 @@ class FakeHttp:
         self.calls: list[tuple[str, dict[str, str], dict]] = []
 
     def __call__(self, method, url, headers, body, timeout):
-        path = "/" + url.split("/", 3)[3]
-        self.calls.append((path, headers, json.loads(body.decode("utf-8")) if body else {}))
+        path, _, query = ("/" + url.split("/", 3)[3]).partition("?")
+        sent = json.loads(body.decode("utf-8")) if body else dict(pair.split("=", 1) for pair in query.split("&") if pair)
+        self.calls.append((path, headers, sent))
         answer = self.routes.get(path)
         if callable(answer):
-            answer = answer(json.loads(body.decode("utf-8")))
+            answer = answer(sent)
         if isinstance(answer, tuple):
             return answer
         if answer is None:
@@ -173,7 +174,8 @@ def test_vmos_reads_details_moves_installed_version_and_asks_keep_alive():
     vmos = VmosCloud(AK, SK, transport=http, clock=Clock())
     phone = CloudPhone("vmos", "AC32010230001", "Shop 1")
     assert vmos.phone_details(["AC32010230001"]) == {
-        "AC32010230001": {"name": "Shop phone", "android": "13", "paidUntilMs": 1_800_000_000_000}}
+        "AC32010230001": {"name": "Shop phone", "android": "13", "paidUntilMs": 1_800_000_000_000, "equipmentId": None,
+                          "plan": None}}
     assert vmos.pad_code_changes() == {"B": "C", "A": "C"}  # a phone that moved twice is followed to its newest code
     assert vmos.installed_version(phone) == {"versionName": "5.0.0-alpha.114.dev1", "versionCode": 267, "state": "installed"}
     assert vmos.installed_version(phone, "com.missing") is None

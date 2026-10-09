@@ -276,6 +276,14 @@
 .cloud-phone-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cloud-phone-message { color: var(--text-muted); }
 .cloud-address { display: flex; gap: var(--space-2); }
+.cloud-rent { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface); }
+.cloud-rent-title { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--text); }
+.cloud-rent-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.cloud-offers { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.cloud-offer { white-space: normal; text-align: left; }
+.cloud-phone-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.cloud-confirm { margin: 0; font-size: var(--text-sm); color: var(--text); }
+.cloud-ok { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--success-soft); font-size: var(--text-sm); color: var(--text); }
 .cloud-address .cloud-input { flex: 1 1 200px; }
 @media (max-width: 520px) {
   .cloud-phone-top { flex-wrap: wrap; }

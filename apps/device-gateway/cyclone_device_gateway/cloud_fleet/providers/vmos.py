@@ -8,7 +8,9 @@ service can remember it. The paths are the documented defaults and can be overri
 change on VMOS's side is a settings fix, not a release.
 
 Only connectors that serve Cyclone's own rules are here (plan 56 §2): reading phones and their state, opening ADB,
-following a changed padCode, checking Cyclone's installed version and keeping its service alive. Nothing here taps,
+following a changed padCode, checking Cyclone's installed version and keeping its service alive; and, behind the
+owner's own confirmed buttons in Glass (alpha.117), renting phones (by the week or month, or pay-for-time), powering
+pay-for-time phones on and off, renewing, and backing a phone up or restoring its own backup. Nothing here taps,
 types, spoofs a device or reaches an app's accounts: Cyclone acts on the phone only through its own executor.
 
 Remote ADB answers with an SSH command (`ssh … user@host -p port -L local:adb-proxy:port -Nf`), a key (the SSH
@@ -37,7 +39,24 @@ ENDPOINTS = {
     "padCodeChanges": "/vcpcloud/api/padApi/queryPadIdChangeRecords",
     "installedApps": "/vcpcloud/api/padApi/listInstalledApp",
     "keepAlive": "/vcpcloud/api/padApi/setKeepAliveApp",
+    # The owner's buttons (alpha.117): offers, renting, pay-for-time power, renewal, backup.
+    "offers": "/vcpcloud/api/padApi/getCloudGoodList",
+    "rent": "/vcpcloud/api/padApi/createMoneyOrder",
+    "rentTiming": "/vcpcloud/api/padApi/createByTimingOrder",
+    "powerOn": "/vcpcloud/api/padApi/timingPadOn",
+    "powerOff": "/vcpcloud/api/padApi/timingPadOff",
+    "autoRenewOn": "/vcpcloud/api/padApi/openAutoRenew",
+    "autoRenewOff": "/vcpcloud/api/padApi/closeAutoRenew",
+    "backupSize": "/vcpcloud/api/padApi/backupCalculate",
+    "backupSizeResult": "/vcpcloud/api/padApi/queryBackupCalculateResult",
+    "backup": "/vcpcloud/api/padApi/addBackup",
+    "backupProgress": "/vcpcloud/api/padApi/queryBackupBatch",
+    "restore": "/vcpcloud/api/padApi/clonePadBackup",
 }
+# The few VMOS lists that are GET requests, signed over their raw query string.
+GET_ENDPOINTS = {"offers"}
+# Android 13 (SDK 33) is Cyclone's floor; VMOS names images "Android13" and so on.
+ANDROID_VERSIONS = (13, 14, 15)
 # Cyclone's own service, which VMOS's keep-alive guards against being stopped (Android 13–15 images).
 CYCLONE_PACKAGE = "com.cyclone.mobile"
 CYCLONE_SERVICE = "com.cyclone.mobile/com.cyclone.mobile.CycloneAccessibilityService"
@@ -121,7 +140,8 @@ class VmosCloud:
         # "v2" (VMOS's current scheme) unless this account is known to use the older HMAC one.
         self.signing = "hmac" if signing == "hmac" else "v2"
 
-    def _call(self, endpoint: str, payload: dict[str, Any]) -> Any:
+    def _call(self, endpoint: str, payload: dict[str, Any] | None = None) -> Any:
+        payload = payload or {}
         try:
             return self._signed_call(endpoint, payload, self.signing)
         except _SignatureRefused as refused:
@@ -134,10 +154,15 @@ class VmosCloud:
             return data
 
     def _signed_call(self, endpoint: str, payload: dict[str, Any], scheme: str) -> Any:
-        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        method = "GET" if endpoint in GET_ENDPOINTS else "POST"
+        # A GET is signed over its query exactly as sent: Cyclone builds it from plain numbers and words, unencoded.
+        body = "&".join(f"{k}={v}" for k, v in payload.items()) if method == "GET" else \
+            json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
         path = self.endpoints[endpoint]
         if scheme == "v2":
             headers = v2_headers(self._ak, self._sk, str(int(self.clock())), path, body)
+            if method == "GET":
+                headers.pop("Content-Type", None)
         else:
             x_date = datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             headers = sign(self._ak, self._sk, urlparse(self.base_url).netloc, body, x_date)
@@ -149,6 +174,8 @@ class VmosCloud:
             return status, raw
 
         try:
+            if method == "GET":
+                return call_json(tap, "GET", self.base_url + path + (f"?{body}" if body else ""), headers, b"", provider=self.name)
             return call_json(tap, "POST", self.base_url + path, headers, body.encode("utf-8"), provider=self.name)
         except ProviderError as exc:
             code = answer.get("code")
@@ -199,10 +226,13 @@ class VmosCloud:
             if not code or (remote_ids is not None and code not in remote_ids):
                 continue
             ends = row.get("signExpirationTimeTamp")
+            equipment = row.get("equipmentId")
             out[code] = {
                 "name": str(row.get("padName") or "").strip()[:80] or None,
                 "android": str(row.get("androidVersion") or "").strip()[:24] or None,
                 "paidUntilMs": int(ends) if isinstance(ends, (int, float)) and ends > 0 else parse_time_ms(row.get("signExpirationTime")),
+                "equipmentId": int(equipment) if isinstance(equipment, int) and equipment > 0 else None,
+                "plan": str(row.get("configName") or "").strip()[:60] or None,
             }
         return out
 
@@ -241,6 +271,114 @@ class VmosCloud:
         if phones:
             self._call("keepAlive", {"padCodes": [p.remote_id for p in phones], "applyAllInstances": False,
                                      "appInfos": [{"serverName": service}]})
+
+
+    # The owner's buttons ------------------------------------------------------------------------------------
+    # Each is reached only from an owner route in Glass; the service checks the price the owner confirmed first.
+
+    def offers(self, android: int = 13) -> list[dict[str, Any]]:
+        """The phones VMOS sells for one Android version: per configuration, its rental periods (a day, a week, a
+        month…) and its pay-for-time rates, with prices in cents as VMOS lists them. Sold-out ones are left out."""
+        if android not in ANDROID_VERSIONS:
+            raise ProviderError("PROVIDER_REJECTED", "Cyclone needs Android 13, 14 or 15.", retryable=False)
+        data = self._call("offers", {"androidVersion": android})
+        group = data.get("goodId") if isinstance(data, dict) else None
+        configs = data.get("configs") if isinstance(data, dict) else None
+        out = []
+        for config in configs if isinstance(configs, list) else []:
+            if not isinstance(config, dict) or config.get("sellOutFlag") is True:
+                continue
+            config_id = config.get("configId")
+            if not isinstance(config_id, int):
+                continue
+            rentals = [r for r in (_sku(t, "rental") for t in config.get("goodTimes") or []) if r]
+            timing = [] if config.get("timingSellOutFlag") is False else \
+                [r for r in (_sku(t, "timing") for t in config.get("timingGoodTimes") or []) if r]
+            if not rentals and not timing:
+                continue
+            out.append({"configId": config_id, "name": str(config.get("configName") or f"Plan {config_id}")[:60],
+                        "android": android, "group": group if isinstance(group, int) else 1,
+                        "rentals": rentals, "timing": timing})
+        return out
+
+    def rent(self, sku_id: int, android: int, count: int, *, auto_renew: bool) -> list[int]:
+        """Rent new phones for a period (`createMoneyOrder`, `goodId` = the period's SKU). Answers the new phones'
+        equipment ids; their padCodes appear in `userPadList` once VMOS has made them."""
+        data = self._call("rent", {"androidVersionName": f"Android{android}", "goodId": sku_id, "goodNum": count,
+                                   "autoRenew": bool(auto_renew)})
+        return [int(r["equipmentId"]) for r in _rows(data) if isinstance(r.get("equipmentId"), int)]
+
+    def renew(self, equipment_id: int, sku_id: int, android: int, *, auto_renew: bool) -> None:
+        """Pay another period for one rented phone (`createMoneyOrder` with its `equipmentId`)."""
+        self._call("rent", {"androidVersionName": f"Android{android}", "goodId": sku_id, "goodNum": 1,
+                            "autoRenew": bool(auto_renew), "equipmentId": str(equipment_id)})
+
+    def set_auto_renew(self, phone: CloudPhone, on: bool) -> None:
+        self._call("autoRenewOn" if on else "autoRenewOff", {"padCode": phone.remote_id})
+
+    def rent_timing(self, sku_id: int, android: int, count: int, *, group: int = 1) -> list[str]:
+        """Pay-for-time phones (`createByTimingOrder`): billed only while powered on. Answers their padCodes."""
+        data = self._call("rentTiming", {"goodId": group, "goodTimeId": sku_id, "goodNum": count, "androidVersion": 20 + android})
+        return [str(r["padCode"]) for r in _rows(data) if str(r.get("padCode") or "").strip()]
+
+    def power(self, phone: CloudPhone, on: bool) -> None:
+        """Power a pay-for-time phone on or off. On never asks for a "new device" (`defCode` 0); off always keeps
+        the phone's environment (`isBackUp` 1), so nothing on it is lost."""
+        if on:
+            self._call("powerOn", {"padCodes": [phone.remote_id], "defCode": 0})
+        else:
+            self._call("powerOff", {"padCodes": [phone.remote_id], "isBackUp": 1})
+
+    def backup_size_start(self, phone: CloudPhone) -> None:
+        self._call("backupSize", {"padCode": phone.remote_id})
+
+    def backup_size(self, phone: CloudPhone) -> tuple[str, int | None]:
+        """("calculating" | "ready" | "failed", bytes)."""
+        data = self._call("backupSizeResult", {"padCode": phone.remote_id})
+        item = data if isinstance(data, dict) else {}
+        size = item.get("totalSize")
+        status = str(item.get("status") or "calculating")
+        return (status if status in {"calculating", "ready", "failed"} else "calculating",
+                int(size) if isinstance(size, (int, float)) and size > 0 else None)
+
+    def backup_start(self, phone: CloudPhone, name: str) -> str:
+        data = self._call("backup", {"vcPadBackupList": [{"padCode": phone.remote_id, "name": name[:60]}]})
+        batch = str((data or {}).get("batchId") or "") if isinstance(data, dict) else ""
+        if not batch:
+            raise ProviderError("PROVIDER_ANSWER", "VMOS didn't start the backup.")
+        return batch
+
+    def backup_progress(self, batch_id: str, phone: CloudPhone) -> dict[str, Any]:
+        """{"state": running | done | failed, "backupId", "message"} for this phone in a backup batch."""
+        data = self._call("backupProgress", {"batchId": batch_id})
+        items = data.get("items") if isinstance(data, dict) else None
+        for item in items if isinstance(items, list) else []:
+            if isinstance(item, dict) and item.get("padCode") == phone.remote_id:
+                status = item.get("status")
+                if status == 2 and item.get("backupId"):
+                    return {"state": "done", "backupId": str(item["backupId"])[:120], "message": None}
+                if status == 3:
+                    return {"state": "failed", "backupId": None, "message": str(item.get("failMsg") or "VMOS couldn't back it up.")[:160]}
+                return {"state": "running", "backupId": None, "message": None}
+        if isinstance(data, dict) and data.get("taskStatus") == -1:
+            return {"state": "failed", "backupId": None, "message": "VMOS couldn't back it up."}
+        return {"state": "running", "backupId": None, "message": None}
+
+    def restore(self, backup_id: str, phone: CloudPhone) -> None:
+        """Put a backup back onto a phone (`clonePadBackup`). It replaces what is on the phone now."""
+        self._call("restore", {"vcPadBackupList": [{"backupId": backup_id}], "pads": [{"padCode": phone.remote_id}]})
+
+
+def _sku(raw: Any, kind: str) -> dict[str, Any] | None:
+    if not isinstance(raw, dict) or not isinstance(raw.get("id"), int):
+        return None
+    price = raw.get("goodPrice", raw.get("currentPrice"))
+    minutes = raw.get("goodTime")
+    if not isinstance(price, (int, float)) or price < 0 or not isinstance(minutes, int) or minutes <= 0:
+        return None
+    return {"skuId": raw["id"], "kind": kind, "label": str(raw.get("showContent") or f"{minutes} min")[:40],
+            "minutes": minutes, "priceCents": int(round(price)), "phonesPerOrder": int(raw.get("equipmentNumber") or 1),
+            "autoRenew": raw.get("autoRenew") is True}
 
 
 class _SignatureRefused(Exception):
