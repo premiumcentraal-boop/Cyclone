@@ -39,6 +39,8 @@ internal object ProfileCarry {
             .put("settings", settings(context))
             // Plan 57 P1: the profiles, so every profile's Cyclone knows every profile (Main is the authority).
             .put("registry", ProfileRegistryCodec.encode(ProfileRegistryStore.records(context)))
+            // Plan 57 P2: Market installs, owner skills and app manuals (see PortableFiles).
+            .put("files", files(context))
     }
 
     /** Takes in a bundle from another profile, and remembers what came for Profiles to show. */
@@ -51,7 +53,8 @@ internal object ProfileCarry {
         val memory = MindMissions.memory(context).absorb(MemoryCarry.Parcel.fromJson(bundle.optJSONObject("memory") ?: JSONObject()), me)
         val skills = AdaptiveBrainRuntime.store.absorbRows(bundle.optJSONObject("brain") ?: JSONObject())
         runCatching { AdaptiveBrainRuntime.store.writeMirror() }
-        val settings = applySettings(context, bundle.optJSONArray("settings") ?: JSONArray())
+        val (settings, inPlace) = applySettings(context, bundle.optJSONArray("settings") ?: JSONArray())
+        val files = runCatching { applyFiles(context, bundle.optJSONObject("files") ?: JSONObject()) }.getOrDefault(0)
         bundle.optString("registry").takeIf { it.isNotBlank() }?.let { text ->
             runCatching {
                 val incoming = ProfileRegistryCodec.decode(text)
@@ -60,7 +63,8 @@ internal object ProfileCarry {
             }
         }
         val report = CarryReport(System.currentTimeMillis(), bundle.optString("from_label").take(60).ifBlank { "another profile" },
-            memory.added + memory.updated, memory.removed, skills, settings)
+            memory.added + memory.updated, memory.removed, skills, settings, files, inPlace,
+            runCatching { AdaptiveBrainRuntime.store.skillCount() }.getOrDefault(-1))
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_LAST, report.toJson().toString()).apply()
         return report
     }
@@ -79,43 +83,118 @@ internal object ProfileCarry {
     private fun settings(context: Context): JSONArray {
         val out = JSONArray()
         CarryRules.settings.keys.forEach { file ->
+            val entry = PortableSettings.entry(file) ?: return@forEach
             context.getSharedPreferences(file, Context.MODE_PRIVATE).all.forEach { (key, value) ->
                 if (!CarryRules.carriesSetting(file, key, value)) return@forEach
-                val type = when (value) { is Boolean -> "b"; is Int -> "i"; is Long -> "l"; is Float -> "f"; else -> "s" }
-                out.put(JSONObject().put("file", file).put("key", key).put("type", type).put("value", value))
+                val row = JSONObject().put("file", file).put("key", key)
+                when {
+                    key in entry.idArrays -> row.put("type", "items").put("value", CarryRules.safeItems(file, key, value as String))
+                    value is Set<*> -> row.put("type", "ss").put("value", JSONArray(value.filterIsInstance<String>().sorted()))
+                    else -> row.put("type", when (value) { is Boolean -> "b"; is Int -> "i"; is Long -> "l"; is Float -> "f"; else -> "s" })
+                        .put("value", value)
+                }
+                out.put(row)
             }
         }
         return out
     }
 
-    private fun applySettings(context: Context, settings: JSONArray): Int {
+    /** Applies carried settings; returns how many changed and how many now match the other profile. */
+    private fun applySettings(context: Context, settings: JSONArray): Pair<Int, Int> {
         val current = CarryRules.settings.keys.associateWith { context.getSharedPreferences(it, Context.MODE_PRIVATE).all }
         val edits = CarryRules.settings.keys.associateWith { context.getSharedPreferences(it, Context.MODE_PRIVATE).edit() }
         var count = 0
+        var inPlace = 0
         for (index in 0 until settings.length()) {
             val entry = settings.optJSONObject(index) ?: continue
             val file = entry.optString("file")
             val key = entry.optString("key")
             val edit = edits[file] ?: continue
+            if (entry.optString("type") == "items") {
+                // Plan 57 P2: routines merge by id; nothing here is deleted by a carry.
+                val incoming = entry.optJSONArray("value") ?: continue
+                inPlace++
+                val (text, changed) = CarryRules.mergeItems(file, key, current[file]?.get(key) as? String, incoming) ?: continue
+                if (!CarryRules.carriesSetting(file, key, text)) continue
+                edit.putString(key, text)
+                count += changed
+                continue
+            }
             val value: Any = when (entry.optString("type")) {
                 "b" -> entry.optBoolean("value")
                 "i" -> entry.optInt("value")
                 "l" -> entry.optLong("value")
                 "f" -> entry.optDouble("value").toFloat()
                 "s" -> entry.optString("value")
+                "ss" -> entry.optJSONArray("value")?.let { a -> (0 until a.length()).map { a.optString(it) }.toSet() } ?: continue
                 else -> continue
             }
-            if (!CarryRules.carriesSetting(file, key, value) || current[file]?.get(key) == value) continue
+            if (!CarryRules.carriesSetting(file, key, value)) continue
+            inPlace++
+            if (current[file]?.get(key) == value) continue
             when (value) {
                 is Boolean -> edit.putBoolean(key, value)
                 is Int -> edit.putInt(key, value)
                 is Long -> edit.putLong(key, value)
                 is Float -> edit.putFloat(key, value)
                 is String -> edit.putString(key, value)
+                is Set<*> -> edit.putStringSet(key, value.filterIsInstance<String>().toSet())
             }
             count++
         }
         edits.values.forEach { it.apply() }
+        return count to inPlace
+    }
+
+    // Plan 57 P2: files ------------------------------------------------------------------------------------------------
+
+    private fun read(context: Context, path: String): String? = runCatching {
+        java.io.File(context.filesDir, path).takeIf { it.isFile }?.readText()
+    }.getOrNull()
+
+    private fun write(context: Context, path: String, text: String) {
+        val file = java.io.File(context.filesDir, path)
+        file.parentFile?.mkdirs()
+        val atomic = android.util.AtomicFile(file)
+        val out = atomic.startWrite()
+        try { out.write(text.toByteArray(Charsets.UTF_8)); atomic.finishWrite(out) } catch (e: Exception) { atomic.failWrite(out); throw e }
+    }
+
+    private fun files(context: Context): JSONObject {
+        val skills = PortableFiles.safeSkills(read(context, PortableFiles.OWNER_SKILLS))
+        val out = JSONObject()
+            .put("installs", PortableFiles.safeInstalls(read(context, PortableFiles.MARKET_INSTALLS)))
+            .put("skills", skills)
+            .put("anchors", PortableFiles.safeAnchors(read(context, PortableFiles.OWNER_ANCHORS), skills))
+        val folder = java.io.File(context.filesDir, PortableFiles.MANUALS)
+        val manuals = folder.listFiles().orEmpty().filter { it.isFile && PortableFiles.validManualName(it.name) && it.length() <= PortableFiles.MANUAL_MAX_CHARS }
+            .associate { it.name to it.readText() }
+        var room = PortableFiles.TOTAL_MAX_CHARS - out.toString().length
+        val kept = JSONObject()
+        PortableFiles.safeManuals(manuals).forEach { (name, text) -> if (text.length < room) { kept.put(name, text); room -= text.length } }
+        return out.put("manuals", kept)
+    }
+
+    private fun applyFiles(context: Context, files: JSONObject): Int {
+        var count = 0
+        files.optJSONArray("installs")?.let { incoming ->
+            PortableFiles.mergeInstalls(read(context, PortableFiles.MARKET_INSTALLS), incoming)?.let { (text, n) -> write(context, PortableFiles.MARKET_INSTALLS, text); count += n }
+        }
+        files.optJSONArray("skills")?.let { incoming ->
+            PortableFiles.mergeSkills(read(context, PortableFiles.OWNER_SKILLS), incoming)?.let { (text, n) -> write(context, PortableFiles.OWNER_SKILLS, text); count += n }
+        }
+        files.optJSONObject("anchors")?.let { incoming ->
+            PortableFiles.mergeAnchors(read(context, PortableFiles.OWNER_ANCHORS), incoming)?.let { write(context, PortableFiles.OWNER_ANCHORS, it) }
+        }
+        files.optJSONObject("manuals")?.let { incoming ->
+            val folder = java.io.File(context.filesDir, PortableFiles.MANUALS)
+            val local = folder.listFiles().orEmpty().map { it.name }.toSet()
+            val all = incoming.keys().asSequence().associateWith { incoming.optString(it) }
+            val add = PortableFiles.manualsToAdd(local, all)
+            add.forEach { (name, text) -> write(context, "${PortableFiles.MANUALS}/$name", text) }
+            if (add.isNotEmpty()) runCatching { com.cyclone.mobile.manual.ManualRuntime.forgetCached() }
+            count += add.size
+        }
         return count
     }
 }

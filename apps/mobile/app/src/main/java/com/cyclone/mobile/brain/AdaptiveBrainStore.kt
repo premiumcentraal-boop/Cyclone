@@ -544,6 +544,13 @@ class AdaptiveBrainStore(private val context: Context) : SQLiteOpenHelper(contex
         })
     }
 
+    /** Plan 57 P2: how many skills and paths this profile's Brain holds, for the "Profile C has" line. */
+    @Synchronized
+    fun skillCount(): Int = runCatching {
+        (android.database.DatabaseUtils.queryNumEntries(readableDatabase, "micro_skills") +
+            android.database.DatabaseUtils.queryNumEntries(readableDatabase, "learned_paths")).toInt()
+    }.getOrDefault(-1)
+
     /**
      * Plan 40 P2: the Brain's skills, paths and notes as rows for another profile (most recently used first), and
      * how well Cyclone opens each app. Rows that look like they hold a secret stay here.

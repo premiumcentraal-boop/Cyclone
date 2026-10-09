@@ -1,9 +1,14 @@
 package com.cyclone.mobile.runtime.workspaces
 
 import com.cyclone.mobile.mind.MindMemory
+import org.json.JSONArray
 import org.json.JSONObject
 
-/** What one carry brought into this profile. Counts and names only, never content. */
+/**
+ * What one carry brought into this profile. Counts and names only, never content. Plan 57 P2 adds [files] (installs,
+ * owner skills and manuals taken in), [settingsInPlace] (carried settings that now match the other profile) and
+ * [skillsTotal] (skills and paths this profile now holds; -1 when unknown).
+ */
 data class CarryReport(
     val atMs: Long,
     val fromLabel: String,
@@ -11,13 +16,18 @@ data class CarryReport(
     val forgotten: Int,
     val skills: Int,
     val settings: Int,
+    val files: Int = 0,
+    val settingsInPlace: Int = -1,
+    val skillsTotal: Int = -1,
 ) {
     fun toJson(): JSONObject = JSONObject().put("at", atMs).put("from", fromLabel).put("memories", memories)
         .put("forgotten", forgotten).put("skills", skills).put("settings", settings)
+        .put("files", files).put("settingsInPlace", settingsInPlace).put("skillsTotal", skillsTotal)
 
     companion object {
         fun fromJson(json: JSONObject) = CarryReport(json.getLong("at"), json.getString("from"), json.optInt("memories"),
-            json.optInt("forgotten"), json.optInt("skills"), json.optInt("settings"))
+            json.optInt("forgotten"), json.optInt("skills"), json.optInt("settings"), json.optInt("files"),
+            json.optInt("settingsInPlace", -1), json.optInt("skillsTotal", -1))
     }
 }
 
@@ -61,22 +71,62 @@ object CarryRules {
         table.columns.all(row::has) && row.optString(table.key).isNotBlank() &&
             !MindMemory.looksSecret(table.columns.filter { it in readable }.joinToString(" ") { row.optString(it) })
 
-    /** The settings that travel: the file, then the keys (null means every key in it). */
-    val settings: Map<String, Set<String>?> = mapOf(
-        "cyclone_drive" to null,
-        "cyclone_ui" to setOf("visual_quality"),
-    )
+    /**
+     * The settings that travel: the file, then the keys (null means every key in it). Plan 57 P2: derived from the one
+     * classification table, [PortableSettings].
+     */
+    val settings: Map<String, Set<String>?> get() = PortableSettings.carried
     private val privateName = Regex("(?i)(^|_)(key|keys|token|secret|password|pin|otp|pairing|paired|session|auth|cookie|account)(_|$)")
 
     fun carriesSetting(file: String, key: String, value: Any?): Boolean {
-        val keys = if (file in settings) settings[file] else return false
-        if (keys != null && key !in keys) return false
+        val entry = PortableSettings.entry(file)?.takeIf { it.kind == PortableSettings.Kind.CARRY } ?: return false
+        if (entry.keys != null && key !in entry.keys) return false
         if (privateName.containsMatchIn(key)) return false
+        // An id array is filtered item by item ([safeItems]); here only its shape is checked.
+        if (key in entry.idArrays) return value is String && value.length <= ID_ARRAY_MAX_CHARS
         return when (value) {
             is Boolean, is Int, is Long, is Float -> true
-            is String -> value.length <= 200 && !MindMemory.looksSecret(value)
+            is String -> value.length <= entry.maxChars && !MindMemory.looksSecret(value)
+            is Set<*> -> key in entry.sets && value.size <= 200 &&
+                value.all { it is String && it.length <= 200 && !MindMemory.looksSecret(it) }
             else -> false
         }
+    }
+
+    const val ID_ARRAY_MAX_CHARS = 1_048_576
+
+    /** The items of an id array that may leave: whole objects with an id, small enough, nothing secret-shaped. */
+    fun safeItems(file: String, key: String, text: String?): JSONArray {
+        val entry = PortableSettings.entry(file)?.takeIf { it.kind == PortableSettings.Kind.CARRY && key in it.idArrays } ?: return JSONArray()
+        val array = runCatching { JSONArray(text ?: "[]") }.getOrNull() ?: return JSONArray()
+        val out = JSONArray()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val raw = item.toString()
+            if (item.optString("id").isBlank() || raw.length > entry.maxChars || MindMemory.looksSecret(raw)) continue
+            out.put(item)
+        }
+        return out
+    }
+
+    /**
+     * Merges an incoming id array into this profile's: the same id is replaced, new ids are added, ids only here stay
+     * (a carry never deletes a routine). Returns the merged text and how many items changed, or null when nothing did.
+     */
+    fun mergeItems(file: String, key: String, local: String?, incoming: JSONArray): Pair<String, Int>? {
+        val safe = safeItems(file, key, incoming.toString())
+        val mine = runCatching { JSONArray(local ?: "[]") }.getOrDefault(JSONArray())
+        val merged = linkedMapOf<String, JSONObject>()
+        for (i in 0 until mine.length()) mine.optJSONObject(i)?.let { merged[it.optString("id")] = it }
+        var changed = 0
+        for (i in 0 until safe.length()) {
+            val item = safe.getJSONObject(i)
+            val id = item.optString("id")
+            if (merged[id]?.toString() != item.toString()) { merged[id] = item; changed++ }
+        }
+        if (changed == 0) return null
+        val text = JSONArray(merged.values.toList()).toString()
+        return if (text.length > ID_ARRAY_MAX_CHARS) null else text to changed
     }
 
     /** The context bound into a bundle's encryption: which profile it is for, and for which switch. */
@@ -88,6 +138,7 @@ object CarryRules {
             report.memories.takeIf { it > 0 }?.let { "$it ${if (it == 1) "memory" else "memories"}" },
             report.skills.takeIf { it > 0 }?.let { "$it ${if (it == 1) "skill" else "skills"}" },
             report.settings.takeIf { it > 0 }?.let { "your settings" },
+            report.files.takeIf { it > 0 }?.let { "$it ${if (it == 1) "saved item" else "saved items"}" },
         )
         if (parts.isEmpty()) return if (report.forgotten > 0) "Forgot ${report.forgotten} as you did in ${report.fromLabel}" else null
         val list = if (parts.size == 1) parts[0] else parts.dropLast(1).joinToString(", ") + " and " + parts.last()

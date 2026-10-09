@@ -140,7 +140,8 @@ def test_the_dead_man_return_is_fixed_and_armed_only_by_the_owner_switch():
 
 def test_root_in_a_new_profile_is_proven_from_its_own_cyclone():
     bootstrap = text(WS / "ProfileBootstrapRuntime.kt")
-    assert "check(rootFromTarget(target))" in bootstrap
+    # Plan 57 P2: the result is recorded for "Profile C has", then still enforced.
+    assert "val rooted = rootFromTarget(target)" in bootstrap and "check(rooted) { ProfileSwitch.rootGuidance(manager, label) }" in bootstrap
     assert '"su", "$targetUid"' not in bootstrap
     service = text(WS / "ProfileBootstrapService.kt")
     check = service[service.index("private fun checkRoot("):]

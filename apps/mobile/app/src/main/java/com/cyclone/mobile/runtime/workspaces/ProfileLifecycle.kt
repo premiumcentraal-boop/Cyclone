@@ -52,6 +52,7 @@ object ProfileLifecycle {
             check(ProfileSetupRuntime.listUsersRequired().none { it.id == user }) { "Android didn't remove the profile. Nothing was forgotten." }
             Layer2Workspaces.engine.forgetUser(user)
             ProfileRegistryStore.drop(context, id)
+            runCatching { ProfileInventoryStore.forget(context, id) }
             backup
         }
 

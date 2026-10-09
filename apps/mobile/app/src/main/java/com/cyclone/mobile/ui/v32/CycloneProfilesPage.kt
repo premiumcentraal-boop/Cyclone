@@ -528,6 +528,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                 }
                 // Plan 57 §5.4: how many profiles this phone holds, and Allow more / Restore default on rooted phones.
                 if (ownerUser != null && ownerUser == verifiedCurrentUser) item { com.cyclone.mobile.ui.ProfileRoomCard() }
+                item { com.cyclone.mobile.ui.ProfileCornerstonesCard() }
                 item { CycloneSimpleCard(Modifier.fillMaxWidth()) { com.cyclone.mobile.ui.ProfileDebugButtons(profileSetup.issue) } }
                 if (connectorEntries.isNotEmpty()) {
                     item {

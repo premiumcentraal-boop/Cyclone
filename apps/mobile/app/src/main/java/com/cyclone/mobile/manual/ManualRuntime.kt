@@ -253,6 +253,9 @@ object ManualRuntime {
 
     private fun file(context: Context, packageName: String): File = File(File(context.filesDir, "manual/dictionaries"), "$packageName.json")
 
+    /** Plan 57 P2: a carry wrote manuals on disk; read them again next time. */
+    internal fun forgetCached() = cache.clear()
+
     private fun load(context: Context, packageName: String): AppDictionary = cache.getOrPut(packageName) {
         val file = file(context, packageName)
         runCatching { if (file.isFile) DictionaryJson.read(JSONObject(file.readText())).copy(packageName = packageName) else null }.getOrNull()

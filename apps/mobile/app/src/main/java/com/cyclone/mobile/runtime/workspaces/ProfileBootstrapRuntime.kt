@@ -92,12 +92,30 @@ internal object ProfileBootstrapRuntime {
         val installedSupport = (ProfileRequiredPackages.supportAllowlist + listOfNotNull(hiddenMagisk)).filter { pkg ->
             runCatching { context.packageManager.getApplicationInfo(pkg, 0) }.isSuccess
         }.toSet()
-        (installedSupport + PKG).forEach { pkg ->
-            run("/system/bin/cmd", "package", "install-existing", "--user", "$target", pkg)
-            check(ProfileSetupParser.packages(run("/system/bin/pm", "list", "packages", "--user", "$target", pkg)).contains(pkg)) {
-                "A required app wasn't installed in this profile."
+        // Plan 57 P2: the cornerstones. Cyclone, the root manager and Shizuku are required; Cyclone Cloak and the apps the
+        // owner marked are installed too, best effort, and reported.
+        val items = ProfileCornerstones.resolve(PKG, installedSupport, hiddenMagisk,
+            runCatching { ProfileCornerstones.cloakPackage(context) }.getOrNull(), ProfileCornerstones.marked(context))
+        val checks = linkedMapOf<String, ProfileInventory.App>()
+        items.forEach { item ->
+            val label = runCatching {
+                context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(item.packageName, 0)).toString().take(40)
+            }.getOrNull()
+            if (label == null && item.role != ProfileCornerstones.Role.CYCLONE) {
+                checks[item.packageName] = ProfileInventory.App(item.packageName, item.role, item.packageName.substringAfterLast('.'), false,
+                    note = "Not installed in this profile")
+                return@forEach
             }
-            run("/system/bin/pm", "enable", "--user", "$target", pkg)
+            val installed = runCatching {
+                run("/system/bin/cmd", "package", "install-existing", "--user", "$target", item.packageName)
+                check(ProfileSetupParser.packages(run("/system/bin/pm", "list", "packages", "--user", "$target", item.packageName)).contains(item.packageName)) {
+                    "A required app wasn't installed in this profile."
+                }
+                run("/system/bin/pm", "enable", "--user", "$target", item.packageName)
+            }
+            if (item.required) installed.getOrThrow()
+            checks[item.packageName] = ProfileInventory.App(item.packageName, item.role, label ?: "Cyclone", installed.isSuccess,
+                note = if (installed.isSuccess) null else "Android didn't install it")
         }
         run("/system/bin/am", "start-user", "-w", "$target")
         check(run("/system/bin/am", "get-started-user-state", "$target").contains("RUNNING_UNLOCKED")) {
@@ -105,7 +123,12 @@ internal object ProfileBootstrapRuntime {
         }
         val targetUid = packageUid(target, PKG)
         val sourceUid = context.applicationInfo.uid
-        if (manager == ProfileSetupPlan.RootManager.MAGISK) prepareMagisk(source, target, sourceUid, targetUid, installedSupport)
+        if (manager == ProfileSetupPlan.RootManager.MAGISK) {
+            val shareable = checks.values.filter { it.installed && it.role != ProfileCornerstones.Role.CYCLONE }.map { it.packageName }.toSet()
+            val required = items.filter { it.required && it.role != ProfileCornerstones.Role.CYCLONE }.map { it.packageName }.toSet()
+            val shared = prepareMagisk(source, target, sourceUid, targetUid, shareable, required)
+            shareable.forEach { pkg -> checks[pkg]?.let { checks[pkg] = it.copy(rootShared = pkg in shared) } }
+        }
 
         val folder = "/data/user_de/$target/$PKG/files"
         // Force-stop only the destination Cyclone process before import, never another app.
@@ -139,7 +162,15 @@ internal object ProfileBootstrapRuntime {
         // Plan 57 P1: prove root from the target's own Cyclone, whatever the root manager. When it can't be set by
         // command (KernelSU, APatch, or a Magisk grant missing), the owner is told the one step to do by hand.
         val label = runCatching { ProfileRegistryStore.records(context).firstOrNull { it.id == profile }?.label }.getOrNull() ?: "this profile"
-        check(rootFromTarget(target)) { ProfileSwitch.rootGuidance(manager, label) }
+        val rooted = rootFromTarget(target)
+        // Plan 57 P2: what this profile has, for Profiles and the debug file (the carry adds its counts).
+        runCatching {
+            val previous = ProfileInventoryStore.get(context, profile)
+            ProfileInventoryStore.save(context, ProfileInventory(profile, System.currentTimeMillis(),
+                runCatching { context.packageManager.getPackageInfo(PKG, 0).versionName }.getOrNull(), manager?.name, rooted,
+                checks.values.toList(), previous?.settings ?: -1, previous?.skills ?: -1, previous?.files ?: -1))
+        }
+        check(rooted) { ProfileSwitch.rootGuidance(manager, label) }
     }
 
     /**
@@ -197,7 +228,8 @@ internal object ProfileBootstrapRuntime {
         execute(ProfileSwitch.returnCommand(source, target, nonce))
     }
 
-    private fun prepareMagisk(source: Int, target: Int, sourceUid: Int, targetUid: Int, support: Set<String>) {
+    /** Shares Magisk's grants into [target]; returns the apps in [support] whose grant was shared. */
+    private fun prepareMagisk(source: Int, target: Int, sourceUid: Int, targetUid: Int, support: Set<String>, required: Set<String>): Set<String> {
         check(runCatching { run("magisk", "-V").trim().toInt() >= 24000 }.getOrDefault(false)) {
             "Automatic profile root setup needs Magisk 24 or newer. Update Magisk, then switch again."
         }
@@ -211,8 +243,20 @@ internal object ProfileBootstrapRuntime {
             run("magisk", "--sqlite", "INSERT OR REPLACE INTO policies (uid,policy,until,logging,notification) SELECT $destination,policy,until,logging,notification FROM policies WHERE uid=$uid AND policy=2 AND (until=0 OR until>strftime('%s','now'));")
         }
         inherit(sourceUid, targetUid)
-        // Only installed allowlisted support apps with an existing owner grant inherit it.
-        support.forEach { pkg -> inherit(packageUid(source, pkg), packageUid(target, pkg)) }
+        // Only installed cornerstones with an existing owner grant inherit it. Plan 57 P2: Cloak and the owner's marked
+        // apps are best effort; a failure there never stops the switch.
+        val shared = mutableSetOf<String>()
+        support.forEach { pkg ->
+            val result = runCatching {
+                val from = packageUid(source, pkg)
+                val had = run("magisk", "--sqlite", "SELECT policy FROM policies WHERE uid=$from AND policy=2 AND (until=0 OR until>strftime('%s','now'));").contains("policy=2")
+                inherit(from, packageUid(target, pkg))
+                had
+            }
+            if (pkg in required) result.getOrThrow()
+            if (result.getOrDefault(false)) shared += pkg
+        }
+        return shared
     }
 
     private fun mirrorGrants(context: Context, target: Int) {

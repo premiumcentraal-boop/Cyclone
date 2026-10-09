@@ -43,6 +43,8 @@ object ProfileDebugReport {
         val problems: List<String> = emptyList(),
         val switches: List<ProfileSwitch.Record> = emptyList(),
         val userSwitcherOn: Boolean? = null,
+        /** Plan 57 P2: what each profile had at its last switch (names and counts only). */
+        val inventories: List<ProfileInventory> = emptyList(),
     )
 
     // Pure ---------------------------------------------------------------------------------------------------------
@@ -94,6 +96,7 @@ object ProfileDebugReport {
                 stages = r.stages.map { st -> st.copy(note = st.note?.let { clean(it, 200) }) }).toJson()
         }))
         out.put("userSwitcherOn", f.userSwitcherOn ?: JSONObject.NULL)
+        out.put("inventories", JSONArray(f.inventories.map { it.toJson() }))
         return out
     }
 
@@ -132,6 +135,7 @@ object ProfileDebugReport {
             }
         }
         f.userSwitcherOn?.let { appendLine("Android's user switcher: ${if (it) "on" else "off"}") }
+        f.inventories.forEach { appendLine("${it.profileId} has: ${it.line()}") }
         appendLine()
         appendLine("Last steps (newest last):")
         f.steps.takeLast(15).forEach { s ->
@@ -193,6 +197,7 @@ object ProfileDebugReport {
             steps = ProfileStepJournal.snapshot(), connectors = connectors, carry = attempt("carry") { ProfileCarry.lastReport(context) },
             failure = failure, problems = problems, switches = ProfileSwitch.recent(),
             userSwitcherOn = attempt("user switcher") { ProfileSetupRuntime.userSwitcherOn() },
+            inventories = attempt("inventories") { ProfileInventoryStore.all(context) }.orEmpty(),
         )
     }
 }

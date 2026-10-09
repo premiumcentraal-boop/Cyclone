@@ -236,6 +236,10 @@ object ProfileSetupRuntime {
                     onProgress("Bringing your memory and skills…")
                     val carried = runCatching { ProfileBootstrapRuntime.carry(context, user) }
                     ProfileCarry.noteSent(context, carried.isSuccess)
+                    // Plan 57 P2: the carry's counts complete the "Profile C has" line.
+                    if (profileId != null) carried.getOrNull()?.let { r ->
+                        runCatching { ProfileInventoryStore.update(context, profileId) { it.copy(settings = r.settingsInPlace, skills = r.skillsTotal, files = r.files) } }
+                    }
                     tracker.note(ProfileSwitch.Stage.CARRY, carried.isSuccess, carried.exceptionOrNull()?.message)
                 }
                 val activeUser = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser()))

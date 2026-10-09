@@ -57,9 +57,14 @@ class ProfileCarryGuard(unittest.TestCase):
         pack = read("runtime/workspaces/ProfileCarry.kt")
         for secret in ("OpenRouterSecretStore", "cyclone_ai", "Vault", "gateway", "token", "History"):
             self.assertNotIn(secret, pack[pack.index("fun pack("):pack.index("fun absorb(")], secret)
+        # Plan 57 P2: the carried files come from the one classification table (test_portable_settings_guard.py).
         rules = read("runtime/workspaces/CarryRules.kt")
-        settings = rules[rules.index("val settings:"):rules.index("private val privateName")]
-        self.assertEqual(sorted(re.findall(r'"(cyclone_[a-z_]+)" to', settings)), ["cyclone_drive", "cyclone_ui"])
+        self.assertIn("val settings: Map<String, Set<String>?> get() = PortableSettings.carried", rules)
+        table = read("runtime/workspaces/PortableSettings.kt")
+        carried = sorted(re.findall(r'\bcarry\("(cyclone_[a-z_]+)"', table))
+        self.assertIn("cyclone_drive", carried)
+        for never in ("cyclone_ai", "cyclone_ai_secrets", "cyclone_vault_secrets_v1", "cyclone_gateway_trust_v33"):
+            self.assertNotIn(never, carried)
         memory = read("mind/MemoryCarry.kt")
         self.assertIn("facts.filterNot(::secret)", memory)
         self.assertIn("secret(incoming)", memory)
