@@ -14,7 +14,14 @@
 4. An error screen that downloads a full debug file, so every mistake can be fixed easily.
 5. A multi-stage alpha plan.
 
-This plan is the deep dive (§1–§4) and the runs (§5). It is checked against the code at alpha.117 dev2.
+This plan is:
+- the deep dive (§1–§4);
+- the design for making room on rooted phones (§5);
+- the runs (§6);
+- the next build step by step (§7);
+- decisions and open questions (§8).
+
+It is checked against the code at alpha.117 dev2.
 
 ## 1. Why "Profile B already exists" appeared for Profile C
 
@@ -71,40 +78,10 @@ adb shell cmd user list --all --verbose | findstr /i "partial guest PRIVATE MANA
 
 The debug file (§4) will contain exactly this, plus Android's raw answer to the create.
 
-### 1.2a Rooted phones can make room for more profiles (owner idea, 2026-10-09)
+### 1.2a Rooted phones can make room
 
-**Where Android's limit comes from.** Android reads its total user limit live, on every call:
-
-```java
-// UserManager.getMaxSupportedUsers()
-Math.max(1, SystemProperties.getInt("fw.max_users", config_multiuserMaximumUsers))
-```
-
-`fw.max_users` is an ordinary (not `ro.`) system property. With root:
-- **Right away:** `resetprop fw.max_users <n>` (Magisk; KernelSU and APatch ship `resetprop` too) raises the limit
-  immediately, with no reboot. `pm get-max-users` then reads the new number.
-- **After a reboot:** a tiny module that Cyclone writes keeps it.
-  - It lives in `/data/adb/modules/cyclone_profiles/`.
-  - `module.prop` names it "Cyclone profiles".
-  - Its `system.prop` holds `fw.max_users=<n>` and `fw.show_multiuserui=1`.
-- **Undo:** remove the module and reset the property. Users already made stay; only new ones are limited again.
-
-**What it doesn't fix:**
-- **A per-type limit or a switched-off user type.** Android's "Maximum number of that type already exists" comes from
-  the user type's own limit (`config_userTypeCustomizations`) or from the type being disabled, not from
-  `fw.max_users`. Stock Android leaves full secondary users unlimited, but a ROM can cap them.
-  - If the debug file shows that this is the limit that fired, the fix is a resource overlay module. That is heavier;
-    it is built only if a phone needs it.
-- **The phone's real capacity.** Each profile uses storage (hundreds of MB before apps). Android keeps only a few users
-  running at once (`config_multiuserMaxRunningUsers`); others are stopped and started again on a switch. Cyclone
-  therefore offers a sane ceiling (8 by default, at most 16) and shows the free storage.
-
-**Rules:**
-- It changes how the phone itself behaves, so it is an **owner-approved** action (like a permission grant), never
-  automatic and never an agent tool.
-- It uses fixed, typed commands only, and every change is read back (`getprop`, `pm get-max-users`).
-- It has its own **Restore default** button.
-- The debug file records the before and after.
+The owner asked whether Magisk can make room for more profiles on rooted phones. It can, for Android's total user
+limit. §5 is the full design.
 
 ### 1.3 Other defects found on the way
 
@@ -234,7 +211,130 @@ patterns. A CI test plants secrets and checks none survive.
 - **Share:** a FileProvider `cache-path`, then the share sheet.
 - Nothing is uploaded by itself.
 
-## 5. The runs
+## 5. Profile room on rooted phones (design)
+
+### 5.1 Goal
+
+On a rooted Cyclone phone, "the phone has no room for another profile" should not be the end. With the owner's yes,
+Cyclone raises Android's limit for this phone, keeps it after reboots, and can put it back exactly as it was.
+
+### 5.2 Android has two different limits, and Cyclone must tell them apart
+
+| Limit | Where Android keeps it | Android's words when it is hit | Can root raise it? |
+| --- | --- | --- | --- |
+| **Total users** | `UserManager.getMaxSupportedUsers()` = `fw.max_users`, else `config_multiuserMaximumUsers`. Read on every call. Counts every alive user except guests, profiles included. | `Cannot add user. Maximum user limit is reached.` | **Yes.** `fw.max_users` is a normal system property: `resetprop` changes it at once, and a module keeps it at boot. |
+| **Per user type** | The user type's `maxAllowed`, or the type switched off. Full secondary users are unlimited in stock Android; ROMs can cap them through `config_user_types` / `config_userTypeCustomizations`. | `Cannot add more users of type android.os.usertype.full.SECONDARY. Maximum number of that type already exists.` | **Not by a property.** Only a framework resource overlay could change it. Heavier and phone-specific; §5.8. |
+| **Running users** (not a creation limit) | `config_multiuserMaxRunningUsers` | — (Android stops the least-recent background user) | Not needed. Cyclone starts the target user before every switch anyway. |
+
+**How Cyclone tells which one fired:**
+1. **Android's words** in the raw answer (P0's classifier).
+2. **`dumpsys user`.** It prints each user type with its maximum allowed and whether it is enabled. Cyclone reads it
+   read-only (new fixed op `DUMP_USERS`), parses only the type lines, and keeps the result in the debug file.
+3. **The counts:** alive non-guest users vs. `pm get-max-users`, and full secondary users vs. that type's maximum.
+
+| Verdict | What the owner sees |
+| --- | --- |
+| `TOTAL_LIMIT` | The room screen with **Allow more profiles** |
+| `TYPE_LIMIT` / `TYPE_DISABLED` | "This phone's system allows only N extra users of this kind." Then **Delete now** / **Clean up**, a **Save debug file** button, and no false promise. |
+| `UNKNOWN` | The debug file, and the Android words shown as they are |
+
+### 5.3 Which root managers, and how
+
+| Manager | Detected by (fixed, read-only) | Sets the property with | Keeps it after reboot with |
+| --- | --- | --- | --- |
+| Magisk 24+ (hidden app too) | `magisk -V` | `magisk resetprop fw.max_users <n>` | Module `/data/adb/modules/cyclone_profiles/` with `system.prop` |
+| KernelSU / KernelSU Next | `ksud -V` (`/data/adb/ksud`) | `/data/adb/ksu/bin/resetprop fw.max_users <n>` | The same module layout (KernelSU reads `system.prop`) |
+| APatch | `apd -V` (`/data/adb/apd`) | `/data/adb/ap/bin/resetprop fw.max_users <n>` | The same module layout |
+| None, or unknown | — | Not offered | Not offered |
+
+**Rules for the commands:**
+- Every command is a new **fixed** `ProfileSetupOperation` with an exact shape check, like every existing profile
+  command:
+  - `ROOM_DETECT`;
+  - `ROOM_READ` (`getprop fw.max_users`);
+  - `ROOM_SET` (`resetprop fw.max_users <n>`, with `n` in 4..16);
+  - `ROOM_WRITE_MODULE`;
+  - `ROOM_REMOVE_MODULE`;
+  - `ROOM_RESET` (`resetprop --delete fw.max_users`, or the recorded original value).
+- **No free shell, ever.**
+- **The module's files are generated in code** from the number alone: `module.prop` (id `cyclone_profiles`, name
+  "Cyclone profiles", the version, author Cyclone, a one-line description) and `system.prop` (`fw.max_users=<n>`).
+- **Written atomically:** a temp folder, then `chmod 0644`, `restorecon -R`, then a rename into
+  `/data/adb/modules/cyclone_profiles`.
+- **Cyclone writes only that one folder.** The CI guard checks that no other `/data/adb` path appears.
+
+### 5.4 The owner's flow
+
+1. Creating a profile fails, or the pre-check finds no room, with verdict `TOTAL_LIMIT`.
+2. **The room screen** (P0) lists what uses the slots:
+   - "Main · Profile B · Work profile · 'Old test' (Recently deleted, still uses a slot) · 1 unfinished Cyclone
+     profile";
+   - the limit: "Android allows 4 on this phone";
+   - free storage.
+3. It offers three ways out, in this order:
+   - **Delete now** for profiles in Recently deleted (each backed up first, as today);
+   - **Clean up** unfinished Cyclone profiles;
+   - **Allow more profiles** on rooted phones.
+4. **Allow more profiles** opens a confirm sheet:
+   - "Let this phone hold up to **8** profiles? Cyclone sets Android's user limit and keeps it after restarts with a
+     small Magisk module. Each profile uses storage; you have 41 GB free. You can undo this in Settings → Profiles."
+   - The owner can pick 6, 8, 12 or 16. Default 8, never below the number already in use.
+   - Buttons: **Allow** / **Not now**.
+5. **On Allow:**
+   1. Record the original value, both the property and `pm get-max-users`.
+   2. `ROOM_SET`, then read back `getprop` **and** `pm get-max-users`. They must both say `n`.
+   3. `ROOM_WRITE_MODULE`, then read back both files byte for byte.
+   4. Retry the create.
+
+   Each step goes into the step journal.
+6. **Settings → Profiles → Profile room card.** It shows "Up to 8 profiles · kept by the Cyclone profiles module",
+   and two buttons:
+   - **Change**;
+   - **Restore default**, which removes the module, resets the property, reads back, and says "Profiles you already
+     have stay".
+
+### 5.5 What can go wrong, and what Cyclone does
+
+| Case | Behaviour |
+| --- | --- |
+| `resetprop` read-back doesn't match | Stop. Undo nothing (nothing changed). "Root didn't apply the change"; debug file. |
+| Module written but the property read-back fails | Remove the module again, then report |
+| The module exists but the owner disabled it in Magisk | The Profile room card says "Off in Magisk: on the next restart the limit goes back to N" |
+| After a reboot the limit is back (the module wasn't loaded) | At start, Cyclone compares `getprop` with the module and offers **Apply again** |
+| More profiles than the restored default allows | Allowed. Android keeps existing users; only creating new ones is refused. Restore default says so before it runs. |
+| Low storage (under 3 GB free) | The confirm sheet warns; it doesn't forbid |
+| A per-type limit fired | Never offered (§5.2) |
+| Not rooted, or root denied | Not offered. The room screen shows only Delete now and Clean up. |
+
+### 5.6 Safety
+
+- **Owner-only.** The owner's confirm is required, as for a permission grant. It is never automatic and never a
+  Mind, Instant, MCP or PC tool.
+- **One property and one module folder, nothing else.**
+- **Every change is read back and recorded** in the debug file: before, after, the manager and its version.
+- **Fully reversible** with Restore default.
+- **The scope guard holds.** This adds Android users for the owner's own profiles. It does not hide root, change the
+  device's identity, or touch other apps.
+
+### 5.7 Tests
+
+- **Pure:**
+  - the verdict classifier (Android's real sentences, `dumpsys user` type blocks from AOSP 13/14/15 shapes);
+  - slot counting (guests excluded; work, private and clone profiles counted; partial users counted);
+  - the choice of `n` (never below in use, 4..16).
+- **Command shapes:** each `ROOM_*` op accepts only its exact form.
+- **The generated module files**, byte for byte.
+- **Read-back logic:** success, a mismatch, and a module written but the property not set.
+- **CI guard:** the only `/data/adb` path in the app is `/data/adb/modules/cyclone_profiles`, and `resetprop` only
+  ever sets `fw.max_users`.
+
+### 5.8 Later, only if a debug file shows a per-type limit
+
+A framework overlay module (RRO) raising that user type's `maxAllowed` would be phone- and ROM-specific. It would need
+a reboot and its own device proof, so it is a research item: built only when a real debug file shows
+`TYPE_LIMIT` on an owner's phone.
+
+## 6. The runs
 
 Each run is one alpha, built on the latest release, with tests and an honest device line.
 
@@ -258,7 +358,7 @@ owner today.
     settings**.
 - **D5:** list partial users that Cyclone made (`Cyclone_…` name) and offer **Clean up**. Cyclone never touches users
   it didn't make.
-- **Make room (rooted phones, §1.2a).** When the phone is full and root is Magisk, KernelSU or APatch, the full screen
+- **Make room on rooted phones (§5).** When the phone is full and root is Magisk, KernelSU or APatch, the full screen
   offers **Allow up to 8 profiles**.
   - The owner confirms it.
   - Cyclone runs `resetprop`, writes the Cyclone profiles module, reads it back, then retries the create.
@@ -373,7 +473,73 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
   after a switch;
 - `docs/PROFILES_DEVICE_MATRIX.md`, **UNVERIFIED** until seen on the owner's Pixel.
 
-## 6. Questions for the owner
+## 7. The next build: alpha.118 (P0), step by step
+
+**Base:** the latest release, `5.0.0-alpha.117.dev2` (version code 271, `6936667d`).
+
+**Ships as:** `5.0.0-alpha.118.dev1` with version code **272**:
+- gateway and MCP `5.0.0-alpha.118.dev1`;
+- Glass unchanged (`1.0.0-alpha.64`) unless W10 lands.
+
+**Order.** Work packages go in this order, so that everything after W1 is logged from the start.
+
+| # | Work package | Files | Tests |
+| --- | --- | --- | --- |
+| W1 | **Step journal.** Every privileged step (`ProfileSetupRuntime.executeRoot`, `ProfileBootstrapRuntime.execute`, `ProfileLifecycle`): time, operation, fixed command shape, exit code, ms, raw output (8 KB, redacted), verdict. A ring of 200 in `noBackupFilesDir/profile-debug/steps.json`, written atomically. | new `runtime/workspaces/ProfileStepJournal.kt`; hooks in the three runtimes | `ProfileStepJournalTest`: ring size, atomic write, redaction of planted secrets |
+| W2 | **Truthful classifier and labels (D1, D2).** Limit and type sentences checked before "already exists"; new kinds `MAX_USERS_REACHED` (total) and `USER_TYPE_LIMIT` / `USER_TYPE_DISABLED`; "already exists" only after a re-list finds the name. Every message takes the profile's label; no "Profile B" text left in the setup path. | `ProfileProvisioningContract.kt`, `ProfileSetupRuntime.kt`, `ProfileSetup429.kt` | `ProfileFailureClassifierTest` with AOSP's real sentences; a guard that no "Profile B" literal remains in setup copy |
+| W3 | **Capacity (D4).** Pure `ProfileCapacity`: parses `cmd user list --all --verbose`, `pm get-max-users` and the type lines of `dumpsys user` (new fixed op `DUMP_USERS`). Counts slots as Android does, gives a verdict (§5.2), lists what uses each slot. Replaces the count in `SecondaryUserProvisioningPolicy`. | new `ProfileCapacity.kt`; `ProfileSetupPlan.kt` (`DUMP_USERS`) | `ProfileCapacityTest`: Pixel-like 4-user phone with a trashed profile, work profile and Private Space; partial users; type-limit text |
+| W4 | **Clean up unfinished Cyclone users (D5).** Only users named `Cyclone_<16 hex>`, marked partial or never journaled as ready, not the main or current user, and not in the registry as ready. `pm remove-user` through the existing fixed op, after an owner confirm. | `ProfileLifecycle.kt` (new `cleanUpUnfinished`), `ProfileTrash.kt` (refusal rules) | `ProfileCleanupRulesTest`: never main, current, ready, foreign-named or non-Cyclone users |
+| W5 | **Profile room (§5).** Root-manager detection; `ROOM_*` fixed ops; generated module files; set, read back, retry; the Profile room card with Change / Restore default. | new `ProfileRoom.kt`; `ProfileSetupPlan.kt`; Settings → Profiles card | `ProfileRoomTest`: detection parsing, `n` rules, module bytes, read-back cases; command-shape tests |
+| W6 | **The room screen.** What uses the slots, the limit, free storage; Delete now / Clean up / Allow more profiles; the type-limit wording. | `ProfileSetup429.kt` (or new `ProfileRoomScreen.kt`) | Compose contract test like `CycloneProfile429ContractTest` |
+| W7 | **Clean start (D3).** The Profiles page **+** always starts a new plan (`beginAnotherProfile`, or **Finish setting up X / Discard it** for an unfinished one). Typing a name never renames another profile. | `CycloneProfilesPage.kt`, `ProfileSetup429.kt`, `ProfileSetupRuntime.kt` (`discardUnfinished`) | Journal tests: + clears a ready journal, offers resume for an unfinished one; the rename bug is covered |
+| W8 | **The debug file (§4).** Pure assembler plus redaction (`MindMemory.looksSecret` and fixed patterns; never `ext` values, keys, vault or app data). Zip with `debug.json` and `summary.txt`. **Save** (`ACTION_CREATE_DOCUMENT`) and **Share** (FileProvider `cache-path` `profile-debug/`). | new `ProfileDebugReport.kt`; `res/xml/setup_helper_paths.xml` (add path); manifest unchanged | `ProfileDebugReportTest`: schema, planted secrets removed, size cap |
+| W9 | **The error screen.** Used by setup, the Profiles page issue card and the rescue screen. Shows the headline with the label, what was checked (✓/✗), Android's own words (expandable), the fix buttons from W4–W6, and **Save debug file**, **Share**, **Copy summary**. | new `ui/ProfileErrorScreen.kt`; `ProfileSetup429.kt`, `CycloneProfilesPage.kt`, `ProfileRescueActivity.kt` | Contract test: every failure kind has a screen with its buttons |
+| W10 | *(Optional in 118, else P3)* The gateway `profiles.debug` op so Glass can download the file | gateway and Glass | — |
+
+**Guards (CI):**
+- `scripts/ci`: the only `/data/adb` path in the app is the Cyclone profiles module folder;
+- `resetprop` only ever with `fw.max_users`;
+- every new `ProfileSetupOperation` has an exact shape check;
+- no "Profile B" literal in setup copy.
+
+**Validation before the release push:**
+- `./gradlew :app:testDebugUnitTest` (in CI), plus the pure profile classes compiled and run locally with `kotlinc` as in
+  alpha.114;
+- gateway, MCP and `scripts/ci` suites;
+- `python scripts/ci/release_versions.py --check`;
+- `python scripts/ci/mobile_product_guard.py`.
+
+**Release:**
+1. Bump `release/version.toml`, `build.gradle.kts` (272), the three `pyproject.toml` files, and add
+   `docs/RELEASE_5.0.0-alpha.118.dev1.md`.
+2. Push to `claude/cyclone-v5-handoff-review-9qrs40`.
+3. Wait for Mobile CI and publish.
+4. Verify the manifest `source_sha`, every checksum and the APK signer.
+
+**Device line:** **UNVERIFIED.** The owner's first check is to create Profile C again:
+- if the phone is full, the room screen appears;
+- **Allow more profiles** then succeeds (or names a type limit);
+- a debug file saves to Downloads.
+
+**After 118:**
+
+| Alpha | Run |
+| --- | --- |
+| 119 | P1, the switcher |
+| 120 | P2, complete profiles |
+| 121 | P3, Cloak and device proof |
+| 122 | Plan 56 V1 (VMOS "Ready in one click"), then V2–V4 |
+
+## 8. Decisions and questions for the owner
+
+**Decided defaults** (the owner can override any of them):
+- **Room ceiling:** offered default **8** profiles; choices 6, 8, 12, 16; never below the number in use.
+- **Delete now:** offered inside the room screen, always with its automatic backup first (unchanged rule: no backup,
+  no delete).
+- **Clean up** of unfinished users: only users Cyclone itself named, always after a confirm.
+- **Order of builds:** profiles P0–P3 (alpha.118–121) before VMOS V1 (alpha.122).
+
+**Still open:**
 
 1. **Right now:** what does Recently deleted hold, and what does `adb shell cmd user list --all --verbose` show?
    That confirms §1.2. P0's debug file will show it without adb.
@@ -382,4 +548,5 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
 4. **Root manager:** Magisk (hidden or not), KernelSU or APatch on this phone?
 5. **Deleting:** should **Delete now** be offered right inside the "phone is full" screen, always with its automatic
    backup first?
-6. **Room for more:** is 8 profiles a good default ceiling for "Allow more profiles" on rooted phones (16 at most)?
+6. **Per-type limit:** if the debug file shows `TYPE_LIMIT` on this phone, should Cyclone research the overlay module
+   (§5.8)?
