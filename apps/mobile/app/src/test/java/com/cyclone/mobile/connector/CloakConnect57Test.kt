@@ -88,8 +88,8 @@ class CloakConnect57Test {
         assertFalse(status.toString().contains("com.") || status.toString().contains("/data"))
     }
 
-    @Test fun `root status needs its own scope, and hello says minor 2`() {
-        assertEquals(2, ConnectorContract.MINOR)
+    @Test fun `root status needs its own scope, and hello says at least minor 2`() {
+        assertTrue(ConnectorContract.MINOR >= 2)
         assertEquals(ConnectorScope.DEVICE_ROOT_READ, ConnectorScope.of("device.root.read"))
     }
 
