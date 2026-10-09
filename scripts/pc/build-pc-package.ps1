@@ -78,8 +78,14 @@ if (-not $Makensis) {
     }
 }
 if (-not $Makensis) {
-    choco install nsis -y --no-progress
+    # The Chocolatey feed sometimes answers 504 for a minute; retry with backoff before calling it a failure.
     $Makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+    foreach ($wait in @(0, 20, 45, 90)) {
+        if ($wait) { Write-Host "NSIS not installed yet; retrying Chocolatey in $wait s."; Start-Sleep -Seconds $wait }
+        choco install nsis -y --no-progress
+        if (Test-Path $Makensis) { break }
+    }
+    if (-not (Test-Path $Makensis)) { throw 'NSIS could not be installed from Chocolatey after 4 attempts (feed unavailable).' }
 }
 $VersionToml = Get-Content (Join-Path $Repo 'release\version.toml') -Raw
 if ($VersionToml -notmatch '(?m)^android_version_code\s*=\s*(\d+)') { throw 'release/version.toml has no android_version_code.' }
