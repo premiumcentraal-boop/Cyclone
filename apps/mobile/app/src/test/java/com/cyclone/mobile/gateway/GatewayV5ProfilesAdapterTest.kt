@@ -73,7 +73,8 @@ class GatewayV5ProfilesAdapterTest {
     @Test fun theDebugFileGoesToGlassRedactedWithEachProfilesHealth() {
         val inv = com.cyclone.mobile.runtime.workspaces.ProfileInventory(b, 7L, "x", "MAGISK", false, emptyList())
         val steps = (1..300).map {
-            com.cyclone.mobile.runtime.workspaces.ProfileStep(it.toLong(), "BOOTSTRAP", "cmd $it", 0, 1, "x".repeat(8_000), null)
+            // Ordinary words survive redaction at full size (a long unbroken run would be hidden as a token).
+            com.cyclone.mobile.runtime.workspaces.ProfileStep(it.toLong(), "BOOTSTRAP", "cmd $it", 0, 1, "line of output ".repeat(550), null)
         }
         val facts = com.cyclone.mobile.runtime.workspaces.ProfileDebugReport.Facts(1L, mapOf("versionName" to "x"), null, null, null, null,
             emptyList(), emptyMap(), steps, emptyList(), null, null, inventories = listOf(inv))
