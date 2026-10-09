@@ -39,6 +39,7 @@ left a frozen `OPENAI_DECISIONS` slot that waits for exactly this release. What 
 | **Knowing it worked** | Transport success, mostly | A **Verify** board after the move: "did the screen reach the goal?", with the screenshot |
 | **Context** | A fixed context for each board | **Context on demand**: words → labels → screenshot → zoom, climbing only when code, memory or Luna's own "need to see" answer calls for it (§5A) |
 | **Short tasks** | Any "and then" goes to Flash | **Instant chains**: 2–4 reversible steps, one Luna call per step, App Map walks for known screens (§5B) |
+| **Known places** | App Maps are only consulted inside a mission | A **destination index** checked at decision one: a mapped place is reached with zero calls, or offered to Triage as a choice (§5C) |
 | **Trust** | One bar (0.8–0.9) for everything | A bar per capability, set by what a mistake costs, calibrated in the Lab |
 
 **The flow (one request):**
@@ -345,6 +346,108 @@ given the screen, so they belong together. A three-step chain is about three cal
 That is roughly **2.5–4 s** end to end, most of it Instagram starting, and **3–4 Luna calls** (about $0.0003). The
 Mind takes 20–60 s for the same request today.
 
+## 5C. Mapped at decision one: the destination index
+
+**The problem.** App Maps (`mind/map/MindMap`) are built per app, lazily, only once a mission is already inside the
+app. At decision one, the router doesn't know that "my Instagram DMs" is a screen Cyclone has already walked twenty
+times. So it plans, binds and verifies its way there.
+
+**The fix.** One small phone-wide **destination index**, in memory, that every request is checked against before
+anything else. When the request names a mapped place, the router knows it at once. Then the place is either reached
+with **zero model calls**, or offered to Luna as a choice in the Triage call it makes anyway.
+
+### 5C.1 What is in the index
+
+One entry per mapped screen that is worth going to, across all apps:
+
+```kotlin
+data class Destination(
+    val app: String, val appLabel: String,      // com.instagram.android, "Instagram"
+    val screenId: String, val title: String,    // the MindMap screen
+    val aliases: List<String>,                  // "direct", "messages", "dms", "chats", "berichten" (§5C.2)
+    val hopsFromStart: Int,                     // moves from the app's start screen (MindMap.route)
+    val reliability: Double,                    // the weakest move on that route
+    val walks: Int, val lastWalkOk: Boolean,    // how often a walk there was verified, and the last result
+    val appVersion: String?,                    // the app version the route was learned on
+)
+```
+
+- **Small.** A few hundred entries and a few hundred kB, rebuilt for one app whenever Learn or a walk changes that
+  app's knowledge (`AppKnowledgeStore` upserts). Never rebuilt per request.
+- **Safe moves only.** It is built from the same filter as `MindMap.from`: no stale moves, no risky actions,
+  reliability ≥ 0.5. A destination behind a risky move isn't in the index at all.
+- **Structure only.** Screen and control names, no content (the same rule as LearnedHints).
+
+### 5C.2 Where the aliases come from (no model at request time)
+
+- **The screen's title.**
+- **The labels of the controls that lead there.** A move labelled "Messenger" or "Direct" into the inbox makes
+  those words aliases of the inbox. This is the strongest source, and it is free.
+- **The owner's own words.** Every **verified** run (Instant, Flash or Mind) that ended on a mapped screen adds the
+  request's key words as an alias of that screen: "dms" → Instagram's Direct inbox. Next time that exact phrasing is
+  a zero-call hit. Cyclone learns your vocabulary from your own runs.
+- **Once, in the background:** when a new screen is mapped, the fast generative model may suggest a few synonyms and
+  the Dutch words ("berichten", "inbox"). This happens at map time, never at decision time. These aliases are marked
+  as suggested, and they only become trusted after a verified walk.
+
+### 5C.3 How it is used at decision one
+
+1. **Look up (on the phone, ~1–3 ms).** Stage 0 matches the request's words against app names
+   (`InstalledAppLexicon`) and the index aliases, and scores each destination:
+   - how well the words match;
+   - whether the app is named, or the app in front is that app;
+   - the destination's reliability and walk count;
+   - a penalty for an app version different from the one the route was learned on.
+2. **Strong hit → zero calls.** All of these must hold:
+   - one destination clearly wins (its score ≥ 0.9 and it leads the next one by ≥ 0.3);
+   - its route is verified (≥ 3 walks, the last one ok);
+   - Stage 0's rules see no risk words.
+
+   Then the router plans `open_app` → `go_to` itself, and Instant starts **with no Luna call**. A Triage call still
+   runs **in parallel, as a check**. If Triage disagrees (risk flags, `writes_text`), the walk stops before its next
+   move and the run goes up a rung. These moves are reversible, so racing is safe.
+3. **Candidate hits → one choice in Triage.** Otherwise the top 8–15 destinations become the options of a
+   `destination` choice question in the **same** Triage call, plus `none`. Its criteria look like this:
+   `"instagram.direct": "Instagram › Direct inbox: messages, DMs, chats (2 taps from start, walked 14×)"`. Luna now
+   knows at decision one what is mapped, at no extra cost: one more question in a call that is already being made.
+   When `destination` is sure, the chain's `go_to` step is a map walk, not a fused-board search.
+4. **No hit → as before.** Triage, chains and Flash work as already designed; the index only ever makes runs faster.
+
+### 5C.4 The walk itself, made faster
+
+- **Wait for the screen, not a fixed time.** Each map move knows which screen should come next (its fingerprint). The
+  walker listens for the accessibility window/content-changed events and moves on **the moment that fingerprint
+  appears**, instead of the fixed 300 ms settle plus ladder. If it hasn't appeared after the ladder's 1 s, the walk
+  has diverged.
+- **Start from where you are.** `MindMap.locate(pageKey)` finds the current screen. If you are already in the app, the
+  route starts there, not from the start screen, so nothing is redone.
+- **Pre-load.** On a hit, the app's MindMap and the next questions are loaded while the app is still starting.
+- **Jumps, when an app offers them.** If Learn ever sees that an app's own link or a launcher shortcut opens a mapped
+  screen directly, and a walk confirms it, the index stores it as a one-move "jump" that skips the taps.
+
+### 5C.5 When the map is wrong
+
+- **The walker checks every screen** (it does today). The first surprise stops it, reports `diverged` (which also
+  drops the move's confidence), and the fused board continues from the current screen with the steps done on the
+  baton.
+- **An app update** marks that app's destinations "suspect". They still go into Triage as candidates, but stop being
+  zero-call hits until one verified walk on the new version.
+- **Two failed walks in a row** take a destination out of the zero-call path until Learn re-confirms it.
+
+### 5C.6 How much faster
+
+| "Open my Instagram DMs" | Calls | Time to the inbox (target, to be measured) |
+|---|---|---|
+| Today (the Mind) | many | 20–60 s |
+| Instant chain without a map (§5B) | 2–3 | app start + ~1.5 s |
+| Chain with the destination picked in Triage | 1 | app start + ~0.7 s |
+| **Strong hit in the index** | **0** (1 in parallel as a check) | **app start + ~0.3–0.5 s** (two event-driven taps) |
+
+The aim: everything you do often ends up in the bottom row. Every verified run adds aliases, and every verified walk
+raises reliability. So more requests become zero-call hits, the same way the phone model earns actions today.
+
+---
+
 ## 6. The capability registry (what "instant" can mean)
 
 Today Instant knows 18 intents. A team would turn this into data: a **registry** of things Cyclone can do in one
@@ -452,6 +555,7 @@ The registry respects the invariants: every move goes through `PhoneToolExecutor
 | **L4 · Verify** | The Verify board after Instant moves and at the end of Flash; silent success waits for it | Verify pass rate shown; a failed verify hands up with the baton |
 | **L5 · Capability registry** | `Capability` data, Android standard intents and settings panels, learned routes and compiled skills as entries, per-capability bars | "Turn on dark mode", "open Wi-Fi settings", "set a timer for 5 minutes" go Instant |
 | **L5b · Instant chains** | The slot plan in Triage, the fused per-step board, App Map walks for `go_to`, ordinals in code, bounded find, the chain's guard rails and baton hand-off (§5B) | "Open Instagram, go to my DMs, open the first one" and 20 other 2–4 step requests complete in the Lab, median under 5 s, with no irreversible tap |
+| **L5c · Destination index** | The phone-wide index of mapped screens with aliases (titles, incoming control labels, the owner's verified phrasings), Stage 0 lookup, zero-call hits with Triage as a parallel check, the `destination` question in Triage, event-driven map walks, suspect-on-app-update (§5C) | A repeated mapped request ("open my Instagram DMs") reaches the screen with 0 blocking calls, app start + < 0.5 s; a stale map diverges safely to the fused board |
 | **L6 · Flash on Luna** | The Pilot's Step board on Luna with images; Flash's plan still written by the fast generative model | Flash runs in the Lab complete with fewer Mind hand-ups |
 | **L7 · Calibrate and switch** | Golden set, calibration curves, bars from the Lab; set `ACTIVE = LUNA`; Settings copy and release notes | Owner signs off on the numbers |
 
