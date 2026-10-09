@@ -310,17 +310,18 @@ phone; approvals name the phone.
 
 ## 4. The runs
 
-Plan 57 (hardened profiles, alpha.118–121) goes first, so the VMOS runs start at alpha.122.
+Plan 57 (hardened profiles, alpha.118–121, and the Cloak open request in alpha.122) goes first, so the VMOS runs start
+at alpha.123.
 
 | Run | Alpha (next free) | What ships | Done when |
 | --- | --- | --- | --- |
 | **Rent, power, backup** (built 2026-10-09, **alpha.117**) | — | Owner asked for both rentals by the period (a week, a month) and pay-for-time, plus backups the owner triggers. Glass: Rent phones (price confirmed, 1–5 per order), new phones kept by themselves; Power on/off; Renew and auto-renew; Back up; Restore a phone's own backup with a confirm | Gateway, Glass and guard tests pass (done) |
 | **Connectors** (built 2026-10-08, **alpha.117**) | — | V2 signing with HMAC fallback; named sign-in errors; `openOnlineAdb`; padCode following; `setKeepAliveApp`; `userPadList` names and paid-until; `listInstalledApp`; status 16 | Gateway tests pass (done) |
 | **0 Probe** (with the owner's account, not a release) | — | A small probe in `scripts/pc/cloud_probe.py` (it exists; extend it) calls each §2.3 connector once on one test phone and records the answers with keys removed, as test fixtures. It checks the list in §2.5, plus 7-day `expireMinutes`, `uploadFileV3` from a GitHub URL, `asyncCmd` + `padTaskDetail`, `getCloudGoodList`, Pre-installation Management and callbacks. | Fixtures are committed. Every row in §2.3 is marked confirmed or changed. |
-| **V1 Ready in one click** | alpha.122 | The provisioning catalogue with read-back; `FleetEnrollReceiver` and the gateway's grant; install via `uploadFileV3` with `adb install` as fallback; the ready check; Glass card states, thumbnails and rename; the `restartApp` repair rung; the doctor lines | An existing VMOS phone goes from "Add" to Ready with no tap, and runs a starter skill |
-| **V2 Skills in sync** | alpha.123 | `cyclone.skillpack/1`; phone ops `skills.export` / `skills.import`; "Share with my phones"; the PC library; sync on join, on change and on reconnect; Glass Skills → Fleet | A skill saved on phone A runs on VMOS phones B and C after one Share |
-| **V3 Spin up new** | alpha.124 | SKU and image list (Android 13+ only); owner-confirmed purchase and auto-renew; wait until running; chains into V1; **the golden phone**: back up a Ready phone, clone it onto new ones, each clone re-enrolls; restart and reset buttons; the callback receiver as a hint (else polling) | "New VMOS phone" in Glass gives a Ready phone with skills, the purchase confirmed by the owner; three clones of a golden are Ready, each with its own trust |
-| **V4 Run the fleet** | alpha.125 | Groups (with the VMOS console's); run on a group; `padDetail` health; timing devices on a schedule; bills; staged Cyclone updates (canary → 10 % → all, stop if health drops); batch ADB renewal; the repair ladder; a health board | Five VMOS phones updated, synced and kept connected for a week without the owner |
+| **V1 Ready in one click** | alpha.123 | The provisioning catalogue with read-back; `FleetEnrollReceiver` and the gateway's grant; install via `uploadFileV3` with `adb install` as fallback; the ready check; Glass card states, thumbnails and rename; the `restartApp` repair rung; the doctor lines | An existing VMOS phone goes from "Add" to Ready with no tap, and runs a starter skill |
+| **V2 Skills in sync** | alpha.124 | `cyclone.skillpack/1`; phone ops `skills.export` / `skills.import`; "Share with my phones"; the PC library; sync on join, on change and on reconnect; Glass Skills → Fleet | A skill saved on phone A runs on VMOS phones B and C after one Share |
+| **V3 Spin up new** | alpha.125 | SKU and image list (Android 13+ only); owner-confirmed purchase and auto-renew; wait until running; chains into V1; **the golden phone**: back up a Ready phone, clone it onto new ones, each clone re-enrolls; restart and reset buttons; the callback receiver as a hint (else polling) | "New VMOS phone" in Glass gives a Ready phone with skills, the purchase confirmed by the owner; three clones of a golden are Ready, each with its own trust |
+| **V4 Run the fleet** | alpha.126 | Groups (with the VMOS console's); run on a group; `padDetail` health; timing devices on a schedule; bills; staged Cyclone updates (canary → 10 % → all, stop if health drops); batch ADB renewal; the repair ladder; a health board | Five VMOS phones updated, synced and kept connected for a week without the owner |
 | **V5 (only if needed)** | later | Plan 44's relay link (runs 3–4) if the SSH ADB proves flaky | — |
 
 Each run ships with:

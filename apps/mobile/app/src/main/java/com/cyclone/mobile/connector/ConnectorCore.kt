@@ -26,6 +26,11 @@ interface ConnectorBackend {
     fun setConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, json: String?) { error("Config storage unavailable") }
     /** Plan 57 P3: Cyclone's own root facts, from what it last saw ([ConnectorRootStatus]). Never runs a command. */
     fun rootStatus(): JSONObject = ConnectorRootStatus.build(emptyList(), null)
+    /**
+     * Plan 57 (alpha.122, CC7): shows the owner Cyclone's own "open this profile?" screen. Returns null when it was
+     * shown, or an error code (BUSY, RATE_LIMITED). It never switches anything by itself.
+     */
+    fun requestOpen(connectorId: String, connectorLabel: String, profileId: String, profileLabel: String): String? = "BUSY"
 }
 
 /**
@@ -89,6 +94,7 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
             }
             "profiles" -> { need(ConnectorScope.PROFILES_READ); profiles(manifest.id, granted) }
             "root.status.v1" -> { need(ConnectorScope.DEVICE_ROOT_READ); backend.rootStatus() }
+            "profiles.open.request.v1" -> { need(ConnectorScope.PROFILES_OPEN_REQUEST); openRequest(manifest, args) }
             "ext.set" -> { need(ConnectorScope.PROFILES_EXT); setExt(manifest.id, args) }
             "entries.get" -> { need(ConnectorScope.SELECTOR_CONTRIBUTE); JSONObject().put("entries", JSONArray(backend.entries(manifest.id).map { it.toJson() })) }
             "entries.set" -> { need(ConnectorScope.SELECTOR_CONTRIBUTE); setEntries(manifest.id, args) }
@@ -132,6 +138,25 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
         }
         return JSONObject().put("schemaVersion", ProfileRegistryCodec.SCHEMA_VERSION)
             .put("current", backend.currentProfile() ?: JSONObject.NULL).put("profiles", list)
+    }
+
+    /**
+     * Plan 57 (alpha.122, CC7): a request, never a switch. The profile must be the owner's own (`owner`) or a ready
+     * Cyclone profile that isn't in front; Cyclone then asks the owner on its own screen, and only their tap switches.
+     */
+    private fun openRequest(manifest: ConnectorManifest, args: JSONObject): JSONObject {
+        val profileId = args.opt("profileId") as? String ?: throw ConnectorException("BAD_REQUEST", "Send profileId: owner or a profile id.")
+        val label = if (profileId == ConnectorEvent.OWNER) "Main" else backend.profiles()
+            .firstOrNull { it.id == profileId && it.ready && !it.inTrash && it.androidUserId != null }?.label
+            ?: throw ConnectorException("NO_SUCH_PROFILE", "There's no ready profile with that id.")
+        if (backend.currentProfile() == profileId) throw ConnectorException("ALREADY_OPEN", "$label is already open.")
+        backend.requestOpen(manifest.id, manifest.label, profileId, label)?.let { code ->
+            throw ConnectorException(code, when (code) {
+                "RATE_LIMITED" -> "One request every 10 seconds."
+                else -> "Cyclone can't ask right now (a task is running, a request is already waiting, or this profile isn't in front)."
+            })
+        }
+        return JSONObject().put("version", 1).put("requested", true)
     }
 
     private fun setExt(connectorId: String, args: JSONObject): JSONObject {

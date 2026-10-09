@@ -49,6 +49,8 @@
                 "BAD_EXT",
                 "SECRET_REFUSED",
                 "BAD_ENTRIES",
+                "BUSY",
+                "ALREADY_OPEN",
                 "INTERNAL"
               ]
             },

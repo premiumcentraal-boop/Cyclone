@@ -17,8 +17,11 @@ import org.json.JSONObject
 object ConnectorContract {
     const val CONTRACT = "cyclone.connector/1"
     const val MAJOR = 1
-    /** Minor 2 (alpha.121, plan 57 P3): `root.status.v1` and the `device.root.read` scope. */
-    const val MINOR = 2
+    /**
+     * Minor 2 (alpha.121, plan 57 P3): `root.status.v1` and the `device.root.read` scope. Minor 3 (alpha.122): the
+     * owner-confirmed `profiles.open.request.v1` and the `profiles.open.request` scope.
+     */
+    const val MINOR = 3
     /** The action a connector's service declares, so Cyclone can find it. */
     const val ACTION_CONNECT = "com.cyclone.connector.CONNECT"
     /** The action a connector binds to on Cyclone. */
@@ -44,7 +47,8 @@ enum class ConnectorScope(val wire: String, val plain: String) {
     EVENTS_PROFILES("events.profiles", "Hear when profiles are added, changed, switched or removed"),
     PROFILE_CONFIG("profiles.config", "Keep settings for each profile and app"),
     PROFILE_STARTUP("profiles.startup", "Receive a callback before Cyclone opens a profile app"),
-    DEVICE_ROOT_READ("device.root.read", "See whether root works in your profiles");
+    DEVICE_ROOT_READ("device.root.read", "See whether root works in your profiles"),
+    PROFILES_OPEN_REQUEST("profiles.open.request", "Ask you to open a profile (you say yes on Cyclone's own screen)");
 
     companion object {
         fun of(wire: String): ConnectorScope? = values().firstOrNull { it.wire == wire }

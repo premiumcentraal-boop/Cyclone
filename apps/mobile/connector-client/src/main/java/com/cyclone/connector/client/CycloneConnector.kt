@@ -111,6 +111,12 @@ class CycloneConnector private constructor(
     /** Minor 2: Cyclone's own root facts (needs `device.root.read`). Check `hello().getInt("minor") >= 2` first. */
     fun rootStatus(): JSONObject = call("root.status.v1")
 
+    /**
+     * Minor 3: asks the owner to open [profileId] (`owner` or a profile id) on Cyclone's own screen. Needs
+     * `profiles.open.request`. `requested` only means the question was shown; the switch shows up as `profile.switched`.
+     */
+    fun requestOpenProfile(profileId: String): JSONObject = call("profiles.open.request.v1", JSONObject().put("profileId", profileId))
+
     fun startupStatus(profileId: String, androidUserId: Int, packageName: String): JSONObject =
         call("startup.status.v1", tuple(profileId, androidUserId, packageName))
     private fun tuple(profileId: String, androidUserId: Int, packageName: String) = JSONObject()

@@ -201,6 +201,9 @@ object ConnectorRuntime {
         override fun setConfig(connectorId: String, callerUser: Int, key: ProfileConfigKey, json: String?) = ProfileConfigStore.set(context, connectorId, callerUser, key, json)
         override fun now() = System.currentTimeMillis()
         override fun currentProfile(): String? = current(context)
+        override fun requestOpen(connectorId: String, connectorLabel: String, profileId: String, profileLabel: String): String? =
+            com.cyclone.mobile.runtime.workspaces.ProfileOpenRequests.ask(context, connectorId, connectorLabel,
+                if (profileId == ConnectorEvent.OWNER) com.cyclone.mobile.runtime.workspaces.ProfileApps.MAIN else profileId, profileLabel)
         override fun rootStatus(): JSONObject = ConnectorRootStatus.build(
             runCatching { com.cyclone.mobile.runtime.workspaces.ProfileInventoryStore.all(context) }.getOrDefault(emptyList()),
             runCatching { com.cyclone.mobile.runtime.workspaces.ProfileRoom.cached(context) }.getOrNull(),

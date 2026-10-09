@@ -121,7 +121,11 @@ def test_the_dead_man_return_is_fixed_and_armed_only_by_the_owner_switch():
     # Its only interpolations are numbers and the validated hello path.
     assert set(re.findall(r"\$\{?([A-Za-z_]+)", body)) <= {"seconds", "target", "hello", "source"}, body
     callers = {path.name for path, code in kotlin_sources().items() if "armReturn(" in code}
-    assert callers == {"ProfileBootstrapRuntime.kt", "ProfileSetupRuntime.kt"}, callers
+    # The owner's switch on the phone, and (alpha.122) the owner's switch from the PC (bearer route, ProfileApps).
+    assert callers == {"ProfileBootstrapRuntime.kt", "ProfileSetupRuntime.kt", "ProfileApps.kt"}, callers
+    apps = text(WS / "ProfileApps.kt")
+    way_back = apps[apps.index("internal var armWayBack"):]
+    assert way_back.index("requestHello(to, nonce)") < way_back.index("armReturn(from, to, nonce)")
     bootstrap = text(WS / "ProfileBootstrapRuntime.kt")
     hello = bootstrap[bootstrap.index("fun requestHello("):bootstrap.index("fun helloArrived(")]
     assert "check(listening)" in hello

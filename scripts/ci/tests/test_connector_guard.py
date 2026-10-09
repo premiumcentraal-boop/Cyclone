@@ -45,7 +45,7 @@ class ConnectorGuard(unittest.TestCase):
         core = read(CONNECTOR / "ConnectorCore.kt")
         self.assertIn('if (method == "hello") return hello(caller, approval, args)', core)
         self.assertIn('throw ConnectorException("NOT_APPROVED"', core)
-        self.assertEqual(core.count("need(ConnectorScope."), 9, "each method family checks its scope")
+        self.assertEqual(core.count("need(ConnectorScope."), 10, "each method family checks its scope")
         # Plan 57 P3: root.status.v1 is built from what Cyclone last saw; nothing in its path runs a command.
         status = read(CONNECTOR / "ConnectorRootStatus.kt")
         self.assertNotRegex(status, r'ProcessBuilder|Runtime\.getRuntime|runRequired|runBestEffort|ProfileRoom\.status|"su"')
@@ -124,6 +124,32 @@ class ConnectorKitGuard(unittest.TestCase):
         self.assertTrue((schemas / "vectors.json").is_file())
         self.assertTrue((ROOT / "apps/mobile/app/src/test/java/com/cyclone/mobile/connector/ConnectorVectorsTest.kt").is_file())
         self.assertTrue((ROOT / "apps/device-gateway/tests/test_connector_schemas.py").is_file())
+
+
+    def test_a_connector_can_only_ask_to_open_a_profile_never_switch(self):
+        """Plan 57 (alpha.122, CC7): the request shows Cyclone's own screen; only the owner's tap there switches."""
+        requests = read(MOBILE / "runtime/workspaces/ProfileOpenRequests.kt")
+        for forbidden in ("openProfile(", "switchTo(", "switchUser", "runRequired", "ProcessBuilder"):
+            self.assertNotIn(forbidden, requests, forbidden)
+        self.assertIn("isKeyguardLocked", requests, "never opens over a lock screen by itself")
+        activity = read(MOBILE / "ui/ProfileOpenRequestActivity.kt")
+        self.assertEqual(activity.count("ProfileSetupRuntime.openProfile("), 1)
+        self.assertLess(activity.index("fun open()"), activity.index("ProfileSetupRuntime.openProfile("))
+        self.assertIn('Button(enabled = !busy, onClick = { open() })', activity)
+        manifest = read(APP / "AndroidManifest.xml")
+        self.assertIn('<activity android:name=".ui.ProfileOpenRequestActivity" android:exported="false" />', manifest)
+        callers = sorted(p.relative_to(MOBILE).as_posix() for p in MOBILE.rglob("*.kt")
+                         if "ProfileOpenRequests.ask(" in read(p))
+        self.assertEqual(callers, ["connector/ConnectorRuntime.kt"])
+        core = read(CONNECTOR / "ConnectorCore.kt")
+        self.assertIn('"profiles.open.request.v1" -> { need(ConnectorScope.PROFILES_OPEN_REQUEST); openRequest(manifest, args) }', core)
+
+    def test_cloak_never_binds_apps_in_main(self):
+        """Owner decision (alpha.122): Cloak binds apps in every profile except Main."""
+        core = read(CONNECTOR / "ConnectorCore.kt")
+        self.assertIn('if (profileId == ConnectorEvent.OWNER) throw ConnectorException("BAD_REQUEST"', core)
+        config = read(CONNECTOR / "ProfileConfig.kt")
+        self.assertIn("profiles.singleOrNull { it.id == id && it.androidUserId == user && it.ready && !it.inTrash }", config)
 
 
 if __name__ == "__main__":

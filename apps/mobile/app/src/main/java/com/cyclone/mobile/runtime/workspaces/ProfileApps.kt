@@ -31,6 +31,12 @@ object ProfileApps {
     internal var gated: () -> Boolean = { Layer2Workspaces.gated() }
     internal var busy: () -> Boolean = { com.cyclone.mobile.mind.mission.MindMissions.live.value != null }
     internal var sleep: (Long) -> Unit = { Thread.sleep(it) }
+    internal var armWayBack: (Int, Int, String) -> Unit = { from, to, nonce ->
+        ProfileBootstrapRuntime.requestHello(to, nonce)
+        ProfileBootstrapRuntime.armReturn(from, to, nonce)
+    }
+    internal var helloArrived: (Int, String) -> Boolean = { to, nonce -> ProfileBootstrapRuntime.helloArrived(to, nonce) }
+    internal var remember: (ProfileSwitch.Record) -> Unit = { ProfileSwitch.remember(it) }
     internal var label: (Context, String) -> String = { c, pkg ->
         runCatching { c.packageManager.getApplicationLabel(c.packageManager.getApplicationInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)).toString() }
             .getOrDefault(pkg)
@@ -92,19 +98,49 @@ object ProfileApps {
         if (busy()) throw Refused("ASK_BUSY", "Cyclone is running a task on the phone. Switch when it is done.")
         if (gated()) throw Refused("HUMAN_HAS_CONTROL", "A request on the phone is waiting for your approval. Answer it first.")
         val target = resolve(context, profileId)
-        if (current() == target.user) return target.user
-        // Memory and skills travel only with a switch made on the phone itself (Cyclone Carry); from the PC the profile
-        // gets Cyclone ready there and nothing else.
-        if (profileId != MAIN) prepare(context, target.user, profileId)
-        run(ProfileSetupPlan.switchUser(target.user))
-        repeat(40) {
-            if (current() == target.user) {
-                runCatching { com.cyclone.mobile.connector.ConnectorEvents.switched(context, target.user) }
-                return target.user
+        val from = current()
+        if (from == target.user) return target.user
+        // Plan 57 (alpha.122): the PC's switch gets the same safety as one made on the phone: the way back is armed
+        // first (only once the target's Cyclone listens), the target confirms, and every switch is journaled.
+        val tracker = ProfileSwitch.Tracker()
+        var outcome = ProfileSwitch.Outcome.FAILED
+        var note: String? = null
+        try {
+            // Memory and skills travel only with a switch made on the phone itself (Cyclone Carry); from the PC the
+            // profile gets Cyclone ready there and nothing else.
+            if (profileId != MAIN) tracker.stage(ProfileSwitch.Stage.PREPARE) { prepare(context, target.user, profileId) }
+            val nonce = java.util.UUID.randomUUID().toString().replace("-", "")
+            val armed = if (from == null) Result.failure(IllegalStateException("Android didn't say which profile is in front."))
+            else runCatching { armWayBack(from, target.user, nonce) }
+            tracker.note(ProfileSwitch.Stage.ARM_RETURN, armed.isSuccess, armed.exceptionOrNull()?.message)
+            tracker.stage(ProfileSwitch.Stage.SWITCH) {
+                run(ProfileSetupPlan.switchUser(target.user))
+                var arrived = false
+                for (pause in ProfileSwitch.waitSchedule()) {
+                    arrived = current() == target.user
+                    if (arrived) break
+                    sleep(pause)
+                }
+                if (!arrived) throw Refused("DEVICE_NOT_READY", "Android hasn't finished switching profiles yet. Check the phone.")
             }
-            sleep(150)
+            outcome = ProfileSwitch.Outcome.DONE
+            if (armed.isSuccess) {
+                val hello = runCatching { helloArrived(target.user, nonce) }.getOrDefault(false)
+                tracker.note(ProfileSwitch.Stage.CONFIRM, hello, if (hello) null else "No hello yet; the way back stays armed.")
+                if (!hello) outcome = ProfileSwitch.Outcome.CONFIRM_LATE
+            }
+            runCatching { com.cyclone.mobile.connector.ConnectorEvents.switched(context, target.user) }
+            return target.user
+        } catch (error: Throwable) {
+            note = error.message
+            throw error
+        } finally {
+            val label = if (profileId == MAIN) "Main" else runCatching { records(context).firstOrNull { it.id == profileId }?.label }.getOrNull() ?: "A profile"
+            runCatching {
+                remember(ProfileSwitch.Record(System.currentTimeMillis(), from ?: -1, target.user, "$label (from the PC)",
+                    tracker.results.toList(), outcome, note?.let { ProfileDebugRedaction.text(it, 200) }))
+            }
         }
-        throw Refused("DEVICE_NOT_READY", "Android hasn't finished switching profiles yet. Check the phone.")
     }
 
     private data class Target(val user: Int, val main: Int?)

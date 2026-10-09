@@ -40,7 +40,8 @@
           "events.profiles",
           "profiles.config",
           "profiles.startup",
-          "device.root.read"
+          "device.root.read",
+          "profiles.open.request"
         ]
       },
       "uniqueItems": true
@@ -56,7 +57,8 @@
           "events.profiles",
           "profiles.config",
           "profiles.startup",
-          "device.root.read"
+          "device.root.read",
+          "profiles.open.request"
         ]
       },
       "uniqueItems": true

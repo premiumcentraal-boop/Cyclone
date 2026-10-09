@@ -13,9 +13,9 @@ It is the **Cyclone side only**. How Cloak builds or applies a phone profile ins
 never receives or needs those details.
 
 - **Repository:** `premiumcentraal-boop/Cyclone` (Cyclone).
-- **Baseline:** Cyclone `5.0.0-alpha.121.dev1` (version code 275). Written against alpha.119; §7 says what alpha.120 and
-  alpha.121 built since.
-- **Contract:** `cyclone.connector/1`, minor 2 since alpha.121 (SPEC §12). If this file and `tools/cyclone-connector-sdk/SPEC.md` disagree, SPEC.md
+- **Baseline:** Cyclone `5.0.0-alpha.122.dev1` (version code 276). Written against alpha.119; §7 says what alpha.120 to
+  alpha.122 built since.
+- **Contract:** `cyclone.connector/1`, minor 3 since alpha.122 (SPEC §12 and §13). If this file and `tools/cyclone-connector-sdk/SPEC.md` disagree, SPEC.md
   wins for what exists today. This file wins for what is planned (§7).
 
 **Don't edit Cyclone.** Cloak's work is in Cloak's own project. If Cloak needs something Cyclone doesn't offer, write it
@@ -116,7 +116,7 @@ A switch runs in stages, and each stage goes into the debug file:
 | A | Cloak is an approved connector with the right scopes | **Works today** |
 | B | **Load a phone profile onto a Cyclone profile** (bind a Cloak profile to a Cyclone profile's apps) | **Works today** (`config.set.v1` with Cloak's envelope) |
 | C | **Rooted pill:** Cyclone's Profiles page and Glass show Rooted/Native per profile; Cloak shows its own pill with live health | **Works since alpha.121:** the pill follows Cloak's `state` (CC5), and `root.status.v1` gives Cyclone's root facts (CC6) |
-| D | Open another Cyclone profile from Cloak | **Not possible yet.** The owner-confirmed request (CC7) waits for the owner's sign-off |
+| D | Open another Cyclone profile from Cloak | **Works since alpha.122:** `profiles.open.request.v1` asks the owner on Cyclone's own screen (CC7, SPEC §13) |
 
 ## 3. Feature A: be an approved connector
 
@@ -290,31 +290,41 @@ Cloak's module is active.
 - No commands, paths, versions or package names. Ignore fields you don't know.
 - Check `hello.minor >= 2` before calling it. An older Cyclone answers `UNKNOWN_METHOD`; keep working without it.
 
-## 6. Feature D: opening another profile from Cloak
+## 6. Feature D: opening another profile from Cloak (alpha.122)
 
-**Today:** no connector can switch, create, rename or remove profiles (SPEC §1). That stays true: a profile switch
-changes the whole phone. So:
-- Cloak shows the owner which Cyclone profile a binding belongs to, and says "Open Profile C in Cyclone".
-- With `selector.contribute`, Cloak may add up to 8 entries to Cyclone's profile slider. A tap opens **Cloak's**
-  `entryActivity` with `com.cyclone.connector.ENTRY_ID`. Cyclone never switches anything for an entry.
-
-**Coming (CC7): an owner-confirmed request.**
+**No connector switches a profile by itself** (SPEC §1): a switch changes the whole phone. Cloak **asks**, and the owner
+answers on Cyclone's own screen. The owner signed this off on 2026-10-09.
 
 ```json
 {"method": "profiles.open.request.v1", "args": {"profileId": "Cyclone_0123456789abcdef"}}
 → {"version": 1, "requested": true}
 ```
 
-- **Scope:** `profiles.open.request` ("Ask you to open a profile"), approved separately.
-- **Cyclone shows its own sheet:** "Cyclone Cloak asks to open Profile C", with **Open** and **Not now**.
-- **Only the owner's tap** runs Cyclone's staged switch (§1.3), with its way back.
-- **Cloak learns the result only from `profile.switched`.** `requested: true` means the sheet was shown, never that
-  the switch happened.
-- **It is refused** with `BUSY` while a task runs or the sheet is already open, with `NO_SUCH_PROFILE` for a profile
-  that isn't ready, and with `RATE_LIMITED` above 1 request per 10 s.
-- **The sheet never appears by itself on a locked screen.**
-- **It needs a later minor (3; `root.status.v1` took minor 2),** and the owner's sign-off on the contract change
-  (plan 57 §8).
+- **Before you call it:**
+  - check `hello.minor >= 3`; an older Cyclone answers `UNKNOWN_METHOD`;
+  - ask for the scope `profiles.open.request` ("Ask you to open a profile"), which is approved separately.
+- **`profileId`:** `owner` (Main) or a ready Cyclone profile from `profiles`.
+- **What happens:**
+  - Cyclone shows **"Open Profile C?"** with **Open** and **Not now**. On a locked phone it only posts a notification;
+    the screen never opens by itself over a lock screen.
+  - **Only the owner's tap on Open** runs Cyclone's staged switch (§1.3), with its way back.
+- **Learn the result only from `profile.switched`.** `requested: true` means the question was shown, never that the
+  switch happened. "Not now" sends nothing.
+- **Errors:**
+
+  | Code | When |
+  |---|---|
+  | `NO_SUCH_PROFILE` | the profile isn't ready |
+  | `ALREADY_OPEN` | it is already in front |
+  | `BUSY` | a task is running, a review is waiting, another request is still waiting (2 minutes), or Cloak's profile isn't the one in front |
+  | `RATE_LIMITED` | more than one request in 10 s |
+
+  Back off; don't retry in a loop.
+- **Call from the profile in front.** Cloak calls the Cyclone in its own profile, and that Cyclone can only ask the owner
+  when its profile is on screen.
+- **Selector entries are unchanged:** with `selector.contribute`, a tap on one of Cloak's entries in Cyclone's slider
+  opens **Cloak's** `entryActivity`. Cyclone never switches for an entry; an entry can call the request above if it
+  wants a switch.
 
 ## 7. Cyclone-side work for Cloak (the Cyclone agent builds these)
 
@@ -327,8 +337,8 @@ changes the whole phone. So:
 | CC4 | One strict parser for bindings and identities | P3 / alpha.121 | **built, alpha.121** |
 | CC5 | The pill shows Cloak's `state` (§5.3) | P3 / alpha.121 | **built, alpha.121** |
 | CC6 | `root.status.v1` + scope `device.root.read`, contract minor 2 | P3 / alpha.121 | **built, alpha.121** (minor 2) |
-| CC7 | `profiles.open.request.v1` + scope `profiles.open.request`, owner-confirmed sheet, minor 3 | after sign-off | not built; **needs owner sign-off** |
-| CC8 | Bindings for apps in Main | open | owner question 3 |
+| CC7 | `profiles.open.request.v1` + scope `profiles.open.request`, owner-confirmed sheet, minor 3 | alpha.122 | **built, alpha.122** (owner signed off 2026-10-09) |
+| CC8 | Bindings for apps in Main | decided | **No** (owner, 2026-10-09): every profile except Main; `config.*` refuses `owner` |
 | done | `profile.switched` also from the **target** profile's Cyclone (§1.3) | P1 / alpha.119 | **built** |
 
 **Contract rules for Cloak:**

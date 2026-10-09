@@ -5,7 +5,7 @@ result. Attach the debug file (Profiles → Save debug file, or Glass → Home �
 to anything that isn't ✓.
 
 **Phone:** ______ · **Android:** ______ · **Root manager:** Magisk / hidden Magisk / KernelSU / APatch ·
-**Cyclone:** 5.0.0-alpha.121.dev1 or newer.
+**Cyclone:** 5.0.0-alpha.122.dev1 or newer.
 
 ## 1. Creating profiles (by hand, on the phone)
 
@@ -28,7 +28,7 @@ and back), then saves the phone's debug file to `testbench-results/profiles/`.
 |---|---|---|
 | 2.1 | Every switch ends where asked (✓). A ↩ (came back by itself after about 45 s) is safe, but report it | UNVERIFIED |
 | 2.2 | No ✗ stuck and no refused switch while no task is running | UNVERIFIED |
-| 2.3 | The debug file's "Last switches" shows `arm_return✓ confirm✓` and `DONE` for each | UNVERIFIED |
+| 2.3 | The debug file's "Last switches" shows each one as "… (from the PC)" with `arm_return✓ confirm✓` and `DONE` (alpha.122: the PC switch has the way back too) | UNVERIFIED |
 
 ## 3. The way back
 
@@ -56,6 +56,10 @@ and back), then saves the phone's debug file to `testbench-results/profiles/`.
 | 5.3 | Bind an app in B from Cloak in Main, report `ready`, then `degraded` | The pill reads Rooted, then "Rooted · check" | UNVERIFIED |
 | 5.4 | Add an app to B with the app manager, bind it, change B's apps | The binding stays (only an uninstall from B removes it) | UNVERIFIED |
 | 5.5 | Cloak calls `root.status.v1` with `device.root.read` | `rootManager` and each profile's `rootProven` match the "has" lines; no package names or paths | UNVERIFIED |
+| 5.6 | In B, Cloak calls `profiles.open.request.v1` for C (scope `profiles.open.request`) | Cyclone shows "Open Profile C?"; **Not now** changes nothing; **Open** switches to C with the way back; Cloak gets `profile.switched` | UNVERIFIED |
+| 5.7 | Lock the phone, then Cloak asks again | Only a notification; nothing opens over the lock screen | UNVERIFIED |
+| 5.8 | Cloak asks twice within 10 s; asks for B while in B | `RATE_LIMITED`; `ALREADY_OPEN` | UNVERIFIED |
+| 5.9 | Cloak tries `config.set.v1` for `owner` | Refused (`NO_SUCH_PROFILE`): Cloak never binds apps in Main | UNVERIFIED |
 
 ## 6. Glass
 

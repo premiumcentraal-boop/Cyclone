@@ -569,6 +569,42 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
     Glass.
 - **Physical: UNVERIFIED.**
 
+### Alpha.122: Cloak asks to open a profile, Main stays unbindable, the PC switch made safe (**built, alpha.122.dev1**)
+
+**Owner decisions (2026-10-09):**
+- Cloak binds in every profile except Main.
+- Opening a profile from Cloak: yes, as a request the owner answers on Cyclone's own screen.
+
+**As built:**
+- **The request (CC7, connector contract minor 3):** `profiles.open.request.v1` with scope `profiles.open.request`.
+  - **Accepted targets:** `owner` or a ready Cyclone profile that isn't in front.
+  - **Refused:** `NO_SUCH_PROFILE` and `ALREADY_OPEN`; `BUSY` while a task runs, a review waits, another request waits
+    (2 minutes) or the asking app's profile isn't in front; `RATE_LIMITED` above one request in 10 s per connector.
+  - **The answer:** `{version: 1, requested: true}`, which only means the question was shown.
+- **The question:**
+  - `ProfileOpenRequests` holds one waiting request and shows `ProfileOpenRequestActivity` (not exported) with **Open**
+    and **Not now**, plus a high-priority notification.
+  - The screen opens by itself only on an unlocked, awake phone; otherwise there is only the notification.
+  - **Open** runs the staged switch (`openProfile`, way back armed, journaled). Cloak learns the result from
+    `profile.switched`.
+  - **CI guard:** nothing in the request path switches. `openProfile` is called only from the Open button. The activity
+    is not exported. Only `ConnectorRuntime` can ask.
+- **The PC/Glass switch** (`ProfileApps.switchTo`, used by Glass and `cyclone-testbench profiles`):
+  - It now arms the same way back, but only once the target's Cyclone listens. It waits adaptively, confirms with the
+    hello, and journals each switch as "… (from the PC)".
+  - It still carries no memory or skills.
+  - Before, it had neither the way back nor the journal, which the alpha.121 switch-matrix suite would have missed.
+- **Kit:**
+  - SPEC §13; the client `requestOpenProfile()`;
+  - schemas: the hello scopes, the error codes `BUSY` and `ALREADY_OPEN`, and the result schema;
+  - vectors: hello minor 3, and the request needing its scope.
+- **Tests:**
+  - `ProfileOpenRequest57Test` (4): the request, its refusals, the one-at-a-time gate with expiry and rate, and Main
+    refused for bindings;
+  - `ProfilePcSwitch122Test` (2): arm before switch, the journal, a late hello, a failed switch, a target not listening;
+  - guards in `test_connector_guard.py` and `test_profile_room_guard.py`.
+- **Physical: UNVERIFIED.**
+
 ## 7. The next build: alpha.118 (P0), step by step
 
 **Base:** the latest release, `5.0.0-alpha.117.dev2` (version code 271, `6936667d`).
@@ -633,14 +669,15 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
 - **Delete now:** offered inside the room screen, always with its automatic backup first (unchanged rule: no backup,
   no delete).
 - **Clean up** of unfinished users: only users Cyclone itself named, always after a confirm.
-- **Order of builds:** profiles P0–P3 (alpha.118–121) before VMOS V1 (alpha.122).
+- **Order of builds:** profiles P0–P3 (alpha.118–121) and the Cloak open request (alpha.122) before VMOS V1 (alpha.123).
 
 **Still open:**
 
 1. **Right now:** what does Recently deleted hold, and what does `adb shell cmd user list --all --verbose` show?
    That confirms §1.2. P0's debug file will show it without adb.
 2. **Cornerstone apps:** besides Cyclone, root apps, Shizuku and Cloak, which apps must every new profile have?
-3. **Cloak and Main:** should Cloak bind apps in the main profile too, or only in B, C, …?
+3. **Cloak and Main:** ~~should Cloak bind apps in the main profile too?~~ **Decided (owner, 2026-10-09): no.** Cloak
+   binds apps in every Cyclone profile, never in Main. `config.*` refuses `owner`, and a guard and a test keep it so.
 4. **Root manager:** Magisk (hidden or not), KernelSU or APatch on this phone?
 5. **Deleting:** should **Delete now** be offered right inside the "phone is full" screen, always with its automatic
    backup first?

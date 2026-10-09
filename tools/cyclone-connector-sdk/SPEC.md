@@ -1,6 +1,6 @@
 # Cyclone phone connectors `cyclone.connector/1`
 
-Status: **v1, minor 2 alpha** (Cyclone 5.0.0-alpha.121; minor 1 since alpha.106), building on alpha.105 / plan 51 K1–K4. This file is the contract. The code is
+Status: **v1, minor 3 alpha** (Cyclone 5.0.0-alpha.122; minor 2 since alpha.121, minor 1 since alpha.106), building on alpha.105 / plan 51 K1–K4. This file is the contract. The code is
 `apps/mobile/app/src/main/java/com/cyclone/mobile/connector/`. Every release carries the kit (§9):
 `Cyclone-Connector-Client-<version>.aar`, `Cyclone-Connector-Sample-<version>.apk` and
 `Cyclone-Connector-Schemas-<version>.zip` (this file, the JSON Schemas and the test vectors), each listed with its
@@ -79,6 +79,7 @@ Apps sharing a UID are refused. Limits: 20 calls per second, 64 KB per request.
 | `entries.get` | `selector.contribute` | → `{entries[]}` |
 | `events` | `events.profiles` | `{since}` → `{events[], next, reset, more}` (§7) |
 | `root.status.v1` | `device.root.read` | → `{version, rootManager, profileRoom, profiles[]}` (§12, minor 2) |
+| `profiles.open.request.v1` | `profiles.open.request` | `{profileId}` → `{version, requested}` (§13, minor 3) |
 
 Errors:
 
@@ -90,6 +91,7 @@ Errors:
 | `UNSUPPORTED_CONTRACT` | a major version this Cyclone doesn't speak |
 | `RATE_LIMITED` | too many calls |
 | `BAD_REQUEST`, `BAD_EXT`, `BAD_ENTRIES`, `SECRET_REFUSED`, `NO_SUCH_PROFILE`, `UNKNOWN_METHOD` | as named |
+| `BUSY`, `ALREADY_OPEN` | `profiles.open.request.v1` only (§13) |
 | `INTERNAL` | Cyclone couldn't answer; no details are given |
 
 ## 4. Scopes
@@ -102,6 +104,7 @@ Errors:
 | `selector.contribute` | Add its own entries to your profiles list |
 | `events.profiles` | Hear when profiles are added, changed, switched or removed |
 | `device.root.read` | See whether root works in your profiles (minor 2) |
+| `profiles.open.request` | Ask you to open a profile; you say yes on Cyclone's own screen (minor 3) |
 
 When an update asks for more scopes, the old approval keeps working for the scopes it covered. Settings shows the
 new ones until the owner approves them.
@@ -342,4 +345,34 @@ Schema: `root.status.result.schema.json`.
   - they go only when the profile is permanently deleted, or when Android says the app is gone from that profile;
   - a profile restored under a new Android user id keeps them.
 - **The handoff:** `docs/handoff/CLOAK_CONNECTOR_COMPAT.md`.
+
+## 13. Asking the owner to open a profile (minor 3, alpha.122)
+
+Check `hello.minor >= 3` first. Scope `profiles.open.request` is approved separately.
+
+```json
+{"method": "profiles.open.request.v1", "args": {"profileId": "Cyclone_0123456789abcdef"}}
+→ {"version": 1, "requested": true}
+```
+
+- **It asks; it never switches.** `profileId` is `owner` (the main profile) or a ready Cyclone profile. Cyclone shows
+  its own screen: "Cyclone Cloak asks to open Profile C", with **Open** and **Not now**. Only the owner's tap on
+  **Open** switches, through the same staged switch as Profiles (way back armed, journaled).
+- **What `requested: true` means:** the question was shown, as the screen itself or as a notification. Learn the
+  outcome only from `profile.switched` (§7); a "Not now" sends nothing.
+- **On a locked phone,** only a notification is posted. The screen never opens by itself over a lock screen.
+
+**Errors:**
+
+| Code | When |
+|---|---|
+| `NO_SUCH_PROFILE` | That profile isn't ready (setting up, in Recently deleted, or unknown) |
+| `ALREADY_OPEN` | It is already in front |
+| `BUSY` | A task is running, a review waits, another request is still waiting (2 minutes), or your app's profile isn't the one in front |
+| `RATE_LIMITED` | More than one request in 10 seconds |
+
+**Cloak and Main.** By the owner's decision, Cyclone Cloak binds apps in every Cyclone profile, never in Main.
+`config.*` refuses `owner` (§10).
+
+Schema: `profiles.open.request.result.schema.json`.
 

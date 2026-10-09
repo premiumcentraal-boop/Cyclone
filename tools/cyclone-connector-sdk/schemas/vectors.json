@@ -103,7 +103,7 @@
         "ok": true,
         "result": {
           "contract": "cyclone.connector/1",
-          "minor": 2,
+          "minor": 3,
           "connectorId": "acme-profiles",
           "approved": true,
           "granted": [
@@ -773,6 +773,21 @@
       "request": {
         "method": "root.status.v1",
         "args": {}
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "SCOPE_NOT_GRANTED"
+        }
+      }
+    },
+    {
+      "name": "profiles.open.request.v1 needs profiles.open.request",
+      "request": {
+        "method": "profiles.open.request.v1",
+        "args": {
+          "profileId": "owner"
+        }
       },
       "answer": {
         "ok": false,
