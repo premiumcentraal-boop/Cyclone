@@ -19,6 +19,8 @@ internal object ProfileBootstrapRuntime {
     private const val SHIZUKU_PERMISSION = "moe.shizuku.manager.permission.API_V23"
     private const val MAX_OUTPUT = 262144
     const val CARRY_ACTION = "com.cyclone.PROFILE_CARRY"
+    const val HELLO_ACTION = "com.cyclone.PROFILE_HELLO"
+    const val ROOT_CHECK_ACTION = "com.cyclone.PROFILE_ROOT_CHECK"
 
     fun prepare(context: Context, target: Int, profile: String) = prepareInternal(context, target, profile, false)
 
@@ -84,7 +86,10 @@ internal object ProfileBootstrapRuntime {
         val source = ProfileSetupRuntime.currentUserId()
         require(target > 0 && target != source)
         check(run("/system/bin/am", "get-current-user").trim() == (if (repairingActiveTarget) target else source).toString()) { "Open Cyclone in your active phone profile before preparing another." }
-        val installedSupport = ProfileRequiredPackages.supportAllowlist.filter { pkg ->
+        // Plan 57 P1: which root manager this phone uses, and a hidden (renamed) Magisk app, so it comes along too.
+        val manager = runCatching { ProfileRoom.detect(run("/system/bin/ls", "/data/adb")) }.getOrNull()
+        val hiddenMagisk = if (manager == ProfileSetupPlan.RootManager.MAGISK) hiddenMagiskPackage(context) else null
+        val installedSupport = (ProfileRequiredPackages.supportAllowlist + listOfNotNull(hiddenMagisk)).filter { pkg ->
             runCatching { context.packageManager.getApplicationInfo(pkg, 0) }.isSuccess
         }.toSet()
         (installedSupport + PKG).forEach { pkg ->
@@ -100,7 +105,7 @@ internal object ProfileBootstrapRuntime {
         }
         val targetUid = packageUid(target, PKG)
         val sourceUid = context.applicationInfo.uid
-        prepareMagisk(source, target, sourceUid, targetUid, installedSupport)
+        if (manager == ProfileSetupPlan.RootManager.MAGISK) prepareMagisk(source, target, sourceUid, targetUid, installedSupport)
 
         val folder = "/data/user_de/$target/$PKG/files"
         // Force-stop only the destination Cyclone process before import, never another app.
@@ -131,15 +136,70 @@ internal object ProfileBootstrapRuntime {
             val ack = runCatching { JSONObject(run("/system/bin/cat", "$folder/profile-bootstrap-result.json")) }.getOrNull()
             if (ack?.optString("nonce") == nonce && ack.optInt("user") == target && ack.optBoolean("ok")) "ready" else null
         }
-        // Prove destination root policy, not just the database write. Nested su originates as its UID.
-        check(run("su", "$targetUid", "-c", "su -c /system/bin/id").contains("uid=0")) {
-            "This profile cannot return through Cyclone yet. The switch was cancelled."
-        }
+        // Plan 57 P1: prove root from the target's own Cyclone, whatever the root manager. When it can't be set by
+        // command (KernelSU, APatch, or a Magisk grant missing), the owner is told the one step to do by hand.
+        val label = runCatching { ProfileRegistryStore.records(context).firstOrNull { it.id == profile }?.label }.getOrNull() ?: "this profile"
+        check(rootFromTarget(target)) { ProfileSwitch.rootGuidance(manager, label) }
+    }
+
+    /**
+     * Asks the target's Cyclone to run `su -c id` itself and report. Truthful for every root manager: it is the very
+     * check the target's Cyclone needs to switch back.
+     */
+    private fun rootFromTarget(target: Int): Boolean {
+        val nonce = UUID.randomUUID().toString().replace("-", "")
+        val file = "/data/user_de/$target/$PKG/files/root-check-$nonce.json"
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE, "-a", ROOT_CHECK_ACTION, "--es", "nonce", nonce)
+        val answer = runCatching {
+            poll(tries = 75) {
+                runCatching { JSONObject(run("/system/bin/cat", file)) }.getOrNull()?.takeIf { it.optString("nonce") == nonce }
+            }
+        }.getOrNull()
+        runCatching { run("/system/bin/rm", "-f", file) }
+        return answer?.optBoolean("ok") == true
+    }
+
+    /** Magisk's hidden app (its package is random after "Hide the Magisk app"), read from Magisk's own database. */
+    private fun hiddenMagiskPackage(context: Context): String? = runCatching {
+        val out = run("magisk", "--sqlite", "SELECT value FROM strings WHERE key='requester';")
+        Regex("value=([A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+)").find(out)?.groupValues?.get(1)
+            ?.takeIf { ProfileSetupPlan.validPackageName(it) && it != PKG }
+            ?.takeIf { runCatching { context.packageManager.getApplicationInfo(it, 0) }.isSuccess }
+    }.getOrNull()
+
+    /**
+     * Plan 57 P1: asks the target's Cyclone to say hello once its profile is in front (it waits for that), and waits
+     * until it says it is listening. A profile that is locked, or whose Cyclone can't start, never gets a return armed:
+     * the owner might still be typing its PIN.
+     */
+    fun requestHello(target: Int, nonce: String) {
+        require(target >= 0 && ProfileSwitch.validNonce(nonce))
+        val folder = "/data/user_de/$target/$PKG/files"
+        execute("/system/bin/rm -f $folder/switch-hello-* $folder/switch-wait-*")
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE, "-a", HELLO_ACTION, "--es", "nonce", nonce)
+        val listening = waitForFile("$folder/switch-wait-$nonce", seconds = 5)
+        runCatching { run("/system/bin/rm", "-f", "$folder/switch-wait-$nonce") }
+        check(listening) { "Cyclone in that profile isn't listening yet, so no automatic way back was set." }
+    }
+
+    /** Waits up to [seconds] for the target's hello (one bounded command, one journal step). */
+    fun helloArrived(target: Int, nonce: String, seconds: Int = 18): Boolean = waitForFile(ProfileSwitch.helloPath(target, nonce), seconds)
+
+    private fun waitForFile(path: String, seconds: Int): Boolean {
+        require(path.matches(Regex("/data/user_de/[0-9]+/com\\.cyclone\\.mobile/files/switch-(hello|wait)-[a-f0-9]{32}")) && seconds in 1..18)
+        return runCatching {
+            execute("i=0; while [ \$i -lt ${seconds * 4} ]; do [ -f $path ] && exit 0; sleep 0.25; i=\$((i+1)); done; exit 1")
+        }.isSuccess
+    }
+
+    /** Plan 57 P1: the dead-man return, a fixed root-side timer (see [ProfileSwitch.returnCommand]). */
+    fun armReturn(source: Int, target: Int, nonce: String) {
+        execute(ProfileSwitch.returnCommand(source, target, nonce))
     }
 
     private fun prepareMagisk(source: Int, target: Int, sourceUid: Int, targetUid: Int, support: Set<String>) {
-        check(runCatching { run("magisk", "-V").trim().toInt() >= 26000 }.getOrDefault(false)) {
-            "Automatic profile root setup currently requires Magisk 26 or newer. The switch was cancelled."
+        check(runCatching { run("magisk", "-V").trim().toInt() >= 24000 }.getOrDefault(false)) {
+            "Automatic profile root setup needs Magisk 24 or newer. Update Magisk, then switch again."
         }
         val allowed = "SELECT policy FROM policies WHERE uid=$sourceUid AND policy=2 AND (until=0 OR until>strftime('%s','now'));"
         check(run("magisk", "--sqlite", allowed).contains("policy=2")) { "Cyclone needs a saved root grant in this profile before sharing that access." }

@@ -247,10 +247,12 @@ internal fun ProfileRoomCard(modifier: Modifier = Modifier) {
     var room by remember { mutableStateOf<ProfileCapacity.Room?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var dialog by remember { mutableStateOf<String?>(null) }
+    var switcher by remember { mutableStateOf<Boolean?>(null) }
     fun reload() {
         scope.launch {
             status = withContext(Dispatchers.IO) { runCatching { ProfileRoom.status(context) }.getOrNull() }
             room = withContext(Dispatchers.IO) { runCatching { ProfileSetupRuntime.room(context) }.getOrNull() }
+            switcher = withContext(Dispatchers.IO) { runCatching { ProfileSetupRuntime.userSwitcherOn() }.getOrNull() }
         }
     }
     LaunchedEffect(Unit) { reload() }
@@ -284,6 +286,18 @@ internal fun ProfileRoomCard(modifier: Modifier = Modifier) {
             }
             if (s?.raisedByCyclone == true) {
                 OutlinedButton(onClick = { dialog = "restore" }) { Text("Restore default") }
+            }
+            // Plan 57 P1: Android's own user switcher is the last way back when Cyclone can't switch.
+            when (switcher) {
+                true -> Text("Safety net: Android's user switcher is on (Quick Settings → users).", style = MaterialTheme.typography.bodySmall)
+                false -> {
+                    Text("Safety net: Android's user switcher is off. Turn it on so you can always get back to Main.",
+                        style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { run { ProfileSetupRuntime.enableUserSwitcher(); "Android's user switcher is on." } }) {
+                        Text("Turn on Android's user switcher")
+                    }
+                }
+                null -> Unit
             }
             note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }

@@ -24,6 +24,8 @@ class GatewayInitProvider : ContentProvider() {
         runCatching { com.cyclone.mobile.ai.OpenRouterCatalogStore.initialize(app) }
         // Plan 57 W1: privileged profile steps are journaled for the debug file from the first one.
         runCatching { com.cyclone.mobile.runtime.workspaces.ProfileStepJournal.attach(app) }
+        // Plan 57 P1: the last switches, for Profiles and the debug file.
+        runCatching { com.cyclone.mobile.runtime.workspaces.ProfileSwitch.attach(app) }
         // Plan 52 run 7: the owner's Hands style (Natural unless they chose otherwise) from the first moment of the
         // process, not only once Accessibility connects.
         runCatching { com.cyclone.mobile.gesture.HandsSettings.apply(app) }

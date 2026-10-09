@@ -161,7 +161,8 @@ object ProfileFailureClassifier {
             ProfileSetupOperation.ROOM_LIST_ADB, ProfileSetupOperation.ROOM_READ_PROP, ProfileSetupOperation.ROOM_SET_PROP,
             ProfileSetupOperation.ROOM_RESET_PROP, ProfileSetupOperation.ROOM_CLEAR_MODULE, ProfileSetupOperation.ROOM_STAGE_MODULE,
             ProfileSetupOperation.ROOM_OWN_MODULE, ProfileSetupOperation.ROOM_LABEL_MODULE, ProfileSetupOperation.ROOM_PLACE_MODULE,
-            ProfileSetupOperation.ROOM_LIST_MODULE, ProfileSetupOperation.ROOM_READ_MODULE ->
+            ProfileSetupOperation.ROOM_LIST_MODULE, ProfileSetupOperation.ROOM_READ_MODULE,
+            ProfileSetupOperation.READ_USER_SWITCHER, ProfileSetupOperation.ENABLE_USER_SWITCHER ->
                 failure(ProfileSetupFailureKind.ROOT_COMMAND_FAILED, platform)
             ProfileSetupOperation.VERIFY_ROOT -> error("handled above")
             ProfileSetupOperation.CREATE_MANAGED_PROFILE, ProfileSetupOperation.CREATE_SECONDARY_USER -> error("handled above")

@@ -45,6 +45,27 @@ class ProfileBootstrapService : Service() {
             }
             return START_NOT_STICKY
         }
+        // Plan 57 P1: the switch's hello. Waits until this profile is in front, then says so (which disarms the
+        // dead-man return), tells this profile's connectors, and keeps a "Back to Main" notice outside the main profile.
+        if (intent?.action == ProfileBootstrapRuntime.HELLO_ACTION) {
+            val nonce = intent.getStringExtra("nonce").orEmpty()
+            if (!ProfileSwitch.validNonce(nonce)) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId); return START_NOT_STICKY }
+            // Says at once that it is listening; only then does the switch arm its dead-man return.
+            runCatching { File(createDeviceProtectedStorageContext().filesDir, "switch-wait-$nonce").writeText("1") }
+            repairScope.launch {
+                try { sayHello(nonce) } finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
+            }
+            return START_NOT_STICKY
+        }
+        // Plan 57 P1: proves root from this profile's own Cyclone, for every root manager.
+        if (intent?.action == ProfileBootstrapRuntime.ROOT_CHECK_ACTION) {
+            val nonce = intent.getStringExtra("nonce").orEmpty()
+            if (!ProfileSwitch.validNonce(nonce)) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId); return START_NOT_STICKY }
+            repairScope.launch {
+                try { checkRoot(nonce) } finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
+            }
+            return START_NOT_STICKY
+        }
         if (intent?.action == ProfileBootstrapRuntime.CARRY_ACTION) {
             if (carryJob?.isActive != true) carryJob = repairScope.launch {
                 try { takeInCarry() } finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
@@ -140,7 +161,53 @@ class ProfileBootstrapService : Service() {
         }
     }
 
+    private suspend fun sayHello(nonce: String) {
+        val users = getSystemService(android.os.UserManager::class.java)
+        var inFront = false
+        repeat(80) {
+            if (!inFront) {
+                inFront = runCatching { users.isUserForeground }.getOrDefault(false)
+                if (!inFront) delay(500)
+            }
+        }
+        if (!inFront) return
+        val folder = createDeviceProtectedStorageContext().filesDir
+        File(folder, "switch-hello-$nonce").writeText(System.currentTimeMillis().toString())
+        val me = ProfileSetupRuntime.currentUserId()
+        runCatching { com.cyclone.mobile.connector.ConnectorEvents.switched(this, me) }
+        runCatching { backToMainNotice() }
+    }
+
+    /** A quiet, lasting notice in every profile but the main one: tap it to get back to Main. */
+    private fun backToMainNotice() {
+        val manager = getSystemService(android.app.NotificationManager::class.java)
+        val (me, label) = ProfileCarry.me(this)
+        if (me == CarryRules.MAIN) { manager.cancel(RETURN_NOTICE); return }
+        manager.createNotificationChannel(android.app.NotificationChannel("cyclone-profile-return", "Back to Main",
+            android.app.NotificationManager.IMPORTANCE_MIN))
+        val open = android.app.PendingIntent.getActivity(this, 0,
+            Intent(this, com.cyclone.mobile.ui.ProfileRescueActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+        val notice = android.app.Notification.Builder(this, "cyclone-profile-return")
+            .setSmallIcon(android.R.drawable.ic_menu_revert).setContentTitle("You're in $label")
+            .setContentText("Tap to go back to Main").setContentIntent(open).setOngoing(true).build()
+        manager.notify(RETURN_NOTICE, notice)
+    }
+
+    private fun checkRoot(nonce: String) {
+        val ok = runCatching {
+            val process = ProcessBuilder("su", "-c", "/system/bin/id").redirectErrorStream(true).start()
+            try {
+                val done = process.waitFor(12, java.util.concurrent.TimeUnit.SECONDS)
+                done && process.exitValue() == 0 && process.inputStream.bufferedReader().readText().contains("uid=0")
+            } finally { process.destroyForcibly() }
+        }.getOrDefault(false)
+        File(createDeviceProtectedStorageContext().filesDir, "root-check-$nonce.json")
+            .writeText(JSONObject().put("nonce", nonce).put("ok", ok).toString())
+    }
+
     companion object {
         private const val ALIAS = "cyclone.profile.bootstrap.v1"
+        private const val RETURN_NOTICE = 905
     }
 }

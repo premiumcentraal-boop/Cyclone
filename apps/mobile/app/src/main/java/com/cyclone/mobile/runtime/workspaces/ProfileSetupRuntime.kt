@@ -188,55 +188,111 @@ object ProfileSetupRuntime {
         return owner to current
     }
 
-    /** Trusted local UI action. This is not a model tool and cannot bypass an active task. */
+    /**
+     * Trusted local UI action. This is not a model tool and cannot bypass an active task.
+     *
+     * Plan 57 P1: a staged switch with a journal ([ProfileSwitch]): preflight, prepare, carry, arm the dead-man return,
+     * switch (waiting adaptively), confirm. Every switch, finished or not, is remembered for Profiles and the debug file.
+     */
     fun openProfile(context: Context, profileId: String?, onProgress: (String) -> Unit = {}) {
-        synchronized(Layer2Workspaces.engine.mutationLock) {
-            check(!Layer2Workspaces.gated() && !com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask() &&
-                !com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask()) { "Finish the current task before switching profiles." }
-            onProgress("Checking profile access…")
-            runRequired(ProfileSetupPlan.verifyRoot())
-            val users = listUsersRequired()
-            val user = if (profileId == null) {
-                ProfileSetupParser.mainUserId(users)
-                    ?: fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android did not identify the main profile.")
-            } else {
-                ProfileRegistryStore.checkpoint(context, prefs(context))
-                val record = ProfileRegistryStore.records(context).single { it.id == profileId }
-                check(!record.inTrash) { "${record.label} is in Recently deleted. Restore it first." }
-                val target = record.androidUserId ?: error("This profile still needs setup.")
-                check(record.ready && record.secondaryUser) { "This profile still needs setup." }
-                val exact = users.singleOrNull { it.id == target && it.name == record.id }
-                check(exact != null && ProfileRecovery.validOwned(exact, record.parentUserId, true)) { "Profile identity needs repair." }
-                if (target != currentUserId()) {
-                    onProgress("Preparing ${record.label} settings and permissions…")
-                    ProfileBootstrapRuntime.prepare(context, target, record.id)
+        val tracker = ProfileSwitch.Tracker()
+        val source = currentUserId()
+        var target = -1
+        var label = "Main"
+        var outcome = ProfileSwitch.Outcome.FAILED
+        var note: String? = null
+        try {
+            synchronized(Layer2Workspaces.engine.mutationLock) {
+                val user = tracker.stage(ProfileSwitch.Stage.PREFLIGHT) {
+                    check(!Layer2Workspaces.gated() && !com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask() &&
+                        !com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask()) { "Finish the current task before switching profiles." }
+                    onProgress("Checking profile access…")
+                    runRequired(ProfileSetupPlan.verifyRoot())
+                    val users = listUsersRequired()
+                    if (profileId == null) {
+                        ProfileSetupParser.mainUserId(users)
+                            ?: fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android did not identify the main profile.")
+                    } else {
+                        ProfileRegistryStore.checkpoint(context, prefs(context))
+                        val record = ProfileRegistryStore.records(context).single { it.id == profileId }
+                        label = record.label
+                        check(!record.inTrash) { "${record.label} is in Recently deleted. Restore it first." }
+                        val wanted = record.androidUserId ?: error("This profile still needs setup.")
+                        check(record.ready && record.secondaryUser) { "This profile still needs setup." }
+                        val exact = users.singleOrNull { it.id == wanted && it.name == record.id }
+                        check(exact != null && ProfileRecovery.validOwned(exact, record.parentUserId, true)) { "Profile identity needs repair." }
+                        wanted
+                    }
                 }
-                target
-            }
-            if (user != currentUserId()) {
-                // Plan 40 P2: what this Cyclone knows goes with you. Best effort: a carry never blocks the switch.
-                onProgress("Bringing your memory and skills…")
-                ProfileCarry.noteSent(context, runCatching { ProfileBootstrapRuntime.carry(context, user) }.isSuccess)
-            }
-            val activeUser = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser()))
-            check(activeUser == currentUserId() || activeUser == user) { "Your active profile changed. The switch was cancelled." }
-            check(!Layer2Workspaces.gated()) { "Resolve the pending review before switching." }
-            Layer2Workspaces.engine.clearSelection()
-            if (activeUser != user) {
-                onProgress("Asking Android to open the profile…")
-                runRequired(ProfileSetupPlan.switchUser(user))
-            }
-            onProgress("Waiting for Android to confirm the switch…")
-            var verified = false
-            repeat(20) {
-                if (!verified) {
-                    verified = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser())) == user
-                    if (!verified) Thread.sleep(150)
+                target = user
+                if (user != currentUserId() && profileId != null) {
+                    tracker.stage(ProfileSwitch.Stage.PREPARE) {
+                        onProgress("Preparing $label settings and permissions…")
+                        ProfileBootstrapRuntime.prepare(context, user, profileId)
+                    }
                 }
+                if (user != currentUserId()) {
+                    // Plan 40 P2: what this Cyclone knows goes with you. Best effort: a carry never blocks the switch.
+                    onProgress("Bringing your memory and skills…")
+                    val carried = runCatching { ProfileBootstrapRuntime.carry(context, user) }
+                    ProfileCarry.noteSent(context, carried.isSuccess)
+                    tracker.note(ProfileSwitch.Stage.CARRY, carried.isSuccess, carried.exceptionOrNull()?.message)
+                }
+                val activeUser = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser()))
+                check(activeUser == currentUserId() || activeUser == user) { "Your active profile changed. The switch was cancelled." }
+                check(!Layer2Workspaces.gated()) { "Resolve the pending review before switching." }
+                Layer2Workspaces.engine.clearSelection()
+                val nonce = UUID.randomUUID().toString().replace("-", "")
+                var hello = false
+                if (activeUser != null && activeUser != user) {
+                    // The way back first: the target's Cyclone is asked to say hello once it is in front; if it never
+                    // does, the root-side timer switches back to where the owner was.
+                    val armed = runCatching {
+                        ProfileBootstrapRuntime.requestHello(user, nonce)
+                        ProfileBootstrapRuntime.armReturn(activeUser, user, nonce)
+                    }
+                    hello = armed.isSuccess
+                    tracker.note(ProfileSwitch.Stage.ARM_RETURN, armed.isSuccess, armed.exceptionOrNull()?.message)
+                    tracker.stage(ProfileSwitch.Stage.SWITCH) {
+                        onProgress("Asking Android to open the profile…")
+                        runRequired(ProfileSetupPlan.switchUser(user))
+                        onProgress("Waiting for Android to confirm the switch…")
+                        var verified = false
+                        for (pause in ProfileSwitch.waitSchedule()) {
+                            verified = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser())) == user
+                            if (verified) break
+                            Thread.sleep(pause)
+                        }
+                        check(verified) { "Android hasn't completed switching profiles yet." }
+                    }
+                }
+                outcome = ProfileSwitch.Outcome.DONE
+                if (hello) {
+                    val arrived = ProfileBootstrapRuntime.helloArrived(user, nonce)
+                    tracker.note(ProfileSwitch.Stage.CONFIRM, arrived, if (arrived) null else
+                        "Cyclone in $label hasn't said hello yet; the way back stays armed.")
+                    if (!arrived) outcome = ProfileSwitch.Outcome.CONFIRM_LATE
+                }
+                runCatching { com.cyclone.mobile.connector.ConnectorEvents.switched(context, user) }
             }
-            check(verified) { "Android hasn't completed switching profiles yet." }
-            runCatching { com.cyclone.mobile.connector.ConnectorEvents.switched(context, user) }
+        } catch (error: Throwable) {
+            note = error.message
+            throw error
+        } finally {
+            runCatching {
+                ProfileSwitch.remember(ProfileSwitch.Record(System.currentTimeMillis(), source, target, label, tracker.results.toList(),
+                    if (tracker.results.isEmpty() && note != null) ProfileSwitch.Outcome.NOT_STARTED else outcome,
+                    note?.let { ProfileDebugRedaction.text(it, 200) }))
+            }
         }
+    }
+
+    /** Plan 57 P1: Android's own user switcher (the last way back). Null when it can't be read. */
+    fun userSwitcherOn(): Boolean? = ProfileSwitch.userSwitcherOn(runBestEffort(ProfileSetupPlan.readUserSwitcher()))
+
+    fun enableUserSwitcher() {
+        runRequired(ProfileSetupPlan.enableUserSwitcher())
+        check(userSwitcherOn() == true) { "Android didn't turn its user switcher on." }
     }
 
     fun apps(context: Context): List<ProfileApp> = context.packageManager.queryIntentActivities(

@@ -158,6 +158,12 @@ object ProfileRegistryStore {
         save(context, records(context).map { if (it.id == id) it.copy(removedAtMs = null) else it })
     }
 
+    /** Plan 57 P1: the whole list, as a carry brought it ([ProfileSwitch.mergeRegistry] decided what that is). */
+    @Synchronized internal fun replaceAll(context: Context, entries: List<CycloneProfileRecord>) {
+        if (entries == records(context)) return
+        save(context, entries.distinctBy { it.id })
+    }
+
     /** Forgets a profile after Android removed it for good. */
     @Synchronized internal fun drop(context: Context, id: String) {
         save(context, records(context).filterNot { it.id == id })

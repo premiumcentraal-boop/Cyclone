@@ -7,6 +7,13 @@ limits.
   command, gateway route or MCP reaches them.
 - The debug file never copies a connector's own data (`ext` values) and redacts every step it holds.
 - Setup messages name the profile being made; none says "Profile B" by itself.
+
+Plan 57 P1 (alpha.119): the switch's way back stays fixed and narrow.
+
+- The dead-man return is one fixed command built from numbers and a hex nonce, armed only by the owner's switch, and
+  only after the target's Cyclone says it is listening.
+- Root in a new profile is proven from that profile's own Cyclone, not by nested su as another app.
+- Android's user switcher is only ever turned on (never off), from an owner button.
 """
 from __future__ import annotations
 
@@ -104,3 +111,45 @@ def test_the_debug_file_has_its_own_narrow_sharer():
     assert 'android:exported="false"' in block and "${applicationId}.profile-debug" in block
     ui = text(APP / "ui/ProfileProblemUi.kt")
     assert "ProfileDebugReport.AUTHORITY_SUFFIX" in ui and "setup-helper" not in ui
+
+
+def test_the_dead_man_return_is_fixed_and_armed_only_by_the_owner_switch():
+    switch = text(WS / "ProfileSwitch.kt")
+    body = switch[switch.index("fun returnCommand("):switch.index("fun rootGuidance(")]
+    assert "require(source >= 0 && target >= 0 && source != target && validNonce(nonce) && seconds in 10..120)" in body
+    assert 'Regex("[a-f0-9]{32}")' in switch
+    # Its only interpolations are numbers and the validated hello path.
+    assert set(re.findall(r"\$\{?([A-Za-z_]+)", body)) <= {"seconds", "target", "hello", "source"}, body
+    callers = {path.name for path, code in kotlin_sources().items() if "armReturn(" in code}
+    assert callers == {"ProfileBootstrapRuntime.kt", "ProfileSetupRuntime.kt"}, callers
+    bootstrap = text(WS / "ProfileBootstrapRuntime.kt")
+    hello = bootstrap[bootstrap.index("fun requestHello("):bootstrap.index("fun helloArrived(")]
+    assert "check(listening)" in hello
+    setup = text(WS / "ProfileSetupRuntime.kt")
+    armed = setup[setup.index("ProfileBootstrapRuntime.requestHello(user, nonce)"):]
+    assert armed.index("requestHello") < armed.index("armReturn")
+    # Only Cyclone's own screens can switch: never the Mind, gateway or MCP.
+    for path, code in kotlin_sources().items():
+        if "openProfile(" in code and path.name != "ProfileSetupRuntime.kt":
+            assert "/mind/" not in str(path) and "/gateway/" not in str(path), path
+    for tools in (ROOT / "tools/codex-phone-mcp", ROOT / "tools/cyclone-agent-mcp", ROOT / "apps/device-gateway"):
+        for path in tools.rglob("*.py"):
+            code = text(path)
+            assert "switch-user" not in code and "user_switcher_enabled" not in code, path
+
+
+def test_root_in_a_new_profile_is_proven_from_its_own_cyclone():
+    bootstrap = text(WS / "ProfileBootstrapRuntime.kt")
+    assert "check(rootFromTarget(target))" in bootstrap
+    assert '"su", "$targetUid"' not in bootstrap
+    service = text(WS / "ProfileBootstrapService.kt")
+    check = service[service.index("private fun checkRoot("):]
+    assert 'ProcessBuilder("su", "-c", "/system/bin/id")' in check
+
+
+def test_the_user_switcher_is_only_turned_on_from_an_owner_button():
+    plan = text(WS / "ProfileSetupPlan.kt")
+    assert '"/system/bin/settings", "put", "global", "user_switcher_enabled", "1")' in plan
+    assert '"user_switcher_enabled", "0"' not in plan
+    callers = {path.name for path, code in kotlin_sources().items() if "ProfileSetupRuntime.enableUserSwitcher(" in code}
+    assert callers == {"ProfileProblemUi.kt"}, callers

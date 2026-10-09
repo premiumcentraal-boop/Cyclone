@@ -38,6 +38,9 @@ enum class ProfileSetupOperation {
     ROOM_PLACE_MODULE,
     ROOM_LIST_MODULE,
     ROOM_READ_MODULE,
+    // Plan 57 P1: Android's own user switcher, the last way back when Cyclone can't switch.
+    READ_USER_SWITCHER,
+    ENABLE_USER_SWITCHER,
 }
 
 /**
@@ -252,6 +255,11 @@ object ProfileSetupPlan {
         return ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_READ_MODULE, "/system/bin/cat", "$ROOM_MODULE/$file")
     }
 
+    fun readUserSwitcher(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.READ_USER_SWITCHER,
+        "/system/bin/settings", "get", "global", "user_switcher_enabled")
+    fun enableUserSwitcher(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.ENABLE_USER_SWITCHER,
+        "/system/bin/settings", "put", "global", "user_switcher_enabled", "1")
+
     internal fun shell(command: ProfileSetupCommand): String {
         val tokens = command.tokens()
         check(tokens.isNotEmpty() && tokens.all { it.matches(shellTokenPattern) })
@@ -332,6 +340,8 @@ object ProfileSetupPlan {
         ProfileSetupOperation.ROOM_LIST_MODULE -> tokens == listOf("/system/bin/ls", ROOM_MODULE)
         ProfileSetupOperation.ROOM_READ_MODULE -> tokens.size == 2 && tokens[0] == "/system/bin/cat" &&
             tokens[1] in setOf("$ROOM_MODULE/module.prop", "$ROOM_MODULE/system.prop")
+        ProfileSetupOperation.READ_USER_SWITCHER -> tokens == listOf("/system/bin/settings", "get", "global", "user_switcher_enabled")
+        ProfileSetupOperation.ENABLE_USER_SWITCHER -> tokens == listOf("/system/bin/settings", "put", "global", "user_switcher_enabled", "1")
     }
 }
 

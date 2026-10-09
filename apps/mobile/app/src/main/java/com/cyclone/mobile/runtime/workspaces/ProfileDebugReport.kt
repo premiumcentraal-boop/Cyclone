@@ -41,6 +41,8 @@ object ProfileDebugReport {
         val carry: CarryReport?,
         val failure: ProfileSetupFailure?,
         val problems: List<String> = emptyList(),
+        val switches: List<ProfileSwitch.Record> = emptyList(),
+        val userSwitcherOn: Boolean? = null,
     )
 
     // Pure ---------------------------------------------------------------------------------------------------------
@@ -87,6 +89,11 @@ object ProfileDebugReport {
                 .put("android", e.platformMessage?.let { ProfileDebugRedaction.text(it, 400) } ?: JSONObject.NULL)
         } ?: JSONObject.NULL)
         out.put("problems", JSONArray(f.problems.map { clean(it, 200) }))
+        out.put("switches", JSONArray(f.switches.map { r ->
+            r.copy(label = clean(r.label, 60), note = r.note?.let { clean(it, 200) },
+                stages = r.stages.map { st -> st.copy(note = st.note?.let { clean(it, 200) }) }).toJson()
+        }))
+        out.put("userSwitcherOn", f.userSwitcherOn ?: JSONObject.NULL)
         return out
     }
 
@@ -116,6 +123,15 @@ object ProfileDebugReport {
             appendLine("  ${clean(r.label, 40)} · ${r.id} · user ${r.androidUserId ?: "-"} · ${r.stage}${if (r.ready) " · ready" else ""}${if (r.inTrash) " · Recently deleted" else ""}")
         }
         f.problems.forEach { appendLine("Note: ${clean(it, 200)}") }
+        if (f.switches.isNotEmpty()) {
+            appendLine()
+            appendLine("Last switches (newest last):")
+            f.switches.takeLast(5).forEach { r ->
+                val stages = r.stages.joinToString(" ") { "${it.stage.name.lowercase()}${if (it.ok) "✓" else "✗"}" }
+                appendLine("  ${iso(r.atMs)} ${r.from}→${r.to} ${clean(r.label, 40)} · ${r.outcome.name} · $stages${r.note?.let { " · " + clean(it, 120) } ?: ""}")
+            }
+        }
+        f.userSwitcherOn?.let { appendLine("Android's user switcher: ${if (it) "on" else "off"}") }
         appendLine()
         appendLine("Last steps (newest last):")
         f.steps.takeLast(15).forEach { s ->
@@ -175,7 +191,8 @@ object ProfileDebugReport {
             atMs = System.currentTimeMillis(), app = app, rootManager = roomStatus?.manager?.name, room = room, roomStatus = roomStatus,
             usersRaw = usersRaw, records = attempt("registry") { ProfileRegistryStore.records(context) }.orEmpty(), journal = journal,
             steps = ProfileStepJournal.snapshot(), connectors = connectors, carry = attempt("carry") { ProfileCarry.lastReport(context) },
-            failure = failure, problems = problems,
+            failure = failure, problems = problems, switches = ProfileSwitch.recent(),
+            userSwitcherOn = attempt("user switcher") { ProfileSetupRuntime.userSwitcherOn() },
         )
     }
 }

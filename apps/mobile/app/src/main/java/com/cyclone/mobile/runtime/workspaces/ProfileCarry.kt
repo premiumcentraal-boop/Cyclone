@@ -37,6 +37,8 @@ internal object ProfileCarry {
             .put("memory", MindMissions.memory(context).export(me, label).toJson())
             .put("brain", AdaptiveBrainRuntime.store.carryRows())
             .put("settings", settings(context))
+            // Plan 57 P1: the profiles, so every profile's Cyclone knows every profile (Main is the authority).
+            .put("registry", ProfileRegistryCodec.encode(ProfileRegistryStore.records(context)))
     }
 
     /** Takes in a bundle from another profile, and remembers what came for Profiles to show. */
@@ -50,6 +52,13 @@ internal object ProfileCarry {
         val skills = AdaptiveBrainRuntime.store.absorbRows(bundle.optJSONObject("brain") ?: JSONObject())
         runCatching { AdaptiveBrainRuntime.store.writeMirror() }
         val settings = applySettings(context, bundle.optJSONArray("settings") ?: JSONArray())
+        bundle.optString("registry").takeIf { it.isNotBlank() }?.let { text ->
+            runCatching {
+                val incoming = ProfileRegistryCodec.decode(text)
+                ProfileRegistryStore.replaceAll(context,
+                    ProfileSwitch.mergeRegistry(ProfileRegistryStore.records(context), incoming, fromMain = from == CarryRules.MAIN))
+            }
+        }
         val report = CarryReport(System.currentTimeMillis(), bundle.optString("from_label").take(60).ifBlank { "another profile" },
             memory.added + memory.updated, memory.removed, skills, settings)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_LAST, report.toJson().toString()).apply()
