@@ -1,164 +1,173 @@
-# Handoff: make Cyclone Cloak a compatible Cyclone connector (the Cyclone side)
+# Handoff: wire Cyclone Cloak to Cyclone's profiles (the Cyclone side, as built in alpha.122)
 
-**To the agent receiving this:** you are making **Cyclone Cloak** work as a "mod" on top of Cyclone's profiles:
-- it shows a **rooted status pill** for each Cyclone profile;
-- it lets the owner **load one of their Cloak phone profiles onto a Cyclone profile**.
+**To the agent receiving this:** your job is to make **Cyclone Cloak** work with Cyclone's profiles. Everything on the
+Cyclone side is built and released: Cyclone `5.0.0-alpha.122.dev1` (version code 276), connector contract
+`cyclone.connector/1`, **minor 3**. What remains is Cloak's side. This file is the whole contract and the recommended
+wiring.
 
-This file explains:
-- how Cyclone's root profiles work now (alpha.119) and how they will work (alpha.120–121);
-- the exact contract Cloak has to speak;
-- what Cyclone will add for Cloak, and when.
+**What Cloak should do when you are done:**
 
-It is the **Cyclone side only**. How Cloak builds or applies a phone profile inside its own app is out of scope: Cyclone
-never receives or needs those details.
+| # | Feature | Cyclone side |
+|---|---|---|
+| A | Be an **approved connector**; the approval follows the owner into every profile | built (alpha.121) |
+| B | **Load a Cloak phone profile onto a Cyclone profile** (bind it to that profile's apps) | built |
+| C | **The rooted pill**: Cyclone shows Rooted / Rooted · check / Rooted · not working / Native from Cloak's health; Cloak shows its own pill with Cyclone's root facts | built (alpha.121) |
+| D | **Ask to open another profile**; the owner says yes on Cyclone's own screen | built (alpha.122) |
 
-- **Repository:** `premiumcentraal-boop/Cyclone` (Cyclone).
-- **Baseline:** Cyclone `5.0.0-alpha.122.dev1` (version code 276). Written against alpha.119; §7 says what alpha.120 to
-  alpha.122 built since.
-- **Contract:** `cyclone.connector/1`, minor 3 since alpha.122 (SPEC §12 and §13). If this file and `tools/cyclone-connector-sdk/SPEC.md` disagree, SPEC.md
-  wins for what exists today. This file wins for what is planned (§7).
+**Scope:**
+- This file covers the **Cyclone side only**. How Cloak builds or applies a phone profile inside its own app is out of
+  scope; Cyclone never receives or needs those details.
+- **Don't edit Cyclone** (`premiumcentraal-boop/Cyclone`, `apps/mobile/app/**`). If Cloak needs something Cyclone
+  doesn't offer, write it under "Contract feedback" in your report (§11); the Cyclone agent builds it there.
+- **If this file and `tools/cyclone-connector-sdk/SPEC.md` disagree,** SPEC.md wins.
 
-**Don't edit Cyclone.** Cloak's work is in Cloak's own project. If Cloak needs something Cyclone doesn't offer, write it
-under "Contract feedback" in your report (§9). The Cyclone agent builds it on the Cyclone side (`apps/mobile/app/**`).
+**Owner decisions (2026-10-09):**
+- Cloak binds apps in **every Cyclone profile, never in Main**.
+- Opening a profile from Cloak is allowed **only as a request the owner answers** on Cyclone's screen.
 
 ---
 
-## 0. Read first
+## 0. Get the kit and read first
 
-1. `tools/cyclone-connector-sdk/SPEC.md`: the whole connector contract (manifest, scopes, calls, config §10,
-   startup §11).
-2. `apps/mobile/connector-client/` (the AAR): `CycloneConnector.connect(context)`, `getConfig`, `setConfig`,
-   `configStatus`, `profiles`, `events`.
-3. `apps/mobile/app/src/main/java/com/cyclone/mobile/connector/CycloneCloakProfileBinding.kt`: **exactly** how Cyclone
-   reads Cloak's binding. Its test, `app/src/test/.../connector/CycloneCloakProfileBindingTest.kt`, holds valid and
-   invalid envelopes.
-4. `Cyclone V5 plan/57-hardened-profiles.md`: §2 (switcher), §3 (Cloak's connection reviewed: six known problems), §5
-   (profile room), §6 (runs P1–P3).
-5. `tools/cyclone-connector-sdk/schemas/vectors.json`: Cyclone's exact answers. Run your fakes against it.
+**From the Cyclone release `v5.0.0-alpha.122.dev1`** (GitHub releases of `premiumcentraal-boop/Cyclone`):
+- `Cyclone-Connector-Client-5.0.0-alpha.122.dev1.aar`: the client library. Add it to Cloak; it declares the
+  `<queries>` entry for Cyclone.
+- `Cyclone-Connector-Sample-5.0.0-alpha.122.dev1.apk`: a sample connector with a button per call. Read it; don't ship
+  it.
+- `Cyclone-Connector-Schemas-5.0.0-alpha.122.dev1.zip`: SPEC.md, the JSON Schemas and `vectors.json` (Cyclone's exact
+  answers).
 
-## 1. How Cyclone's root profiles work (alpha.119)
+**Read, in this order:**
+1. `tools/cyclone-connector-sdk/SPEC.md`: §2 manifest, §3 calls and errors, §5 profiles, §7 events, §10 config, §12 root
+   status and Cloak, §13 open requests.
+2. `apps/mobile/app/src/main/java/com/cyclone/mobile/connector/CycloneCloakProfileBinding.kt`: **exactly** how Cyclone
+   reads Cloak's bindings. `CycloneCloakProfileBindingTest.kt` has valid and invalid envelopes.
+3. `docs/PROFILES_DEVICE_MATRIX.md` §5: the Cloak checks the owner runs on the phone.
 
-### 1.1 What a profile is
+## 1. How Cyclone's profiles work (what Cloak must know)
 
-**A Cyclone profile is a full secondary Android user:**
-- Android user name `Cyclone_<16 lowercase hex>`;
-- that string is also the profile id you see in `profiles`, for example `Cyclone_0123456789abcdef`;
-- the label ("Profile B", "Work") is separate and can change; **the id never does**.
+### 1.1 Profiles are Android users
 
-**The main profile** is the owner's own Android user (usually user 0). In the connector API it is the synthetic entry
-`{"id": "owner", "label": "This phone", "kind": "owner"}`. It has no registry record.
+- **A Cyclone profile is a full secondary Android user.** Its Android user name and its profile id are both
+  `Cyclone_<16 lowercase hex>`, for example `Cyclone_0123456789abcdef`.
+  - **The id never changes.** The label ("Profile B", "Work") can.
+  - The Android user number (`androidUserId`) can change, if a profile is restored.
+- **The main profile** is the owner's own Android user. In the connector API it is the synthetic entry
+  `{"id": "owner", "label": "This phone", "kind": "owner"}`. It has no registry record, and **Cloak never binds apps in
+  it**.
+- **Every profile runs its own Cyclone and its own Cloak.** They are separate installs with separate data, processes and
+  grants. The uid is `userId * 100000 + appId`.
+- **The profile list (registry)** lives in each Cyclone. The main profile's Cyclone is the authority: its list replaces
+  the others' on every switch, and another profile only adds profiles that profile doesn't know yet.
 
-**Every profile runs its own copy of Cyclone.** The same APK is installed into that Android user with
-`pm install-existing`. Every profile also runs its own copy of every app in it, Cloak included. Android keeps them
-apart:
-- separate data and processes;
-- uid = `userId * 100000 + appId`;
-- separate grants.
+### 1.2 Making a profile, and what it gets
 
-**The profile list (the registry)** lives in each Cyclone. The **main profile's Cyclone is the authority**:
-- On every switch, the list travels with the carry (alpha.119).
-- From Main, it replaces the list.
-- From another profile, only profiles that profile doesn't know yet are added.
+- **Creation** is root only, through fixed commands. No connector can create, rename or remove a profile.
+- **Profile room:** on full rooted phones the owner can allow more profiles (`fw.max_users` via `resetprop`, kept by a
+  small module).
+- **On every switch into a profile made on the phone,** Cyclone:
+  - installs its **cornerstone apps** there with `pm install-existing`: Cyclone, the root manager, Shizuku, **Cyclone
+    Cloak** (found by its connector id `cyclone-cloak`), and up to 12 apps the owner marked;
+  - shares Magisk root grants where the app had one;
+  - proves root from that profile's own Cyclone;
+  - carries memory, skills, settings and the profile list;
+  - carries **Cyclone Cloak's approval** (§2.2).
+- **The owner sees it:** Profiles shows "Profile C has: … Cloak ✓ approved ✓", or why not.
 
-### 1.2 Making a profile (root only)
+### 1.3 Switching
 
-- **Fixed commands only.** Cyclone creates the Android user with root, through a closed set of shape-checked commands
-  (`ProfileSetupPlan`). Nothing a connector sends can reach those commands.
-- **Room on the phone.** When Android's user limit is full, rooted phones can raise `fw.max_users`:
-  - Magisk, KernelSU and APatch each use their own `resetprop`;
-  - a small module, `/data/adb/modules/cyclone_profiles`, keeps the limit after restarts;
-  - the owner confirms first, Cyclone reads the change back, and it can be undone (alpha.118).
-- **Preparing the new profile.** Cyclone:
-  - installs itself and the **support apps** into it: the root manager (a hidden Magisk app included), Shizuku and
-    others on the allowlist;
-  - copies Magisk's per-app grant and sets Magisk's multiuser mode;
-  - **proves root from the new profile's own Cyclone**, which runs `su -c id` itself (alpha.119).
-
-  On KernelSU and APatch the owner allows Cyclone in that profile once, by hand. Cyclone tells them the exact step.
-- **Cloak in a new profile.** Cloak is **not yet** installed into new profiles automatically. It becomes a
-  "cornerstone app" in alpha.120 (§7, CC0).
-
-### 1.3 Switching (alpha.119)
-
-A switch runs in stages, and each stage goes into the debug file:
-1. **Preflight**, then **prepare**, then **carry** (memory, skills, the profile list).
-2. **The way back.** The target's Cyclone is asked to say hello once its profile is in front. When it answers that it
-   is listening, a fixed root-side timer is armed: it switches back if no hello arrives within 45 s.
-3. **Switch.** Android's `am switch-user`; Cyclone waits for it to confirm.
-4. **Hello.** The target's Cyclone writes its hello, which disarms the timer. It then **records `profile.switched` for
-   its own connectors** and shows a quiet "Back to Main" notice.
-
-**What this means for Cloak:**
-- **Both copies hear about it.** The **target profile's** Cloak gets `profile.switched` from its own Cyclone, and the
-  source profile's Cloak gets it from the source Cyclone. Before alpha.119 only the source heard about it.
-- **`profiles.current`** answers "which profile is in front":
-  - from the Cyclone in front, it is reliable;
-  - from a background profile's Cyclone, it is the last switch that Cyclone made, or `null` when it can't tell.
+- **On the phone** (Profiles, rescue screen, or the open request of §6), a switch is staged:
+  1. prepare;
+  2. carry;
+  3. **arm the way back**: a root-side timer switches back after 45 s if the target's Cyclone never says hello. It is
+     armed only once that Cyclone answers that it is listening;
+  4. switch;
+  5. hello, which disarms the timer.
+- **Then both Cyclones record `profile.switched`:** the target's and the source's. So **Cloak in both profiles hears
+  about it.**
+- **From the PC** (Glass, the testbench), switches have the same way back and journal since alpha.122. They **carry
+  nothing**: no memory, skills or approvals.
+- **`profiles.current`:**
+  - reliable from the Cyclone of the profile in front;
+  - from a background profile's Cyclone it is that Cyclone's last switch, or `null`.
 
   Treat it as a hint.
-- **Connectors can't switch profiles.** Only the owner can, from Cyclone's own screens. For a way to *ask* the owner,
-  see §7, CC7.
 
-### 1.4 What is per profile (important for Cloak)
+### 1.4 What lives where (the most important table)
 
-| Thing | Where it lives | Consequence for Cloak |
+| Thing | Where | Consequence for Cloak |
 |---|---|---|
-| Connector **approval** | each profile's Cyclone (`cyclone_connectors` prefs) | Cloak must be approved **in every profile** where it calls Cyclone. Approvals aren't carried yet (§7, CC1). |
-| Binder door | the Cyclone **in the caller's own Android user** | Cloak in Profile C can only talk to Cyclone in Profile C (`ConnectorDiscovery.caller` refuses other users). |
-| **Config store** (`config.*.v1`) | each Cyclone, namespace = connector id + **caller's** Android user | A binding written by Cloak in Main is seen by Main's Cyclone; one written in C, by C's Cyclone. |
-| Profile list | each Cyclone; Main is the authority | Ids are the same everywhere. Labels sync from Main on every switch. |
-| Startup provider | per user, never persisted | Re-register in every profile after either process restarts (SPEC §11). |
+| Binder door | the Cyclone **in the caller's own Android user** | Cloak in C talks only to Cyclone in C. |
+| Approval | each Cyclone; Cloak's **is carried** on switches made on the phone, and re-verified there | Approve once (in Main, normally). A profile reached only by PC switches may still need approving there. |
+| Config store (`config.*.v1`) | each Cyclone; namespace = connector id + **caller's** Android user | A binding written by Cloak in Main is in Main's Cyclone; one written by Cloak in C is in C's Cyclone. Nothing in it is carried. |
+| Profile list | each Cyclone; Main is the authority | Ids are the same everywhere. |
+| Events | each Cyclone's own journal | Each Cloak pulls from its own Cyclone. |
+| Startup provider | per user, never persisted | Re-register after either process restarts (SPEC §11). |
 
-## 2. What "compatible" means: four features
+## 2. Feature A: be an approved connector
 
-| # | Feature | Status on the Cyclone side |
-|---|---|---|
-| A | Cloak is an approved connector with the right scopes | **Works today** |
-| B | **Load a phone profile onto a Cyclone profile** (bind a Cloak profile to a Cyclone profile's apps) | **Works today** (`config.set.v1` with Cloak's envelope) |
-| C | **Rooted pill:** Cyclone's Profiles page and Glass show Rooted/Native per profile; Cloak shows its own pill with live health | **Works since alpha.121:** the pill follows Cloak's `state` (CC5), and `root.status.v1` gives Cyclone's root facts (CC6) |
-| D | Open another Cyclone profile from Cloak | **Works since alpha.122:** `profiles.open.request.v1` asks the owner on Cyclone's own screen (CC7, SPEC §13) |
+### 2.1 The manifest
 
-## 3. Feature A: be an approved connector
-
-**The manifest.** In Cloak's `AndroidManifest.xml`, declare the marker service exactly as SPEC §2 shows: permission
-`com.cyclone.mobile.permission.CONNECTOR_HOST` and action `com.cyclone.connector.CONNECT`. Then add
-`res/xml/cyclone_connector.xml`:
+**The marker service.** In Cloak's `AndroidManifest.xml`, declare it exactly as SPEC §2 shows: an exported service,
+protected by `com.cyclone.mobile.permission.CONNECTOR_HOST`, with the action `com.cyclone.connector.CONNECT` and
+meta-data `com.cyclone.connector` → `@xml/cyclone_connector`. Then add `res/xml/cyclone_connector.xml`:
 
 ```xml
 <cyclone-connector
-    contract="cyclone.connector/1.1"
+    contract="cyclone.connector/1.3"
     id="cyclone-cloak"
     label="Cyclone Cloak"
-    scopes="profiles.read profiles.apps.read profiles.config profiles.startup events.profiles selector.contribute"
+    scopes="profiles.read profiles.apps.read profiles.config events.profiles device.root.read profiles.open.request selector.contribute"
     entryActivity=".CycloneEntryActivity"
     wakeReceiver=".CycloneWakeReceiver" />
 ```
 
 **The rules:**
-- **`id` must be exactly `cyclone-cloak`.** Cyclone looks the binding up under this id
-  (`CycloneCloakProfileBinding.CONNECTOR_ID`). Any other id means no pill.
+- **`id` must be exactly `cyclone-cloak`.** Cyclone looks bindings up, installs Cloak as a cornerstone, and carries
+  its approval under this id. Any other id gets none of that.
+- **The receiver:** `wakeReceiver` must be exported and protected by `com.cyclone.mobile.permission.WAKE_CONNECTOR`.
 - **Scopes:**
-  - `profiles.apps.read` is required to learn which packages a profile has. A binding is only accepted for a package in
-    that profile's list.
-  - `profiles.config` is required for feature B.
-  - `events.profiles` with a `wakeReceiver` is how Cloak hears about switches. The receiver must be protected by
-    `com.cyclone.mobile.permission.WAKE_CONNECTOR`.
-  - `profiles.startup` is optional. Use it if Cloak wants a callback before Cyclone opens an app in a profile (SPEC
-    §11, 250 ms total, never blocking).
-  - `selector.contribute` is optional: Cloak's own entries in Cyclone's profile slider.
+
+  | Scope | Why Cloak needs it |
+  |---|---|
+  | `profiles.read` | the profile list, labels and ids, `current` |
+  | `profiles.apps.read` | each profile's `packages` (a binding is only accepted for a listed package) |
+  | `profiles.config` | feature B (bindings and their health) |
+  | `events.profiles` | hear `profile.switched`, `profile.updated` and the rest; needs the wake receiver |
+  | `device.root.read` | `root.status.v1` (feature C, minor 2) |
+  | `profiles.open.request` | `profiles.open.request.v1` (feature D, minor 3) |
+  | `selector.contribute` | optional: Cloak's own entries in Cyclone's profile slider |
+  | `profiles.startup` | optional: a callback before Cyclone opens an app in a profile (SPEC §11, 250 ms, never blocking) |
+
+  Each scope is approved by the owner. Never assume one; check `hello.granted`.
 - **Signing:** sign every Cloak build with the same key, or rotate it with a lineage (APK Signature Scheme v3). Approval
-  is by package **and** certificate lineage. A new unrelated key reads as "signer changed" and calls fail with
-  `NOT_APPROVED`.
-- **The owner approves Cloak** in Cyclone → Settings → Connectors, **in each profile** (until CC1).
-- **Start every session with `hello`.** Read `approved`, `granted`, `pending` and `minor`. Never assume a scope; check
-  `granted`.
+  is by package **and** certificate lineage; an unrelated new key means `NOT_APPROVED` everywhere.
 
-## 4. Feature B: load a phone profile onto a Cyclone profile (the binding)
+### 2.2 Approval, and how it follows the owner
 
-"Loading" a Cloak phone profile onto a Cyclone profile means Cloak tells Cyclone: "in Cyclone profile X (Android user
-N), app P is bound to Cloak profile K". Cloak writes that through `config.set.v1`, once per (profile, user, package).
+1. **The owner approves Cloak once:** Cyclone → Settings → Connectors (normally in Main).
+2. **On every switch made on the phone, the approval travels.** The receiving profile's Cyclone re-verifies it against
+   the Cloak installed **there**:
+   - the same package;
+   - the same connector id;
+   - the approved certificate in that install's lineage;
+   - scopes limited to what that install's manifest asks for.
+3. **If a check fails,** nothing is approved. The owner sees why in "Profile C has": "signed with a different key here;
+   approve it again", "not installed in this profile", "its connector manifest doesn't match here", or "revoked in this
+   profile".
+4. **A revoke the owner made in a profile wins** over an older approval. Uninstalling is not a revoke.
 
-### 4.1 The exact call
+**What Cloak does:** call `hello` at start and after every `profile.switched`.
+- If `approved` is false, show one line: "Approve Cyclone Cloak in Cyclone → Settings → Connectors in this profile". Do
+  nothing else.
+- If `pending` lists scopes, the owner hasn't approved them yet; keep working with `granted`.
+
+## 3. Feature B: load a Cloak phone profile onto a Cyclone profile (the binding)
+
+"Loading" Cloak profile **K** onto Cyclone profile **X** means: for each app **P** in X that Cloak covers, tell Cyclone
+"in X (Android user N), P is bound to K", with `config.set.v1`, then report its health with `config.status.v1`.
+
+### 3.1 The exact calls
 
 ```json
 {"method": "config.set.v1", "args": {
@@ -177,105 +186,92 @@ N), app P is bound to Cloak profile K". Cloak writes that through `config.set.v1
 }}
 ```
 
-Then report its health:
-
 ```json
 {"method": "config.status.v1", "args": {"profileId": "Cyclone_0123456789abcdef", "androidUserId": 11,
   "packageName": "com.example.app", "state": "ready"}}
 ```
 
-With the client library: `cyclone.setConfig(profileId, userId, pkg, value)`, then
-`cyclone.configStatus(profileId, userId, pkg, "ready")`. To unbind: `setConfig(..., null)`.
+- **Client library:** `setConfig(profileId, androidUserId, packageName, value)` and
+  `configStatus(profileId, androidUserId, packageName, state)`.
+- **Unbind:** `setConfig(..., null)`.
+- **Read back:** `getConfig(...)`, which returns `{value, state, storageKey, …}`.
 
-### 4.2 What Cyclone checks (or the call fails)
+### 3.2 What Cyclone accepts (or refuses)
 
-- **`androidUserId`** is a JSON **integer**, not a string, and must equal that profile's `androidUserId` from
-  `profiles`.
-- **The profile** must be `ready` and not `in_trash`. Otherwise `NO_SUCH_PROFILE`.
-- **`packageName`** must be in that profile's `packages` (needs `profiles.apps.read`). Otherwise `BAD_REQUEST`.
-- **`value`** is a JSON object of at most **4096 UTF-8 bytes**, nested at most 32 levels. The whole request is at most
-  64 KB.
-- **At most 256 tuples** per Cloak installation, per profile copy of Cyclone.
+- **`profileId`** is a ready, non-trashed Cyclone profile. **Never `owner`**; Main is refused with `NO_SUCH_PROFILE`.
+- **`androidUserId`** is a JSON **integer** (not a string), equal to that profile's `androidUserId` in `profiles`.
+- **`packageName`** is in that profile's `packages` (needs `profiles.apps.read`). Otherwise `BAD_REQUEST`.
+  - If an app really installed in the profile is refused, Cyclone's list doesn't name it yet. Tell the owner to add it
+    to the profile in Cyclone, and report it under Contract feedback.
+- **`value`** is a JSON object of at most **4,096 UTF-8 bytes**. A request is at most 64 KB and 32 levels deep.
+- **At most 256 bindings** per Cloak install, in each Cyclone.
 - **`state`** is `unknown` (the default), `ready`, `degraded` or `failed`.
 
-### 4.3 What Cyclone reads from it
+### 3.3 What Cyclone reads (one strict reader since alpha.121)
 
-- **The binding:** `value.cloakProfileId` (a trimmed string, ≤ 160 characters, required), and only when the stored
-  envelope's `profileId`, `androidUserId` and `packageName` match the tuple.
-- **The identity summary,** only when `identityVersion == 1`:
+- **A binding counts only** when the stored envelope's `profileId` (string), `androidUserId` (integer) and
+  `packageName` (string) match the tuple exactly, and `value.cloakProfileId` is a non-empty string (≤ 160 characters).
+- **The identity summary, only with `identityVersion: 1`:**
   - `name`, `manufacturer` and `model` (≤ 80 characters each);
   - `androidRelease` (≤ 40);
   - `sdkInt` (1–1000).
 
-  Any other `identityVersion` still counts as **bound**, but its fields are never read or shown. Add fields only with a
-  new `identityVersion`, after the Cyclone side has added it (contract feedback).
-- **Several apps in one profile:** the most common identity among its apps wins. A tie or a minority means Cyclone shows
-  "bound" without the identity summary.
+  Any other version still counts as **bound**, but none of its fields are shown. New fields need a new
+  `identityVersion`, added on Cyclone's side first (Contract feedback).
+- **Several apps in one profile:** the most common identity wins. A tie shows "bound" with no summary.
+- **Where it shows:**
+  - Cyclone Profiles → info → "Cyclone Cloak" (the `cloakProfileId` per app);
+  - the pill (§4);
+  - Glass Home, which shows only the version-1 summary fields, never `cloakProfileId`.
 
-**Never put these in `value`:** Android ID, IMEI, serial numbers, account names, tokens, passwords or any other
-secret.
-- The config store is not a vault.
-- Cyclone shows `cloakProfileId` on the phone (Profiles → info → "Cyclone Cloak").
-- Glass on the PC gets only the version-1 summary fields above, never the raw `cloakProfileId` (alpha.116).
+**Never put these in `value`:** Android ID, IMEI, serial numbers, account names, tokens, passwords or anything secret.
+The config store is not a vault.
 
-### 4.4 Which Cloak writes, so the pill shows everywhere
+### 3.4 Which Cloak writes
 
-Bindings are stored per caller's Android user (§1.4), and each Cyclone shows only its own store. So:
+Bindings live in the Cyclone of the Cloak that wrote them (§1.4), and each Cyclone shows only its own.
 
-- **Cloak in Main writes the binding for every profile** (its target `androidUserId` may be another user's; that is
-  allowed). Main's Cyclone feeds the main Profiles page and Glass, so this is the one that matters most. **Treat Cloak
-  in Main as the authority**, just as Cyclone's registry is.
-- **Cloak in Profile C also writes the bindings for Profile C,** so Cyclone running in C shows the pill too.
-- How the two copies of Cloak agree is Cloak's own business. They are separate installs in separate Android users.
-  Cyclone carries nothing of Cloak's.
+- **Cloak in Main writes the bindings for every profile.** It may name another profile's `androidUserId`; that is
+  allowed. Main's Cyclone feeds the main Profiles page and Glass. **Treat Cloak in Main as the authority.**
+- **Cloak in profile C also writes C's own bindings,** so Cyclone in C shows the pill there too.
+- **How the two Cloaks agree** is Cloak's business; Cyclone carries nothing of Cloak's.
 
-### 4.5 Known fragilities until alpha.121 (plan 57 §3), and what Cloak should do meanwhile
+### 3.5 When bindings go, and what Cloak should still do
 
-| Problem | Effect today | Do this in Cloak until it's fixed |
-|---|---|---|
-| D13: a binding is deleted when its package is not in the profile's `packages` list. That list is the last setup selection, not the apps really installed. | A binding can vanish after the owner changes a profile's apps, or when a stale list arrives. | On every `profile.updated` / `profile.switched` event and on start, **re-read with `config.get.v1` and re-write what is missing**. Writing the same value again is harmless. |
-| Bindings are tied to `androidUserId`. | A profile restored with a new Android user id loses them. | Key your own records by **`profileId`**. When `profiles` shows a new `androidUserId` for the same id, write the bindings again under the new id. |
-| Two lenient/strict parsers. | A malformed envelope can count as bound on one screen and not on another. | Always write the exact envelope in §4.1: integer `androidUserId`, string `cloakProfileId`, integer `identityVersion`. |
-| No approval in new profiles (D12). | Cloak in a new profile gets `NOT_APPROVED`. | Show "Approve Cyclone Cloak in Cyclone → Settings → Connectors (this profile)". Retry on `hello`. |
-| Main has no registry record. | Apps in Main can't be bound through Cyclone. | Don't try; `owner` is refused by `config.*`. Owner question 3 in plan 57. |
+**When Cyclone deletes or moves a binding (alpha.121):**
+- it is deleted **only** when its profile is permanently deleted, or when Android says the app is gone from that
+  profile (checked by the main profile's Cyclone);
+- it is **not** deleted when Cyclone's app list for the profile is out of date;
+- a profile restored under a **new Android user number** keeps its bindings (they are moved, and read back).
 
-## 5. Feature C: the rooted pill
+**What Cloak should still do (cheap, and safe):**
+- **Key your own records by `profileId`, never by user number.**
+- **Reconcile on start and on `profile.updated` / `profile.switched` / `profile.restored`:**
+  1. read `profiles`;
+  2. for each binding Cloak wants, read it with `getConfig`;
+  3. write it if it is missing or different. Writing the same value again is harmless.
+- **On `profile.removed`,** forget that profile in Cloak; Cyclone has already dropped its bindings.
 
-### 5.1 Today
+## 4. Feature C: the rooted pill
 
-**On Cyclone's Profiles page:**
-- each ready profile shows **Rooted** when Cyclone has at least one valid Cloak binding for an app in it, and **Native**
-  otherwise;
-- Glass Home shows the same (`profiles.cloak` → `/v1/devices/{id}/profiles/cloak-identities`).
+### 4.1 Cyclone's pill (Profiles page, profile details)
 
-**What Rooted means today:** a Cloak binding is configured. It does **not** say that root works right now, or that
-Cloak's module is active.
+The pill follows **Cloak's own health report**, taking the worst state across that profile's bound apps:
 
-### 5.2 What Cloak should do now (works today, future-proof)
+| Pill | Cloak's `state` |
+|---|---|
+| **Rooted** | `ready` or `unknown` |
+| **Rooted · check** | `degraded` |
+| **Rooted · not working** | `failed` |
+| **Native** | no binding |
 
-- **Report health per tuple** with `config.status.v1`:
-  - `ready`: the binding is applied and Cloak's own checks pass;
-  - `degraded`: bound, but something is off (for example, a root grant is missing in this profile);
-  - `failed`: bound but not working;
-  - `unknown`: not checked yet.
+So **Cloak must report health.** Call `config.status.v1` for each binding whenever Cloak re-checks it:
+- `ready`: applied, and Cloak's own checks pass;
+- `degraded`: bound, but something is off (for example, root isn't granted to Cloak in this profile);
+- `failed`: bound but not working;
+- `unknown`: not checked yet.
 
-  Update it whenever Cloak re-checks. Cyclone stores it now; it reaches the pill with CC5.
-- **Cloak's own pill** (in Cloak's UI), per Cyclone profile from `profiles`:
-  - **Rooted ✓:** Cloak's binding is present and `ready`;
-  - **Rooted !:** `degraded` or `failed`, with Cloak's own reason;
-  - **Native:** no binding;
-  - **Setting up / Recently deleted:** from `state`, `setting_up` or `in_trash`. Show no pill action.
-- Cloak's own root check is Cloak's: it runs in its own process, with its own grant. **Never ask Cyclone to run
-  anything.** Connectors can't, by design.
-
-### 5.3 Coming from Cyclone (CC5, CC6)
-
-- **CC5:** Cyclone's pill uses the `state`:
-  - **Rooted** (`ready` or `unknown`);
-  - **Rooted · check** (`degraded`);
-  - **Rooted · not working** (`failed`);
-  - **Native** (no binding).
-- **CC6:** a read-only call, so Cloak can show Cyclone's **own** root facts next to its own:
+### 4.2 Cyclone's root facts for Cloak's own pill: `root.status.v1` (minor 2)
 
 ```json
 {"method": "root.status.v1", "args": {}}
@@ -285,118 +281,195 @@ Cloak's module is active.
    "profiles": [{"id": "Cyclone_0123456789abcdef", "rootProven": true | false | null, "checkedAt": 1760000000000 | null}]}
 ```
 
-- Scope `device.root.read` ("See whether root works in your profiles"), approved separately.
-- `rootProven` is the last root check the profile's own Cyclone made on a switch into it; `null` means never checked.
-- No commands, paths, versions or package names. Ignore fields you don't know.
-- Check `hello.minor >= 2` before calling it. An older Cyclone answers `UNKNOWN_METHOD`; keep working without it.
+- **Scope** `device.root.read`. Check `hello.minor >= 2`.
+- **`rootProven`:** the last time that profile's own Cyclone checked root (`su -c id`) on a switch into it. `null`
+  means never checked. It is a fact from the last switch, not a live probe.
+- **Whose facts:** what the Cyclone you call saw on its own switches. Cloak in Main gets the full picture; Cloak in C
+  sees only the switches C's Cyclone made.
+- **What it never contains:** commands, paths, versions or package names.
 
-## 6. Feature D: opening another profile from Cloak (alpha.122)
+**Cloak's own pill,** per Cyclone profile from `profiles`:
 
-**No connector switches a profile by itself** (SPEC §1): a switch changes the whole phone. Cloak **asks**, and the owner
-answers on Cyclone's own screen. The owner signed this off on 2026-10-09.
+| Cloak shows | When |
+|---|---|
+| **Rooted ✓** | Cloak's binding is `ready` and `rootProven` is true |
+| **Rooted !** | `degraded`, `failed`, or `rootProven` false, with Cloak's reason |
+| **Native** | no binding |
+| nothing to act on | `state` is `setting_up` or `in_trash` |
+
+Cloak's own root check is Cloak's: in its own process, with its own grant. **Never ask Cyclone to run anything.**
+
+## 5. Feature D: ask to open another profile (minor 3)
+
+**No connector switches a profile.** Cloak **asks**, and the owner answers on Cyclone's own screen.
 
 ```json
 {"method": "profiles.open.request.v1", "args": {"profileId": "Cyclone_0123456789abcdef"}}
 → {"version": 1, "requested": true}
 ```
 
-- **Before you call it:**
-  - check `hello.minor >= 3`; an older Cyclone answers `UNKNOWN_METHOD`;
-  - ask for the scope `profiles.open.request` ("Ask you to open a profile"), which is approved separately.
+- **Before you call it:** check `hello.minor >= 3`, and that `profiles.open.request` is granted. Client:
+  `requestOpenProfile(profileId)`.
 - **`profileId`:** `owner` (Main) or a ready Cyclone profile from `profiles`.
-- **What happens:**
-  - Cyclone shows **"Open Profile C?"** with **Open** and **Not now**. On a locked phone it only posts a notification;
-    the screen never opens by itself over a lock screen.
-  - **Only the owner's tap on Open** runs Cyclone's staged switch (§1.3), with its way back.
-- **Learn the result only from `profile.switched`.** `requested: true` means the question was shown, never that the
-  switch happened. "Not now" sends nothing.
+- **What the owner sees:** **"Open Profile C?"** with **Open** and **Not now**.
+  - **Only Open switches,** using the staged switch of §1.3 (way back armed, approval carried).
+  - **On a locked phone** there is only a notification; nothing opens over the lock screen.
+- **The result:** `requested: true` means only that the question was shown. **Learn the outcome from
+  `profile.switched`.** "Not now" sends nothing.
 - **Errors:**
 
-  | Code | When |
-  |---|---|
-  | `NO_SUCH_PROFILE` | the profile isn't ready |
-  | `ALREADY_OPEN` | it is already in front |
-  | `BUSY` | a task is running, a review is waiting, another request is still waiting (2 minutes), or Cloak's profile isn't the one in front |
-  | `RATE_LIMITED` | more than one request in 10 s |
+  | Code | When | Cloak does |
+  |---|---|---|
+  | `NO_SUCH_PROFILE` | not ready, in Recently deleted, or unknown | refresh `profiles` |
+  | `ALREADY_OPEN` | it is already in front | nothing |
+  | `BUSY` | a task is running, a review waits, another request is still waiting (up to 2 min), or Cloak's own profile isn't in front | say "Cyclone is busy; try again in a moment"; no retry loop |
+  | `RATE_LIMITED` | more than one request in 10 s | wait |
 
-  Back off; don't retry in a loop.
-- **Call from the profile in front.** Cloak calls the Cyclone in its own profile, and that Cyclone can only ask the owner
-  when its profile is on screen.
-- **Selector entries are unchanged:** with `selector.contribute`, a tap on one of Cloak's entries in Cyclone's slider
-  opens **Cloak's** `entryActivity`. Cyclone never switches for an entry; an entry can call the request above if it
-  wants a switch.
+- **Call it from the Cloak in front.** Cloak talks to the Cyclone in its own profile, which can only ask while that
+  profile is on screen.
+- **A good place for it:** Cloak's "Open in Cyclone" button next to each profile, and Cloak's entries in Cyclone's slider
+  (`selector.contribute`). A tap on an entry opens **Cloak's** `entryActivity`, which can then make this request.
 
-## 7. Cyclone-side work for Cloak (the Cyclone agent builds these)
+## 6. Recommended wiring in Cloak
 
-| Id | What | Run / alpha | Status |
-|---|---|---|---|
-| CC0 | Cloak becomes a **cornerstone app**: installed into new profiles with `install-existing`, enabled, verified; its root grant copied where the manager allows | P2 / alpha.120 | **built, alpha.120** |
-| CC1 | **Carry Cloak's approval** to new profiles by package and certificate lineage, re-verified against the certificate installed in the target. If it differs, don't carry it and say why (D12). | P3 / alpha.121 | **built, alpha.121** |
-| CC2 | Delete a binding only when Android says the app is gone from that user (`pm list packages --user`), and only on the main profile's Cyclone (D13) | P3 / alpha.121 | **built, alpha.121** |
-| CC3 | Bindings keyed by the stable `Cyclone_…` id; Android user id migrated with read-back | P3 / alpha.121 | **built, alpha.121**: migration with read-back; the storage key still includes the user id |
-| CC4 | One strict parser for bindings and identities | P3 / alpha.121 | **built, alpha.121** |
-| CC5 | The pill shows Cloak's `state` (§5.3) | P3 / alpha.121 | **built, alpha.121** |
-| CC6 | `root.status.v1` + scope `device.root.read`, contract minor 2 | P3 / alpha.121 | **built, alpha.121** (minor 2) |
-| CC7 | `profiles.open.request.v1` + scope `profiles.open.request`, owner-confirmed sheet, minor 3 | alpha.122 | **built, alpha.122** (owner signed off 2026-10-09) |
-| CC8 | Bindings for apps in Main | decided | **No** (owner, 2026-10-09): every profile except Main; `config.*` refuses `owner` |
-| done | `profile.switched` also from the **target** profile's Cyclone (§1.3) | P1 / alpha.119 | **built** |
+### 6.1 A small `CycloneBridge`
 
-**Contract rules for Cloak:**
-- Minor versions only **add** methods, fields and scopes; both sides ignore what they don't know (SPEC §8).
-- Gate every new call on `hello.minor`, and treat `UNKNOWN_METHOD` as "not yet".
+Run all of this off the main thread.
 
-## 8. Hard rules
+1. **Connect:** `CycloneConnector.connect(context)` (it waits for the bind).
+2. **`hello()`** gives `approved`, `granted`, `pending` and `minor`.
+   - Not approved: show the approve line (§2.2) and stop.
+   - Enable features by `granted` and `minor`: bindings (`profiles.config`), root status (minor ≥ 2 and
+     `device.root.read`), open requests (minor ≥ 3 and `profiles.open.request`).
+3. **`profiles()`** gives ids, labels, `androidUserId`, `state`, `packages` and `current`.
+4. **Reconcile bindings** (§3.5, in Main for every profile; elsewhere for the own profile only). Then report the health of
+   each binding (§4.1).
+5. **`rootStatus()`** for Cloak's pill (if enabled).
+6. **Register the wake receiver.** On `com.cyclone.connector.WAKE` (no data), pull `events(since)`.
 
-1. **No secrets or hardware identifiers** in `value`, `ext`, entries or anything else sent to Cyclone. Cyclone refuses
-   values that look like secrets in `ext`, and the config store is not a vault.
-2. **No commands.** Cloak never asks Cyclone to run a command, a shell or root. Cyclone never exposes one to a
-   connector or to the model.
-3. **No phone control.** Cloak never asks Cyclone to approve, pay, send, delete, grant permissions, create, switch or
-   remove profiles. CC7 is a request the owner answers in Cyclone.
-4. **The owner only.** Bindings are for the owner's own profiles and apps.
-5. **Be gentle:**
-   - 20 calls a second at most;
-   - de-duplicate events by `seq`;
-   - on `reset: true`, read `profiles` again;
-   - never block on Binder from the UI thread.
-6. **Unknown is fine:** ignore unknown fields, event types and states. Reject only a broken structure.
+### 6.2 Events
+
+| Event | Cloak does |
+|---|---|
+| `profile.switched` | `hello` again (the approval may have just arrived); re-read `profiles`; reconcile; re-report health; refresh root status |
+| `profile.updated`, `profile.restored` | re-read `profiles`; reconcile (the user number may have changed) |
+| `profile.created` | re-read `profiles`; the profile becomes bindable once `ready` |
+| `profile.trashed` | stop acting on it; keep its bindings (a restore brings them back) |
+| `profile.removed` | forget it |
+| `reset: true` | re-read everything |
+| unknown types | ignore |
+
+- **De-duplicate by `seq`**, and keep `next` between runs.
+- **The wake is only a hint:** also pull `events` when Cloak starts.
+
+### 6.3 Errors (every call)
+
+| Code | Meaning | Cloak does |
+|---|---|---|
+| `NOT_APPROVED` | not approved here, or signed by an unapproved key | show the approve line |
+| `SCOPE_NOT_GRANTED` | the owner hasn't approved that scope | hide that feature |
+| `UNKNOWN_METHOD` | an older Cyclone | hide that feature |
+| `NO_SUCH_PROFILE` | the profile isn't ready, or is Main for `config.*` | refresh `profiles` |
+| `BAD_REQUEST` | wrong shape, or an app not in the profile's list | fix it, or tell the owner (§3.2) |
+| `RATE_LIMITED` | over 20 calls a second, or a second open request in 10 s | back off |
+| `BUSY`, `ALREADY_OPEN` | open requests only (§5) | as in §5 |
+| `INTERNAL` | Cyclone couldn't answer | retry later, once |
+
+Branch on `code`, never on `message`.
+
+## 7. Hard rules
+
+1. **No secrets or hardware identifiers** in anything sent to Cyclone. The config store is not a vault.
+2. **No commands.** Cloak never asks Cyclone to run a command, a shell or root. Cyclone exposes none.
+3. **No phone control.** Cloak never asks Cyclone to approve, pay, send, delete, grant permissions, or create, switch
+   or remove profiles. The open request is a question the owner answers.
+4. **Never bind apps in Main** (owner decision).
+5. **The owner's own profiles and apps only.**
+6. **Be gentle:**
+   - at most 20 calls a second;
+   - never block the UI thread on Binder;
+   - de-duplicate events.
+7. **Unknown is fine:** ignore unknown fields, events and states. Reject only a broken structure.
+
+## 8. Cyclone-side status (for reference)
+
+| Id | What | Status |
+|---|---|---|
+| CC0 | Cloak is a cornerstone app: installed into every profile on the switch in, its Magisk grant shared | built, alpha.120 |
+| CC1 | Cloak's approval carried and re-verified; a revoke wins; the outcome is in "Profile C has" | built, alpha.121 |
+| CC2 | Bindings deleted only with the profile, or when Android says the app is gone | built, alpha.121 |
+| CC3 | Bindings follow a profile to a new Android user number (moved, read back) | built, alpha.121 |
+| CC4 | One strict reader for bindings and identities | built, alpha.121 |
+| CC5 | The pill follows Cloak's `state` | built, alpha.121 |
+| CC6 | `root.status.v1` + `device.root.read` (minor 2) | built, alpha.121 |
+| CC7 | `profiles.open.request.v1` + `profiles.open.request` (minor 3), owner-confirmed screen | built, alpha.122 |
+| CC8 | Bindings in Main | **decided: no** |
+| — | `profile.switched` from the target profile's Cyclone too | built, alpha.119 |
+| — | The PC switch with the way back and the journal | built, alpha.122 |
+
+**Physical: UNVERIFIED.** None of this has been run on the owner's phone yet.
 
 ## 9. Test it
 
-**Without a phone:**
-- Run Cloak's Cyclone client code against fakes built from `tools/cyclone-connector-sdk/schemas/vectors.json`.
-- Add your own vectors for the §4.1 envelope. Feed them to the same parser rules as `CycloneCloakProfileBindingTest`:
-  - valid version 1;
-  - unknown `identityVersion`;
-  - an envelope that doesn't match its tuple;
-  - a string `androidUserId` (must not count).
+### 9.1 Without a phone
 
-**On a rooted phone** with Cyclone alpha.119 or newer, Main plus Profiles B and C:
-1. Approve Cloak in Main (and in B and C) in Cyclone → Settings → Connectors. `hello` shows `approved: true`.
-2. From Cloak in Main, bind one app in B to a Cloak profile and report `ready`. Cyclone's Profiles page shows **Rooted**
-   on B; B's info page shows the Cloak profile id.
-3. Switch Main → B in Cyclone. Cloak in B is woken and reads `profile.switched` for B. Cloak in Main reads it too.
-4. In Cyclone, change B's apps. Confirm the binding survives, or that Cloak re-writes it (§4.5).
-5. Save Cyclone's debug file (Profiles → debug buttons). It must contain none of Cloak's `value` fields. Connector
-   names appear only for `ext` notes, by name.
+- **Vectors:** run Cloak's bridge against fakes built from `vectors.json`. These must hold:
+  - hello says minor 3;
+  - `root.status.v1` and `profiles.open.request.v1` without their scopes give `SCOPE_NOT_GRANTED`.
+- **Envelopes:** add your own vectors, matching `CycloneCloakProfileBindingTest`:
+  - a valid version 1;
+  - an unknown `identityVersion` (bound, no summary);
+  - a mismatched tuple, and a string `androidUserId` (neither counts);
+  - `owner` refused.
+- **Bridge unit tests:**
+  - gating on `minor` and `granted`;
+  - reconciling after `profile.updated` with a new user number;
+  - de-duplication by `seq`;
+  - the error table of §6.3;
+  - no retry loop on `BUSY`.
 
-**Report back:**
-- what passed;
-- what is **UNVERIFIED** (say it plainly for anything not run on a real phone);
-- the "Contract feedback" list for the Cyclone agent.
+### 9.2 On the rooted phone
+
+The setup: Cyclone alpha.122, with Main, B and C. These are rows 5.1–5.9 of `docs/PROFILES_DEVICE_MATRIX.md`:
+
+1. **Approval travels.** Approve Cloak in Main only, then switch Main → B on the phone. B's "has" line reads "Cloak ✓
+   approved ✓", and Cloak in B gets `approved: true`.
+2. **A revoke stays.** Revoke Cloak in B, then switch Main → B again. It stays revoked.
+3. **Health reaches the pill.** From Cloak in Main, bind an app in B and report `ready`, then `degraded`. The pill reads
+   Rooted, then "Rooted · check".
+4. **Bindings survive an app change.** Change B's apps in Cyclone. The binding survives; only uninstalling the app from
+   B removes it.
+5. **Root status matches.** `root.status.v1` agrees with the "has" lines.
+6. **Open, from B for C.** Not now changes nothing. Open switches, and Cloak in both profiles gets `profile.switched`.
+7. **Locked phone.** Lock the phone and ask: there is only a notification.
+8. **Limits.** Ask twice within 10 s: `RATE_LIMITED`. Ask for B while in B: `ALREADY_OPEN`.
+9. **Main stays unbindable.** `config.set.v1` for `owner` is refused.
+10. **The debug file stays clean.** Save Cyclone's debug file. It contains none of Cloak's `value` fields.
 
 ## 10. Deliverables (in Cloak's own project)
 
-- The manifest and `cyclone_connector.xml` (§3).
-- A small `CycloneBridge` layer on the client AAR:
-  - `hello` and its gating;
-  - binding writes with re-assertion (§4);
-  - status reports (§5.2);
+- **The manifest** and `cyclone_connector.xml` (§2.1).
+- **`CycloneBridge`** (§6):
+  - connect;
+  - `hello` and gating;
+  - reconcile and health reports;
+  - root status;
+  - the open request;
   - the event pull with a wake receiver;
-  - the per-profile approval prompt.
-- Cloak's pill UI (§5.2) and the "Open in Cyclone" hint (§6).
-- Tests: envelope vectors, gating on `hello.minor`, re-assertion after `profile.updated`, de-duplication by `seq`.
-- A README section:
-  - what Cloak sends to Cyclone (§4.1 fields only);
-  - what it never sends (§8);
-  - how to revoke it (Cyclone → Settings → Connectors → revoke deletes all of Cloak's data in that profile's Cyclone).
+  - the approve prompt.
+- **Cloak's UI:**
+  - the pill per profile (§4.2);
+  - "Open in Cyclone" (§5);
+  - the approve line (§2.2).
+- **Tests** (§9.1).
+- **A README section:**
+  - what Cloak sends to Cyclone (§3.1 fields only);
+  - what it never sends (§7);
+  - how to revoke it (Cyclone → Settings → Connectors → Revoke, which deletes Cloak's data in that profile's Cyclone).
+
+## 11. Report back
+
+- What passed: the vectors, the unit tests, and each phone row of §9.2.
+- What is **UNVERIFIED**. Say it plainly for anything not run on a real phone.
+- **Contract feedback:** anything Cyclone should add or change, for example an app refused by `config.set.v1` although
+  it is installed in that profile.
