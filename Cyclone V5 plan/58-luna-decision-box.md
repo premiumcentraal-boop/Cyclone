@@ -37,6 +37,8 @@ left a frozen `OPENAI_DECISIONS` slot that waits for exactly this release. What 
 | **The router's questions** | One board: route, intent, target, all `choice` | **Triage**: one call, about 12 typed questions (`score` for difficulty, `noul` for risks, `choice` for capability), then a separate **Bind** call for the target |
 | **What Instant can do** | 18 hard-coded intents | A **capability registry**: Android intents, learned routes, compiled skills, each with its risk, undo and verify check |
 | **Knowing it worked** | Transport success, mostly | A **Verify** board after the move: "did the screen reach the goal?", with the screenshot |
+| **Context** | A fixed context for each board | **Context on demand**: words → labels → screenshot → zoom, climbing only when code, memory or Luna's own "need to see" answer calls for it (§5A) |
+| **Short tasks** | Any "and then" goes to Flash | **Instant chains**: 2–4 reversible steps, one Luna call per step, App Map walks for known screens (§5B) |
 | **Trust** | One bar (0.8–0.9) for everything | A bar per capability, set by what a mistake costs, calibrated in the Lab |
 
 **The flow (one request):**
@@ -207,6 +209,142 @@ Notes:
 
 ---
 
+## 5A. Context on demand: the box decides what it needs to see
+
+**The rule:** every question starts with the **cheapest context that could answer it**, and climbs only when the
+answer itself says the context wasn't enough. No screenshot "just in case"; no guessing when one is needed.
+
+### 5A.1 The context ladder
+
+| Tier | What the board gets | Added cost | Typical use |
+|---|---|---|---|
+| **C0 · Words** | The request, the foreground app, a shortlist of installed apps, local facts | — | Triage for "open camera", "louder", "set a timer" |
+| **C1 · Labels** | + the screen as a **numbered** list of controls from the accessibility tree: `7: "Send" (button)`, `12: "Anna · 2h" (list item 1)` | tree read, ~20–80 ms | Bind and Step on normal app screens |
+| **C2 · Sight** | + a marked screenshot (~512 px, WebP), the **same numbers** drawn on the controls | capture + encode + upload, est. 150–400 ms (to measure) | Icon-only controls, games, canvases, "tap the blue one", Verify on visual apps |
+| **C3 · Zoom** | + a sharper crop of one region (the list, the toolbar) | another image | Small text, dense lists, two similar icons |
+| **K · Map** | + the App Map card for this app: its known screens and the route to them (`mind/map/MindMap`) | on the phone, ~5 ms | "Go to my DMs", "open settings in Instagram": a known destination |
+
+The numbers are the **choices**: Luna answers `12`, code taps control 12. It can't point at something that isn't
+on the screen, and the text list and the picture can't disagree, because they come from the same numbering.
+
+### 5A.2 Four ways the tier is chosen (cheapest first)
+
+1. **Code knows (0 calls).** Signals in the accessibility tree force a tier before asking anything:
+   - the likely targets have no text or description (icon-only buttons) → C2;
+   - the screen has almost no nodes (a game, a video, a WebView canvas, a Flutter app with an empty tree) → C2;
+   - the request points at the screen ("this", "that", "the blue one", "what's on my screen") → C2;
+   - the screen is sensitive → **never** C2 or C3; the question goes up a rung instead.
+2. **The phone remembers (0 calls).** Every answered question leaves a lesson: *(app, screen key, question kind) →
+   the tier that finally answered it.* Next time the question starts at that tier. Instagram's bottom bar is
+   icon-only: after the first time, Bind on that screen starts at C2 without trying C1 first. This is the phone
+   learning **what context it needs**, per screen, from experience.
+3. **The answer asks for more (1 extra call, only when needed).** Every target question carries two **abstain
+   choices** with clear criteria:
+   - `not_listed`: "what the request means isn't among these controls";
+   - `need_to_see`: "the words alone don't tell which control is meant; seeing the screen would".
+
+   An answer acts only when **all three** hold: the top choice ≥ the capability's bar, the gap to the second choice
+   ≥ 0.2, and abstain < 0.15. Otherwise the **same single question** (not the whole board) is asked again one tier
+   up: `need_to_see` → C2; a close tie between two similar icons → C3; `not_listed` → scroll once (in a chain) or
+   go up a rung. At most **two climbs**, then the run goes up a rung with the baton.
+4. **Racing, when the phone has learned it's a coin flip.** For a screen where C1 failed more than ~30 % of the
+   time, ask C1 and C2 **at the same time** and take the first sure answer. It costs a fraction of a cent and saves a
+   whole round trip. Off for sensitive screens and when "Let decisions see the screen" is off.
+
+Triage also asks `needs_screen` (noul) from the words alone. It is a **hint**, used to start the screenshot early
+in parallel, never a permission to skip one that code or the abstain answer calls for.
+
+### 5A.3 Why this is solid
+
+- **No silent guesses.** A model forced to pick from a list will pick something; the abstain choices give it an
+  honest way out, and code treats "unsure" as "go up", never "go ahead".
+- **Context matches the question, not the request.** In one chain, step 1 (open Instagram) needs C0, step 2 (the DM
+  icon) needs C2, step 3 (the first conversation) needs C1. Each step climbs on its own.
+- **It gets faster with use**, because the remembered tier skips the failed attempts.
+
+---
+
+## 5B. Chains: Instant for two to four steps
+
+"Open Instagram, go to my DMs and open the first one" is three steps, all reversible, with no typing. It should
+run in seconds without the Mind. That is an **Instant chain**: still Instant mode (the ⚡ chip shows "3 steps").
+
+### 5B.1 When a request is a chain
+
+Triage gets a **slot plan**: up to four extra choice questions, `step_1` … `step_4`, each picking a **step kind**
+from a short fixed list. The step kinds:
+- `open_app`, `go_to` (a screen in the app), `find` (scroll until it's there), `tap`, `open_item` (the nth thing
+  in a list), `back`, `toggle` (a setting);
+- `read` ("tell me who messaged"), which ends the chain with an answer;
+- `none`, which ends the plan.
+
+These are **independent** questions about the words, so one call answers all of them (Decisions' own guidance). The
+step *targets* are **not** chosen yet: they depend on the screens that don't exist yet.
+
+The router takes a chain when:
+- Triage's `difficulty` < 1.3;
+- 2 to 4 slots are filled;
+- every step kind is reversible;
+- `writes_text`, `sends_or_posts`, `money`, `destroys` and `account` are all below their bars.
+
+Otherwise it goes to Flash, as today. The existing clause splitter (`agent/nav/TaskClauses`) is used as a check:
+when it and the slot plan disagree on the number of steps, the run goes up to Flash.
+
+### 5B.2 One call per step: the fused board
+
+After each move the screen settles (the Fast Path settle: 300 ms, then up to 500 ms / 1 s while the screen is
+still changing). Then **one** Luna call answers, about the screen *as it is now*:
+
+| Question | Type | Meaning |
+|---|---|---|
+| `prev_done` | noul | Did step *k* reach what it was for? |
+| `blocker` | choice | `none` · `popup` · `permission` · `sign_in` · `error` · `wrong_screen` · `loading` |
+| `next_target` | choice | Step *k+1*'s control: the numbered controls + `not_listed` + `need_to_see` |
+| `next_move` | choice | `tap` · `scroll_down` · `scroll_up` · `back` · `wait` |
+
+Verifying the last step and binding the next one in **one call** halves the calls. These questions are independent
+given the screen, so they belong together. A three-step chain is about three calls, not six.
+
+### 5B.3 The shortcuts that make it fast
+
+- **Map walk, zero calls.** If the App Map knows the destination ("Direct inbox" in Instagram), `go_to` walks its
+  route with `MapWalker`: each move is checked by the screen key, no model. "Go to my DMs" becomes two map taps. Only
+  when the map diverges does the fused board take over.
+- **Ordinals in code.** "The first DM", "the latest email", "the third photo": code finds the list (a scrollable
+  container with repeated rows) and numbers its items in reading order. When the list is plain, "first" is item 1
+  and needs no call. When it isn't (a "Notes" row, a "Requests" header, a pinned chat above the first real
+  conversation), Bind asks *"which item is the first conversation?"* over the numbered items.
+- **Bounded find.** `find` scrolls at most three times. After each scroll the fused board asks whether the target is
+  there now. It stops early when the screen fingerprint doesn't change (the end of the list).
+- **Prepare while waiting.** While an app opens, the phone loads its App Map, builds the next question and warms
+  the connection, so the call goes out the moment the screen settles.
+
+### 5B.4 The chain's guard rails
+
+- At most **4 steps, 6 moves, 8 s**. One screen-changing move per decision; the screen is re-read after every move.
+- **Stops at the goal.** "Open the first DM" ends with the conversation open. It never types, and never taps a
+  send, call, follow, like or delete control (`Pilot.irreversible`), whatever the board says.
+- **Blockers:** a `popup` with a clearly dismissive control ("Not now", "Skip", "Close") may be dismissed **once**.
+  `permission`, `sign_in` and `error` hand the run up with the baton. `loading` waits once, up to 1 s.
+- **Any unsure answer** after two context climbs → Flash takes over **at the current step**, with the steps done on
+  the baton. Nothing is redone.
+- A sensitive screen anywhere in the chain → the Mind.
+
+### 5B.5 Worked example (targets, to be measured)
+
+"Open Instagram, scroll to my DMs and open the first DM":
+
+| # | Step | Decided by | Context | Time (target) |
+|---|---|---|---|---|
+| — | Triage + slot plan: `open_app`, `go_to`, `open_item` | 1 call | C0 | 0.2–0.4 s, in parallel with the tree read |
+| 1 | Open Instagram | intent, Bind not needed (the grammar knows the app) | C0 | app start: 0.5–2 s (the app, not Cyclone) |
+| 2 | Go to DMs | App Map walk (0 calls); without a map, the fused board → the messenger icon is icon-only, so C2 | K, else C2 | 0.4 s with the map, ~0.9 s without |
+| 3 | Open the first conversation | Code numbers the list; one fused call checks step 2 and picks the first real chat | C1 | ~0.7 s |
+| ✓ | End: Verify (`prev_done` on the last screen) | 1 call | C1 | ~0.3 s, the sound plays on yes |
+
+That is roughly **2.5–4 s** end to end, most of it Instagram starting, and **3–4 Luna calls** (about $0.0003). The
+Mind takes 20–60 s for the same request today.
+
 ## 6. The capability registry (what "instant" can mean)
 
 Today Instant knows 18 intents. A team would turn this into data: a **registry** of things Cyclone can do in one
@@ -310,8 +448,10 @@ The registry respects the invariants: every move goes through `PhoneToolExecutor
 | **L1 · Luna live** | `DecisionProvider.LUNA` (rename the frozen `OPENAI_DECISIONS`): model `openai/gpt-6-luna-decisions`, same endpoint, `vision = true`, `live = true`. `state` as an array with optional `image_url` items. Watch mode compares Luna and JEV | Shadow numbers in Glass; `test_decisions_guard.py` updated |
 | **L2 · Triage** | The Triage board (§5) and `fromTriage`; Board 0 retired behind a flag; regex rules kept as a net | Golden set: rung accuracy ≥ JEV's, no risky request below Flash |
 | **L3 · Bind + sight** | The Bind board with marked screenshots; ambiguity asks the owner; Instant's shutter / call-button boxes use it | "Tap the blue one", "take a selfie" on icon-only cameras work in the Lab |
+| **L3b · Context on demand** | The numbered context (C1), abstain choices, the per-screen tier memory, re-asking one question one tier up, racing C1/C2 on coin-flip screens (§5A) | Golden set: fewer wrong taps than "always screenshot", lower p95 than it, no screenshot on a sensitive screen (guard test) |
 | **L4 · Verify** | The Verify board after Instant moves and at the end of Flash; silent success waits for it | Verify pass rate shown; a failed verify hands up with the baton |
 | **L5 · Capability registry** | `Capability` data, Android standard intents and settings panels, learned routes and compiled skills as entries, per-capability bars | "Turn on dark mode", "open Wi-Fi settings", "set a timer for 5 minutes" go Instant |
+| **L5b · Instant chains** | The slot plan in Triage, the fused per-step board, App Map walks for `go_to`, ordinals in code, bounded find, the chain's guard rails and baton hand-off (§5B) | "Open Instagram, go to my DMs, open the first one" and 20 other 2–4 step requests complete in the Lab, median under 5 s, with no irreversible tap |
 | **L6 · Flash on Luna** | The Pilot's Step board on Luna with images; Flash's plan still written by the fast generative model | Flash runs in the Lab complete with fewer Mind hand-ups |
 | **L7 · Calibrate and switch** | Golden set, calibration curves, bars from the Lab; set `ACTIVE = LUNA`; Settings copy and release notes | Owner signs off on the numbers |
 
