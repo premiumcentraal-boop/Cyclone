@@ -385,7 +385,7 @@ owner today.
 **Done when:** creating a profile on a full phone says the phone is full, shows what is using the slots, offers the
 fix, and saves a debug file.
 
-### P1 (alpha.119): A switcher that always works
+### P1 (alpha.119): A switcher that always works (**built, alpha.119.dev1**)
 
 **A switch state machine with a journal.** Every stage is logged into the debug file:
 1. **Preflight.** Nothing is changed in it. Check:
@@ -425,6 +425,35 @@ switcher is on, and offers to turn it on.
 
 **Done when:** 50 switches in a row across Main, B and C on a Pixel (`testbench` suite `profiles`) end where asked,
 or come back by themselves with a debug file.
+
+**As built (alpha.119.dev1):**
+- **`ProfileSwitch`** is the state machine: `PREFLIGHT`, `PREPARE`, `CARRY`, `ARM_RETURN`, `SWITCH`, `CONFIRM`.
+  - Each stage records its result and time.
+  - The last 20 switches are kept in `profile-debug/switches.json` and shown in the debug file.
+- **The dead-man return** is one fixed command built by `ProfileSwitch.returnCommand`. It takes numbers and a 32-hex
+  nonce only, and a CI guard pins its shape.
+  - **A deviation from the plan:** it is not a `ProfileSetupPlan` operation. It is a backgrounded `setsid sh -c`
+    timer, which the token-only plan can't express.
+  - It is armed only after the target's Cyclone writes `switch-wait-<nonce>`. A locked profile, or one whose Cyclone
+    can't start, never gets a return armed, so the owner can type a PIN.
+  - It fires only while the target is still in front and its hello is missing.
+- **The hello:**
+  - The target's Cyclone waits until its profile is in front, then writes `switch-hello-<nonce>`, which disarms the
+    return.
+  - It then tells its connectors and shows a minimum-priority **Back to Main** notice (outside the main profile).
+  - The source waits up to 18 s for it. A late hello is `CONFIRM_LATE`, not a failure.
+- **Root managers:**
+  - The manager is detected from `/data/adb`. Magisk grants are still shared by command (24+ now, the hidden app
+    included).
+  - Root is proven from the target's own Cyclone (`ROOT_CHECK`, `su -c id`) for every manager.
+  - KernelSU and APatch grants are not set by command. When the check fails, the owner gets the one step to do by hand.
+- **The registry:** it travels with every carry. From Main it replaces the list; from another profile, only unknown
+  profiles are added.
+- **The safety net:** Profile room shows whether Android's user switcher is on, and offers to turn it on (never off).
+- **Tests:**
+  - `ProfileSwitch57Test` (7);
+  - guard checks in `test_profile_room_guard.py` for the return, the root proof and the user switcher.
+- **Physical: UNVERIFIED.** The 50-switch run is still owed.
 
 ### P2 (alpha.120): Complete new profiles (cornerstone apps and Cyclone's full settings)
 
