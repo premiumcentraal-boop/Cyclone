@@ -341,7 +341,7 @@ Each run is one alpha, built on the latest release, with tests and an honest dev
 **Numbering.** The VMOS fleet runs (plan 56 V1–V4) move after these, because a broken profile switcher blocks the
 owner today.
 
-### P0 (alpha.118): Truthful errors and the debug file
+### P0 (alpha.118): Truthful errors and the debug file (**built, alpha.118.dev1**)
 
 **Fixes:**
 - **D1, the classifier:**

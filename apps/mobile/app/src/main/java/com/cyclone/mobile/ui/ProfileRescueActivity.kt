@@ -24,6 +24,7 @@ class ProfileRescueActivity : ComponentActivity() {
             com.cyclone.mobile.ui.v32.CycloneV32Theme {
                 val scope = rememberCoroutineScope()
                 var busy by remember { mutableStateOf(false) }
+                val setupState by ProfileSetupRuntime.state.collectAsState()
                 var message by remember { mutableStateOf(if (intent.getBooleanExtra("repair_failed", false)) "Repair could not finish. You can return to your main profile safely below." else "This profile hasn't inherited Cyclone's setup yet.") }
                 fun perform(repair: Boolean) {
                     busy = true
@@ -53,7 +54,7 @@ class ProfileRescueActivity : ComponentActivity() {
                             finish()
                         }) { Text("Continue in this profile") }
                         // Plan 57 W8: the debug file is reachable even here, where nothing else of Cyclone runs.
-                        ProfileDebugButtons(ProfileSetupRuntime.state.value.issue)
+                        ProfileDebugButtons(setupState.issue)
                     }
                 }
             }
