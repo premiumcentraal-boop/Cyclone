@@ -31,4 +31,43 @@ class ProfileBootstrapContractTest {
         assertEquals(12, ProfileBootstrapContract.userId(1210234))
         assertTrue(runCatching { ProfileBootstrapContract.targetUid(0, 12) }.isFailure)
     }
+
+    @Test fun bootstrapAcknowledgementPreservesSafeStageAndReason() {
+        val ack = ProfileBootstrapContract.parseBootstrapAcknowledgement(
+            """{"nonce":"attempt","user":12,"ok":false,"stage":"permission_validation","reasonCode":"permission_denied"}""",
+        )
+        assertNotNull(ack)
+        assertEquals("attempt", ack?.nonce)
+        assertEquals(12, ack?.user)
+        assertEquals("permission_validation", ack?.stage)
+        assertEquals("permission_denied", ack?.reasonCode)
+        assertFalse(ack?.ok ?: true)
+    }
+
+    @Test fun bootstrapAcknowledgementDropsUnrecognizedAndSensitiveDiagnostics() {
+        val ack = ProfileBootstrapContract.parseBootstrapAcknowledgement(
+            """{"nonce":"attempt","user":12,"ok":false,"stage":"private payload","reasonCode":"secret exception detail"}""",
+        )
+        assertNotNull(ack)
+        assertEquals("unknown", ack?.stage)
+        assertNull(ack?.reasonCode)
+        assertNull(ProfileBootstrapContract.parseBootstrapAcknowledgement("not-json"))
+    }
+
+    @Test fun bootstrapAcknowledgementCanReportUnknownReceiverIdentity() {
+        val ack = ProfileBootstrapContract.parseBootstrapAcknowledgement(
+            """{"user":-1,"ok":false,"stage":"receiver_identity","reasonCode":"receiver_exception"}""",
+        )
+        assertNotNull(ack)
+        assertEquals(-1, ack?.user)
+        assertEquals("receiver_identity", ack?.stage)
+    }
+
+    @Test fun bootstrapExceptionsMapToStableNonSensitiveCodes() {
+        assertEquals("permission_denied", ProfileBootstrapContract.bootstrapFailureCode(SecurityException("secret")))
+        assertEquals("crypto_failed", ProfileBootstrapContract.bootstrapFailureCode(java.security.GeneralSecurityException("secret")))
+        assertEquals("storage_failed", ProfileBootstrapContract.bootstrapFailureCode(java.io.IOException("secret")))
+        assertEquals("validation_failed", ProfileBootstrapContract.bootstrapFailureCode(IllegalStateException("secret")))
+        assertEquals("receiver_exception", ProfileBootstrapContract.bootstrapFailureCode(UnsupportedOperationException("secret")))
+    }
 }

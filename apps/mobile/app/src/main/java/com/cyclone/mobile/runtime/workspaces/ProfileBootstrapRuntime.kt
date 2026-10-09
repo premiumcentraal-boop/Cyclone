@@ -34,9 +34,9 @@ internal object ProfileBootstrapRuntime {
         check(run("/system/bin/am", "get-started-user-state", "$target").contains("RUNNING_UNLOCKED")) { "That profile is locked." }
         val targetUid = packageUid(target, PKG)
         val folder = "/data/user_de/$target/$PKG/files"
-        run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/carry-inbox.json", "$folder/carry-result.json")
+        run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/profile-bootstrap-result.json", "$folder/carry-inbox.json", "$folder/carry-result.json")
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
+        val publicKey = awaitReceivingPublicKey(folder, target)
         val nonce = UUID.randomUUID().toString()
         val plain = ProfileCarry.pack(context).toString().toByteArray(Charsets.UTF_8)
         val sealed = try { ProfileTransferCipher.seal(publicKey, plain, CarryRules.cipherContext(target, nonce)) } finally { plain.fill(0) }
@@ -108,7 +108,7 @@ internal object ProfileBootstrapRuntime {
         run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/profile-bootstrap-result.json", "$folder/profile-bootstrap.json")
         mirrorGrants(context, target)
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
+        val publicKey = awaitReceivingPublicKey(folder, target)
         val nonce = UUID.randomUUID().toString()
         val preferences = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).all
         val ai = JSONObject()
@@ -127,9 +127,13 @@ internal object ProfileBootstrapRuntime {
         }
         writePrivate("$folder/profile-bootstrap.json", targetUid, payload.toString())
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        poll {
-            val ack = runCatching { JSONObject(run("/system/bin/cat", "$folder/profile-bootstrap-result.json")) }.getOrNull()
-            if (ack?.optString("nonce") == nonce && ack.optInt("user") == target && ack.optBoolean("ok")) "ready" else null
+        poll(tries = 150, timeoutMessage = "The receiving Cyclone did not return a matching bootstrap acknowledgement. Your current profile was kept open.") {
+            val ack = readBootstrapAcknowledgement("$folder/profile-bootstrap-result.json") ?: return@poll null
+            requireAcknowledgedUser(ack, target)
+            if (!ack.ok && ack.nonce.isBlank()) error(bootstrapFailureMessage(ack))
+            if (ack.nonce != nonce) return@poll null
+            if (!ack.ok) error(bootstrapFailureMessage(ack))
+            "ready"
         }
         // Prove destination root policy, not just the database write. Nested su originates as its UID.
         check(run("su", "$targetUid", "-c", "su -c /system/bin/id").contains("uid=0")) {
@@ -192,9 +196,37 @@ internal object ProfileBootstrapRuntime {
         return uid
     }
 
-    private fun <T : Any> poll(tries: Int = 30, read: () -> T?): T {
+    private fun awaitReceivingPublicKey(folder: String, target: Int): String = poll(
+        timeoutMessage = "The receiving Cyclone did not publish its bootstrap key. Your current profile was kept open.",
+    ) {
+        val publicKey = runCatching {
+            run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() }
+        }.getOrNull()
+        if (publicKey != null) return@poll publicKey
+        val ack = readBootstrapAcknowledgement("$folder/profile-bootstrap-result.json") ?: return@poll null
+        requireAcknowledgedUser(ack, target)
+        if (!ack.ok) error(bootstrapFailureMessage(ack))
+        null
+    }
+
+    private fun readBootstrapAcknowledgement(path: String): ProfileBootstrapContract.BootstrapAcknowledgement? =
+        runCatching { run("/system/bin/cat", path) }.getOrNull()?.let { ProfileBootstrapContract.parseBootstrapAcknowledgement(it) }
+
+    private fun requireAcknowledgedUser(ack: ProfileBootstrapContract.BootstrapAcknowledgement, target: Int) {
+        if (ack.user < 0) error("The receiving Cyclone could not identify its Android profile. Your current profile was kept open.")
+        if (ack.user != target) error("The receiving Cyclone reported a different Android profile. Your current profile was kept open.")
+    }
+
+    private fun bootstrapFailureMessage(ack: ProfileBootstrapContract.BootstrapAcknowledgement): String =
+        "The receiving Cyclone failed during ${ack.stage} (${ack.reasonCode ?: "unknown"}). Your current profile was kept open."
+
+    private fun <T : Any> poll(
+        tries: Int = 30,
+        timeoutMessage: String = "Cyclone couldn't verify the receiving profile. Your current profile was kept open.",
+        read: () -> T?,
+    ): T {
         repeat(tries) { read()?.let { return it }; Thread.sleep(200) }
-        error("Cyclone couldn't verify the receiving profile. Your current profile was kept open.")
+        error(timeoutMessage)
     }
 
     private fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"

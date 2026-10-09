@@ -54,7 +54,13 @@ class ProfileBootstrapService : Service() {
         val folder = createDeviceProtectedStorageContext().filesDir
         val input = File(folder, "profile-bootstrap.json")
         val result = File(folder, "profile-bootstrap-result.json")
+        var stage = "keystore"
+        var nonce = ""
+        var receivingUser = -1
         try {
+            stage = "receiver_identity"
+            receivingUser = ProfileSetupRuntime.currentUserId()
+            stage = "keystore"
             val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             if (!store.containsAlias(ALIAS)) {
                 KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore").apply {
@@ -64,8 +70,12 @@ class ProfileBootstrapService : Service() {
                 }.generateKeyPair()
             }
             if (input.exists()) {
+                stage = "transfer_read"
                 val transfer = JSONObject(input.readText())
-                ProfileBootstrapContract.validateTransfer(transfer.getInt("source"), transfer.getInt("target"), ProfileSetupRuntime.currentUserId())
+                nonce = transfer.optString("nonce").takeUnless { it == "null" }.orEmpty()
+                stage = "identity_validation"
+                ProfileBootstrapContract.validateTransfer(transfer.getInt("source"), transfer.getInt("target"), receivingUser)
+                stage = "preferences"
                 val ai = transfer.getJSONObject("ai")
                 val edit = getSharedPreferences("cyclone_ai", MODE_PRIVATE).edit()
                 ProfileBootstrapContract.aiKeys.forEach(edit::remove)
@@ -76,36 +86,50 @@ class ProfileBootstrapService : Service() {
                     }
                 }
                 check(edit.commit())
+                stage = "profile_registry"
                 check(getSharedPreferences("cyclone_profile_registry", MODE_PRIVATE).edit()
                     .putString("profiles", transfer.getString("profiles")).commit())
+                stage = "credential_restore"
                 if (transfer.has("key")) {
                     val bytes = ProfileTransferCipher.decrypt(store.getKey(ALIAS, null) as java.security.PrivateKey, transfer.getString("key"))
                     try { OpenRouterSecretStore.save(this, String(bytes, Charsets.UTF_8)) } finally { bytes.fill(0) }
                     check(OpenRouterSecretStore.hasKey(this))
                 } else OpenRouterSecretStore.clear(this)
+                stage = "permission_validation"
                 val permissions = transfer.getJSONArray("permissions")
                 for (index in 0 until permissions.length()) {
                     val permission = permissions.getString(index)
                     check(permission in ProfileBootstrapContract.permissions || permission == "moe.shizuku.manager.permission.API_V23")
                     check(checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED)
                 }
+                stage = "overlay_validation"
                 if (transfer.optBoolean("overlay")) check(android.provider.Settings.canDrawOverlays(this))
+                stage = "accessibility_validation"
                 if (transfer.optBoolean("accessibility")) check(android.provider.Settings.Secure.getString(contentResolver,
                     "enabled_accessibility_services").orEmpty().split(':').contains(ProfileBootstrapContract.ACCESSIBILITY))
+                stage = "listener_validation"
                 if (transfer.optBoolean("listener")) {
                     val components = android.provider.Settings.Secure.getString(contentResolver, "enabled_notification_listeners").orEmpty().split(':')
                     check(components.any { it == ProfileBootstrapContract.LISTENER || it == "com.cyclone.mobile/com.cyclone.mobile.CycloneNotificationListener" })
                 }
+                stage = "profile_origin"
                 check(createDeviceProtectedStorageContext().getSharedPreferences("cyclone_profile_origin", MODE_PRIVATE).edit()
                     .putInt("source", transfer.getInt("source")).putString("profile", transfer.getString("profile")).commit())
-                result.writeText(JSONObject().put("nonce", transfer.getString("nonce")).put("user", ProfileSetupRuntime.currentUserId()).put("ok", true).toString())
+                stage = "success_ack"
+                result.writeText(JSONObject().put("nonce", nonce).put("user", receivingUser).put("ok", true)
+                    .put("stage", stage).toString())
             }
             input.delete()
+            stage = "public_key_publish"
             File(folder, "profile-bootstrap-public.txt").writeText(Base64.encodeToString(store.getCertificate(ALIAS).publicKey.encoded, Base64.NO_WRAP))
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             input.delete()
             // Never log preference contents, encrypted payloads, or credential failures with values.
-            result.writeText("{\"ok\":false}")
+            if (receivingUser < 0) receivingUser = runCatching { ProfileSetupRuntime.currentUserId() }.getOrDefault(-1)
+            val acknowledgement = JSONObject().put("user", receivingUser).put("ok", false)
+                .put("stage", stage).put("reasonCode", ProfileBootstrapContract.bootstrapFailureCode(error))
+            if (nonce.isNotBlank()) acknowledgement.put("nonce", nonce)
+            result.writeText(acknowledgement.toString())
         } finally {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf(startId)
