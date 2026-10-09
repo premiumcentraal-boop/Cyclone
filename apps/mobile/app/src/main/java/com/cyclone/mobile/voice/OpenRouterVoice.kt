@@ -177,7 +177,7 @@ class OpenRouterVoice(private val key: String, private val http: OkHttpClient = 
         }
 
         private const val BASE = "https://openrouter.ai/api/v1"
-        private const val DECISIONS = "https://openrouter.ai/api/alpha/decisions"
+        private const val DECISIONS = com.cyclone.mobile.decisions.DecisionsWire.ENDPOINT
         private val JSON = "application/json".toMediaType()
 
         val CLIENT: OkHttpClient = OkHttpClient.Builder()

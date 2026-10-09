@@ -1,5 +1,6 @@
-"""Alpha.78: Cyclone's decisions go through one provider port. JEV is live and reads text only; OpenAI Decisions is
-frozen until it is available, and switching is one place (mind/decide/Decisions.kt)."""
+"""Cyclone's decisions go through one provider port (alpha.78; plan 58 in alpha.123): JEV (text only) decides by default,
+GPT-6 Luna Decisions (text and images) is live beside it, and the provider is a setting read in one place
+(mind/decide/Decisions.kt). Every request uses the one documented wire (decisions/DecisionsWire.kt)."""
 import re
 import unittest
 from pathlib import Path
@@ -15,17 +16,26 @@ def read(path: str) -> str:
 class DecisionsGuard(unittest.TestCase):
     def test_the_decisions_endpoint_lives_in_one_place(self):
         users = sorted(p.relative_to(MOBILE).as_posix() for p in MOBILE.rglob("*.kt") if "api/alpha/decisions" in p.read_text(encoding="utf-8"))
-        # Drive's JEV watch keeps its own call (voice may not import mind code); it only watches.
-        self.assertEqual(users, ["mind/decide/Decisions.kt", "voice/OpenRouterVoice.kt"], users)
+        self.assertEqual(users, ["decisions/DecisionsWire.kt"], users)
+        # Drive's JEV watch keeps its own call (it only watches) but uses the shared endpoint and wire.
+        voice = read("voice/OpenRouterVoice.kt")
+        self.assertIn("DecisionsWire.ENDPOINT", voice)
+        self.assertIn("DecisionsWire.body(", read("voice/JevShadow.kt"))
 
-    def test_jev_is_live_text_only_and_openai_is_frozen(self):
+    def test_jev_decides_by_default_and_luna_is_live_with_vision(self):
         decide = read("mind/decide/Decisions.kt")
-        self.assertIn('JEV("JEV (TypeSafe)", "~typesafe/jev-latest", "https://openrouter.ai/api/alpha/decisions", vision = false, live = true)', decide)
-        self.assertIn('OPENAI_DECISIONS("OpenAI Decisions", model = "", endpoint = null, vision = true, live = false)', decide)
-        self.assertIn("val ACTIVE: DecisionProvider = DecisionProvider.JEV", decide)
-        self.assertIn("ACTIVE.takeIf { it.live && it.endpoint != null && it.model.isNotBlank() } ?: DecisionProvider.JEV", decide)
+        self.assertIn('JEV("JEV (TypeSafe)", "~typesafe/jev-latest", DecisionsWire.ENDPOINT, vision = false, live = true, wire = "jev")', decide)
+        self.assertIn('LUNA("GPT-6 Luna Decisions", "openai/gpt-6-luna-decisions", DecisionsWire.ENDPOINT, vision = true, live = true, wire = "luna")', decide)
+        self.assertNotIn("OPENAI_DECISIONS", decide)
+        self.assertIn("val DEFAULT: DecisionProvider = DecisionProvider.JEV", decide)
+        self.assertIn("chosen.takeIf { it.usable } ?: DEFAULT", decide)
+        # The provider is a setting, defaulting to JEV.
+        modes = read("mind/modes/CycloneModes.kt")
+        self.assertIn('DecisionProvider.of(p.getString("decision_provider", null))', modes)
+        self.assertIn("?: com.cyclone.mobile.mind.decide.Decisions.DEFAULT", modes)
         # A provider without vision never receives a screenshot.
         self.assertIn("if (provider.vision) request else request.copy(image = null)", decide)
+        self.assertIn("if (provider.vision) state else state.filterNot { it is com.cyclone.mobile.decisions.DPart.Image }", decide)
 
     def test_every_decision_caller_uses_the_port(self):
         modes = read("mind/modes/CycloneModes.kt")
@@ -33,6 +43,7 @@ class DecisionsGuard(unittest.TestCase):
         self.assertFalse((MOBILE / "mind/modes/OpenRouterDecisionBox.kt").exists())
         fast = read("mind/pilot/FastMode.kt")
         self.assertIn("com.cyclone.mobile.mind.decide.Decisions.active()", fast)
+        self.assertIn("com.cyclone.mobile.mind.decide.Decisions.call(key, provider,", fast)
         self.assertNotRegex(fast, r'"https://openrouter\.ai/api/alpha/decisions"')
         # The decision model is not a free text field any more.
         settings = read("ui/overlay/CycloneAiSettingsActivity.kt")
@@ -44,7 +55,7 @@ class DecisionsGuard(unittest.TestCase):
 
 
     def test_the_phone_model_is_taught_by_the_provider_and_acts_only_on_what_it_earned(self):
-        """Alpha 89: the phone model learns from JEV's (later OpenAI Decisions') verified decisions, never from its own,
+        """Alpha 89: the phone model learns from the decision provider's verified decisions, never from its own,
         acts only on earned actions and when sure, keeps being audited, and its lessons never leave the phone."""
         lessons = read("mind/decide/Lessons.kt")
         start = lessons.index("fun teaches(")
@@ -77,7 +88,8 @@ class DecisionsGuard(unittest.TestCase):
     def test_routing_waits_for_the_decision_only_briefly(self):
         decide = read("mind/decide/Decisions.kt")
         self.assertIn("ROUTING_DEADLINE_MS = 2_500L", decide)
-        self.assertIn("ProviderDecisionBox(key, active(), ROUTING_DEADLINE_MS)", decide)
+        self.assertIn("ProviderDecisionBox(key, provider, ROUTING_DEADLINE_MS,", decide)
+        self.assertIn("TRIAGE_DEADLINE_MS = 1_200L", decide)
 
 
 if __name__ == "__main__":

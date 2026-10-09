@@ -128,6 +128,46 @@ def clean_decisions(raw: Any) -> dict[str, Any] | None:
         "teaching": _int(raw.get("teaching")),
         "earned": [e for e in raw.get("earned") or [] if isinstance(e, str) and _INTENT.match(e)][:40],
         "actions": actions[:40],
+        "calls": _clean_calls(raw.get("calls")),
+        "watch": _clean_watch(raw.get("watch")),
+        "paused": {k: v for k, v in (raw.get("paused") or {}).items()
+                   if isinstance(k, str) and _INTENT.match(k) and isinstance(v, str) and _INTENT.match(v)}
+        if isinstance(raw.get("paused"), dict) else {},
+    }
+
+
+def _clean_calls(raw: Any) -> list[dict[str, Any]]:
+    """Plan 58: every decisions call per provider and board. Counts, times, failure kinds and cost only."""
+    out = []
+    for item in raw if isinstance(raw, list) else []:
+        if not (isinstance(item, dict) and isinstance(item.get("provider"), str) and _INTENT.match(item["provider"])
+                and isinstance(item.get("board"), str) and _INTENT.match(item["board"])):
+            continue
+        failures = item.get("failures") if isinstance(item.get("failures"), dict) else {}
+        cost = item.get("cost")
+        out.append({
+            "provider": item["provider"], "board": item["board"], "calls": _int(item.get("calls")),
+            "answerRate": _share(item.get("answerRate")),
+            "p50": _int(item.get("p50")) or None, "p95": _int(item.get("p95")) or None,
+            "failures": {k: _int(v) for k, v in failures.items() if isinstance(k, str) and _INTENT.match(k)},
+            "cost": round(float(cost), 6) if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0 else None,
+        })
+    return out[:20]
+
+
+def _clean_watch(raw: Any) -> dict[str, Any] | None:
+    """Plan 58: the watch's comparison (the Lab gate's numbers). Counts and shares only."""
+    if not isinstance(raw, dict):
+        return None
+    modes = raw.get("triageModes") if isinstance(raw.get("triageModes"), dict) else {}
+    return {
+        "providers": [p for p in raw.get("providers") or [] if isinstance(p, str) and _INTENT.match(p)][:4],
+        "watched": _int(raw.get("watched")), "answerRate": _share(raw.get("answerRate")),
+        "board0Agreement": _share(raw.get("board0Agreement")), "board0Compared": _int(raw.get("board0Compared")),
+        "triaged": _int(raw.get("triaged")), "triageRungAgreement": _share(raw.get("triageRungAgreement")),
+        "triageBelowRules": _int(raw.get("triageBelowRules")),
+        "triageModes": {k: _int(v) for k, v in modes.items() if isinstance(k, str) and _INTENT.match(k)},
+        "triageChains": _int(raw.get("triageChains")), "triageRefusals": _int(raw.get("triageRefusals")),
     }
 
 

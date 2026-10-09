@@ -301,14 +301,26 @@ class PilotTest {
         assertEquals(PilotAnswer("e4", 0.92, "other"), PilotWire.parseChoice(completion))
         assertFalse(PilotWire.parseChoice("""{"choices":[{"message":{"content":"{\"fits_plan\":false,\"choice\":\"e4\",\"confidence\":0.9}"}}]}""")!!.fitsPlan)
         assertNull(PilotWire.parseChoice("""{"choices":[{"message":{"content":"sure, tap Lou"}}]}"""))
-        val board = PilotWire.parseDecisions("""{"answers":{"next":{"choice":"hand_back","confidence":0.8},"reason":"step_unclear","needs_smart":"yes","fits_plan":"no"}}""")!!
+        // Plan 58: the documented Decisions shape, read exactly: yes/no questions are probabilities of yes.
+        val board = PilotWire.parseDecisions("""{"answers":{"next":{"type":"choice","choice":"hand_back","confidence":0.8},""" +
+            """"reason":{"type":"choice","choice":"step_unclear","confidence":0.7},"needs_smart":{"type":"noul","noul":0.9},""" +
+            """"fits_plan":{"type":"noul","noul":0.1}}}""", q)!!
         assertEquals("hand_back", board.choice)
         assertTrue(board.needsSmart && !board.fitsPlan)
-        assertEquals(PilotAnswer("e4", 0.7, null), PilotWire.parseDecisions("""{"decisions":{"next":{"value":"e4","probability":0.7}}}"""))
-        assertEquals("e4", PilotWire.parseDecisions("""{"next":"e4"}""")!!.choice)
-        assertNull(PilotWire.parseDecisions("""{"nothing":1}"""))
+        assertEquals(PilotAnswer("e4", 0.7, null), PilotWire.parseDecisions("""{"answers":{"next":{"type":"choice","choice":"e4","confidence":0.7}}}""", q))
+        // The old, undocumented shapes are no answer now.
+        assertNull(PilotWire.parseDecisions("""{"decisions":{"next":{"value":"e4","probability":0.7}}}""", q))
+        assertNull(PilotWire.parseDecisions("""{"next":"e4"}""", q))
+        assertNull(PilotWire.parseDecisions("""{"nothing":1}""", q))
+        // A move that isn't on offer, or a refusal, is no answer.
+        assertNull(PilotWire.parseDecisions("""{"answers":{"next":{"type":"choice","choice":"e99","confidence":0.9}}}""", q))
+        assertNull(PilotWire.parseDecisions("""{"answers":{"next":{"type":"refusal"}}}""", q))
         val decisions = PilotWire.decisionsBody("~typesafe/jev-latest", q)
         assertEquals(listOf("fits_plan", "needs_smart", "next", "reason"), decisions.getJSONObject("questions").keys().asSequence().toList().sorted())
+        assertEquals("noul", decisions.getJSONObject("questions").getJSONObject("fits_plan").getString("type"))
+        assertTrue(decisions.getJSONObject("questions").getJSONObject("fits_plan").getJSONObject("criteria").has("true"))
+        assertTrue(decisions.getJSONObject("questions").getJSONObject("next").getJSONObject("criteria").has("e4"))
+        assertTrue(decisions.get("state") is org.json.JSONArray)
         // The smart model's verdict: fenced or wrapped JSON is read; unknown verdicts are no verdict.
         val verdict = PilotWire.parseVerdict("Here you go:\n```json\n{\"verdict\":\"revise\",\"steps\":[{\"do\":\"Tap Send\",\"risk\":\"irreversible\"}],\"note\":\"n\"}\n```")!!
         assertEquals(PilotVerdict.REVISE, verdict.kind)

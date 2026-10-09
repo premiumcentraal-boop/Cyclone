@@ -48,12 +48,21 @@ object PhoneBrain {
     }
 
     /** The numbers for the health report, Glass and the Lab. */
-    fun stats(context: Context, bar: Double, use: PhoneModelUse): org.json.JSONObject =
-        DecisionStats.summary(synchronized(lock) { load(context) }, bar, Decisions.active().label, use.wire, System.currentTimeMillis())
+    fun stats(context: Context, bar: Double, use: PhoneModelUse): org.json.JSONObject {
+        val provider = Decisions.refresh(context)
+        return DecisionStats.summary(synchronized(lock) { load(context) }, bar, provider.label, use.wire, System.currentTimeMillis())
+            // Plan 58: every decisions call per provider and board, the watch's comparison, and the breakers.
+            .put("calls", CallLog.summary(Decisions.calls()))
+            .put("watch", WatchLog.summary(DecisionWatch.records(context)))
+            .put("paused", org.json.JSONObject().also { o ->
+                DecisionProvider.entries.forEach { p -> Decisions.breaker(p).reason()?.let { o.put(p.wire, it.wire) } }
+            })
+    }
 
     /** Forgets every lesson (Settings), and the phone model starts again from its built-in examples. */
     fun forget(context: Context, bar: Double) = synchronized(lock) {
         runCatching { file(context).delete() }
+        DecisionWatch.forget(context)
         lessons = emptyList()
         train(emptyList(), bar)
     }

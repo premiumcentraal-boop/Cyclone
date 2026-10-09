@@ -235,8 +235,8 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 Text("Speed", fontWeight = FontWeight.Bold)
                 Text(
                     when (modes.speed) {
-                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly. For anything else JEV decides in one quick " +
-                            "call: Instant, Flash (a few routine steps) or the full Mind. The phone model learns from JEV and takes over the actions " +
+                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly. For anything else ${modes.provider.label} decides in one quick " +
+                            "call: Instant, Flash (a few routine steps) or the full Mind. The phone model learns from it and takes over the actions " +
                             "it has proven it gets right. Unsure always goes to the smarter mode."
                         com.cyclone.mobile.mind.modes.Speed.COMMANDS -> "Clear commands like \"swipe up\", \"open my camera\", \"take a selfie\" or " +
                             "\"call Mam\" happen instantly, with no model. Everything else goes to the Mind."
@@ -267,6 +267,56 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Plan 58: who decides, the watch beside it, Triage's switch and strict privacy.
+                    Text("Decided by", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.mind.decide.DecisionProvider.entries.filter { it.usable }.forEach { provider ->
+                            FilterChip(selected = modes.provider == provider, onClick = {
+                                save(modes.copy(provider = provider))
+                                com.cyclone.mobile.mind.decide.Decisions.refresh(context)
+                            }, label = { Text(provider.label) })
+                        }
+                    }
+                    Text(
+                        "JEV reads text only. GPT-6 Luna Decisions can also read the screen. Switch after the Lab's numbers say the new one " +
+                            "is at least as good.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Compare beside it", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                watchSummary(stats),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = modes.watch, onCheckedChange = { save(modes.copy(watch = it)) })
+                    }
+                    Text("Triage", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.mind.modes.StageSwitch.entries.forEach { stage ->
+                            FilterChip(selected = modes.triage == stage, onClick = { save(modes.copy(triage = stage)) }, label = { Text(stage.label) })
+                        }
+                    }
+                    Text(
+                        "Triage asks how hard a request is, what it means and whether it is risky, all in one call. Watch only: it is asked " +
+                            "and measured but never decides. Turn it on once the Lab's numbers pass.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Strict privacy", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Decisions only go to providers that keep no data. Fewer providers, so answers can be slower.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = modes.strictPrivacy, onCheckedChange = { save(modes.copy(strictPrivacy = it)) })
+                    }
                 }
                 Text(
                     "Instant never types, sends, pays, deletes or posts, and never acts on a password, code or card screen: those go " +
@@ -397,10 +447,10 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                         }
                     }
                     if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) {
-                        // Alpha.78: the decision model is Cyclone's decision provider, not a free choice. JEV now (text only);
-                        // OpenAI Decisions takes over in an update once it is available.
+                        // The decision model is Cyclone's decision provider, chosen under Speed (plan 58), not a free choice.
+                        val provider = remember { com.cyclone.mobile.mind.decide.Decisions.refresh(context) }
                         Text(
-                            "${com.cyclone.mobile.mind.decide.Decisions.active().label}, text only. OpenAI Decisions replaces it once it's available.",
+                            "${provider.label}${if (provider.vision) ", reads the screen too" else ", text only"}. Choose it under Speed.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -867,13 +917,27 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /** One line about how requests are decided on this phone (alpha 89). */
+/** Plan 58: the watch in one line ("Luna answered 95% · agreed 88% · triage 84% · 0 below the rules"). */
+private fun watchSummary(stats: org.json.JSONObject?): String {
+    val watch = stats?.optJSONObject("watch")
+    if (watch == null || watch.optInt("watched") == 0) {
+        return "The other decision model answers the same questions beside it and never acts, so you can compare them."
+    }
+    val parts = mutableListOf("${watch.optInt("watched")} compared")
+    watch.optDouble("answerRate").takeIf { !it.isNaN() }?.let { parts += "answered ${(it * 100).toInt()}%" }
+    watch.optDouble("board0Agreement").takeIf { !it.isNaN() }?.let { parts += "agreed ${(it * 100).toInt()}%" }
+    watch.optDouble("triageRungAgreement").takeIf { !it.isNaN() }?.let { parts += "triage matched ${(it * 100).toInt()}%" }
+    parts += "${watch.optInt("triageBelowRules")} below the rules"
+    return parts.joinToString(" · ") + "."
+}
+
 private fun phoneModelSummary(stats: org.json.JSONObject?): String {
     if (stats == null || stats.optInt("lessons") == 0) {
-        return "It learns on this phone from the requests JEV decides. Nothing it learns leaves the phone."
+        return "It learns on this phone from the requests the decision model decides. Nothing it learns leaves the phone."
     }
     val parts = mutableListOf<String>()
     stats.optDouble("onPhoneShare").takeIf { !it.isNaN() }?.let { parts += "${(it * 100).toInt()}% decided on this phone" }
-    stats.optJSONObject("decisionsMs")?.optLong("p50", -1)?.takeIf { it > 0 }?.let { parts += "JEV answers in ${it} ms (median)" }
+    stats.optJSONObject("decisionsMs")?.optLong("p50", -1)?.takeIf { it > 0 }?.let { parts += "decisions answer in ${it} ms (median)" }
     val earned = stats.optJSONArray("earned")?.length() ?: 0
     parts += if (earned == 0) "no actions earned yet" else "$earned ${if (earned == 1) "action" else "actions"} earned"
     return parts.joinToString(" · ") + ". Nothing it learns leaves the phone."

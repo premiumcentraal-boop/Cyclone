@@ -360,3 +360,23 @@ def test_decision_numbers_reach_the_pc_as_counts_and_times_only(tmp_path):
     merged = h.merge({}, clean, NOW)
     answer = verdict(history=merged)
     assert answer["details"]["decisions"]["onPhoneShare"] == 0.42
+
+
+def test_plan58_call_and_watch_numbers_pass_as_counts_only(tmp_path):
+    raw = {**REPORT, "decisions": {
+        "provider": "JEV (TypeSafe)",
+        "calls": [{"provider": "luna", "board": "watch", "calls": 20, "answerRate": 0.95, "p50": 310, "p95": 820,
+                   "failures": {"timeout": 1, "Bad Kind": 3}, "cost": 0.0021, "request": "text mom"},
+                  {"provider": "../x", "board": "watch", "calls": 1}],
+        "watch": {"providers": ["luna", "Bad One"], "watched": 20, "answerRate": 0.95, "board0Agreement": 0.9, "board0Compared": 10,
+                  "triaged": 19, "triageRungAgreement": 0.84, "triageBelowRules": 0, "triageModes": {"instant": 5, "mind": 9, "x y": 1},
+                  "triageChains": 3, "triageRefusals": 0, "request": "pay 300 euro"},
+        "paused": {"luna": "rate_limited", "jev": "Not A Wire"}}}
+    decisions = h.clean_report(raw)["decisions"]
+    assert decisions["calls"] == [{"provider": "luna", "board": "watch", "calls": 20, "answerRate": 0.95, "p50": 310, "p95": 820,
+                                   "failures": {"timeout": 1}, "cost": 0.0021}]
+    watch = decisions["watch"]
+    assert watch["providers"] == ["luna"] and watch["triageBelowRules"] == 0 and watch["triageModes"] == {"instant": 5, "mind": 9}
+    assert decisions["paused"] == {"luna": "rate_limited"}
+    text = json.dumps(decisions)
+    assert "text mom" not in text and "pay 300" not in text

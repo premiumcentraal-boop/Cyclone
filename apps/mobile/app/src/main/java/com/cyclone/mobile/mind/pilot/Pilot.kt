@@ -566,39 +566,37 @@ object PilotWire {
             fitsPlan = json.optBoolean("fits_plan", true), needsSmart = json.optBoolean("needs_smart", false))
     }
 
-    fun decisionsBody(model: String, question: PilotQuestion): JSONObject = JSONObject()
-        .put("model", model)
-        .put("state", JSONObject().put("task", "Carry out one step of a phone task for a smarter planner.")
-            .put("situation", Pilot.context(question)))
-        .put("questions", JSONObject()
-            .put("fits_plan", JSONObject().put("type", "choice").put("instructions", "Does the screen still fit the plan?")
-                .put("choices", JSONArray(listOf("yes", "no"))))
-            .put("needs_smart", JSONObject().put("type", "choice").put("instructions", "Does the next move need the smart planner?")
-                .put("choices", JSONArray(listOf("no", "yes"))))
-            .put("next", JSONObject().put("type", "choice").put("instructions", Pilot.instructions(question))
-                .put("choices", JSONArray(question.options.keys.toList())))
-            .put("reason", JSONObject().put("type", "choice")
-                .put("instructions", "If the screen doesn't fit or the planner is needed, why? Otherwise pick other.")
-                .put("choices", JSONArray(Pilot.REASONS))))
+    /** Plan 58: the Pilot's board in the documented Decisions shape: two yes/no questions and two choices. */
+    fun decisionQuestions(question: PilotQuestion): Map<String, com.cyclone.mobile.decisions.DQuestion> = linkedMapOf(
+        "fits_plan" to com.cyclone.mobile.decisions.DQuestion.Noul("Does the screen still fit the plan?",
+            "The screen is where the plan expects it to be, so the planned step can be done here.",
+            "The screen is somewhere else, shows an error, a dialog or something the plan didn't expect."),
+        "needs_smart" to com.cyclone.mobile.decisions.DQuestion.Noul("Does the next move need the smart planner?",
+            "The next move needs judgement, writing, the owner's input or a choice the plan didn't settle.",
+            "The next move is a plain step of the plan that one of the options carries out."),
+        "next" to com.cyclone.mobile.decisions.DQuestion.Choice(Pilot.instructions(question), question.options),
+        "reason" to com.cyclone.mobile.decisions.DQuestion.choice(
+            "If the screen doesn't fit or the planner is needed, why? Otherwise pick other.", Pilot.REASONS),
+    )
+
+    fun decisionsBody(model: String, question: PilotQuestion, withImage: Boolean = false): JSONObject =
+        com.cyclone.mobile.decisions.DecisionsWire.body(model, buildList {
+            add(com.cyclone.mobile.decisions.DPart.Text("Carry out one step of a phone task for a smarter planner."))
+            add(com.cyclone.mobile.decisions.DPart.Text(Pilot.context(question)))
+            question.image?.takeIf { withImage && com.cyclone.mobile.decisions.DecisionsWire.isImageDataUrl(it) }
+                ?.let { add(com.cyclone.mobile.decisions.DPart.Image(it)) }
+        }, decisionQuestions(question))
 
     /**
-     * A decision endpoint's answer, read tolerantly: `answers|decisions|results|output` or the top level, holding each
-     * question as a string or as `{choice|value|answer|label, confidence|probability|p}`.
+     * A decisions answer, read exactly (plan 58): `next` must be one of the options; `fits_plan` and `needs_smart` are
+     * probabilities of yes. A missing or refused yes/no keeps the safe reading (the plan fits; the planner isn't asked
+     * for) only when `next` itself was answered.
      */
-    fun parseDecisions(body: String?): PilotAnswer? {
-        val json = runCatching { JSONObject(body ?: return null) }.getOrNull() ?: return null
-        val holder = listOf("answers", "decisions", "results", "output").firstNotNullOfOrNull { json.optJSONObject(it) } ?: json
-        fun read(key: String): Pair<String, Double>? {
-            val answer = holder.opt(key) ?: return null
-            val node = answer as? JSONObject
-            val value = node?.let { n -> listOf("choice", "value", "answer", "label").firstNotNullOfOrNull { k -> n.optString(k).takeIf { it.isNotBlank() } } }
-                ?: (answer as? String) ?: return null
-            val confidence = node?.let { n -> listOf("confidence", "probability", "p").firstNotNullOfOrNull { k -> n.optDouble(k, Double.NaN).takeIf { !it.isNaN() } } } ?: 0.0
-            return value.trim() to confidence
-        }
-        val (choice, confidence) = read("next") ?: return null
-        return PilotAnswer(choice, confidence.coerceIn(0.0, 1.0), read("reason")?.first,
-            fitsPlan = read("fits_plan")?.first?.lowercase() != "no", needsSmart = read("needs_smart")?.first?.lowercase() == "yes")
+    fun parseDecisions(body: String?, question: PilotQuestion): PilotAnswer? {
+        val reply = com.cyclone.mobile.decisions.DecisionsWire.parse(body, decisionQuestions(question)) ?: return null
+        val next = reply.choice("next") ?: return null
+        return PilotAnswer(next.choice, next.confidence, reply.choice("reason")?.choice,
+            fitsPlan = (reply.noul("fits_plan")?.yes ?: 1.0) >= 0.5, needsSmart = (reply.noul("needs_smart")?.yes ?: 0.0) >= 0.5)
     }
 
     /** The smart model's short request: a system line and one user message; no tools, a JSON verdict. */

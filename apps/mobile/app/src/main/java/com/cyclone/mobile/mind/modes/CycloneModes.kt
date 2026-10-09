@@ -20,7 +20,16 @@ data class ModeSettings(
     val silentSuccess: Boolean = true,
     /** Alpha 89: the phone model (taught by JEV) acts on what it has earned, only learns, or is off. */
     val phoneModel: com.cyclone.mobile.mind.decide.PhoneModelUse = com.cyclone.mobile.mind.decide.PhoneModelUse.EARNED,
+    /** Plan 58: who decides (Settings → Speed → Advanced). JEV until the Lab's numbers say Luna is at least as good. */
+    val provider: com.cyclone.mobile.mind.decide.DecisionProvider = com.cyclone.mobile.mind.decide.Decisions.DEFAULT,
+    /** Plan 58: the other provider answers the same questions beside it, never acting, so the two can be compared. */
+    val watch: Boolean = true,
+    /** Plan 58: the Triage board. Shadow (asked beside, never acting) until its gate passes. */
+    val triage: StageSwitch = StageSwitch.SHADOW,
+    /** Plan 58: ask OpenRouter for zero-data-retention providers only (slower, fewer providers). */
+    val strictPrivacy: Boolean = false,
 )
+
 
 /** What happened to a request, for the surface that asked (Live voice speaks it; the Ask bar shows it). */
 data class ModeResult(
@@ -45,13 +54,20 @@ object CycloneModes {
     fun settings(context: Context): ModeSettings {
         val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return ModeSettings(Speed.of(p.getString("speed", null)), p.getInt("keep_listening_s", 8).coerceIn(0, 20),
-            p.getBoolean("silent_success", true), com.cyclone.mobile.mind.decide.PhoneModelUse.of(p.getString("phone_model", null)))
+            p.getBoolean("silent_success", true), com.cyclone.mobile.mind.decide.PhoneModelUse.of(p.getString("phone_model", null)),
+            provider = com.cyclone.mobile.mind.decide.DecisionProvider.of(p.getString("decision_provider", null))
+                ?: com.cyclone.mobile.mind.decide.Decisions.DEFAULT,
+            watch = p.getBoolean("decision_watch", true),
+            triage = StageSwitch.of(p.getString("triage", null), StageSwitch.SHADOW),
+            strictPrivacy = p.getBoolean("strict_privacy", false))
     }
 
     fun save(context: Context, settings: ModeSettings) {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString("speed", settings.speed.wire).putInt("keep_listening_s", settings.keepListeningSeconds.coerceIn(0, 20))
-            .putBoolean("silent_success", settings.silentSuccess).putString("phone_model", settings.phoneModel.wire).apply()
+            .putBoolean("silent_success", settings.silentSuccess).putString("phone_model", settings.phoneModel.wire)
+            .putString("decision_provider", settings.provider.wire).putBoolean("decision_watch", settings.watch)
+            .putString("triage", settings.triage.wire).putBoolean("strict_privacy", settings.strictPrivacy).apply()
     }
 
     @Volatile private var current: Running? = null
@@ -123,7 +139,7 @@ object CycloneModes {
         try {
             val fast = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
             learnBar = fast.sureness.bar
-            // Alpha.78: decisions go to the one decision provider (JEV, text only, until OpenAI Decisions is live).
+            // Decisions go to the one decision provider (plan 58: JEV or GPT-6 Luna Decisions, a setting).
             val box = if (settings.speed == Speed.AUTO) com.cyclone.mobile.mind.decide.Decisions.box(context) else null
             val blocker = device.blocker()
             // The screen is read only when the command needs its labels ("tap Pokémon GO") or Auto may ask a box; a
@@ -133,8 +149,14 @@ object CycloneModes {
             val phone = if (settings.speed == Speed.AUTO) runCatching {
                 com.cyclone.mobile.mind.decide.PhoneBrain.decider(context, settings.phoneModel, fast.sureness.bar)
             }.getOrNull() else null
-            val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar, phone) }
+            // Plan 58: Triage replaces Board 0 only when its switch is on (after the Lab gate); in shadow the watch asks it.
+            val triage = if (settings.speed == Speed.AUTO) com.cyclone.mobile.mind.decide.Decisions.triage(context) else null
+            val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar, phone, triage) }
             routed = route
+            // Plan 58: the provider that isn't deciding answers the same questions beside it, on its own thread, never acting.
+            if (settings.speed == Speed.AUTO) runCatching {
+                com.cyclone.mobile.mind.decide.DecisionWatch.watch(context, request, world, route, settings, fast.sureness.bar)
+            }
             AskLedger.routed(request, route.mode.name.lowercase(), route.by.name.lowercase(), route.why, route.decideMs)
             // Alpha 91: the phone decided at once; JEV answers the same question in the background now and then, so its
             // agreement and its speed keep being measured without making the owner wait.

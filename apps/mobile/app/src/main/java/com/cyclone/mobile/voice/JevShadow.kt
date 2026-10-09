@@ -1,6 +1,5 @@
 package com.cyclone.mobile.voice
 
-import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -10,7 +9,7 @@ import org.json.JSONObject
  * never changes what Cyclone does; Settings → Voice shows how often it agreed and how fast it was, so the owner's own
  * car test decides whether it may take over simple decisions later.
  *
- * Pure: the request, a tolerant reader for the answer (the Decisions API is alpha), and the running tally.
+ * Pure: the request and the exact reader (`decisions/DecisionsWire`), and the running tally.
  */
 object JevShadow {
     const val MODEL = "~typesafe/jev-latest"
@@ -47,37 +46,38 @@ object JevShadow {
 
     const val KEEP = 50
 
-    /** The decision request: the state (what was said, what is open) and one typed choice question. */
-    fun request(transcript: String, context: VoiceContext): JSONObject = JSONObject()
-        .put("model", MODEL)
-        .put("state", JSONObject()
-            .put("task", "Classify one spoken request to a phone assistant used while driving.")
-            .put("spoken", transcript.take(VoiceRules.MAX_TRANSCRIPT_CHARS))
-            .put("open_question", context.open?.spoken ?: JSONObject.NULL)
-            .put("open_kind", context.open?.kind ?: JSONObject.NULL)
-            .put("task_running", context.taskLive))
-        .put("questions", JSONObject().put("kind", JSONObject()
-            .put("type", "choice")
-            .put("instructions", "task: a new job for the phone. reply: a new job to reply to or message someone. answer: an answer to " +
-                "the open question. confirm: yes to the open readback. decline: no to it. cancel: never mind. none: not for the assistant. " +
-                "unclear: a job is meant but something essential is missing.")
-            .put("choices", JSONArray(CHOICES))))
+    /** The one typed question JEV answers (plan 58: the documented shape, with guidance per kind). */
+    val QUESTIONS: Map<String, com.cyclone.mobile.decisions.DQuestion> = mapOf("kind" to com.cyclone.mobile.decisions.DQuestion.Choice(
+        "What kind of request is this?",
+        linkedMapOf(
+            "task" to "A new job for the phone.",
+            "reply" to "A new job to reply to or message someone.",
+            "answer" to "An answer to the open question.",
+            "confirm" to "Yes to the open readback.",
+            "decline" to "No to the open readback.",
+            "cancel" to "Never mind.",
+            "none" to "Not meant for the assistant.",
+            "unclear" to "A job is meant but something essential is missing.",
+        ).let { guidance -> CHOICES.associateWith { guidance[it].orEmpty() } },
+    ))
 
-    /**
-     * JEV's answer to the "kind" question, read tolerantly: the alpha API has shipped the answer as
-     * `answers.kind`, `decisions.kind` or `kind`, holding `choice`, `value` or `answer`, with `confidence` or
-     * `probability`. Anything else is no answer.
-     */
+    /** The decision request: the situation as text items of the state, and the one typed question. */
+    fun request(transcript: String, context: VoiceContext): JSONObject = com.cyclone.mobile.decisions.DecisionsWire.body(
+        MODEL,
+        listOfNotNull(
+            "Classify one spoken request to a phone assistant used while driving.",
+            "Spoken: ${transcript.take(VoiceRules.MAX_TRANSCRIPT_CHARS)}",
+            context.open?.spoken?.let { "Open question: $it" },
+            context.open?.kind?.let { "Open question kind: $it" },
+            "A task is running: ${context.taskLive}",
+        ).map { com.cyclone.mobile.decisions.DPart.Text(it) },
+        QUESTIONS,
+    )
+
+    /** JEV's answer to the "kind" question, read exactly (plan 58). Anything else, or a refusal, is no answer. */
     fun parse(body: String?): Decision? {
-        val json = runCatching { JSONObject(body ?: return null) }.getOrNull() ?: return null
-        val holder = listOf("answers", "decisions", "results", "output").firstNotNullOfOrNull { json.optJSONObject(it) } ?: json
-        val answer: Any = holder.opt("kind") ?: return null
-        val node = answer as? JSONObject
-        val value = node?.let { n -> listOf("choice", "value", "answer", "label").firstNotNullOfOrNull { k -> n.optString(k).takeIf { it.isNotBlank() } } }
-            ?: (answer as? String)
-            ?: return null
-        val kind = VoiceKind.fromWire(value) ?: return null
-        val confidence = node?.let { n -> listOf("confidence", "probability", "p").firstNotNullOfOrNull { k -> n.optDouble(k, Double.NaN).takeIf { !it.isNaN() } } } ?: 0.0
-        return Decision(kind, confidence.coerceIn(0.0, 1.0))
+        val answer = com.cyclone.mobile.decisions.DecisionsWire.parse(body, QUESTIONS)?.choice("kind") ?: return null
+        val kind = VoiceKind.fromWire(answer.choice) ?: return null
+        return Decision(kind, answer.confidence)
     }
 }

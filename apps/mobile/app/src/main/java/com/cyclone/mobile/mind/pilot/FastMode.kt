@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 enum class FastRoute(val wire: String, val label: String) {
     /** An ordinary fast model with a strict output schema. Sees screenshots. */
     MODEL("model", "Fast model"),
-    /** The decision provider (alpha.78: JEV, text only; OpenAI Decisions replaces it when live). See `mind/decide`. */
+    /** The decision provider (plan 58: JEV or GPT-6 Luna Decisions, chosen in Settings → Speed). See `mind/decide`. */
     DECISIONS("decisions", "Decision model");
 
     companion object { fun of(wire: String?) = entries.firstOrNull { it.wire == wire } ?: MODEL }
@@ -35,7 +35,7 @@ data class FastModeSettings(
     /** The smart model reviews the rest of the plan in parallel while the rapid model works. */
     val lookahead: Boolean = true,
 ) {
-    /** The decision route's model is the provider's, not a free choice (alpha.78: frozen to JEV). */
+    /** The decision route's model is the provider's, not a free choice. */
     val activeModel: String get() = if (route == FastRoute.DECISIONS) com.cyclone.mobile.mind.decide.Decisions.active().model else model
     fun pilot() = PilotSettings(sureness.bar, images && (route == FastRoute.MODEL || com.cyclone.mobile.mind.decide.Decisions.active().vision), lookahead)
 }
@@ -74,6 +74,7 @@ object FastMode {
     fun decider(context: Context, settings: FastModeSettings = settings(context)): PilotDecider? {
         if (!settings.enabled) return null
         val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
+        com.cyclone.mobile.mind.decide.Decisions.refresh(context)
         return OpenRouterPilotDecider(key, settings.route, settings.activeModel)
     }
 }
@@ -98,14 +99,17 @@ class MindPilotAdvisor(private val model: com.cyclone.mobile.mind.MindModel) : P
 class OpenRouterPilotDecider(private val key: String, private val route: FastRoute, private val model: String) : PilotDecider {
     override fun decide(question: PilotQuestion): PilotAnswer? {
         val started = SystemClock.elapsedRealtime()
-        // Alpha.78: the decision route goes to the one decision provider (JEV now, OpenAI Decisions when live).
-        val text = when (route) {
-            FastRoute.MODEL -> post(CHAT, PilotWire.choiceBody(model, question))
-            FastRoute.DECISIONS -> com.cyclone.mobile.mind.decide.Decisions.active().let { provider ->
-                com.cyclone.mobile.mind.decide.Decisions.post(key, provider, PilotWire.decisionsBody(provider.model, question), "Cyclone Pilot")
+        // The decision route goes to the one decision provider (plan 58: JEV or GPT-6 Luna Decisions, a setting).
+        val answer = when (route) {
+            FastRoute.MODEL -> PilotWire.parseChoice(post(CHAT, PilotWire.choiceBody(model, question)) ?: return null)
+            FastRoute.DECISIONS -> {
+                val provider = com.cyclone.mobile.mind.decide.Decisions.active()
+                val body = runCatching { PilotWire.decisionsBody(provider.model, question, withImage = provider.vision) }.getOrNull() ?: return null
+                val result = com.cyclone.mobile.mind.decide.Decisions.call(key, provider, body, "Cyclone Pilot", "pilot")
+                    as? com.cyclone.mobile.decisions.DecisionsResult.Ok ?: return null
+                PilotWire.parseDecisions(result.body, question)
             }
-        } ?: return null
-        val answer = if (route == FastRoute.MODEL) PilotWire.parseChoice(text) else PilotWire.parseDecisions(text)
+        }
         return answer?.copy(ms = SystemClock.elapsedRealtime() - started)
     }
 

@@ -9,18 +9,22 @@ class JevShadowTest {
     @Test fun `the request asks one typed choice over every kind`() {
         val body = JevShadow.request("reply to Louella", VoiceContext(open = VoiceContext.OpenAsk("question", "Which Louella?"), taskLive = true))
         assertEquals("~typesafe/jev-latest", body.getString("model"))
-        assertEquals("reply to Louella", body.getJSONObject("state").getString("spoken"))
-        assertEquals("Which Louella?", body.getJSONObject("state").getString("open_question"))
+        val state = body.getJSONArray("state")
+        val text = (0 until state.length()).joinToString("\n") { state.getString(it) }
+        assertTrue(text.contains("Spoken: reply to Louella"))
+        assertTrue(text.contains("Open question: Which Louella?"))
         val kind = body.getJSONObject("questions").getJSONObject("kind")
         assertEquals("choice", kind.getString("type"))
-        assertEquals(VoiceKind.entries.size, kind.getJSONArray("choices").length())
+        assertEquals(VoiceKind.entries.size, kind.getJSONObject("criteria").length())
     }
 
-    @Test fun `answers are read tolerantly and strictly`() {
-        assertEquals(JevShadow.Decision(VoiceKind.REPLY, 0.93), JevShadow.parse("""{"answers":{"kind":{"choice":"reply","confidence":0.93}}}"""))
-        assertEquals(JevShadow.Decision(VoiceKind.TASK, 0.7), JevShadow.parse("""{"decisions":{"kind":{"value":"task","probability":0.7}}}"""))
-        assertEquals(JevShadow.Decision(VoiceKind.NONE, 0.0), JevShadow.parse("""{"kind":"none"}"""))
-        assertNull(JevShadow.parse("""{"answers":{"kind":{"choice":"launch"}}}"""))
+    @Test fun `answers are read exactly`() {
+        assertEquals(JevShadow.Decision(VoiceKind.REPLY, 0.93),
+            JevShadow.parse("""{"answers":{"kind":{"type":"choice","choice":"reply","confidence":0.93}}}"""))
+        assertNull(JevShadow.parse("""{"decisions":{"kind":{"value":"task","probability":0.7}}}"""))
+        assertNull(JevShadow.parse("""{"kind":"none"}"""))
+        assertNull(JevShadow.parse("""{"answers":{"kind":{"type":"choice","choice":"launch","confidence":0.9}}}"""))
+        assertNull(JevShadow.parse("""{"answers":{"kind":{"type":"refusal"}}}"""))
         assertNull(JevShadow.parse("not json"))
         assertNull(JevShadow.parse(null))
         assertNull(JevShadow.parse("""{"error":{"message":"beta"}}"""))

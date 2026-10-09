@@ -18,6 +18,12 @@ enum class Speed(val wire: String, val label: String) {
     companion object { fun of(wire: String?) = entries.firstOrNull { it.wire == wire } ?: AUTO }
 }
 
+/** Plan 58: each new stage ships behind its own switch. Off: not used. Shadow: asked and measured, never acting. On: acts. */
+enum class StageSwitch(val wire: String, val label: String) {
+    OFF("off", "Off"), SHADOW("shadow", "Watch only"), ON("on", "On");
+    companion object { fun of(wire: String?, default: StageSwitch) = entries.firstOrNull { it.wire == wire } ?: default }
+}
+
 /** Where a request goes, with what Instant needs or the short answer to say. */
 data class Route(
     val mode: Mode,
@@ -176,7 +182,8 @@ object ModeRouter {
         )
     }
 
-    private val INTENTS = linkedMapOf(
+    /** Board 0's action keys and what each means for Instant (also Triage's `capability` options, plan 58). */
+    val INTENTS = linkedMapOf(
         "swipe_up" to (InstantIntent.SWIPE to "up"), "swipe_down" to (InstantIntent.SWIPE to "down"),
         "swipe_left" to (InstantIntent.SWIPE to "left"), "swipe_right" to (InstantIntent.SWIPE to "right"),
         "scroll_up" to (InstantIntent.SCROLL to "up"), "scroll_down" to (InstantIntent.SCROLL to "down"),
@@ -225,7 +232,7 @@ object ModeRouter {
      * agreement with JEV is measured all the time.
      */
     fun route(text: String, world: GrammarWorld, facts: LocalFacts, speed: Speed, box: DecisionBox?, bar: Double,
-              phone: PhoneDecider? = null): Route {
+              phone: PhoneDecider? = null, triage: TypedBox? = null): Route {
         if (speed == Speed.MIND) return Route(Mode.MIND, "Speed is set to Always Mind", by = Decider.SETTING, decision = guessOf(Mode.MIND))
         stage0(text, world, facts)?.let { r ->
             return r.copy(by = if (r.mode == Mode.ANSWER) Decider.ANSWER else Decider.GRAMMAR, decision = guessOf(r.mode, r.command))
@@ -252,6 +259,18 @@ object ModeRouter {
             fromGuess(shadow, text, world)?.let { return it.copy(by = Decider.PHONE, decision = shadow, decideMs = phoneMs, shadow = shadow) }
         }
         if (box == null) return Route(Mode.MIND, "no decision provider is reachable", by = Decider.FALLBACK, decision = guessOf(Mode.MIND), shadow = shadow)
+        // Plan 58: with Triage switched on, its one call replaces Board 0. Its answers can only make a request more
+        // careful: the rules above already sent writing, money, deleting and accounts to the Mind.
+        if (triage != null) {
+            val started2 = System.nanoTime()
+            val answer = runCatching { triage.ask(Triage.state(text, world), Triage.questions(world, text)) }.getOrNull()
+            val ms = answer?.ms ?: ((System.nanoTime() - started2) / 1_000_000)
+            if (answer == null) return Route(Mode.FLASH, "triage gave no answer", by = Decider.DECISIONS, decision = guessOf(Mode.FLASH),
+                decideMs = ms, shadow = shadow)
+            val reading = Triage.read(answer.reply)
+            val r = Triage.route(reading, text, world, bar)
+            return r.copy(by = Decider.DECISIONS, decision = Triage.guessOf(r, reading), decideMs = ms, shadow = shadow)
+        }
         val reply = runCatching { box.ask(board0(text, world)) }.getOrNull()
         val route = fromBoard(reply, text, world, bar)
         return route.copy(by = Decider.DECISIONS, decision = reply?.let { decisionOf(it) } ?: guessOf(route.mode), decideMs = reply?.ms ?: 0, shadow = shadow)

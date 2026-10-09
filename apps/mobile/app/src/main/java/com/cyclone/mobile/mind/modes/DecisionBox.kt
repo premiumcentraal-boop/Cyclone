@@ -9,14 +9,24 @@ import org.json.JSONObject
  * questions at once**. Each answer is chosen from a list Cyclone prepared on the phone (on-screen labels, installed
  * apps, contacts), with a confidence. It never writes free text, so it can't invent an app, a contact or a button.
  *
- * Pure: requests, the two wire formats (a fast model with a strict schema; a decision endpoint) and tolerant readers.
- * The call itself is `mind/decide/Decisions` on the phone (JEV now; OpenAI Decisions when it is live).
+ * Pure: requests and the two wire formats (a fast model with a strict schema; the Decisions API through
+ * `decisions/DecisionsWire`, read exactly). The call itself is `mind/decide/Decisions` on the phone (JEV or GPT-6 Luna
+ * Decisions, plan 58).
  */
-data class BoxQuestion(val id: String, val instructions: String, val choices: List<String>) {
+data class BoxQuestion(
+    val id: String,
+    val instructions: String,
+    val choices: List<String>,
+    /** Plan 58: guidance per choice (the Decisions API's `criteria`); a choice without one is described by its name. */
+    val guidance: Map<String, String> = emptyMap(),
+) {
     init {
         require(id.matches(Regex("[a-z][a-z0-9_]{0,31}"))) { "question id" }
         require(choices.isNotEmpty() && choices.size <= 64) { "choices" }
     }
+
+    fun typed(): com.cyclone.mobile.decisions.DQuestion.Choice =
+        com.cyclone.mobile.decisions.DQuestion.Choice(instructions, choices.distinct().associateWith { guidance[it].orEmpty() })
 }
 
 data class BoxRequest(
@@ -29,9 +39,19 @@ data class BoxRequest(
     val image: String? = null,
 )
 
-data class BoxAnswer(val choice: String, val confidence: Double)
+data class BoxAnswer(
+    val choice: String,
+    val confidence: Double,
+    /** Plan 58: every option's probability, when the provider gives them (the runner-up matters: "Mam" vs "Mama"). */
+    val probabilities: Map<String, Double> = emptyMap(),
+)
 
-data class BoxReply(val answers: Map<String, BoxAnswer>, val ms: Long = 0) {
+data class BoxReply(
+    val answers: Map<String, BoxAnswer>,
+    val ms: Long = 0,
+    /** Plan 58: questions the provider refused. A refusal is no answer, never a "no". */
+    val refused: Set<String> = emptySet(),
+) {
     fun choice(id: String): String? = answers[id]?.choice
     fun confidence(id: String): Double = answers[id]?.confidence ?: 0.0
     /** The answer to [id] when it is at least [bar] sure; otherwise null. */
@@ -44,6 +64,17 @@ fun interface DecisionBox {
 
     /** Can the box read a screenshot? False for JEV (alpha.78): callers then don't take one. */
     val sees: Boolean get() = false
+}
+
+/** A typed answer with how long it took. */
+data class TypedAnswer(val reply: com.cyclone.mobile.decisions.DReply, val ms: Long)
+
+/**
+ * Plan 58: a decision call with typed questions (yes/no, choice, score), for boards that need more than choices
+ * (Triage). Null means no usable answer: the caller goes one mode up.
+ */
+fun interface TypedBox {
+    fun ask(state: List<com.cyclone.mobile.decisions.DPart>, questions: Map<String, com.cyclone.mobile.decisions.DQuestion>): TypedAnswer?
 }
 
 object BoxWire {
@@ -90,32 +121,33 @@ object BoxWire {
         return answers.takeIf { it.isNotEmpty() }?.let { BoxReply(it) }
     }
 
-    fun decisionsBody(model: String, request: BoxRequest): JSONObject = JSONObject()
-        .put("model", model)
-        .put("state", JSONObject().put("task", request.task).put("situation", clean(request.context)))
-        .put("questions", JSONObject().also { questions ->
-            request.questions.forEach { q ->
-                questions.put(q.id, JSONObject().put("type", "choice").put("instructions", q.instructions).put("choices", JSONArray(q.choices)))
-            }
-        })
+    /** Plan 58: the documented Decisions shape (`state` array, typed questions with `criteria`). */
+    fun decisionsBody(model: String, request: BoxRequest, zdr: Boolean = false): JSONObject =
+        com.cyclone.mobile.decisions.DecisionsWire.body(model, state(request), typed(request), zdr = zdr)
 
-    /**
-     * A decision endpoint's answer, read tolerantly: `answers|decisions|results|output` or the top level, holding each
-     * question as a string or `{choice|value|answer|label, confidence|probability|p}`. Answers outside the choices are
-     * dropped.
-     */
-    fun parseDecisions(body: String?, request: BoxRequest): BoxReply? {
-        val json = runCatching { JSONObject(body ?: return null) }.getOrNull() ?: return null
-        val holder = listOf("answers", "decisions", "results", "output").firstNotNullOfOrNull { json.optJSONObject(it) } ?: json
-        val answers = request.questions.mapNotNull { q ->
-            val raw = holder.opt(q.id) ?: return@mapNotNull null
-            val node = raw as? JSONObject
-            val value = node?.let { n -> listOf("choice", "value", "answer", "label").firstNotNullOfOrNull { k -> n.optString(k).takeIf { it.isNotBlank() } } }
-                ?: (raw as? String) ?: return@mapNotNull null
-            val confidence = node?.let { n -> listOf("confidence", "probability", "p").firstNotNullOfOrNull { k -> n.optDouble(k, Double.NaN).takeIf { !it.isNaN() } } } ?: 0.0
-            value.trim().takeIf { it in q.choices }?.let { q.id to BoxAnswer(it, confidence.coerceIn(0.0, 1.0)) }
+    /** The state: the task, the cleaned situation, and the screenshot when there is one and it is a proper data URL. */
+    fun state(request: BoxRequest): List<com.cyclone.mobile.decisions.DPart> = buildList {
+        add(com.cyclone.mobile.decisions.DPart.Text(request.task))
+        add(com.cyclone.mobile.decisions.DPart.Text(clean(request.context)))
+        request.image?.takeIf { com.cyclone.mobile.decisions.DecisionsWire.isImageDataUrl(it) }?.let {
+            add(com.cyclone.mobile.decisions.DPart.Text("The screenshot shows the screen, with controls labelled."))
+            add(com.cyclone.mobile.decisions.DPart.Image(it))
+        }
+    }
+
+    fun typed(request: BoxRequest): Map<String, com.cyclone.mobile.decisions.DQuestion> =
+        request.questions.associate { it.id to it.typed() }
+
+    /** A decisions answer as the box's reply: exactly the documented shape; anything else is no answer. */
+    fun parseDecisions(body: String?, request: BoxRequest): BoxReply? =
+        com.cyclone.mobile.decisions.DecisionsWire.parse(body, typed(request))?.let { fromDecisions(it) }
+
+    fun fromDecisions(reply: com.cyclone.mobile.decisions.DReply): BoxReply? {
+        val answers = reply.answers.mapNotNull { (id, a) ->
+            (a as? com.cyclone.mobile.decisions.DAnswer.Choice)?.let { id to BoxAnswer(it.choice, it.confidence, it.probabilities) }
         }.toMap()
-        return answers.takeIf { it.isNotEmpty() }?.let { BoxReply(it) }
+        val refused = reply.answers.filterValues { it == com.cyclone.mobile.decisions.DAnswer.Refusal }.keys
+        return if (answers.isEmpty() && refused.isEmpty()) null else BoxReply(answers, refused = refused)
     }
 
     private fun json(text: String): JSONObject? {

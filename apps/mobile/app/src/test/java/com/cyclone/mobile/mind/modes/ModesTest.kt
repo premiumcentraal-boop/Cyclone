@@ -132,11 +132,18 @@ class ModesTest {
         assertNull(reply.choice("intent"))
         assertEquals("Maps", reply.sure("target", 0.8))
         assertNull(reply.sure("target", 0.9))
-        val decisions = BoxWire.parseDecisions("""{"answers":{"route":{"choice":"flash","confidence":0.7},"intent":"none"}}""", request)!!
+        // Plan 58: the documented answer shape; an answer outside the options, or of the wrong shape, is dropped.
+        val decisions = BoxWire.parseDecisions("""{"answers":{"route":{"type":"choice","choice":"flash","confidence":0.7,""" +
+            """"probabilities":{"flash":0.7,"mind":0.2,"instant":0.1}},"intent":"none"}}""", request)!!
         assertEquals("flash", decisions.choice("route"))
         assertEquals(0.7, decisions.confidence("route"), 0.001)
-        assertNull(BoxWire.parseDecisions("""{"answers":{"route":"teleport"}}""", request))
-        assertEquals(3, BoxWire.decisionsBody("jev", request).getJSONObject("questions").length())
+        assertEquals(0.2, decisions.answers.getValue("route").probabilities.getValue("mind"), 0.001)
+        assertNull(decisions.choice("intent"))
+        assertNull(BoxWire.parseDecisions("""{"answers":{"route":{"type":"choice","choice":"teleport","confidence":0.9}}}""", request))
+        assertEquals(setOf("route"), BoxWire.parseDecisions("""{"answers":{"route":{"type":"refusal"}}}""", request)!!.refused)
+        val body = BoxWire.decisionsBody("jev", request)
+        assertEquals(3, body.getJSONObject("questions").length())
+        assertTrue(body.getJSONObject("questions").getJSONObject("route").getJSONObject("criteria").has("instant"))
         assertFalse(BoxWire.clean("Card 4111 1111 1111 1111\nHello").contains("4111"))
     }
 
