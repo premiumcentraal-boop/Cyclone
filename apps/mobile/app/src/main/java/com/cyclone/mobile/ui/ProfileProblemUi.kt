@@ -119,8 +119,9 @@ internal fun ProfileProblemPanel(issue: ProfileSetupFailure, onRetry: (() -> Uni
                     }, modifier = Modifier.fillMaxWidth()) { Text("Open Android's users settings") }
                     ProfileProblem.Fix.ROOT_MANAGER -> Text("Open your root manager (Magisk, KernelSU or APatch) and allow Cyclone.",
                         style = MaterialTheme.typography.bodySmall)
-                    ProfileProblem.Fix.RETRY -> if (onRetry != null) FilledTonalButton(onClick = onRetry, enabled = working == null,
-                        modifier = Modifier.fillMaxWidth()) { Text("Try again") }
+                    ProfileProblem.Fix.RETRY -> onRetry?.let { retry ->
+                        FilledTonalButton(onClick = retry, enabled = working == null, modifier = Modifier.fillMaxWidth()) { Text("Try again") }
+                    }
                 }
             }
             ProfileDebugButtons(issue)

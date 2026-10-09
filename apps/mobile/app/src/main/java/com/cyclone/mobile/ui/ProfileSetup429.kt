@@ -740,5 +740,4 @@ private fun profileAppLabel429(context: Context, packageName: String): String = 
 }.getOrDefault(packageName)
 
 internal fun suggestedProfileName(taken: List<String>): String =
-    com.cyclone.mobile.runtime.workspaces.ProfileProblem.suggestName(taken)"
-}
+    com.cyclone.mobile.runtime.workspaces.ProfileProblem.suggestName(taken)
