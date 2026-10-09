@@ -13,8 +13,9 @@ It is the **Cyclone side only**. How Cloak builds or applies a phone profile ins
 never receives or needs those details.
 
 - **Repository:** `premiumcentraal-boop/Cyclone` (Cyclone).
-- **Baseline:** Cyclone `5.0.0-alpha.119.dev1` (version code 273).
-- **Contract:** `cyclone.connector/1`, minor 1. If this file and `tools/cyclone-connector-sdk/SPEC.md` disagree, SPEC.md
+- **Baseline:** Cyclone `5.0.0-alpha.121.dev1` (version code 275). Written against alpha.119; §7 says what alpha.120 and
+  alpha.121 built since.
+- **Contract:** `cyclone.connector/1`, minor 2 since alpha.121 (SPEC §12). If this file and `tools/cyclone-connector-sdk/SPEC.md` disagree, SPEC.md
   wins for what exists today. This file wins for what is planned (§7).
 
 **Don't edit Cyclone.** Cloak's work is in Cloak's own project. If Cloak needs something Cyclone doesn't offer, write it
@@ -114,8 +115,8 @@ A switch runs in stages, and each stage goes into the debug file:
 |---|---|---|
 | A | Cloak is an approved connector with the right scopes | **Works today** |
 | B | **Load a phone profile onto a Cyclone profile** (bind a Cloak profile to a Cyclone profile's apps) | **Works today** (`config.set.v1` with Cloak's envelope) |
-| C | **Rooted pill:** Cyclone's Profiles page and Glass show Rooted/Native per profile; Cloak shows its own pill with live health | **Partly:** the pill exists (binding = Rooted). Health in the pill and Cyclone's root facts for Cloak are planned (CC5, CC6) |
-| D | Open another Cyclone profile from Cloak | **Not possible today.** Owner-confirmed request planned (CC7) |
+| C | **Rooted pill:** Cyclone's Profiles page and Glass show Rooted/Native per profile; Cloak shows its own pill with live health | **Works since alpha.121:** the pill follows Cloak's `state` (CC5), and `root.status.v1` gives Cyclone's root facts (CC6) |
+| D | Open another Cyclone profile from Cloak | **Not possible yet.** The owner-confirmed request (CC7) waits for the owner's sign-off |
 
 ## 3. Feature A: be an approved connector
 
@@ -312,20 +313,21 @@ changes the whole phone. So:
 - **It is refused** with `BUSY` while a task runs or the sheet is already open, with `NO_SUCH_PROFILE` for a profile
   that isn't ready, and with `RATE_LIMITED` above 1 request per 10 s.
 - **The sheet never appears by itself on a locked screen.**
-- **It needs `hello.minor >= 2`,** and the owner's sign-off on the contract change (plan 57 §8).
+- **It needs a later minor (3; `root.status.v1` took minor 2),** and the owner's sign-off on the contract change
+  (plan 57 §8).
 
-## 7. Cyclone-side work for Cloak (planned; the Cyclone agent builds these)
+## 7. Cyclone-side work for Cloak (the Cyclone agent builds these)
 
 | Id | What | Run / alpha | Status |
 |---|---|---|---|
-| CC0 | Cloak becomes a **cornerstone app**: installed into new profiles with `install-existing`, enabled, verified; its root grant copied where the manager allows | P2 / alpha.120 | planned |
-| CC1 | **Carry Cloak's approval** to new profiles by package and certificate lineage, re-verified against the certificate installed in the target. If it differs, don't carry it and say why (D12). | P3 / alpha.121 | planned |
-| CC2 | Delete a binding only when Android says the app is gone from that user (`pm list packages --user`), and only on the main profile's Cyclone (D13) | P3 / alpha.121 | planned |
-| CC3 | Bindings keyed by the stable `Cyclone_…` id; Android user id migrated with read-back | P3 / alpha.121 | planned |
-| CC4 | One strict parser for bindings and identities | P3 / alpha.121 | planned |
-| CC5 | The pill shows Cloak's `state` (§5.3) | P3 / alpha.121 | planned |
-| CC6 | `root.status.v1` + scope `device.root.read`, contract minor 2 | P3 / alpha.121 | planned; contract change |
-| CC7 | `profiles.open.request.v1` + scope `profiles.open.request`, owner-confirmed sheet, minor 2 | P3 / alpha.121 | planned; **needs owner sign-off** |
+| CC0 | Cloak becomes a **cornerstone app**: installed into new profiles with `install-existing`, enabled, verified; its root grant copied where the manager allows | P2 / alpha.120 | **built, alpha.120** |
+| CC1 | **Carry Cloak's approval** to new profiles by package and certificate lineage, re-verified against the certificate installed in the target. If it differs, don't carry it and say why (D12). | P3 / alpha.121 | **built, alpha.121** |
+| CC2 | Delete a binding only when Android says the app is gone from that user (`pm list packages --user`), and only on the main profile's Cyclone (D13) | P3 / alpha.121 | **built, alpha.121** |
+| CC3 | Bindings keyed by the stable `Cyclone_…` id; Android user id migrated with read-back | P3 / alpha.121 | **built, alpha.121**: migration with read-back; the storage key still includes the user id |
+| CC4 | One strict parser for bindings and identities | P3 / alpha.121 | **built, alpha.121** |
+| CC5 | The pill shows Cloak's `state` (§5.3) | P3 / alpha.121 | **built, alpha.121** |
+| CC6 | `root.status.v1` + scope `device.root.read`, contract minor 2 | P3 / alpha.121 | **built, alpha.121** (minor 2) |
+| CC7 | `profiles.open.request.v1` + scope `profiles.open.request`, owner-confirmed sheet, minor 3 | after sign-off | not built; **needs owner sign-off** |
 | CC8 | Bindings for apps in Main | open | owner question 3 |
 | done | `profile.switched` also from the **target** profile's Cyclone (§1.3) | P1 / alpha.119 | **built** |
 

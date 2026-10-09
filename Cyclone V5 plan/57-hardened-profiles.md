@@ -516,7 +516,7 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
   - guards: `test_portable_settings_guard.py` (4), plus updated carry and room guards.
 - **Physical: UNVERIFIED.**
 
-### P3 (alpha.121): Cyclone Cloak connectivity done right, and device proof
+### P3 (alpha.121): Cyclone Cloak connectivity done right, and device proof (**built, alpha.121.dev1**)
 
 **Cloak fixes (§3):**
 - the approval carried with certificate re-verification;
@@ -534,6 +534,40 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
 - suite `profiles`: create B, C and D on a full and an empty phone; switch matrix; rollback; Cloak bound before and
   after a switch;
 - `docs/PROFILES_DEVICE_MATRIX.md`, **UNVERIFIED** until seen on the owner's Pixel.
+
+**As built (alpha.121.dev1):**
+- **Approval carry (CC1, D12):** `ConnectorCarry` takes only Cyclone Cloak's approval across.
+  - **Re-verified in the receiving profile:** same package, same connector id, the approved certificate in that
+    install's lineage, and scopes limited to what its manifest asks for.
+  - **An owner revoke there wins** over an older approval. An uninstall is not a revoke.
+  - **The outcome** reaches the "has" line: "Cloak ✓ approved ✓", or the reason it isn't.
+- **Binding hygiene (CC2, CC3, D13):**
+  - **When tuples go:** only with a permanently deleted profile, or when Android's own package list for that profile
+    (taken by the main profile's Cyclone, and only when it lists Cyclone itself) no longer has the app.
+  - **A user-id change** migrates them: rewritten and read back.
+  - **Not done:** the plan's "keyed by the stable id" is met by that migration; the storage key still includes the
+    user id.
+- **One strict parser (CC4)** for bindings and identities. A string `androidUserId` is not a binding.
+- **The pill follows Cloak's state (CC5):** Rooted, Rooted · check, Rooted · not working, Native.
+- **`SWITCHED` in the target profile:** done in P1.
+- **`root.status.v1` (CC6):** connector contract minor 2, with scope `device.root.read`.
+  - Built from the last switches and Cyclone's own profile-room notes, with no command in its path (CI guard).
+  - SPEC §12, the client method `rootStatus()`, the schema and a vector.
+- **Not built:**
+  - **CC7**, the owner-confirmed `profiles.open.request.v1`, waits for the owner's sign-off.
+  - **Main-profile bindings (owner question 3)** stay open.
+- **Glass:**
+  - **The phone:** op `profiles.debug` (read only) returns the redacted debug file, a health line per profile and the
+    summary.
+  - **The PC:** route `GET /v1/devices/{id}/profiles/debug` (bearer). It checks the shape, redacts again, and applies
+    the usual fail-closed secret check.
+  - **Glass Home:** Profiles health on demand, and Download debug file.
+- **Testbench:**
+  - `cyclone-testbench profiles --rounds 17`: 51 switches through every pair, each recorded as arrived, came back,
+    stuck or refused, then the debug file saved.
+  - `docs/PROFILES_DEVICE_MATRIX.md`, with creation, the switch matrix, the way back, complete profiles, Cloak and
+    Glass.
+- **Physical: UNVERIFIED.**
 
 ## 7. The next build: alpha.118 (P0), step by step
 
