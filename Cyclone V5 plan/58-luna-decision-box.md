@@ -1,6 +1,6 @@
 # 58 · The Luna Decision Box: every request triaged in one fast call, Instant in under a second
 
-Status: **Plan (2026-10-09), nothing built.** Written at alpha.122 dev1. Builds on plan 41 (Fast mode and decisions)
+Status: **Final plan (2026-10-09), nothing built. Builds as alpha.123–130 (§11).** Written at alpha.122 dev1. Builds on plan 41 (Fast mode and decisions)
 and plan 42 (Instant, Flash, Mind). Physical device: **UNVERIFIED** throughout.
 
 **Owner's ask (2026-10-09).** OpenAI's Decisions API is now on OpenRouter as `openai/gpt-6-luna-decisions`, and it
@@ -543,35 +543,171 @@ The registry respects the invariants: every move goes through `PhoneToolExecutor
 
 ---
 
-## 11. The runs
+## 11. The build plan (final): eight releases, alpha.123–130
 
-| Run | What | Done when |
-|---|---|---|
-| **L0 · Fix the wire** | One real call to `/api/alpha/decisions` with today's body, then with `criteria`. Rewrite `BoxWire.decisionsBody`, `PilotWire.decisionsBody` and both readers to the documented shape (`criteria`; `answers.<name>.choice/confidence/probabilities`, `noul`, `score`, `refusal`). Tests built from the docs' example answer | JEV answers Board 0 again (or we learn it already did), `DecisionsTest` covers the documented answer |
-| **L1 · Luna live** | `DecisionProvider.LUNA` (rename the frozen `OPENAI_DECISIONS`): model `openai/gpt-6-luna-decisions`, same endpoint, `vision = true`, `live = true`. `state` as an array with optional `image_url` items. Watch mode compares Luna and JEV | Shadow numbers in Glass; `test_decisions_guard.py` updated |
-| **L2 · Triage** | The Triage board (§5) and `fromTriage`; Board 0 retired behind a flag; regex rules kept as a net | Golden set: rung accuracy ≥ JEV's, no risky request below Flash |
-| **L3 · Bind + sight** | The Bind board with marked screenshots; ambiguity asks the owner; Instant's shutter / call-button boxes use it | "Tap the blue one", "take a selfie" on icon-only cameras work in the Lab |
-| **L3b · Context on demand** | The numbered context (C1), abstain choices, the per-screen tier memory, re-asking one question one tier up, racing C1/C2 on coin-flip screens (§5A) | Golden set: fewer wrong taps than "always screenshot", lower p95 than it, no screenshot on a sensitive screen (guard test) |
-| **L4 · Verify** | The Verify board after Instant moves and at the end of Flash; silent success waits for it | Verify pass rate shown; a failed verify hands up with the baton |
-| **L5 · Capability registry** | `Capability` data, Android standard intents and settings panels, learned routes and compiled skills as entries, per-capability bars | "Turn on dark mode", "open Wi-Fi settings", "set a timer for 5 minutes" go Instant |
-| **L5b · Instant chains** | The slot plan in Triage, the fused per-step board, App Map walks for `go_to`, ordinals in code, bounded find, the chain's guard rails and baton hand-off (§5B) | "Open Instagram, go to my DMs, open the first one" and 20 other 2–4 step requests complete in the Lab, median under 5 s, with no irreversible tap |
-| **L5c · Destination index** | The phone-wide index of mapped screens with aliases (titles, incoming control labels, the owner's verified phrasings), Stage 0 lookup, zero-call hits with Triage as a parallel check, the `destination` question in Triage, event-driven map walks, suspect-on-app-update (§5C) | A repeated mapped request ("open my Instagram DMs") reaches the screen with 0 blocking calls, app start + < 0.5 s; a stale map diverges safely to the fused board |
-| **L6 · Flash on Luna** | The Pilot's Step board on Luna with images; Flash's plan still written by the fast generative model | Flash runs in the Lab complete with fewer Mind hand-ups |
-| **L7 · Calibrate and switch** | Golden set, calibration curves, bars from the Lab; set `ACTIVE = LUNA`; Settings copy and release notes | Owner signs off on the numbers |
+**Order.** This plan takes alpha.123–130. Plan 56 (VMOS fleet) moves to alpha.131+ (owner decision 5, §12).
 
-Each run follows the release rhythm (code first, Mobile CI green, then the bump). Physical device checks per run go
-into a short owner checklist; until then each run is **UNVERIFIED**.
+**Each release:**
+- is one plan stage;
+- ships behind its own switch, default **off** or **shadow** until its gate passes;
+- follows the release rhythm (code first, Mobile CI green, then the version bump).
+
+Nothing reaches the owner's everyday routing until the Lab numbers say it is at least as good as what it replaces.
+
+### 11.1 The engineering rules for every release
+
+These hold for every work package below. A PR that breaks one doesn't merge.
+
+**Correctness**
+1. **Pure core, thin edges.** Question builders, wire formats, readers, combiners (`fromTriage`, the chain
+   planner), the index and its scoring are pure Kotlin with JVM unit tests. Android code only gathers inputs and
+   moves the phone, through `PhoneToolExecutor`.
+2. **Typed everywhere.** Questions are `noul` / `choice` / `score`; answers carry `probabilities` and may be
+   `refusal`. No string-sniffing readers: the documented shape is read exactly, and anything else is "no answer".
+3. **Recorded fixtures.** Every reader is tested against **real** Luna and JEV answers, recorded once, redacted and
+   kept in `src/test/resources/decisions/`. Every board also has tests for: an unknown option, a missing answer, a
+   refusal, a 400, a 429, a timeout, and an empty body.
+
+**Failure**
+4. **Unsure, slow or broken goes up, never down.** Every board has a deadline. A late, low, abstaining, refused or
+   failed answer moves the request one rung up with the baton. No request is ever lost (today's rule, kept and
+   tested).
+5. **Circuit breaker.** Three decision failures in 60 s, or a 429, pause the boards for 2 minutes. During the pause,
+   routing uses Stage 0, the rules and the phone model, and anything else goes to Flash. One line shows it in the
+   run trace and in Glass. Offline works the same way.
+6. **Kill switches.** Each stage has its own switch in Settings → Speed → Advanced (and as a Lab variant): `triage`,
+   `sight`, `verify`, `registry`, `index`, `chains`, `luna_step`. Turning one off falls back to the release before.
+   Speed → "Instant for commands" stays the one-tap way back to grammar-only.
+
+**Safety and privacy**
+7. **Safety lives in code.** These are all CI guards in `scripts/ci/tests/test_luna_box_guard.py`:
+   - a decision can make a request more careful, never less;
+   - every target question has `not_listed` and `need_to_see`;
+   - no screenshot is taken on a sensitive screen, or when "Let decisions see the screen" is off;
+   - Instant never taps an irreversible label;
+   - the decisions endpoint stays in one place.
+8. **Privacy.**
+   - Context is app words only, with secret-looking lines dropped.
+   - Screenshots only per §5A.
+   - Lessons, aliases and the index hold structure only, never content.
+   - The health report and debug files carry counts and times. A redaction test covers every new store.
+
+**Measurement**
+9. **Measured, not assumed.** Every stage logs to `ModesTrace` and `AskLedger`: the board, the tier, the time, the
+   answer, the confidence and the cost. `DecisionStats` grows per-board numbers (p50/p95 time, answer rate, abstain
+   rate, hand-up rate, verify pass rate, cost per request) for Glass and the Lab.
+10. **Languages and phones.**
+    - The golden set covers English and Dutch from day one, plus 10 % other languages: Triage must route them,
+      even though the grammar can't parse them.
+    - The device matrix covers at least a Pixel, a Samsung and one other OEM skin, a small and a large screen, dark
+      mode, font scale 1.3, and a slow network (3G profile).
+
+### 11.2 The service levels each gate checks
+
+All on the owner's phone, measured over the Lab golden set and a week of shadow use.
+
+| What | Target |
+|---|---|
+| Stage 0 (grammar, rules, phone model, index lookup) | p95 ≤ 20 ms |
+| Triage call | p50 ≤ 400 ms, p95 ≤ 900 ms |
+| Zero-call index hit → first move | p95 ≤ 150 ms (app start not counted) |
+| Instant (single step) → first move, not grammar-settled | p50 ≤ 700 ms |
+| Instant chain (2–4 steps) end to end | median ≤ 5 s, p95 ≤ 9 s |
+| **Risky request routed without approval** | **0, a hard gate** |
+| Wrong action on Instant (golden set) | ≤ 1 % |
+| Rung accuracy (golden set) | ≥ JEV's on the same set, and ≥ 90 % |
+| Abstain or hand-up when the right answer was available | ≤ 10 % |
+| Cost | ≤ $0.001 per request on average |
+
+### 11.3 The golden set and the decisions Lab (built first, used by every gate)
+
+- **`mind/lab/golden/requests.jsonl`:** about 300 requests at the start, growing with every bug. Each request is
+  labelled with:
+  - the rung, the capability and the target;
+  - the risk flags;
+  - for chains, the steps;
+  - for screen-dependent requests, a recorded screen (tree + marked screenshot, from a test account).
+
+  The mix: easy commands, paraphrases, ambiguous requests, risky ones, chatter, other languages, multi-step
+  requests, and mapped destinations.
+- **Offline scorer (JVM test):** runs the pure router against **recorded** answers. It is free and runs in CI, and it
+  catches combiner and threshold regressions.
+- **Live scorer (Lab):** a `lab.decisions` run, started from the PC through the gateway. It sends the golden set
+  through the real boards (Luna and JEV side by side) and returns aggregates only: accuracy, calibration bins,
+  times, cost. This is a gateway contract minor bump. It is read-only and never moves the phone.
+- **Calibration:** reliability bins per question; each capability's bar is chosen on a tuning half and checked on
+  the held-out half.
+
+### 11.4 The releases
+
+| Release | Stage | Work packages | Switch at ship | Gate to turn it on |
+|---|---|---|---|---|
+| **alpha.123** | **R1 · The wire and Luna in shadow** (L0, L1) | (a) A probe: the owner runs `scripts/dev/decisions_probe.py` with their key; it records real JEV and Luna answers for the fixtures and settles the `choices`/`criteria` question. (b) One `DecisionsWire` for modes, the Pilot and Drive's JEV watch: `criteria`, typed answers, `state` array with `image_url`, refusal. (c) `DecisionProvider.LUNA` (`openai/gpt-6-luna-decisions`, vision) replaces the frozen slot. (d) Watch: Luna answers beside JEV on every Auto request; only JEV acts. (e) Per-provider stats. (f) The golden set v1, the offline scorer and the guard file | Luna: **shadow** | JEV answers again (or the probe shows it already did); Luna's shadow answer rate ≥ 95 %, p95 known |
+| **alpha.124** | **R2 · Triage** (L2) | `TriageBoard` (§5) incl. the slot plan and `destination` questions (asked, not yet acted on); `ModeRouter.fromTriage`; regex rules kept as a net with disagreement lessons; the circuit breaker; the `lab.decisions` live scorer | `triage`: shadow → **on** at gate | Golden set: rung accuracy ≥ JEV's and ≥ 90 %, 0 risky under-routes; one week of shadow without a risky under-route |
+| **alpha.125** | **R3 · Context on demand, Bind, Verify** (L3, L3b, L4) | The numbered screen (C1) and marked screenshots (C2/C3) from one numbering; abstain choices; re-ask one question one tier up; per-screen tier memory; racing C1 and C2; `BindBoard` (owner asked on a tie); `VerifyBoard` after Instant moves, with the sound on yes; the "Let decisions see the screen" switch | `sight`, `verify`: on with the gate | Wrong taps ≤ 1 % on the screen set; fewer than "always screenshot" with a lower p95; the sensitive-screen guard passes; verify agrees with the human label ≥ 95 % |
+| **alpha.126** | **R4 · The capability registry** (L5) | `Capability` data; the 18 intents moved in; Android standard intents and settings panels; learned routes and compiled skills as entries; per-capability bars (provisional until R8) | `registry`: on | "Dark mode on", "Wi-Fi settings", "timer 5 min" and 40 more go Instant in the Lab; nothing irreversible in the registry (guard) |
+| **alpha.127** | **R5 · The destination index** (L5c) | `DestinationIndex` built from the maps (safe moves only), aliases from titles, incoming control labels and verified phrasings; Stage 0 lookup; zero-call hits with Triage as a parallel check that can stop the walk; event-driven map walks; suspect-on-app-update; two-failures-out | `index`: on, zero-call hits **off** until the gate | Mapped requests reach the screen at app start + < 0.5 s; zero wrong destinations on the mapped set; a stale map diverges safely in a forced test |
+| **alpha.128** | **R6 · Instant chains** (L5b) | Acting on the slot plan; the fused per-step board; ordinals in code; bounded find; chain guard rails (4 steps, 6 moves, 8 s, no irreversible tap, one dismiss); hand-off to Flash at the current step | `chains`: on with the gate | The 2–4 step set: ≥ 90 % complete, median ≤ 5 s, 0 irreversible taps, every hand-off continues without redoing a step |
+| **alpha.129** | **R7 · Flash steps on Luna** (L6) | The Pilot's Step board on the new wire with context on demand; Flash's plan still from the fast generative model | `luna_step`: on with the gate | Flash Lab missions: completion ≥ today's, Mind hand-ups down |
+| **alpha.130** | **R8 · Calibrate and switch** (L7) | Calibration from the live scorer and shadow data; final bars; `Decisions.ACTIVE = LUNA` with JEV as the fallback provider; Settings copy; Glass Brain → Decisions page; release notes | Luna **active** | Every row of §11.2 met; owner signs off on the numbers |
+
+Every release also brings:
+- its `docs/RELEASE_*.md`, stating what is **UNVERIFIED** on a real phone;
+- its rows in **`docs/LUNA_DEVICE_MATRIX.md`**, the owner's on-phone checklist (written in R1, grown each release).
+
+### 11.5 The first build session: alpha.123, in order
+
+1. **Probe script** (`scripts/dev/decisions_probe.py`). It is standard-library Python and reads the key from an
+   environment variable, never from a file it writes. It sends Board 0 three ways:
+   - JEV with today's `choices`;
+   - JEV with `criteria`;
+   - Luna with `criteria`, plus one image.
+
+   It saves the redacted answers as fixtures. **The owner runs it once** (this session has no OpenRouter key).
+2. **`mind/decide/DecisionsWire.kt`** (pure). `DQuestion` (`Noul`, `Choice`, `Score`), `DAnswer` (with
+   probabilities, or a refusal), a `DState` list of text and images, the body builder, and the exact reader. Unit
+   tests: the docs' example answer, plus every failure case.
+3. **Port the callers onto it:**
+   - `BoxWire.decisionsBody` / `parseDecisions`;
+   - `PilotWire.decisionsBody` / `parseDecisions`;
+   - Drive's JEV watch in `voice/OpenRouterVoice.kt`. Its call stays separate, because voice may not import mind
+     code; the pure wire goes into a shared package both may use.
+
+   `BoxQuestion` keeps its API; choices become `criteria` with the instructions as guidance.
+4. **`DecisionProvider.LUNA`**; `Decisions.ACTIVE` stays `JEV`. **Watch:** on Auto requests, Luna answers Board 0 in
+   the background. Its lesson is recorded with `provider = LUNA` and is never acted on.
+5. **Stats:** `DecisionStats` per provider (answer rate, p50/p95, agreement, cost).
+6. **Golden set v1 + offline scorer + `test_luna_box_guard.py`**; update `test_decisions_guard.py` for the new
+   provider list.
+7. **Validation:**
+   - `./gradlew :app:testDebugUnitTest`;
+   - `python -m pytest scripts/ci/tests -q`;
+   - push the code without a bump; Mobile CI green;
+   - then the alpha.123 bump, `docs/RELEASE_5.0.0-alpha.123.dev1.md`, and the first device-matrix rows.
 
 ---
 
-## 12. Owner decisions
+## 12. Owner decisions (recommended defaults are taken unless the owner says otherwise)
 
-1. **Screenshots to Luna:** on by default with the switch in Settings (recommended), or off by default?
-2. **Decide-only vs. generation:** keep the Mind's generative model for writing messages and long plans
-   (recommended; Decisions can't write), or try to push Flash planning onto decisions too (choosing from a menu of
-   learned plans)?
-3. **JEV after the switch:** keep it as the fallback when Luna is slow or down (recommended), or retire it?
-4. **Strict privacy (ZDR):** worth a slower answer?
+1. **Screenshots to Luna:** on by default, with the switch in Settings. *(Taken.)*
+2. **Decide-only vs. generation:** the Mind's generative model keeps writing messages and long plans; Decisions
+   decides. *(Taken.)*
+3. **JEV after the switch:** kept as the fallback provider when Luna is slow or down. *(Taken.)*
+4. **Strict privacy (ZDR):** an opt-in switch; its speed cost is measured in R3. *(Taken.)*
+5. **Release order:** this plan takes alpha.123–130; VMOS fleet (plan 56) moves to alpha.131+. *(Taken; say so if
+   VMOS should go first.)*
+
+**What this plan can and can't promise.** It builds the practices that make software reliable at scale:
+- typed contracts;
+- tests on real answers;
+- safety in code;
+- shadow before acting;
+- calibrated thresholds;
+- kill switches;
+- service levels checked at every gate.
+
+What it can't do is prove reliability ahead of use. The numbers come from the Lab, shadow use and the device matrix,
+and every release says honestly what a real phone has and hasn't confirmed.
 
 ## 13. Sources
 

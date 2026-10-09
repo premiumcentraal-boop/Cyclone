@@ -43,10 +43,11 @@ historical.
     profile debug file + health in Glass, a switch-matrix test suite.
   - alpha.122: a connector can **ask** the owner to open a profile (contract minor 3,
     owner-confirmed on Cyclone's own screen); PC/Glass switches got the dead-man return + journal.
-- **Next up — plan 56 "VMOS fleet" (cloud phones), runs V1–V4 = alpha.123–126:**
-  V1 one-click Ready + starter skill → V2 skills sync across phones → V3 spin up / clone new
-  phones (owner-confirmed purchase) → V4 run the fleet (groups, scheduling, health, staged
-  updates). VMOS phone power/backup/rent landed earlier in alpha.117.
+- **Next up — plan 58 "Luna Decision Box", releases R1–R8 = alpha.123–130:** R1 the decisions wire + Luna in
+  shadow → R2 Triage → R3 context on demand, Bind, Verify → R4 capability registry → R5 destination index → R6
+  Instant chains → R7 Flash steps on Luna → R8 calibrate and switch. First session: plan 58 §11.5.
+- **Then plan 56 "VMOS fleet" (cloud phones), runs V1–V4 = alpha.131+.** VMOS phone power/backup/rent landed
+  earlier in alpha.117.
 - **Physical device: UNVERIFIED.** Nothing in alpha.118–122 has been run on a real phone; the
   owner's checklist is `docs/PROFILES_DEVICE_MATRIX.md`.
 
