@@ -179,6 +179,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var switchMessage by remember { mutableStateOf("") }
     var setup by remember { mutableStateOf(false) }
+    // Plan 57 W7: a profile whose setup was started but not finished, when the owner asked for a new one.
+    var unfinished by remember { mutableStateOf<com.cyclone.mobile.runtime.workspaces.UnfinishedSetup?>(null) }
     var workspaces by remember { mutableStateOf(emptyList<Workspace>()) }
     var records by remember { mutableStateOf(emptyList<CycloneProfileRecord>()) }
     var cloakBindings by remember { mutableStateOf(emptyList<com.cyclone.mobile.connector.CycloneCloakBindingReference>()) }
@@ -209,6 +211,13 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     val task by WorkspaceTasks.state.collectAsState()
     val profileSetup by ProfileSetupRuntime.state.collectAsState()
     val revision by Layer2Workspaces.engine.revision.collectAsState()
+
+    /** Plan 57 W7: + always starts a new plan; an unfinished one is offered to finish or discard first. */
+    fun startNewProfile() {
+        runCatching { ProfileSetupRuntime.startNewPlan(context) }
+            .onSuccess { open -> if (open == null) setup = true else unfinished = open }
+            .onFailure { error = it.message.orEmpty() }
+    }
 
     fun refreshProfiles() {
         scope.launch {
@@ -414,7 +423,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                 title = "Profiles",
                 subtitle = clusters.firstOrNull { it.current }?.let { "Current profile: ${it.label}" } ?: "Current profile not verified",
                 trailing = {
-                    FilledIconButton(onClick = { setup = true }, modifier = Modifier.size(48.dp)) {
+                    FilledIconButton(onClick = { startNewProfile() }, modifier = Modifier.size(48.dp)) {
                         Icon(Icons.Rounded.Add, "Add profile", modifier = Modifier.size(22.dp))
                     }
                 },
@@ -466,17 +475,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
 
         profileSetup.issue?.takeIf { !profileSetup.busy && !profileSetup.ready }?.let { issue ->
             item {
-                CycloneSurface(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(issue.headline, style = MaterialTheme.typography.titleMedium)
-                        Text(issue.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (issue.retryUseful) {
-                            Button(onClick = { setup = true }, modifier = Modifier.fillMaxWidth()) { Text(issue.action) }
-                        } else {
-                            Text(issue.action, style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
-                }
+                // Plan 57 W9: the error screen: what was checked, Android's words, the fixes and the debug file.
+                com.cyclone.mobile.ui.ProfileProblemPanel(issue, onRetry = { setup = true }, onChanged = { refreshProfiles() })
             }
         }
 
@@ -514,7 +514,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                         QuietProfilesEmpty(
                             title = "Add your first profile",
                             body = "Create a separate phone space, name it, and choose the apps you want inside.",
-                            action = { Button(onClick = { setup = true }) { Text("Add profile") } },
+                            action = { Button(onClick = { startNewProfile() }) { Text("Add profile") } },
                         )
                     }
                 } else {
@@ -526,6 +526,9 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                         )
                     }
                 }
+                // Plan 57 §5.4: how many profiles this phone holds, and Allow more / Restore default on rooted phones.
+                if (ownerUser != null && ownerUser == verifiedCurrentUser) item { com.cyclone.mobile.ui.ProfileRoomCard() }
+                item { CycloneSimpleCard(Modifier.fillMaxWidth()) { com.cyclone.mobile.ui.ProfileDebugButtons(profileSetup.issue) } }
                 if (connectorEntries.isNotEmpty()) {
                     item {
                         Text("From your connectors", style = MaterialTheme.typography.titleSmall,
@@ -585,6 +588,24 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                 }
             }
         }
+    }
+
+    unfinished?.let { open ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { unfinished = null },
+            title = { Text("Finish setting up ${open.label}?") },
+            text = { Text("${open.label} was started but isn't finished. Finish it, or discard it and start a new profile." +
+                if (open.androidUserId != null) " A discarded profile that Android already made is listed under Clean up." else "") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { unfinished = null; setup = true }) { Text("Finish ${open.label}") } },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    unfinished = null
+                    runCatching { ProfileSetupRuntime.discardUnfinished(context) }
+                        .onSuccess { setup = true }
+                        .onFailure { error = it.message.orEmpty() }
+                }) { Text("Discard and start new") }
+            },
+        )
     }
 
     if (setup) ProfileSetupPage { setup = false; refreshProfiles() }

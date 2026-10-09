@@ -83,6 +83,11 @@
             android:authorities="${applicationId}.setup-helper" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/setup_helper_paths" />
         </provider>
+        <!-- Plan 57 W8: the profile debug file, its own narrow sharer. -->
+        <provider android:name=".runtime.workspaces.ProfileDebugFileProvider"
+            android:authorities="${applicationId}.profile-debug" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/profile_debug_paths" />
+        </provider>
 
         <provider
             android:name=".gateway.GatewayInitProvider"

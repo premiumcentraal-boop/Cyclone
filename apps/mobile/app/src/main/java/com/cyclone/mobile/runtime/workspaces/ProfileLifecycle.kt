@@ -55,6 +55,37 @@ object ProfileLifecycle {
             backup
         }
 
+    /**
+     * Plan 57 W4: removes the unfinished Cyclone users [ProfileTrash.unfinished] lists, after the owner's confirm. They
+     * hold no finished profile, so there is nothing to back up. Returns how many Android removed.
+     */
+    fun cleanUpUnfinished(context: Context, onProgress: (String) -> Unit = {}): Int =
+        synchronized(Layer2Workspaces.engine.mutationLock) {
+            check(!ProfileSetupRuntime.state.value.busy) { "Wait for profile setup to finish." }
+            check(!Layer2Workspaces.gated() && !com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask() &&
+                !com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask()) { "Finish the current task first." }
+            ProfileSetupRuntime.runRequired(ProfileSetupPlan.verifyRoot())
+            val users = ProfileSetupRuntime.listUsersRequired()
+            val main = ProfileSetupParser.mainUserId(users)
+            val current = ProfileSetupParser.currentUserId(ProfileSetupRuntime.runRequired(ProfileSetupPlan.currentUser()))
+                ?: error("Android did not identify the current profile.")
+            check(main != null && current == main) { "Open the main profile to clean up profiles." }
+            val targets = ProfileTrash.unfinished(users, ProfileRegistryStore.records(context), main, current)
+            var removed = 0
+            targets.forEach { user ->
+                onProgress("Cleaning up an unfinished profile…")
+                if (runCatching { ProfileSetupRuntime.runRequired(ProfileSetupPlan.removeUser(user.id)) }.isSuccess) {
+                    removed++
+                    Layer2Workspaces.engine.forgetUser(user.id)
+                    if (ProfileRegistryStore.records(context).any { it.id == user.name }) ProfileRegistryStore.drop(context, user.name)
+                    ProfileSetupRuntime.forgetJournal(context, user.name)
+                }
+            }
+            val left = ProfileSetupRuntime.listUsersRequired().count { u -> targets.any { it.id == u.id } }
+            check(left == 0) { "Android didn't remove $left unfinished ${if (left == 1) "profile" else "profiles"}. Save the debug file to see why." }
+            removed
+        }
+
     /** Empties Recently deleted (each profile is backed up first). Returns how many were deleted. */
     fun emptyTrash(context: Context, onProgress: (String) -> Unit = {}): Int =
         ProfileTrash.order(ProfileRegistryStore.records(context)).count { record ->

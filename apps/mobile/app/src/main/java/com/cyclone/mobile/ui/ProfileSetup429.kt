@@ -96,7 +96,7 @@ internal fun ProfileSetup429(onClose: () -> Unit) {
     var records by remember { mutableStateOf(ProfileRegistryStore.records(context)) }
     var onMainProfile by remember { mutableStateOf<Boolean?>(null) }
     var profileName by rememberSaveable {
-        mutableStateOf(initialRecord?.label ?: suggestedProfileName(ProfileRegistryStore.records(context).size))
+        mutableStateOf(initialRecord?.label ?: suggestedProfileName(ProfileRegistryStore.records(context).map { it.label }))
     }
     var renaming by rememberSaveable { mutableStateOf(false) }
 
@@ -303,7 +303,7 @@ internal fun ProfileSetup429(onClose: () -> Unit) {
                                         runCatching { ProfileSetupRuntime.beginAnotherProfile(context) }
                                             .onSuccess {
                                                 selected = emptySet()
-                                                profileName = suggestedProfileName(ProfileRegistryStore.records(context).size)
+                                                profileName = suggestedProfileName(ProfileRegistryStore.records(context).map { it.label })
                                                 page = 0
                                                 message = ""
                                                 refresh()
@@ -335,11 +335,19 @@ internal fun ProfileSetup429(onClose: () -> Unit) {
                         color = if (progress.issue != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (!progress.busy && !progress.ready && progress.message.isNotBlank() && progress.issue != null) {
-                    Text(
-                        progress.message,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.error,
+                val issue = progress.issue
+                if (!progress.busy && !progress.ready && issue != null) {
+                    // Plan 57 W9: the error screen, with the fixes and the debug file.
+                    ProfileProblemPanel(
+                        issue = issue,
+                        onRetry = {
+                            val chosen = apps.filter { it.packageName in selected }
+                            if (chosen.isNotEmpty() && persistFriendlyName()) {
+                                message = ""
+                                ProfileSetupRuntime.create(context, chosen)
+                            } else chooseApps()
+                        },
+                        onChanged = { refresh() },
                     )
                 }
             }
@@ -731,9 +739,6 @@ private fun profileAppLabel429(context: Context, packageName: String): String = 
     context.packageManager.getApplicationLabel(info).toString()
 }.getOrDefault(packageName)
 
-private fun suggestedProfileName(existingCount: Int): String = when (existingCount) {
-    0 -> "Profile B"
-    1 -> "Profile C"
-    2 -> "Profile D"
-    else -> "Profile ${existingCount + 2}"
+internal fun suggestedProfileName(taken: List<String>): String =
+    com.cyclone.mobile.runtime.workspaces.ProfileProblem.suggestName(taken)"
 }

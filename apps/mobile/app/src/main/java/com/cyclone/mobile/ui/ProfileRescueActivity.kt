@@ -24,7 +24,7 @@ class ProfileRescueActivity : ComponentActivity() {
             com.cyclone.mobile.ui.v32.CycloneV32Theme {
                 val scope = rememberCoroutineScope()
                 var busy by remember { mutableStateOf(false) }
-                var message by remember { mutableStateOf(if (intent.getBooleanExtra("repair_failed", false)) "Repair could not finish. You can return to Profile A safely below." else "This profile hasn't inherited Cyclone's setup yet.") }
+                var message by remember { mutableStateOf(if (intent.getBooleanExtra("repair_failed", false)) "Repair could not finish. You can return to your main profile safely below." else "This profile hasn't inherited Cyclone's setup yet.") }
                 fun perform(repair: Boolean) {
                     busy = true
                     scope.launch {
@@ -32,7 +32,7 @@ class ProfileRescueActivity : ComponentActivity() {
                             runCatching {
                                 if (repair) ProfileBootstrapRuntime.requestRepair(this@ProfileRescueActivity)
                                 else ProfileSetupRuntime.openProfile(this@ProfileRescueActivity, null)
-                                if (repair) "Repair started. Cyclone will reopen when your settings are ready." else "Returning to Profile A…"
+                                if (repair) "Repair started. Cyclone will reopen when your settings are ready." else "Returning to your main profile…"
                             }.getOrElse { "Cyclone couldn't complete that action. If root is unavailable here, use Android's profile switcher below." }
                         }
                         busy = false
@@ -42,8 +42,8 @@ class ProfileRescueActivity : ComponentActivity() {
                     Column(Modifier.fillMaxSize().systemBarsPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("Get back to your Cyclone", style = MaterialTheme.typography.headlineMedium)
                         Text(message)
-                        Button(enabled = !busy, onClick = { perform(false) }) { Text("Return to Profile A") }
-                        OutlinedButton(enabled = !busy, onClick = { perform(true) }) { Text("Repair from Profile A") }
+                        Button(enabled = !busy, onClick = { perform(false) }) { Text("Return to main profile") }
+                        OutlinedButton(enabled = !busy, onClick = { perform(true) }) { Text("Repair from main profile") }
                         TextButton(onClick = {
                             runCatching { startActivity(Intent("android.settings.USER_SETTINGS")) }
                                 .onFailure { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) }
@@ -52,6 +52,8 @@ class ProfileRescueActivity : ComponentActivity() {
                             startActivity(Intent(this@ProfileRescueActivity, MainActivity::class.java).putExtra("skip_profile_rescue", true))
                             finish()
                         }) { Text("Continue in this profile") }
+                        // Plan 57 W8: the debug file is reachable even here, where nothing else of Cyclone runs.
+                        ProfileDebugButtons(ProfileSetupRuntime.state.value.issue)
                     }
                 }
             }

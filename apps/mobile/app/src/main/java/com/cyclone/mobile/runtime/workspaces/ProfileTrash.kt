@@ -70,4 +70,21 @@ object ProfileTrash {
         }
         return take to skip
     }
+
+    /**
+     * Plan 57 W4: Android users Cyclone started making but never finished: named `Cyclone_<16 hex>` (so Cyclone made
+     * them), not the main or current user, not a ready profile and not one in Recently deleted (that has its own
+     * Delete now). Users Cyclone didn't name are never listed.
+     */
+    fun unfinished(
+        users: List<ProfileUserRecord>,
+        records: List<CycloneProfileRecord>,
+        mainUserId: Int?,
+        currentUserId: Int,
+    ): List<ProfileUserRecord> = users.filter { user ->
+        val record = records.firstOrNull { it.id == user.name }
+        ProfileSetupPlan.validProfileName(user.name) && user.id > 0 && mainUserId != null && user.id != mainUserId &&
+            user.id != currentUserId && !user.userType.endsWith("full.GUEST", ignoreCase = true) &&
+            record?.inTrash != true && !(record != null && record.ready && !user.partial)
+    }
 }

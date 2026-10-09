@@ -206,6 +206,7 @@ internal object ProfileBootstrapRuntime {
     }
 
     private fun execute(command: String, input: String? = null): String {
+        val startedAt = System.currentTimeMillis()
         val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
         val output = StringBuilder()
         val reader = Thread {
@@ -215,10 +216,18 @@ internal object ProfileBootstrapRuntime {
         }.apply { isDaemon = true; start() }
         try {
             process.outputStream.bufferedWriter().use { writer -> input?.let(writer::write) }
-            check(process.waitFor(20, TimeUnit.SECONDS)) { "Profile preparation timed out. No switch was made." }
+            val finished = process.waitFor(20, TimeUnit.SECONDS)
             reader.join(500)
             val text = synchronized(output) { output.toString() }
-            check(process.exitValue() == 0 && !text.lineSequence().any { it.trim().startsWith("Error:") }) {
+            val exit = if (finished) process.exitValue() else null
+            val ok = finished && exit == 0 && !text.lineSequence().any { it.trim().startsWith("Error:") }
+            // Plan 57 W1: the command shape and Android's answer, never the input (it can carry sealed bundles).
+            runCatching {
+                ProfileStepJournal.record("BOOTSTRAP", command, exit, System.currentTimeMillis() - startedAt, text,
+                    if (!finished) "TIMED_OUT" else if (ok) null else "FAILED")
+            }
+            check(finished) { "Profile preparation timed out. No switch was made." }
+            check(ok) {
                 "Android couldn't complete a required profile setup step. No switch was made."
             }
             return text

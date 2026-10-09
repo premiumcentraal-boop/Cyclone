@@ -24,6 +24,20 @@ enum class ProfileSetupOperation {
     // Plan 43 T4: the profile app manager (ProfileApps only, after its ownership guards).
     LIST_PROFILE_APPS,
     UNINSTALL_FOR_PROFILE,
+    // Plan 57 W3: Android's user types and their limits (read-only).
+    DUMP_USERS,
+    // Plan 57 W5: profile room on rooted phones. Only ProfileRoom uses these, after the owner's confirm.
+    ROOM_LIST_ADB,
+    ROOM_READ_PROP,
+    ROOM_SET_PROP,
+    ROOM_RESET_PROP,
+    ROOM_CLEAR_MODULE,
+    ROOM_STAGE_MODULE,
+    ROOM_OWN_MODULE,
+    ROOM_LABEL_MODULE,
+    ROOM_PLACE_MODULE,
+    ROOM_LIST_MODULE,
+    ROOM_READ_MODULE,
 }
 
 /**
@@ -194,6 +208,50 @@ object ProfileSetupPlan {
         return ProfileSetupCommand.fixed(ProfileSetupOperation.LABEL_BACKUP, "/system/bin/restorecon", "-R", backupDir)
     }
 
+    fun dumpUsers(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.DUMP_USERS, "/system/bin/dumpsys", "user")
+
+    // Plan 57 W5: profile room. One property (`fw.max_users`) and one module folder, nothing else.
+    const val ROOM_MODULE = "/data/adb/modules/cyclone_profiles"
+    const val ROOM_MODULE_STAGING = "/data/adb/modules/cyclone_profiles.new"
+    const val ROOM_PROPERTY = "fw.max_users"
+    val ROOM_LIMITS = 4..16
+    private val roomSourcePattern = Regex("(/data/user/0|/data/data)/com\\.cyclone\\.mobile/files/profile-room/cyclone_profiles")
+    fun validRoomSource(path: String): Boolean = path.matches(roomSourcePattern)
+
+    /** The root managers' own `resetprop`. */
+    enum class RootManager(val resetprop: List<String>) {
+        MAGISK(listOf("magisk", "resetprop")),
+        KERNELSU(listOf("/data/adb/ksu/bin/resetprop")),
+        APATCH(listOf("/data/adb/ap/bin/resetprop")),
+    }
+
+    fun roomListAdb(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_LIST_ADB, "/system/bin/ls", "/data/adb")
+    fun roomReadProp(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_READ_PROP, "/system/bin/getprop", ROOM_PROPERTY)
+    fun roomSetProp(manager: RootManager, limit: Int): ProfileSetupCommand {
+        require(limit in ROOM_LIMITS)
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_SET_PROP, *(manager.resetprop + listOf(ROOM_PROPERTY, limit.toString())).toTypedArray())
+    }
+    /** Back to how it was: the recorded original value, or no value at all (Android's own default). */
+    fun roomResetProp(manager: RootManager, original: Int?): ProfileSetupCommand {
+        require(original == null || original in 1..64)
+        val tail = if (original == null) listOf("--delete", ROOM_PROPERTY) else listOf(ROOM_PROPERTY, original.toString())
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_RESET_PROP, *(manager.resetprop + tail).toTypedArray())
+    }
+    fun roomClearModule(staging: Boolean): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_CLEAR_MODULE,
+        "/system/bin/rm", "-rf", if (staging) ROOM_MODULE_STAGING else ROOM_MODULE)
+    fun roomStageModule(source: String): ProfileSetupCommand {
+        require(validRoomSource(source))
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_STAGE_MODULE, "/system/bin/cp", "-r", source, ROOM_MODULE_STAGING)
+    }
+    fun roomOwnModule(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_OWN_MODULE, "/system/bin/chown", "-R", "0:0", ROOM_MODULE_STAGING)
+    fun roomLabelModule(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_LABEL_MODULE, "/system/bin/restorecon", "-R", ROOM_MODULE_STAGING)
+    fun roomPlaceModule(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_PLACE_MODULE, "/system/bin/mv", ROOM_MODULE_STAGING, ROOM_MODULE)
+    fun roomListModule(): ProfileSetupCommand = ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_LIST_MODULE, "/system/bin/ls", ROOM_MODULE)
+    fun roomReadModule(file: String): ProfileSetupCommand {
+        require(file == "module.prop" || file == "system.prop")
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_READ_MODULE, "/system/bin/cat", "$ROOM_MODULE/$file")
+    }
+
     internal fun shell(command: ProfileSetupCommand): String {
         val tokens = command.tokens()
         check(tokens.isNotEmpty() && tokens.all { it.matches(shellTokenPattern) })
@@ -251,6 +309,29 @@ object ProfileSetupPlan {
             Regex("([0-9]{5,}):\\1").matches(tokens[2]) && validBackupDir(tokens[3])
         ProfileSetupOperation.LABEL_BACKUP -> tokens.size == 3 && tokens.take(2) == listOf("/system/bin/restorecon", "-R") &&
             validBackupDir(tokens[2])
+        ProfileSetupOperation.DUMP_USERS -> tokens == listOf("/system/bin/dumpsys", "user")
+        ProfileSetupOperation.ROOM_LIST_ADB -> tokens == listOf("/system/bin/ls", "/data/adb")
+        ProfileSetupOperation.ROOM_READ_PROP -> tokens == listOf("/system/bin/getprop", ROOM_PROPERTY)
+        ProfileSetupOperation.ROOM_SET_PROP -> RootManager.values().any { m ->
+            tokens.size == m.resetprop.size + 2 && tokens.take(m.resetprop.size) == m.resetprop &&
+                tokens[m.resetprop.size] == ROOM_PROPERTY && tokens.last().toIntOrNull()?.let { it in ROOM_LIMITS } == true
+        }
+        ProfileSetupOperation.ROOM_RESET_PROP -> RootManager.values().any { m ->
+            val tail = tokens.drop(m.resetprop.size)
+            tokens.take(m.resetprop.size) == m.resetprop &&
+                (tail == listOf("--delete", ROOM_PROPERTY) ||
+                    (tail.size == 2 && tail[0] == ROOM_PROPERTY && tail[1].toIntOrNull()?.let { it in 1..64 } == true))
+        }
+        ProfileSetupOperation.ROOM_CLEAR_MODULE -> tokens.size == 3 && tokens.take(2) == listOf("/system/bin/rm", "-rf") &&
+            tokens[2] in setOf(ROOM_MODULE, ROOM_MODULE_STAGING)
+        ProfileSetupOperation.ROOM_STAGE_MODULE -> tokens.size == 4 && tokens.take(2) == listOf("/system/bin/cp", "-r") &&
+            validRoomSource(tokens[2]) && tokens[3] == ROOM_MODULE_STAGING
+        ProfileSetupOperation.ROOM_OWN_MODULE -> tokens == listOf("/system/bin/chown", "-R", "0:0", ROOM_MODULE_STAGING)
+        ProfileSetupOperation.ROOM_LABEL_MODULE -> tokens == listOf("/system/bin/restorecon", "-R", ROOM_MODULE_STAGING)
+        ProfileSetupOperation.ROOM_PLACE_MODULE -> tokens == listOf("/system/bin/mv", ROOM_MODULE_STAGING, ROOM_MODULE)
+        ProfileSetupOperation.ROOM_LIST_MODULE -> tokens == listOf("/system/bin/ls", ROOM_MODULE)
+        ProfileSetupOperation.ROOM_READ_MODULE -> tokens.size == 2 && tokens[0] == "/system/bin/cat" &&
+            tokens[1] in setOf("$ROOM_MODULE/module.prop", "$ROOM_MODULE/system.prop")
     }
 }
 

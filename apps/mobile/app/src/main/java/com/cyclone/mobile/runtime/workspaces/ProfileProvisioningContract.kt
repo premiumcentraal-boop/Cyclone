@@ -9,6 +9,10 @@ enum class ProfileSetupFailureKind {
     MANAGED_PROFILE_UNSUPPORTED,
     MAX_USERS_REACHED,
     MAX_PROFILES_REACHED,
+    /** Plan 57: Android's own limit for this kind of user (a ROM can cap full secondary users). */
+    USER_TYPE_LIMIT,
+    /** Plan 57: this kind of user is switched off on this phone. */
+    USER_TYPE_DISABLED,
     PROFILE_CREATION_REJECTED,
     PROFILE_ALREADY_EXISTS,
     PROFILE_START_FAILED,
@@ -29,6 +33,10 @@ data class ProfileSetupFailure(
     internal val platformMessage: String? = null,
 ) {
     fun compactMessage(): String = listOf(headline, reason, action).filter { it.isNotBlank() }.joinToString("\n")
+
+    /** The same failure, worded for the profile the owner is working on ("Profile C couldn't be added"). */
+    fun named(label: String?): ProfileSetupFailure =
+        ProfileFailureClassifier.describe(kind, platformMessage, label?.trim()?.takeIf { it.isNotBlank() })
 }
 
 data class ProfileCommandResult(
@@ -47,7 +55,7 @@ data class ProfileProvisioningCapabilities(
     val shizukuAuthorized: Boolean,
     /**
      * False in 4.2.2 unless a fixed, typed shell-identity broker is actually wired and probed.
-     * Authorization by itself must never be presented as Profile B readiness.
+     * Authorization by itself must never be presented as profile readiness.
      */
     val shizukuProfileProbeVerified: Boolean,
     val parentUserId: Int?,
@@ -82,7 +90,7 @@ object ProfileFailureClassifier {
         if (unavailable) return failure(ProfileSetupFailureKind.ROOT_UNAVAILABLE, sanitize(text))
         if (timedOut) return when (operation) {
             ProfileSetupOperation.START_PROFILE, ProfileSetupOperation.PROFILE_STATE ->
-                failure(ProfileSetupFailureKind.PROFILE_START_FAILED, "Android did not finish starting Profile B in time.")
+                failure(ProfileSetupFailureKind.PROFILE_START_FAILED, "Android did not finish starting the profile in time.")
             ProfileSetupOperation.INSTALL_EXISTING_PACKAGE, ProfileSetupOperation.LIST_PROFILE_PACKAGE,
             ProfileSetupOperation.LIST_PROFILE_APPS, ProfileSetupOperation.UNINSTALL_FOR_PROFILE ->
                 failure(ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED, "Android did not finish adding the app in time.")
@@ -107,16 +115,9 @@ object ProfileFailureClassifier {
         if (rootDenied(lower)) return failure(ProfileSetupFailureKind.ROOT_DENIED, platform)
 
         if (operation in setOf(ProfileSetupOperation.CREATE_MANAGED_PROFILE, ProfileSetupOperation.CREATE_SECONDARY_USER)) {
-            if (lower.contains("already exists")) return failure(ProfileSetupFailureKind.PROFILE_ALREADY_EXISTS, platform)
-            if (lower.contains("add more profiles") || lower.contains("maximum profiles") ||
-                lower.contains("max profiles") || lower.contains("profile limit") ||
-                (lower.contains("profile.managed") && lower.contains("maximum number of that type"))) {
-                return failure(ProfileSetupFailureKind.MAX_PROFILES_REACHED, platform)
-            }
-            if (lower.contains("maximum user limit") || lower.contains("maximum number of users") ||
-                lower.contains("user limit reached") || lower.contains("max users")) {
-                return failure(ProfileSetupFailureKind.MAX_USERS_REACHED, platform)
-            }
+            // Plan 57: limits first. Android's per-type refusal ends in "Maximum number of that type already exists",
+            // which was read as a duplicate profile before alpha.118.
+            createLimit(lower)?.let { return failure(it, platform) }
             if (lower.contains("not enough space") || lower.contains("low storage") || lower.contains("no space left")) {
                 return failure(ProfileSetupFailureKind.STORAGE_FAILURE, platform)
             }
@@ -126,12 +127,18 @@ object ProfileFailureClassifier {
                 (lower.contains("disabled type") && lower.contains("profile.managed"))) {
                 return failure(ProfileSetupFailureKind.MANAGED_PROFILE_UNSUPPORTED, platform)
             }
-            if (lower.contains("disallow_add_managed_profile") || lower.contains("user restriction") ||
+            if (lower.contains("disabled type") || lower.contains("type is disabled") || lower.contains("user type disabled")) {
+                return failure(ProfileSetupFailureKind.USER_TYPE_DISABLED, platform)
+            }
+            if (lower.contains("disallow_add_managed_profile") || lower.contains("disallow_add_user") ||
+                lower.contains("user restriction") ||
                 lower.contains("device policy") || lower.contains("admin policy") || lower.contains("oem") ||
                 lower.contains("securityexception") || lower.contains("permission denial") ||
                 (lower.contains("not allowed") && (lower.contains("profile") || lower.contains("user")))) {
                 return failure(ProfileSetupFailureKind.OEM_RESTRICTION, platform)
             }
+            // Only now a real duplicate. The caller still re-lists users before believing it.
+            if (lower.contains("already exists")) return failure(ProfileSetupFailureKind.PROFILE_ALREADY_EXISTS, platform)
             return failure(ProfileSetupFailureKind.PROFILE_CREATION_REJECTED, platform)
         }
 
@@ -150,12 +157,35 @@ object ProfileFailureClassifier {
             ProfileSetupOperation.MEASURE_APP_DATA, ProfileSetupOperation.BACKUP_APP_DATA,
             ProfileSetupOperation.OWN_BACKUP, ProfileSetupOperation.LABEL_BACKUP ->
                 failure(ProfileSetupFailureKind.STORAGE_FAILURE, platform)
+            ProfileSetupOperation.DUMP_USERS -> failure(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, platform)
+            ProfileSetupOperation.ROOM_LIST_ADB, ProfileSetupOperation.ROOM_READ_PROP, ProfileSetupOperation.ROOM_SET_PROP,
+            ProfileSetupOperation.ROOM_RESET_PROP, ProfileSetupOperation.ROOM_CLEAR_MODULE, ProfileSetupOperation.ROOM_STAGE_MODULE,
+            ProfileSetupOperation.ROOM_OWN_MODULE, ProfileSetupOperation.ROOM_LABEL_MODULE, ProfileSetupOperation.ROOM_PLACE_MODULE,
+            ProfileSetupOperation.ROOM_LIST_MODULE, ProfileSetupOperation.ROOM_READ_MODULE ->
+                failure(ProfileSetupFailureKind.ROOT_COMMAND_FAILED, platform)
             ProfileSetupOperation.VERIFY_ROOT -> error("handled above")
             ProfileSetupOperation.CREATE_MANAGED_PROFILE, ProfileSetupOperation.CREATE_SECONDARY_USER -> error("handled above")
         }
     }
 
     fun local(kind: ProfileSetupFailureKind, detail: String? = null): ProfileSetupFailure = failure(kind, sanitize(detail.orEmpty()))
+
+    /**
+     * Which limit a create ran into, from Android's own words (AOSP `UserManagerService`):
+     * - "Cannot add user. Maximum user limit is reached." → the phone's total ([MAX_USERS_REACHED]);
+     * - "Cannot add more profiles of type …" → profiles ([MAX_PROFILES_REACHED]);
+     * - "Cannot add more users of type …. Maximum number of that type already exists." → the type's own limit.
+     */
+    internal fun createLimit(lower: String): ProfileSetupFailureKind? = when {
+        lower.contains("maximum user limit") || lower.contains("maximum number of users") ||
+            lower.contains("user limit reached") || lower.contains("max users") -> ProfileSetupFailureKind.MAX_USERS_REACHED
+        lower.contains("add more profiles") || lower.contains("maximum profiles") || lower.contains("max profiles") ||
+            lower.contains("profile limit") ||
+            ((lower.contains("maximum number of that type") || lower.contains("more users of type")) && lower.contains("profile.")) ->
+            ProfileSetupFailureKind.MAX_PROFILES_REACHED
+        lower.contains("maximum number of that type") || lower.contains("more users of type") -> ProfileSetupFailureKind.USER_TYPE_LIMIT
+        else -> null
+    }
 
     private fun rootDenied(lower: String): Boolean =
         (lower.contains("su") && (lower.contains("denied") || lower.contains("inaccessible") || lower.contains("not allowed"))) ||
@@ -175,7 +205,12 @@ object ProfileFailureClassifier {
         return oneLine.ifBlank { null }
     }
 
-    private fun failure(kind: ProfileSetupFailureKind, platform: String?): ProfileSetupFailure {
+    private fun failure(kind: ProfileSetupFailureKind, platform: String?): ProfileSetupFailure = describe(kind, platform, null)
+
+    /** The words for a failure. [label] is the profile's own name; without it the texts say "the new profile". */
+    internal fun describe(kind: ProfileSetupFailureKind, platform: String?, label: String?): ProfileSetupFailure {
+        val name = label ?: "the new profile"
+        val Name = name.replaceFirstChar { it.uppercase() }
         val base = when (kind) {
             ProfileSetupFailureKind.ROOT_UNAVAILABLE -> ProfileSetupFailure(kind, "Root unavailable",
                 "Cyclone couldn't start its privileged profile setup authority.", "Retry after checking your root setup.", true)
@@ -183,30 +218,36 @@ object ProfileFailureClassifier {
                 "Root access was requested but the privileged command was denied.", "Retry after allowing Cyclone in your root manager.", true)
             ProfileSetupFailureKind.ROOT_COMMAND_FAILED -> ProfileSetupFailure(kind, "Root check failed",
                 "Root was detected, but the fixed privileged Android check did not complete correctly.", "Retry after rechecking Cyclone in your root manager.", true)
-            ProfileSetupFailureKind.MANAGED_PROFILE_UNSUPPORTED -> ProfileSetupFailure(kind, "Profile B isn't supported",
-                "This phone isn't allowing a managed work profile under your current Profile A.", "Keep using Profile A on this phone.", false)
+            ProfileSetupFailureKind.MANAGED_PROFILE_UNSUPPORTED -> ProfileSetupFailure(kind, "$Name isn't supported",
+                "This phone isn't allowing a managed work profile under your main profile.", "Keep using your main profile on this phone.", false)
             ProfileSetupFailureKind.MAX_USERS_REACHED -> ProfileSetupFailure(kind, "User limit reached",
-                "Android reports this phone has reached its user limit.", "This phone has reached Android's profile limit.", true)
+                "Android says this phone has no room for another user. Profiles in Recently deleted still use a place until they are deleted.",
+                "See what uses the places, then free one or allow more profiles.", true)
             ProfileSetupFailureKind.MAX_PROFILES_REACHED -> ProfileSetupFailure(kind, "Profile limit reached",
                 "This phone isn't allowing another work profile because its profile limit is reached.", "This phone has reached Android's profile limit.", true)
-            ProfileSetupFailureKind.PROFILE_CREATION_REJECTED -> ProfileSetupFailure(kind, "Profile B couldn't be added",
-                "Android rejected creation of the isolated Profile B identity.", "Retry after checking Android's user/profile settings.", true)
-            ProfileSetupFailureKind.PROFILE_ALREADY_EXISTS -> ProfileSetupFailure(kind, "Profile B already exists",
-                "Cyclone found an existing Profile B instead of creating another one.", "Continue the saved Profile B setup.", true)
-            ProfileSetupFailureKind.PROFILE_START_FAILED -> ProfileSetupFailure(kind, "Profile B didn't start",
-                "Android created Profile B, but it could not be started yet.", "Retry after unlocking the phone.", true)
-            ProfileSetupFailureKind.PROFILE_NOT_UNLOCKED -> ProfileSetupFailure(kind, "Profile B needs to finish starting",
-                "Profile B exists, but Android does not report it as running and unlocked.", "Retry after unlocking the phone and Profile B.", true)
+            ProfileSetupFailureKind.USER_TYPE_LIMIT -> ProfileSetupFailure(kind, "No room for $name",
+                "This phone's system allows only a fixed number of extra users of this kind, and they are all in use.",
+                "Free a place: delete a profile in Recently deleted or clean up an unfinished one.", true)
+            ProfileSetupFailureKind.USER_TYPE_DISABLED -> ProfileSetupFailure(kind, "$Name can't be added on this phone",
+                "This phone's system has extra users of this kind switched off.", "Save the debug file and send it to Cyclone's developer.", false)
+            ProfileSetupFailureKind.PROFILE_CREATION_REJECTED -> ProfileSetupFailure(kind, "$Name couldn't be added",
+                "Android rejected creating the new profile.", "Retry after checking Android's user settings.", true)
+            ProfileSetupFailureKind.PROFILE_ALREADY_EXISTS -> ProfileSetupFailure(kind, "$Name already exists",
+                "Cyclone found $name already on the phone instead of creating it again.", "Continue setting up $name.", true)
+            ProfileSetupFailureKind.PROFILE_START_FAILED -> ProfileSetupFailure(kind, "$Name didn't start",
+                "Android created $name, but it could not be started yet.", "Retry after unlocking the phone.", true)
+            ProfileSetupFailureKind.PROFILE_NOT_UNLOCKED -> ProfileSetupFailure(kind, "$Name needs to finish starting",
+                "$Name exists, but Android does not report it as running and unlocked.", "Retry after unlocking the phone and $name.", true)
             ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED -> ProfileSetupFailure(kind, "An app couldn't be added",
-                "Profile B is saved, but one selected app could not be verified there.", "Retry after reinstalling the app in Profile A or changing your selection.", true)
-            ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED -> ProfileSetupFailure(kind, "Profile B couldn't be verified",
-                "Cyclone stopped rather than target the wrong Android user or incomplete profile.", "Retry Profile B setup.", true)
+                "$Name is saved, but one selected app could not be verified there.", "Retry after reinstalling the app in your main profile or changing your selection.", true)
+            ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED -> ProfileSetupFailure(kind, "$Name couldn't be verified",
+                "Cyclone stopped rather than target the wrong Android user or an incomplete profile.", "Retry setting up $name.", true)
             ProfileSetupFailureKind.STORAGE_FAILURE -> ProfileSetupFailure(kind, "Storage needs attention",
                 "Cyclone couldn't safely save profile setup progress.", "Retry after freeing some storage.", true)
-            ProfileSetupFailureKind.OEM_RESTRICTION -> ProfileSetupFailure(kind, "Android is blocking Profile B",
-                "A phone or administrator policy is preventing another managed profile.", "Retry after reviewing Android's work-profile or administrator settings.", true)
+            ProfileSetupFailureKind.OEM_RESTRICTION -> ProfileSetupFailure(kind, "Android is blocking $name",
+                "A phone or administrator policy is preventing another profile.", "Retry after reviewing Android's user or administrator settings.", true)
             ProfileSetupFailureKind.UNKNOWN_PLATFORM_FAILURE -> ProfileSetupFailure(kind, "Profile setup paused",
-                "Android returned an unexpected result while preparing Profile B.", "Retry Profile B setup.", true)
+                "Android returned an unexpected result while preparing $name.", "Retry, or save the debug file.", true)
         }
         return base.copy(platformMessage = platform)
     }
@@ -241,14 +282,14 @@ object ProfileRecovery {
         }
         if (journal.parentUserId != null && journal.parentUserId != currentParentUserId) {
             return ProfileRecoveryDecision.Fail(ProfileFailureClassifier.local(
-                ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "The saved Profile B belongs to a different Profile A user."))
+                ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "The saved profile belongs to a different main user."))
         }
         val sameName = users.filter { it.name == journal.profileName }
         if (journal.profileUserId != null) {
             val exactId = sameName.singleOrNull { it.id == journal.profileUserId }
             if (sameName.size != 1 || exactId == null || !validOwned(exactId, currentParentUserId, journal.secondaryUser)) {
                 return ProfileRecoveryDecision.Fail(ProfileFailureClassifier.local(
-                    ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "The journaled Profile B identity no longer matches Android."))
+                    ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "The saved profile identity no longer matches Android."))
             }
             return ProfileRecoveryDecision.Resume(exactId)
         }
@@ -256,7 +297,7 @@ object ProfileRecovery {
         val existing = sameName.singleOrNull()
         return if (existing != null && validOwned(existing, currentParentUserId, journal.secondaryUser)) ProfileRecoveryDecision.Resume(existing)
         else ProfileRecoveryDecision.Fail(ProfileFailureClassifier.local(
-            ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Cyclone found an ambiguous or invalid partial Profile B identity."))
+            ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Cyclone found an ambiguous or unfinished profile with this identity."))
     }
 
     internal fun verifyCreated(
@@ -267,11 +308,11 @@ object ProfileRecovery {
         secondaryUser: Boolean = false,
     ): ProfileSetupFailure? {
         if (createdUserId <= 0 || createdUserId == parentUserId) {
-            return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android returned an invalid Profile B user id.")
+            return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android returned an invalid user id for the new profile.")
         }
         val exact = usersAfterCreate.singleOrNull { it.id == createdUserId && it.name == profileName }
         return if (exact != null && validOwned(exact, parentUserId, secondaryUser)) null
-        else ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android did not re-list the exact managed Profile B after creation.")
+        else ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android did not list the new profile after creating it.")
     }
 
     internal fun validOwned(user: ProfileUserRecord, parent: Int, secondaryUser: Boolean = false): Boolean =
@@ -324,7 +365,7 @@ object ProfileSelectionVerifier {
         val missing = selected.filterNot { it in currentlyInstalled }.sorted()
         return if (missing.isEmpty()) null else ProfileFailureClassifier.local(
             ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED,
-            "A selected app is no longer installed in Profile A: ${missing.first()}",
+            "A selected app is no longer installed in your main profile: ${missing.first()}",
         )
     }
 }
@@ -347,8 +388,9 @@ object SecondaryUserProvisioningPolicy {
             return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
                 "Cyclone must create new profiles from your main Android user.")
         }
-        val fullUsers = users.count { !it.profile && !it.partial }
-        if (maxUsersReported != null && fullUsers >= maxUsersReported) {
+        // Plan 57: counted as Android counts (every alive user except guests: profiles and unfinished users too).
+        val counted = users.count { !it.userType.endsWith("full.GUEST", ignoreCase = true) }
+        if (maxUsersReported != null && counted >= maxUsersReported) {
             return ProfileFailureClassifier.local(ProfileSetupFailureKind.MAX_USERS_REACHED)
         }
         return null
@@ -399,13 +441,13 @@ object ProfileCapabilityEvaluator {
                     "Android does not expose managed-profile support on this phone.")
             addManagedProfileRestricted ->
                 ProfileFailureClassifier.local(ProfileSetupFailureKind.OEM_RESTRICTION,
-                    "Android reports that adding a managed profile is restricted for Profile A.")
+                    "Android reports that adding a managed profile is restricted for the main profile.")
             parent == null -> ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
                 "Android did not re-list the user running Cyclone.")
             parent.profile -> ProfileFailureClassifier.local(ProfileSetupFailureKind.MANAGED_PROFILE_UNSUPPORTED,
-                "Cyclone is already running inside an Android profile; Profile B cannot be nested under it.")
+                "Cyclone is already running inside an Android profile; another profile cannot be nested under it.")
             parent.partial -> ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
-                "Android reports Profile A as a partial user.")
+                "Android reports the main profile as a partial user.")
             else -> null
         }
         return Result(capabilities, failure)

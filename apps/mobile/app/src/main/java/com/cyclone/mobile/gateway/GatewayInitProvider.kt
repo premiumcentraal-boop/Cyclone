@@ -22,6 +22,8 @@ class GatewayInitProvider : ContentProvider() {
         // First, so a freeze during startup is caught too.
         runCatching { com.cyclone.mobile.runtime.health.MainThreadWatchdog.start(app) }
         runCatching { com.cyclone.mobile.ai.OpenRouterCatalogStore.initialize(app) }
+        // Plan 57 W1: privileged profile steps are journaled for the debug file from the first one.
+        runCatching { com.cyclone.mobile.runtime.workspaces.ProfileStepJournal.attach(app) }
         // Plan 52 run 7: the owner's Hands style (Natural unless they chose otherwise) from the first moment of the
         // process, not only once Accessibility connects.
         runCatching { com.cyclone.mobile.gesture.HandsSettings.apply(app) }

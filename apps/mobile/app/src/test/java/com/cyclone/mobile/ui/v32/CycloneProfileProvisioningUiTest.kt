@@ -5,14 +5,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CycloneProfileProvisioningUiTest {
-    @Test fun profileFailureIsHeadlineReasonAndOneSetupAction() {
+    @Test fun profileFailureIsHeadlineReasonActionFixesAndTheDebugFile() {
         val page = source("CycloneProfilesPage.kt")
         assertTrue(page.contains("ProfileSetupRuntime.state.collectAsState()"))
         assertTrue(page.contains("profileSetup.issue"))
-        assertTrue(page.contains("Text(issue.headline"))
-        assertTrue(page.contains("Text(issue.reason"))
-        assertTrue(page.contains("Text(issue.action)"))
-        assertTrue(page.contains("Button(onClick = { setup = true }"))
+        // Plan 57 W9: the error screen lives in ProfileProblemUi.kt and is shared with setup and the rescue screen.
+        assertTrue(page.contains("ProfileProblemPanel(issue, onRetry = { setup = true }"))
+        val panel = sequenceOf(File("src/main/java/com/cyclone/mobile/ui/ProfileProblemUi.kt"),
+            File("apps/mobile/app/src/main/java/com/cyclone/mobile/ui/ProfileProblemUi.kt")).first { it.isFile }.readText()
+        assertTrue(panel.contains("Text(issue.headline"))
+        assertTrue(panel.contains("Text(issue.reason"))
+        assertTrue(panel.contains("Text(issue.action"))
+        assertTrue(panel.contains("ProfileDebugButtons(issue)"))
+        // Plan 57 W7: + always starts a new plan.
+        assertTrue(page.contains("FilledIconButton(onClick = { startNewProfile() }"))
+        assertFalse(page.contains("FilledIconButton(onClick = { setup = true }"))
     }
 
     @Test fun profileErrorUiDoesNotMisrouteRootFailuresToShizuku() {
