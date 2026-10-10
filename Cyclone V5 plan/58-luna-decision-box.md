@@ -1,6 +1,6 @@
 # 58 · The Luna Decision Box: every request triaged in one fast call, Instant in under a second
 
-Status: **Final plan (2026-10-09), nothing built. Builds as alpha.123–125 (§11).** Written at alpha.122 dev1. Builds on plan 41 (Fast mode and decisions)
+Status: **Final plan (2026-10-09). alpha.123 (Foundation) built 2026-10-10, unreleased, see §14; alpha.124–125 planned.** Written at alpha.122 dev1. Builds on plan 41 (Fast mode and decisions)
 and plan 42 (Instant, Flash, Mind). Physical device: **UNVERIFIED** throughout.
 
 **Owner's ask (2026-10-09).** OpenAI's Decisions API is now on OpenRouter as `openai/gpt-6-luna-decisions`, and it
@@ -729,6 +729,41 @@ Every release also brings:
 
 What it can't do is prove reliability ahead of use. The numbers come from the Lab, shadow use and the device matrix,
 and every release says honestly what a real phone has and hasn't confirmed.
+
+## 14. As built: alpha.123 (Foundation), 2026-10-10
+
+**Built as planned:**
+- `decisions/DecisionsWire` (the documented shape, read exactly), `DecisionsHttp` (failures told apart) and
+  `DecisionBreaker`;
+- the modes box, the Pilot and Drive's JEV watch moved onto it;
+- `DecisionProvider.LUNA` and the provider as a setting (JEV default);
+- `Triage` and `ModeRouter.route(…, triage)`, acting only when switched on, after the rules;
+- the watch (`DecisionWatch`, `WatchBoard`, `WatchLog`);
+- the call log (`CallLog`);
+- Settings → Speed (decided by, compare beside it, Triage, strict privacy, Test JEV / Test LUNA);
+- the gateway's health allowlist;
+- golden set v1 (308) with `scripts/dev/golden_build.py`;
+- the offline scorer (`GoldenSetTest`);
+- `scripts/dev/decisions_probe.py`;
+- `test_luna_box_guard.py`;
+- `docs/LUNA_DEVICE_MATRIX.md`.
+
+**Changed from the plan:**
+- **The live scorer runs on the phone, not through the gateway.** It is `mind/lab/DecisionLab`, started from Settings,
+  with its report carried in the health numbers. There is no `lab.decisions` gateway command, so the PC contract is
+  unchanged.
+- **The watch asks Board 0 and Triage in one call** to the provider that isn't deciding. With Compare off and Triage on
+  Watch only, the deciding provider answers Triage in the background.
+- **Calls are not a "send" risk.** They keep Instant's 2-second cancel window, as §6 says.
+
+**Found by the golden set and fixed:**
+- the missing-app answer misfired on abbreviations ("yt"), name prefixes ("insta"), kinds of app ("music",
+  "agenda", "the bank app") and pointers ("the second one").
+
+**Still open:**
+- real recorded fixtures (the owner runs the probe);
+- Glass drawing the numbers (alpha.125);
+- physical device: UNVERIFIED.
 
 ## 13. Sources
 
