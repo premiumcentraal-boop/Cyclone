@@ -46,8 +46,9 @@ object Triage {
             "An instruction or a question for the assistant.", "Chatter, thanks, or words said to someone else."))
         put("answer_only", flag("Does it only ask for information, with nothing to do on the phone?",
             "It asks a question or wants to know something.", "It asks for something to be done on the phone."))
-        put("sends_or_posts", flag("Does it send, post, share, reply to or call anyone?",
-            "Something leaves the phone to another person or a public place.", "Nothing is sent to anyone."))
+        put("sends_or_posts", flag("Does it send, post, share or reply anything to anyone?",
+            "A message, a post, a file or a reply leaves the phone to another person or a public place.",
+            "Nothing is sent to anyone. Starting a phone call is not sending: it waits two seconds so the owner can stop it."))
         put("money", flag("Does it buy, pay, order, book or transfer money?", "Money or a purchase is involved.", "No money is involved."))
         put("destroys", flag("Does it delete, remove, uninstall, reset or clear anything?", "Something would be deleted or lost.", "Nothing is deleted."))
         put("account", flag("Does it sign in, sign out, or change an account, a password or security setting?",

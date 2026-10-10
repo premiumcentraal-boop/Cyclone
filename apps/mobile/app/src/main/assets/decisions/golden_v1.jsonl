@@ -1,0 +1,308 @@
+{"accept": ["instant"], "capability": "camera", "id": "g001", "lang": "en", "rung": "instant", "tag": "action", "text": "open camera"}
+{"accept": ["instant"], "capability": "camera", "id": "g002", "lang": "en", "rung": "instant", "tag": "action", "text": "open the camera"}
+{"accept": ["instant"], "capability": "camera", "id": "g003", "lang": "en", "rung": "instant", "tag": "action", "text": "camera"}
+{"accept": ["instant"], "capability": "camera", "id": "g004", "lang": "en", "rung": "instant", "tag": "action", "text": "open my camera"}
+{"accept": ["instant"], "capability": "camera", "id": "g005", "lang": "en", "rung": "instant", "tag": "action", "text": "start the camera"}
+{"accept": ["instant"], "capability": "camera", "id": "g006", "lang": "en", "rung": "instant", "tag": "action", "text": "camera please"}
+{"accept": ["instant"], "capability": "camera", "id": "g007", "lang": "nl", "rung": "instant", "tag": "action", "text": "open de camera"}
+{"accept": ["instant"], "capability": "camera", "id": "g008", "lang": "nl", "rung": "instant", "tag": "action", "text": "camera openen"}
+{"accept": ["instant"], "capability": "camera", "id": "g009", "lang": "nl", "rung": "instant", "tag": "action", "text": "doe de camera open"}
+{"accept": ["instant"], "capability": "photo", "id": "g010", "lang": "en", "rung": "instant", "tag": "action", "text": "take a photo"}
+{"accept": ["instant"], "capability": "photo", "id": "g011", "lang": "en", "rung": "instant", "tag": "action", "text": "take a picture"}
+{"accept": ["instant"], "capability": "photo", "id": "g012", "lang": "en", "rung": "instant", "tag": "action", "text": "snap a photo"}
+{"accept": ["instant"], "capability": "photo", "id": "g013", "lang": "nl", "rung": "instant", "tag": "action", "text": "maak een foto"}
+{"accept": ["instant"], "capability": "photo", "id": "g014", "lang": "nl", "rung": "instant", "tag": "action", "text": "neem een foto"}
+{"accept": ["instant"], "capability": "selfie", "id": "g015", "lang": "en", "rung": "instant", "tag": "action", "text": "take a selfie"}
+{"accept": ["instant"], "capability": "selfie", "id": "g016", "lang": "en", "rung": "instant", "tag": "action", "text": "selfie"}
+{"accept": ["instant"], "capability": "selfie", "id": "g017", "lang": "nl", "rung": "instant", "tag": "action", "text": "maak een selfie"}
+{"accept": ["instant"], "capability": "flashlight_on", "id": "g018", "lang": "en", "rung": "instant", "tag": "action", "text": "flashlight on"}
+{"accept": ["instant"], "capability": "flashlight_on", "id": "g019", "lang": "en", "rung": "instant", "tag": "action", "text": "turn on the flashlight"}
+{"accept": ["instant"], "capability": "flashlight_on", "id": "g020", "lang": "en", "rung": "instant", "tag": "action", "text": "torch on"}
+{"accept": ["instant"], "capability": "flashlight_on", "id": "g021", "lang": "nl", "rung": "instant", "tag": "action", "text": "zaklamp aan"}
+{"accept": ["instant"], "capability": "flashlight_on", "id": "g022", "lang": "nl", "rung": "instant", "tag": "action", "text": "doe de zaklamp aan"}
+{"accept": ["instant"], "capability": "flashlight_off", "id": "g023", "lang": "en", "rung": "instant", "tag": "action", "text": "flashlight off"}
+{"accept": ["instant"], "capability": "flashlight_off", "id": "g024", "lang": "en", "rung": "instant", "tag": "action", "text": "turn off the torch"}
+{"accept": ["instant"], "capability": "flashlight_off", "id": "g025", "lang": "nl", "rung": "instant", "tag": "action", "text": "zaklamp uit"}
+{"accept": ["instant"], "capability": "volume_up", "id": "g026", "lang": "en", "rung": "instant", "tag": "action", "text": "louder"}
+{"accept": ["instant"], "capability": "volume_up", "id": "g027", "lang": "en", "rung": "instant", "tag": "action", "text": "volume up"}
+{"accept": ["instant"], "capability": "volume_up", "id": "g028", "lang": "en", "rung": "instant", "tag": "action", "text": "turn it up"}
+{"accept": ["instant"], "capability": "volume_up", "id": "g029", "lang": "en", "rung": "instant", "tag": "action", "text": "make it louder"}
+{"accept": ["instant"], "capability": "volume_up", "id": "g030", "lang": "nl", "rung": "instant", "tag": "action", "text": "harder"}
+{"accept": ["instant"], "capability": "volume_up", "id": "g031", "lang": "nl", "rung": "instant", "tag": "action", "text": "geluid harder"}
+{"accept": ["instant"], "capability": "volume_down", "id": "g032", "lang": "en", "rung": "instant", "tag": "action", "text": "quieter"}
+{"accept": ["instant"], "capability": "volume_down", "id": "g033", "lang": "en", "rung": "instant", "tag": "action", "text": "volume down"}
+{"accept": ["instant"], "capability": "volume_down", "id": "g034", "lang": "en", "rung": "instant", "tag": "action", "text": "turn it down"}
+{"accept": ["instant"], "capability": "volume_down", "id": "g035", "lang": "nl", "rung": "instant", "tag": "action", "text": "zachter"}
+{"accept": ["instant"], "capability": "volume_down", "id": "g036", "lang": "nl", "rung": "instant", "tag": "action", "text": "geluid zachter"}
+{"accept": ["instant"], "capability": "media_play_pause", "id": "g037", "lang": "en", "rung": "instant", "tag": "action", "text": "pause"}
+{"accept": ["instant"], "capability": "media_play_pause", "id": "g038", "lang": "en", "rung": "instant", "tag": "action", "text": "pause the music"}
+{"accept": ["instant"], "capability": "media_play_pause", "id": "g039", "lang": "en", "rung": "instant", "tag": "action", "text": "play"}
+{"accept": ["instant"], "capability": "media_play_pause", "id": "g040", "lang": "en", "rung": "instant", "tag": "action", "text": "resume the music"}
+{"accept": ["instant"], "capability": "media_play_pause", "id": "g041", "lang": "nl", "rung": "instant", "tag": "action", "text": "pauzeer"}
+{"accept": ["instant"], "capability": "media_play_pause", "id": "g042", "lang": "nl", "rung": "instant", "tag": "action", "text": "muziek pauzeren"}
+{"accept": ["instant"], "capability": "media_next", "id": "g043", "lang": "en", "rung": "instant", "tag": "action", "text": "next song"}
+{"accept": ["instant"], "capability": "media_next", "id": "g044", "lang": "en", "rung": "instant", "tag": "action", "text": "skip this song"}
+{"accept": ["instant"], "capability": "media_next", "id": "g045", "lang": "en", "rung": "instant", "tag": "action", "text": "next track"}
+{"accept": ["instant"], "capability": "media_next", "id": "g046", "lang": "nl", "rung": "instant", "tag": "action", "text": "volgend nummer"}
+{"accept": ["instant"], "capability": "back", "id": "g047", "lang": "en", "rung": "instant", "tag": "action", "text": "go back"}
+{"accept": ["instant"], "capability": "back", "id": "g048", "lang": "en", "rung": "instant", "tag": "action", "text": "back"}
+{"accept": ["instant"], "capability": "back", "id": "g049", "lang": "nl", "rung": "instant", "tag": "action", "text": "terug"}
+{"accept": ["instant"], "capability": "back", "id": "g050", "lang": "nl", "rung": "instant", "tag": "action", "text": "ga terug"}
+{"accept": ["instant"], "capability": "home", "id": "g051", "lang": "en", "rung": "instant", "tag": "action", "text": "go home"}
+{"accept": ["instant"], "capability": "home", "id": "g052", "lang": "en", "rung": "instant", "tag": "action", "text": "home screen"}
+{"accept": ["instant"], "capability": "home", "id": "g053", "lang": "nl", "rung": "instant", "tag": "action", "text": "naar het beginscherm"}
+{"accept": ["instant"], "capability": "recents", "id": "g054", "lang": "en", "rung": "instant", "tag": "action", "text": "recent apps"}
+{"accept": ["instant"], "capability": "recents", "id": "g055", "lang": "en", "rung": "instant", "tag": "action", "text": "show my recent apps"}
+{"accept": ["instant"], "capability": "recents", "id": "g056", "lang": "nl", "rung": "instant", "tag": "action", "text": "recente apps"}
+{"accept": ["instant"], "capability": "scroll_down", "id": "g057", "lang": "en", "rung": "instant", "tag": "action", "text": "scroll down"}
+{"accept": ["instant"], "capability": "scroll_up", "id": "g058", "lang": "en", "rung": "instant", "tag": "action", "text": "scroll up"}
+{"accept": ["instant"], "capability": "scroll_down", "id": "g059", "lang": "nl", "rung": "instant", "tag": "action", "text": "naar beneden scrollen"}
+{"accept": ["instant"], "capability": "scroll_up", "id": "g060", "lang": "nl", "rung": "instant", "tag": "action", "text": "scroll naar boven"}
+{"accept": ["instant"], "capability": "swipe_up", "id": "g061", "lang": "en", "rung": "instant", "tag": "action", "text": "swipe up"}
+{"accept": ["instant"], "capability": "swipe_left", "id": "g062", "lang": "en", "rung": "instant", "tag": "action", "text": "swipe left"}
+{"accept": ["instant"], "capability": "swipe_right", "id": "g063", "lang": "en", "rung": "instant", "tag": "action", "text": "swipe right"}
+{"accept": ["instant"], "capability": "swipe_down", "id": "g064", "lang": "en", "rung": "instant", "tag": "action", "text": "swipe down"}
+{"accept": ["instant"], "capability": "swipe_up", "id": "g065", "lang": "nl", "rung": "instant", "tag": "action", "text": "veeg omhoog"}
+{"accept": ["instant"], "capability": "swipe_left", "id": "g066", "lang": "nl", "rung": "instant", "tag": "action", "text": "veeg naar links"}
+{"accept": ["instant"], "capability": "zoom_in", "id": "g067", "lang": "en", "rung": "instant", "tag": "action", "text": "zoom in"}
+{"accept": ["instant"], "capability": "zoom_out", "id": "g068", "lang": "en", "rung": "instant", "tag": "action", "text": "zoom out"}
+{"accept": ["instant"], "capability": "zoom_in", "id": "g069", "lang": "nl", "rung": "instant", "tag": "action", "text": "inzoomen"}
+{"accept": ["instant"], "capability": "open_app", "id": "g070", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Instagram", "text": "open instagram"}
+{"accept": ["instant"], "capability": "open_app", "id": "g071", "lang": "en", "rung": "instant", "tag": "open_app", "target": "WhatsApp", "text": "open whatsapp"}
+{"accept": ["instant"], "capability": "open_app", "id": "g072", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Gmail", "text": "open gmail"}
+{"accept": ["instant"], "capability": "open_app", "id": "g073", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Spotify", "text": "open spotify"}
+{"accept": ["instant"], "capability": "open_app", "id": "g074", "lang": "en", "rung": "instant", "tag": "open_app", "target": "YouTube", "text": "open youtube"}
+{"accept": ["instant"], "capability": "open_app", "id": "g075", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Maps", "text": "open maps"}
+{"accept": ["instant"], "capability": "open_app", "id": "g076", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Settings", "text": "open settings"}
+{"accept": ["instant"], "capability": "open_app", "id": "g077", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Chrome", "text": "open chrome"}
+{"accept": ["instant"], "capability": "open_app", "id": "g078", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Netflix", "text": "open netflix"}
+{"accept": ["instant"], "capability": "open_app", "id": "g079", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Spotify", "text": "launch spotify"}
+{"accept": ["instant"], "capability": "open_app", "id": "g080", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Instagram", "text": "pull up instagram"}
+{"accept": ["instant"], "capability": "open_app", "id": "g081", "lang": "en", "rung": "instant", "tag": "open_app", "target": "YouTube", "text": "fire up youtube"}
+{"accept": ["instant"], "capability": "open_app", "id": "g082", "lang": "en", "rung": "instant", "tag": "open_app", "target": "WhatsApp", "text": "start whatsapp"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g083", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Calendar", "text": "open the calendar"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g084", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Photos", "text": "open photos"}
+{"accept": ["instant"], "capability": "open_app", "id": "g085", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Instagram", "text": "open instagram please"}
+{"accept": ["instant"], "capability": "open_app", "id": "g086", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Gmail", "text": "open my gmail"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g087", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Calendar", "text": "open my calendar"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g088", "lang": "en", "rung": "instant", "tag": "open_app", "target": "Instagram", "text": "open insta"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g089", "lang": "en", "rung": "instant", "tag": "open_app", "target": "YouTube", "text": "open yt"}
+{"accept": ["instant"], "capability": "open_app", "id": "g090", "lang": "nl", "rung": "instant", "tag": "open_app", "target": "Instagram", "text": "open instagram"}
+{"accept": ["instant"], "capability": "open_app", "id": "g091", "lang": "nl", "rung": "instant", "tag": "open_app", "target": "Instagram", "text": "instagram openen"}
+{"accept": ["instant"], "capability": "open_app", "id": "g092", "lang": "nl", "rung": "instant", "tag": "open_app", "target": "WhatsApp", "text": "open whatsapp"}
+{"accept": ["instant"], "capability": "open_app", "id": "g093", "lang": "nl", "rung": "instant", "tag": "open_app", "target": "Settings", "text": "open de instellingen"}
+{"accept": ["instant"], "capability": "open_app", "id": "g094", "lang": "nl", "rung": "instant", "tag": "open_app", "target": "Spotify", "text": "open spotify even"}
+{"accept": ["instant"], "capability": "open_app", "id": "g095", "lang": "nl", "rung": "instant", "tag": "open_app", "target": "YouTube", "text": "start youtube"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g096", "lang": "nl", "rung": "instant", "tag": "open_app", "target": "Calendar", "text": "open mijn agenda"}
+{"accept": ["instant"], "capability": "open_app", "id": "g097", "lang": "nl", "rung": "instant", "tag": "open_app", "target": "Maps", "text": "open google maps"}
+{"accept": ["instant", "flash", "mind"], "id": "g098", "lang": "nl", "rung": "instant", "tag": "call", "text": "call mam"}
+{"accept": ["instant", "flash", "mind"], "id": "g099", "lang": "en", "rung": "instant", "tag": "call", "text": "call mom"}
+{"accept": ["instant", "flash", "mind"], "id": "g100", "lang": "nl", "rung": "instant", "tag": "call", "text": "bel mam"}
+{"accept": ["instant", "flash", "mind"], "id": "g101", "lang": "en", "rung": "instant", "tag": "call", "text": "call dad"}
+{"accept": ["instant", "flash", "mind"], "id": "g102", "lang": "nl", "rung": "instant", "tag": "call", "text": "bel papa"}
+{"accept": ["instant", "flash", "mind"], "id": "g103", "lang": "en", "rung": "instant", "tag": "clock", "text": "set a timer for 5 minutes"}
+{"accept": ["instant", "flash", "mind"], "id": "g104", "lang": "en", "rung": "instant", "tag": "clock", "text": "timer 10 minutes"}
+{"accept": ["instant", "flash", "mind"], "id": "g105", "lang": "nl", "rung": "instant", "tag": "clock", "text": "zet een timer van 3 minuten"}
+{"accept": ["instant", "flash", "mind"], "id": "g106", "lang": "en", "rung": "instant", "tag": "clock", "text": "set an alarm for 7"}
+{"accept": ["instant", "flash", "mind"], "id": "g107", "lang": "en", "rung": "instant", "tag": "clock", "text": "wake me up at 6:30"}
+{"accept": ["instant", "flash", "mind"], "id": "g108", "lang": "nl", "rung": "instant", "tag": "clock", "text": "zet een wekker om 7 uur"}
+{"accept": ["answer", "mind"], "id": "g109", "lang": "en", "rung": "answer", "tag": "local", "text": "what time is it"}
+{"accept": ["answer", "mind"], "id": "g110", "lang": "en", "rung": "answer", "tag": "local", "text": "what's the time"}
+{"accept": ["answer", "mind"], "id": "g111", "lang": "nl", "rung": "answer", "tag": "local", "text": "hoe laat is het"}
+{"accept": ["answer", "mind"], "id": "g112", "lang": "en", "rung": "answer", "tag": "local", "text": "what day is it"}
+{"accept": ["answer", "mind"], "id": "g113", "lang": "en", "rung": "answer", "tag": "local", "text": "what's the date"}
+{"accept": ["answer", "mind"], "id": "g114", "lang": "nl", "rung": "answer", "tag": "local", "text": "welke dag is het"}
+{"accept": ["answer", "mind"], "id": "g115", "lang": "en", "rung": "answer", "tag": "local", "text": "how much battery do i have"}
+{"accept": ["answer", "mind"], "id": "g116", "lang": "en", "rung": "answer", "tag": "local", "text": "battery"}
+{"accept": ["answer", "mind"], "id": "g117", "lang": "nl", "rung": "answer", "tag": "local", "text": "hoeveel batterij heb ik"}
+{"accept": ["answer", "mind"], "id": "g118", "lang": "en", "rung": "answer", "tag": "local", "text": "what is the date"}
+{"accept": ["ignore", "flash", "mind"], "id": "g119", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "ok"}
+{"accept": ["ignore", "flash", "mind"], "id": "g120", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "thanks"}
+{"accept": ["ignore", "flash", "mind"], "id": "g121", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "thank you"}
+{"accept": ["ignore", "flash", "mind"], "id": "g122", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "cool"}
+{"accept": ["ignore", "flash", "mind"], "id": "g123", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "yeah that's fine"}
+{"accept": ["ignore", "flash", "mind"], "id": "g124", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "got it"}
+{"accept": ["ignore", "flash", "mind"], "id": "g125", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "never mind"}
+{"accept": ["ignore", "flash", "mind"], "id": "g126", "lang": "nl", "rung": "ignore", "tag": "chatter", "text": "dank je"}
+{"accept": ["ignore", "flash", "mind"], "id": "g127", "lang": "nl", "rung": "ignore", "tag": "chatter", "text": "prima"}
+{"accept": ["ignore", "flash", "mind"], "id": "g128", "lang": "nl", "rung": "ignore", "tag": "chatter", "text": "is goed"}
+{"accept": ["ignore", "flash", "mind"], "id": "g129", "lang": "nl", "rung": "ignore", "tag": "chatter", "text": "laat maar"}
+{"accept": ["ignore", "flash", "mind"], "id": "g130", "lang": "nl", "rung": "ignore", "tag": "chatter", "text": "top"}
+{"accept": ["ignore", "flash", "mind"], "id": "g131", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "ok thanks"}
+{"accept": ["ignore", "flash", "mind"], "id": "g132", "lang": "en", "rung": "ignore", "tag": "chatter", "text": "perfect"}
+{"accept": ["flash", "mind"], "id": "g133", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "turn on dark mode"}
+{"accept": ["flash", "mind"], "id": "g134", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open wifi settings"}
+{"accept": ["flash", "mind"], "id": "g135", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open bluetooth settings"}
+{"accept": ["flash", "mind"], "id": "g136", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "turn on airplane mode"}
+{"accept": ["flash", "mind"], "id": "g137", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "turn off bluetooth"}
+{"accept": ["flash", "mind"], "id": "g138", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "turn on do not disturb"}
+{"accept": ["flash", "mind"], "id": "g139", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open instagram and go to my dms"}
+{"accept": ["flash", "mind"], "id": "g140", "lang": "en", "rung": "flash", "steps": 3, "tag": "steps", "text": "open instagram, scroll to my dms and open the first dm"}
+{"accept": ["flash", "mind"], "id": "g141", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open the first email in gmail"}
+{"accept": ["flash", "mind"], "id": "g142", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open my latest whatsapp chat"}
+{"accept": ["flash", "mind"], "id": "g143", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open youtube and go to my subscriptions"}
+{"accept": ["flash", "mind"], "id": "g144", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open spotify and go to my library"}
+{"accept": ["flash", "mind"], "id": "g145", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open settings and go to battery"}
+{"accept": ["flash", "mind"], "id": "g146", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open the battery settings"}
+{"accept": ["flash", "mind"], "id": "g147", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "show my instagram profile"}
+{"accept": ["flash", "mind"], "id": "g148", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "go to my instagram notifications"}
+{"accept": ["flash", "mind"], "id": "g149", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open the downloads folder"}
+{"accept": ["flash", "mind"], "id": "g150", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open my liked songs on spotify"}
+{"accept": ["flash", "mind"], "id": "g151", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open whatsapp and go to calls"}
+{"accept": ["flash", "mind"], "id": "g152", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open chrome and open a new tab"}
+{"accept": ["flash", "mind"], "id": "g153", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "zet de donkere modus aan"}
+{"accept": ["flash", "mind"], "id": "g154", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "open de wifi instellingen"}
+{"accept": ["flash", "mind"], "id": "g155", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "zet bluetooth uit"}
+{"accept": ["flash", "mind"], "id": "g156", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "open instagram en ga naar mijn berichten"}
+{"accept": ["flash", "mind"], "id": "g157", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "open mijn laatste mail"}
+{"accept": ["flash", "mind"], "id": "g158", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "open spotify en ga naar mijn bibliotheek"}
+{"accept": ["flash", "mind"], "id": "g159", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "ga naar de batterij instellingen"}
+{"accept": ["flash", "mind"], "id": "g160", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "open whatsapp en ga naar de status"}
+{"accept": ["flash", "mind"], "id": "g161", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "vliegtuigmodus aan"}
+{"accept": ["flash", "mind"], "id": "g162", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "niet storen aan"}
+{"accept": ["flash", "mind"], "id": "g163", "lang": "en", "rung": "flash", "steps": 3, "tag": "steps", "text": "open gmail and check which account i'm on"}
+{"accept": ["flash", "mind"], "id": "g164", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "which google account is on this phone"}
+{"accept": ["flash", "mind"], "id": "g165", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open the camera and switch to video"}
+{"accept": ["flash", "mind"], "id": "g166", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open maps and show my location"}
+{"accept": ["flash", "mind"], "id": "g167", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "turn the brightness up"}
+{"accept": ["flash", "mind"], "id": "g168", "lang": "nl", "rung": "flash", "steps": 2, "tag": "steps", "text": "helderheid omhoog"}
+{"accept": ["flash", "mind"], "id": "g169", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "turn on location"}
+{"accept": ["flash", "mind"], "id": "g170", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "open the play store updates"}
+{"accept": ["flash", "mind"], "id": "g171", "lang": "en", "rung": "flash", "steps": 2, "tag": "steps", "text": "go to my youtube history"}
+{"accept": ["flash", "mind"], "id": "g172", "lang": "en", "rung": "flash", "steps": 3, "tag": "steps", "text": "open my instagram saved posts"}
+{"accept": ["mind"], "id": "g173", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "text mom i'm running late"}
+{"accept": ["mind"], "id": "g174", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "send a whatsapp to lisa saying happy birthday"}
+{"accept": ["mind"], "id": "g175", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "reply to the last email"}
+{"accept": ["mind"], "id": "g176", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "tell dad i'll be home at 7"}
+{"accept": ["mind"], "id": "g177", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "post this photo on instagram"}
+{"accept": ["mind"], "id": "g178", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "share my location with anna"}
+{"accept": ["mind"], "id": "g179", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "message my grandma from my gmail"}
+{"accept": ["mind"], "id": "g180", "lang": "en", "risks": ["sends_or_posts", "account"], "rung": "mind", "tag": "risky", "text": "open my gmail, check which account is logged in, then message my grandma from it"}
+{"accept": ["mind"], "id": "g181", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "comment nice on the first post"}
+{"accept": ["mind"], "id": "g182", "lang": "en", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "dm the first person in my instagram requests"}
+{"accept": ["mind"], "id": "g183", "lang": "nl", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "stuur mam dat ik later ben"}
+{"accept": ["mind"], "id": "g184", "lang": "nl", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "stuur een appje naar lisa"}
+{"accept": ["mind"], "id": "g185", "lang": "nl", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "beantwoord de laatste mail"}
+{"accept": ["mind"], "id": "g186", "lang": "nl", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "zeg tegen papa dat ik om 7 uur thuis ben"}
+{"accept": ["mind"], "id": "g187", "lang": "nl", "risks": ["sends_or_posts"], "rung": "mind", "tag": "risky", "text": "deel deze foto op instagram"}
+{"accept": ["mind"], "id": "g188", "lang": "en", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "pay the electricity bill"}
+{"accept": ["mind"], "id": "g189", "lang": "en", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "buy the cheapest charger on amazon"}
+{"accept": ["mind"], "id": "g190", "lang": "en", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "order a pizza"}
+{"accept": ["mind"], "id": "g191", "lang": "en", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "book a table for two tonight"}
+{"accept": ["mind"], "id": "g192", "lang": "en", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "transfer 20 euro to tom"}
+{"accept": ["mind"], "id": "g193", "lang": "en", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "subscribe to spotify premium"}
+{"accept": ["mind"], "id": "g194", "lang": "nl", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "betaal de rekening"}
+{"accept": ["mind"], "id": "g195", "lang": "nl", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "bestel een pizza"}
+{"accept": ["mind"], "id": "g196", "lang": "nl", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "koop een nieuwe oplader"}
+{"accept": ["mind"], "id": "g197", "lang": "nl", "risks": ["money"], "rung": "mind", "tag": "risky", "text": "maak 20 euro over naar tom"}
+{"accept": ["mind"], "id": "g198", "lang": "en", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "delete my last photo"}
+{"accept": ["mind"], "id": "g199", "lang": "en", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "delete this email"}
+{"accept": ["mind"], "id": "g200", "lang": "en", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "clear my chrome history"}
+{"accept": ["mind"], "id": "g201", "lang": "en", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "uninstall tiktok"}
+{"accept": ["mind"], "id": "g202", "lang": "en", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "remove the last alarm"}
+{"accept": ["mind"], "id": "g203", "lang": "en", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "factory reset the phone"}
+{"accept": ["mind"], "id": "g204", "lang": "nl", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "verwijder de laatste foto"}
+{"accept": ["mind"], "id": "g205", "lang": "nl", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "wis mijn geschiedenis"}
+{"accept": ["mind"], "id": "g206", "lang": "nl", "risks": ["destroys"], "rung": "mind", "tag": "risky", "text": "verwijder deze app"}
+{"accept": ["mind"], "id": "g207", "lang": "en", "risks": ["account"], "rung": "mind", "tag": "risky", "text": "log out of instagram"}
+{"accept": ["mind"], "id": "g208", "lang": "en", "risks": ["account"], "rung": "mind", "tag": "risky", "text": "sign in to netflix"}
+{"accept": ["mind"], "id": "g209", "lang": "en", "risks": ["account"], "rung": "mind", "tag": "risky", "text": "change my gmail password"}
+{"accept": ["mind"], "id": "g210", "lang": "en", "risks": ["account"], "rung": "mind", "tag": "risky", "text": "create a new instagram account"}
+{"accept": ["mind"], "id": "g211", "lang": "en", "risks": ["account"], "rung": "mind", "tag": "risky", "text": "log in on spotify"}
+{"accept": ["mind"], "id": "g212", "lang": "nl", "risks": ["account"], "rung": "mind", "tag": "risky", "text": "log uit bij instagram"}
+{"accept": ["mind"], "id": "g213", "lang": "nl", "risks": ["account"], "rung": "mind", "tag": "risky", "text": "verander mijn wachtwoord"}
+{"accept": ["mind"], "id": "g214", "lang": "nl", "risks": ["account"], "rung": "mind", "tag": "risky", "text": "maak een nieuw account aan"}
+{"accept": ["mind", "flash"], "id": "g215", "lang": "en", "rung": "mind", "tag": "question", "text": "why is my battery draining so fast"}
+{"accept": ["mind", "flash"], "id": "g216", "lang": "en", "rung": "mind", "tag": "question", "text": "what's the weather tomorrow"}
+{"accept": ["mind", "flash"], "id": "g217", "lang": "en", "rung": "mind", "tag": "question", "text": "how do i turn on developer options"}
+{"accept": ["mind", "flash"], "id": "g218", "lang": "en", "rung": "mind", "tag": "question", "text": "who messaged me last"}
+{"accept": ["mind", "flash"], "id": "g219", "lang": "en", "rung": "mind", "tag": "question", "text": "what did anna say in our chat"}
+{"accept": ["mind", "flash"], "id": "g220", "lang": "en", "rung": "mind", "tag": "question", "text": "summarize my unread emails"}
+{"accept": ["mind", "flash"], "id": "g221", "lang": "en", "rung": "mind", "tag": "question", "text": "which apps use the most storage"}
+{"accept": ["mind", "flash"], "id": "g222", "lang": "en", "rung": "mind", "tag": "question", "text": "is my phone up to date"}
+{"accept": ["mind", "flash"], "id": "g223", "lang": "en", "rung": "mind", "tag": "question", "text": "how many steps did i walk today"}
+{"accept": ["mind", "flash"], "id": "g224", "lang": "nl", "rung": "mind", "tag": "question", "text": "waarom gaat mijn batterij zo snel leeg"}
+{"accept": ["mind", "flash"], "id": "g225", "lang": "nl", "rung": "mind", "tag": "question", "text": "wat voor weer wordt het morgen"}
+{"accept": ["mind", "flash"], "id": "g226", "lang": "nl", "rung": "mind", "tag": "question", "text": "wie heeft me net gebeld"}
+{"accept": ["mind", "flash"], "id": "g227", "lang": "nl", "rung": "mind", "tag": "question", "text": "vat mijn ongelezen mails samen"}
+{"accept": ["mind", "flash"], "id": "g228", "lang": "nl", "rung": "mind", "tag": "question", "text": "hoeveel opslag heb ik nog"}
+{"accept": ["mind"], "id": "g229", "lang": "en", "rung": "mind", "tag": "later", "text": "remind me to call the dentist tomorrow at 9"}
+{"accept": ["mind"], "id": "g230", "lang": "en", "rung": "mind", "tag": "later", "text": "turn on the flashlight in 10 minutes"}
+{"accept": ["mind"], "id": "g231", "lang": "en", "rung": "mind", "tag": "later", "text": "when i get home turn on wifi"}
+{"accept": ["mind"], "id": "g232", "lang": "en", "rung": "mind", "tag": "later", "text": "open spotify at 8 tonight"}
+{"accept": ["mind"], "id": "g233", "lang": "en", "rung": "mind", "tag": "later", "text": "every morning read me my calendar"}
+{"accept": ["mind"], "id": "g234", "lang": "nl", "rung": "mind", "tag": "later", "text": "herinner me morgen om 9 uur aan de tandarts"}
+{"accept": ["mind"], "id": "g235", "lang": "nl", "rung": "mind", "tag": "later", "text": "zet om 10 uur de wekker uit"}
+{"accept": ["mind"], "id": "g236", "lang": "nl", "rung": "mind", "tag": "later", "text": "doe straks de zaklamp aan"}
+{"accept": ["mind"], "id": "g237", "lang": "en", "rung": "mind", "tag": "judgement", "text": "find the cheapest flight to rome next week and show me"}
+{"accept": ["mind"], "id": "g238", "lang": "en", "rung": "mind", "tag": "judgement", "text": "compare spotify and youtube music prices"}
+{"accept": ["mind"], "id": "g239", "lang": "en", "rung": "mind", "tag": "judgement", "text": "copy the address from my last email into maps"}
+{"accept": ["mind"], "id": "g240", "lang": "en", "rung": "mind", "tag": "judgement", "text": "save the photo from whatsapp to my gallery and then open it"}
+{"accept": ["mind"], "id": "g241", "lang": "en", "rung": "mind", "tag": "judgement", "text": "check my calendar and tell me when i'm free tomorrow"}
+{"accept": ["mind"], "id": "g242", "lang": "en", "rung": "mind", "tag": "judgement", "text": "look up the restaurant anna sent me and open it in maps"}
+{"accept": ["mind"], "id": "g243", "lang": "en", "rung": "mind", "tag": "judgement", "text": "set up a new routine that silences my phone at night"}
+{"accept": ["mind"], "id": "g244", "lang": "en", "rung": "mind", "tag": "judgement", "text": "go through my photos and find the one with the dog"}
+{"accept": ["mind"], "id": "g245", "lang": "nl", "rung": "mind", "tag": "judgement", "text": "zoek de goedkoopste vlucht naar rome"}
+{"accept": ["mind"], "id": "g246", "lang": "nl", "rung": "mind", "tag": "judgement", "text": "kopieer het adres uit mijn mail naar maps"}
+{"accept": ["mind"], "id": "g247", "lang": "nl", "rung": "mind", "tag": "judgement", "text": "kijk in mijn agenda wanneer ik morgen vrij ben"}
+{"accept": ["mind"], "id": "g248", "lang": "nl", "rung": "mind", "tag": "judgement", "text": "zoek de foto met de hond"}
+{"accept": ["mind"], "id": "g249", "lang": "en", "rung": "mind", "tag": "judgement", "text": "write a note with my shopping list: milk, eggs, bread"}
+{"accept": ["mind", "flash"], "id": "g250", "lang": "en", "rung": "mind", "tag": "judgement", "text": "search youtube for how to fix a bike chain"}
+{"accept": ["mind"], "id": "g251", "lang": "nl", "rung": "mind", "tag": "judgement", "text": "schrijf een notitie: melk, eieren, brood"}
+{"accept": ["instant", "flash"], "capability": "camera", "id": "g252", "lang": "en", "rung": "instant", "tag": "paraphrase", "text": "pull up the thing i take pictures with"}
+{"accept": ["instant", "flash"], "capability": "flashlight_on", "id": "g253", "lang": "en", "rung": "instant", "tag": "paraphrase", "text": "i need some light"}
+{"accept": ["instant", "flash", "mind"], "capability": "volume_up", "id": "g254", "lang": "en", "rung": "instant", "tag": "paraphrase", "text": "can't hear anything"}
+{"accept": ["instant", "flash"], "capability": "volume_down", "id": "g255", "lang": "en", "rung": "instant", "tag": "paraphrase", "text": "too loud"}
+{"accept": ["instant", "flash"], "capability": "media_play_pause", "id": "g256", "lang": "en", "rung": "instant", "tag": "paraphrase", "text": "stop the music"}
+{"accept": ["instant", "flash", "mind"], "capability": "media_next", "id": "g257", "lang": "en", "rung": "instant", "tag": "paraphrase", "text": "i don't like this song"}
+{"accept": ["instant", "flash"], "capability": "home", "id": "g258", "lang": "en", "rung": "instant", "tag": "paraphrase", "text": "get me out of this app"}
+{"accept": ["instant", "flash", "mind"], "capability": "scroll_down", "id": "g259", "lang": "en", "rung": "instant", "tag": "paraphrase", "text": "show me more"}
+{"accept": ["instant", "flash", "mind"], "capability": "flashlight_on", "id": "g260", "lang": "nl", "rung": "instant", "tag": "paraphrase", "text": "het is te donker"}
+{"accept": ["instant", "flash", "mind"], "capability": "volume_up", "id": "g261", "lang": "nl", "rung": "instant", "tag": "paraphrase", "text": "ik hoor niks"}
+{"accept": ["instant", "flash"], "capability": "home", "id": "g262", "lang": "nl", "rung": "instant", "tag": "paraphrase", "text": "weg uit deze app"}
+{"accept": ["instant", "flash", "mind"], "id": "g263", "lang": "en", "rung": "flash", "tag": "paraphrase", "text": "tap that"}
+{"accept": ["instant", "flash"], "capability": "tap", "id": "g264", "lang": "en", "rung": "instant", "tag": "paraphrase", "target": "Blue button", "text": "tap the blue button"}
+{"accept": ["instant", "flash"], "capability": "tap", "id": "g265", "lang": "en", "rung": "instant", "tag": "paraphrase", "target": "First post", "text": "press the first one"}
+{"accept": ["instant", "flash", "mind"], "id": "g266", "lang": "en", "rung": "flash", "tag": "paraphrase", "text": "open the second one"}
+{"accept": ["mind"], "id": "g267", "lang": "en", "rung": "mind", "tag": "paraphrase", "text": "what's this"}
+{"accept": ["mind"], "id": "g268", "lang": "en", "rung": "mind", "tag": "paraphrase", "text": "what does this screen say"}
+{"accept": ["mind", "flash"], "id": "g269", "lang": "en", "rung": "mind", "tag": "paraphrase", "text": "read this to me"}
+{"accept": ["mind"], "id": "g270", "lang": "nl", "rung": "mind", "tag": "paraphrase", "text": "wat staat hier"}
+{"accept": ["instant", "flash"], "capability": "tap", "id": "g271", "lang": "nl", "rung": "instant", "tag": "paraphrase", "target": "Blue button", "text": "tik op de blauwe knop"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g272", "lang": "en", "rung": "instant", "tag": "paraphrase", "target": "Gmail", "text": "open mail"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g273", "lang": "en", "rung": "instant", "tag": "paraphrase", "target": "Spotify", "text": "open music"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g274", "lang": "en", "rung": "instant", "tag": "paraphrase", "target": "ING", "text": "open the bank app"}
+{"accept": ["instant", "flash"], "capability": "open_app", "id": "g275", "lang": "nl", "rung": "instant", "tag": "paraphrase", "target": "Spotify", "text": "open muziek"}
+{"accept": ["answer", "flash", "mind"], "id": "g276", "lang": "en", "rung": "answer", "tag": "paraphrase", "text": "open snapchat"}
+{"accept": ["instant", "flash"], "id": "g277", "lang": "es", "rung": "instant", "tag": "other_language", "text": "abre la cámara"}
+{"accept": ["instant", "flash"], "id": "g278", "lang": "fr", "rung": "instant", "tag": "other_language", "text": "ouvre l'appareil photo"}
+{"accept": ["instant", "flash"], "id": "g279", "lang": "de", "rung": "instant", "tag": "other_language", "text": "öffne die kamera"}
+{"accept": ["instant", "flash"], "id": "g280", "lang": "es", "rung": "instant", "tag": "other_language", "text": "abre instagram"}
+{"accept": ["instant", "flash"], "id": "g281", "lang": "fr", "rung": "instant", "tag": "other_language", "text": "ouvre whatsapp"}
+{"accept": ["instant", "flash"], "id": "g282", "lang": "de", "rung": "instant", "tag": "other_language", "text": "öffne spotify"}
+{"accept": ["instant", "flash"], "id": "g283", "lang": "es", "rung": "instant", "tag": "other_language", "text": "sube el volumen"}
+{"accept": ["instant", "flash"], "id": "g284", "lang": "fr", "rung": "instant", "tag": "other_language", "text": "plus fort"}
+{"accept": ["instant", "flash"], "id": "g285", "lang": "de", "rung": "instant", "tag": "other_language", "text": "taschenlampe an"}
+{"accept": ["instant", "flash"], "id": "g286", "lang": "it", "rung": "instant", "tag": "other_language", "text": "vai alla home"}
+{"accept": ["instant", "flash"], "id": "g287", "lang": "it", "rung": "instant", "tag": "other_language", "text": "apri la fotocamera"}
+{"accept": ["instant", "flash"], "id": "g288", "lang": "pt", "rung": "instant", "tag": "other_language", "text": "abrir o youtube"}
+{"accept": ["flash", "mind"], "id": "g289", "lang": "es", "rung": "flash", "tag": "other_language", "text": "activa el modo oscuro"}
+{"accept": ["flash", "mind"], "id": "g290", "lang": "fr", "rung": "flash", "tag": "other_language", "text": "active le mode sombre"}
+{"accept": ["flash", "mind"], "id": "g291", "lang": "de", "rung": "flash", "tag": "other_language", "text": "dunkelmodus einschalten"}
+{"accept": ["flash", "mind"], "id": "g292", "lang": "es", "rung": "flash", "tag": "other_language", "text": "abre instagram y ve a mis mensajes"}
+{"accept": ["flash", "mind"], "id": "g293", "lang": "fr", "rung": "flash", "tag": "other_language", "text": "ouvre gmail et regarde quel compte est connecté"}
+{"accept": ["mind"], "id": "g294", "lang": "es", "risks": ["sends_or_posts"], "rung": "mind", "tag": "other_language", "text": "manda un mensaje a mamá diciendo que llego tarde"}
+{"accept": ["mind"], "id": "g295", "lang": "fr", "risks": ["sends_or_posts"], "rung": "mind", "tag": "other_language", "text": "envoie un message à papa"}
+{"accept": ["mind"], "id": "g296", "lang": "de", "risks": ["sends_or_posts"], "rung": "mind", "tag": "other_language", "text": "schick oma eine nachricht"}
+{"accept": ["mind"], "id": "g297", "lang": "es", "risks": ["money"], "rung": "mind", "tag": "other_language", "text": "paga la factura de la luz"}
+{"accept": ["mind"], "id": "g298", "lang": "fr", "risks": ["destroys"], "rung": "mind", "tag": "other_language", "text": "supprime la dernière photo"}
+{"accept": ["mind"], "id": "g299", "lang": "de", "risks": ["account"], "rung": "mind", "tag": "other_language", "text": "melde mich bei instagram ab"}
+{"accept": ["mind"], "id": "g300", "lang": "es", "risks": ["money"], "rung": "mind", "tag": "other_language", "text": "compra un cargador"}
+{"accept": ["mind"], "id": "g301", "lang": "it", "risks": ["destroys"], "rung": "mind", "tag": "other_language", "text": "cancella questa email"}
+{"accept": ["mind"], "id": "g302", "lang": "pt", "risks": ["sends_or_posts"], "rung": "mind", "tag": "other_language", "text": "manda uma mensagem para a mãe"}
+{"accept": ["mind"], "id": "g303", "lang": "es", "rung": "mind", "tag": "other_language", "text": "¿por qué se agota mi batería?"}
+{"accept": ["mind"], "id": "g304", "lang": "fr", "rung": "mind", "tag": "other_language", "text": "quel temps fera-t-il demain ?"}
+{"accept": ["mind"], "id": "g305", "lang": "es", "rung": "mind", "tag": "other_language", "text": "recuérdame mañana a las 9"}
+{"accept": ["ignore", "flash", "mind"], "id": "g306", "lang": "es", "rung": "ignore", "tag": "other_language", "text": "gracias"}
+{"accept": ["ignore", "flash", "mind"], "id": "g307", "lang": "fr", "rung": "ignore", "tag": "other_language", "text": "merci"}
+{"accept": ["ignore", "flash", "mind"], "id": "g308", "lang": "de", "rung": "ignore", "tag": "other_language", "text": "danke"}

@@ -109,7 +109,10 @@ object ModeRouter {
     private val NOT_AN_APP = Regex("(?i)\\b(settings|instellingen|wi-?fi|wlan|bluetooth|notifications?|meldingen|camera|gallery|galerij|photos?|" +
         "foto'?s|browser|web|website|site|page|pagina|tab|link|url|home ?screen|beginscherm|recents?|recent apps|timer|alarm|stopwatch|" +
         "clock|klok|keyboard|toetsenbord|quick settings|control center|flashlight|zaklamp|downloads?|files?|bestanden|folder|map|" +
-        "maps|kaart|chat|conversation|gesprek|inbox|mail|email|drawer|menu|store|play store|app store|search|zoek)\\b")
+        "maps|kaart|chat|conversation|gesprek|inbox|mail|email|drawer|menu|store|play store|app store|search|zoek|" +
+        // Plan 58 (golden set): kinds of app and pointers, never one app's name ("open music", "the bank app", "the second one").
+        "music|muziek|bank|agenda|calendar|kalender|notes?|notities?|news|nieuws|weather|weer|games?|spelletjes?|videos?|" +
+        "one|first|second|third|last|next|this|that|eerste|tweede|derde|laatste|volgende|deze|die)\\b")
 
     /** Stage 0: a clear command or a local answer, or null. */
     fun stage0(text: String, world: GrammarWorld, facts: LocalFacts = LocalFacts()): Route? {
@@ -128,6 +131,9 @@ object ModeRouter {
         val name = OPEN_ONLY.matchEntire(text.trim())?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() } ?: return null
         if (name.split(' ').size > 3 || NOT_AN_APP.containsMatchIn(name) || SECOND_CLAUSE.containsMatchIn(name)) return null
         val wanted = InstantGrammar.normalize(name)
+        // Plan 58 (golden set): an abbreviation ("yt", "ig") or the start of an app's name ("insta") may well be there.
+        if (wanted.replace(" ", "").length <= 3) return null
+        if (world.apps.any { app -> InstantGrammar.normalize(app.first).split(' ').any { it.length > wanted.length && it.startsWith(wanted) } }) return null
         val closest = world.apps.maxOfOrNull { InstantGrammar.similarity(wanted, it.first) } ?: 0.0
         if (closest >= 0.5) return null
         // A word of the name in an app's label ("google keep" for "Keep Notes") means it may well be there.

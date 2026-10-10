@@ -294,6 +294,19 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                         }
                         Switch(checked = modes.watch, onCheckedChange = { save(modes.copy(watch = it)) })
                     }
+                    // Plan 58: the decisions Lab: the golden set through one provider, a few cents, about a minute.
+                    var labNote by remember { mutableStateOf(labSummary(stats)) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.mind.decide.DecisionProvider.entries.filter { it.usable }.forEach { provider ->
+                            androidx.compose.material3.OutlinedButton(onClick = {
+                                val started = com.cyclone.mobile.mind.lab.DecisionLab.start(context, provider) { report ->
+                                    labNote = report?.let { labLine(it) } ?: "The test didn't finish. Try again."
+                                }
+                                labNote = if (started) "Testing ${provider.label} on 300 labelled requests…" else "A test is already running, or there's no OpenRouter key."
+                            }) { Text("Test ${provider.wire.uppercase()}") }
+                        }
+                    }
+                    Text(labNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Triage", style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         com.cyclone.mobile.mind.modes.StageSwitch.entries.forEach { stage ->
@@ -917,6 +930,23 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /** One line about how requests are decided on this phone (alpha 89). */
+/** Plan 58: the decisions Lab's last reports, one line each. */
+private fun labSummary(stats: org.json.JSONObject?): String {
+    val lab = stats?.optJSONObject("lab")
+    if (lab == null || lab.length() == 0) {
+        return "Test a decision model on 300 labelled requests (a few cents, about a minute). Nothing on your phone is read or moved."
+    }
+    return lab.keys().asSequence().sorted().mapNotNull { lab.optJSONObject(it) }.joinToString("\n") { labLine(it) }
+}
+
+private fun labLine(report: org.json.JSONObject): String {
+    val score = report.optJSONObject("score")
+    val accuracy = score?.optDouble("accuracy")?.takeIf { !it.isNaN() }?.let { "${(it * 100).toInt()}% right" } ?: "no answers"
+    val risky = score?.optJSONArray("riskyUnder")?.length() ?: 0
+    val p95 = report.optLong("p95", -1).takeIf { it > 0 }?.let { " · p95 $it ms" }.orEmpty()
+    return "${report.optString("provider").uppercase()}: $accuracy · $risky risky too low$p95 · answered ${report.optInt("answered")} of ${report.optInt("requests")}"
+}
+
 /** Plan 58: the watch in one line ("Luna answered 95% · agreed 88% · triage 84% · 0 below the rules"). */
 private fun watchSummary(stats: org.json.JSONObject?): String {
     val watch = stats?.optJSONObject("watch")

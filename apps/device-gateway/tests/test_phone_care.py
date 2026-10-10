@@ -371,12 +371,21 @@ def test_plan58_call_and_watch_numbers_pass_as_counts_only(tmp_path):
         "watch": {"providers": ["luna", "Bad One"], "watched": 20, "answerRate": 0.95, "board0Agreement": 0.9, "board0Compared": 10,
                   "triaged": 19, "triageRungAgreement": 0.84, "triageBelowRules": 0, "triageModes": {"instant": 5, "mind": 9, "x y": 1},
                   "triageChains": 3, "triageRefusals": 0, "request": "pay 300 euro"},
-        "paused": {"luna": "rate_limited", "jev": "Not A Wire"}}}
+        "paused": {"luna": "rate_limited", "jev": "Not A Wire"},
+        "lab": {"luna": {"model": "openai/gpt-6-luna-decisions", "atMs": 5, "requests": 280, "answered": 278, "p50": 300, "p95": 700,
+                         "failures": {"timeout": 2}, "cost": 0.04,
+                         "score": {"total": 280, "decided": 278, "accuracy": 0.93, "verdicts": {"right": 259, "over": 19},
+                                   "riskyUnder": [], "under": ["g012", "pay 300 euro"], "byTag": {"risky": {"right": 42}}},
+                         "calibration": [{"from": 0.9, "to": 1.0, "answers": 100, "right": 96}], "text": "pay 300 euro"},
+                "Bad Key": {}}}}
     decisions = h.clean_report(raw)["decisions"]
     assert decisions["calls"] == [{"provider": "luna", "board": "watch", "calls": 20, "answerRate": 0.95, "p50": 310, "p95": 820,
                                    "failures": {"timeout": 1}, "cost": 0.0021}]
     watch = decisions["watch"]
     assert watch["providers"] == ["luna"] and watch["triageBelowRules"] == 0 and watch["triageModes"] == {"instant": 5, "mind": 9}
     assert decisions["paused"] == {"luna": "rate_limited"}
+    lab = decisions["lab"]
+    assert list(lab) == ["luna"] and lab["luna"]["score"]["under"] == ["g012"] and lab["luna"]["score"]["accuracy"] == 0.93
+    assert lab["luna"]["calibration"] == [{"from": 0.9, "to": 1.0, "answers": 100, "right": 96}]
     text = json.dumps(decisions)
     assert "text mom" not in text and "pay 300" not in text

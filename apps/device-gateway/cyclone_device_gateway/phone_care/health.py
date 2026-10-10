@@ -130,6 +130,7 @@ def clean_decisions(raw: Any) -> dict[str, Any] | None:
         "actions": actions[:40],
         "calls": _clean_calls(raw.get("calls")),
         "watch": _clean_watch(raw.get("watch")),
+        "lab": _clean_lab(raw.get("lab")),
         "paused": {k: v for k, v in (raw.get("paused") or {}).items()
                    if isinstance(k, str) and _INTENT.match(k) and isinstance(v, str) and _INTENT.match(v)}
         if isinstance(raw.get("paused"), dict) else {},
@@ -153,6 +154,40 @@ def _clean_calls(raw: Any) -> list[dict[str, Any]]:
             "cost": round(float(cost), 6) if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0 else None,
         })
     return out[:20]
+
+
+_GOLDEN_ID = re.compile(r"^g\d{3,4}$")
+
+
+def _counts(raw: Any) -> dict[str, int]:
+    return {k: _int(v) for k, v in raw.items() if isinstance(k, str) and _INTENT.match(k)} if isinstance(raw, dict) else {}
+
+
+def _clean_lab(raw: Any) -> dict[str, Any]:
+    """Plan 58: the decisions Lab's last report per provider. Scores, times, cost and golden-set ids only."""
+    out: dict[str, Any] = {}
+    for provider, report in (raw.items() if isinstance(raw, dict) else []):
+        if not (isinstance(provider, str) and _INTENT.match(provider) and isinstance(report, dict)):
+            continue
+        score = report.get("score") if isinstance(report.get("score"), dict) else {}
+        ids = lambda key: [i for i in score.get(key) or [] if isinstance(i, str) and _GOLDEN_ID.match(i)][:400]
+        model = report.get("model")
+        cost = report.get("cost")
+        out[provider] = {
+            "model": model[:60] if isinstance(model, str) else None, "atMs": _int(report.get("atMs")),
+            "requests": _int(report.get("requests")), "answered": _int(report.get("answered")),
+            "p50": _int(report.get("p50")) or None, "p95": _int(report.get("p95")) or None,
+            "failures": _counts(report.get("failures")),
+            "cost": round(float(cost), 6) if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0 else None,
+            "score": {"total": _int(score.get("total")), "decided": _int(score.get("decided")),
+                      "accuracy": _share(score.get("accuracy")), "verdicts": _counts(score.get("verdicts")),
+                      "riskyUnder": ids("riskyUnder"), "under": ids("under"),
+                      "byTag": {t: _counts(v) for t, v in (score.get("byTag") or {}).items() if isinstance(t, str) and _INTENT.match(t)}
+                      if isinstance(score.get("byTag"), dict) else {}},
+            "calibration": [{"from": _share(b.get("from")), "to": _share(b.get("to")), "answers": _int(b.get("answers")),
+                             "right": _int(b.get("right"))} for b in report.get("calibration") or [] if isinstance(b, dict)][:10],
+        }
+    return out
 
 
 def _clean_watch(raw: Any) -> dict[str, Any] | None:

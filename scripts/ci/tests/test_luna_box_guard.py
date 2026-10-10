@@ -80,6 +80,19 @@ class LunaBoxGuard(unittest.TestCase):
         self.assertIn('"calls": _clean_calls(raw.get("calls"))', health)
         self.assertIn('"watch": _clean_watch(raw.get("watch"))', health)
 
+    def test_the_lab_only_asks_about_labelled_sentences(self):
+        lab = read("mind/lab/DecisionLab.kt")
+        for acting in ("MindMissions", "InstantRun", "PhoneToolExecutor", "hands.", "look(", "AndroidMindDevice"):
+            self.assertNotIn(acting, lab)
+        self.assertIn("GoldenSet.WORLD", lab)
+        golden = (ROOT / "apps/mobile/app/src/main/assets/decisions/golden_v1.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertGreaterEqual(len(golden), 300)
+        self.assertTrue((ROOT / "scripts/dev/golden_build.py").is_file())
+        # The probe reads the key from the environment only and never prints it.
+        probe = (ROOT / "scripts/dev/decisions_probe.py").read_text(encoding="utf-8")
+        self.assertIn('os.environ.get("OPENROUTER_API_KEY"', probe)
+        self.assertNotRegex(probe, r"print\([^)]*key")
+
 
 if __name__ == "__main__":
     unittest.main()

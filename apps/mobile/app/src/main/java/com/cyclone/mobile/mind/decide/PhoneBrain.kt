@@ -54,6 +54,7 @@ object PhoneBrain {
             // Plan 58: every decisions call per provider and board, the watch's comparison, and the breakers.
             .put("calls", CallLog.summary(Decisions.calls()))
             .put("watch", WatchLog.summary(DecisionWatch.records(context)))
+            .put("lab", com.cyclone.mobile.mind.lab.DecisionLab.reports(context))
             .put("paused", org.json.JSONObject().also { o ->
                 DecisionProvider.entries.forEach { p -> Decisions.breaker(p).reason()?.let { o.put(p.wire, it.wire) } }
             })
