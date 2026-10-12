@@ -14,11 +14,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,7 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cyclone.mobile.runtime.workspaces.CarryReport
@@ -39,13 +40,14 @@ import com.cyclone.mobile.runtime.workspaces.CarryRules
 import com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord
 import com.cyclone.mobile.runtime.workspaces.ProfileBackup
 import com.cyclone.mobile.runtime.workspaces.ProfileTrash
+import com.cyclone.mobile.ui.v32.ask.AskGlass
 import java.text.DateFormat
 import java.util.Date
 
 /** The colours a profile can wear (plan 40 P1), the same family as Settings' group tiles. */
 internal val ProfileColors: List<Long> = listOf(0xFF3E7BFA, 0xFF7B61FF, 0xFF30B85A, 0xFFFF9F0A, 0xFFFF6B5E, 0xFF32ADE6, 0xFFE056FD, 0xFF8E8E93)
 
-/** One profile in Recently deleted: what it is, how long it stays, Restore and Delete now. */
+/** One profile in Recently deleted, as a row: its face, how long it stays, Restore, and a bin for Delete now. */
 @Composable
 internal fun ProfileTrashCard(
     record: CycloneProfileRecord,
@@ -54,53 +56,47 @@ internal fun ProfileTrashCard(
     onRestore: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    CycloneSimpleCard(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ProfileBadge(record.emoji, record.color, record.label)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(record.label, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "${record.packages.size} ${if (record.packages.size == 1) "app" else "apps"} · ${ProfileTrash.line(record.removedAtMs ?: nowMs, nowMs)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CycloneLiquidTextAction("Restore", onRestore, Modifier.weight(1f), enabled = !busy, prominent = true)
-            CycloneLiquidTextAction("Delete now", onDelete, Modifier.weight(1f), enabled = !busy)
-        }
-    }
+    ProfileRow(
+        title = record.label,
+        subtitle = ProfileTrash.line(record.removedAtMs ?: nowMs, nowMs),
+        onClick = null,
+        leading = { ProfileAvatar(record.label, record.emoji, record.color, size = 40.dp, dimmed = true) },
+        trailing = {
+            ProfileButton("Restore", onRestore, enabled = !busy, compact = true)
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).clickable(enabled = !busy, role = Role.Button, onClick = onDelete)
+                    .semantics { contentDescription = "Delete ${record.label} now" },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(21.dp), tint = ProfileGlass.Destructive) }
+        },
+    )
 }
 
-/** An automatic backup: which profile, when, how big, and what didn't fit. */
+/** An automatic backup, as a row: which profile, when and how big, and a bin. */
 @Composable
 internal fun ProfileBackupRow(context: Context, backup: ProfileBackup, busy: Boolean, onDelete: () -> Unit) {
-    CycloneSimpleCard(Modifier.fillMaxWidth()) {
-        Text(backup.label, style = MaterialTheme.typography.titleSmall)
-        Text(
-            "Backed up ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(backup.createdAtMs))} · " +
-                Formatter.formatShortFileSize(context, backup.bytes) + " · ${backup.packages.size} apps" +
-                if (backup.skipped.isNotEmpty()) " · ${backup.skipped.size} didn't fit" else "",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        CycloneLiquidTextAction("Delete backup", onDelete, Modifier.fillMaxWidth(), enabled = !busy)
-    }
+    ProfileRow(
+        title = backup.label,
+        subtitle = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(backup.createdAtMs)) + " · " +
+            Formatter.formatShortFileSize(context, backup.bytes),
+        onClick = null,
+        leading = { ProfileIconTile(Icons.Rounded.Archive, Color(0xFF8E8E93)) },
+        trailing = {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).clickable(enabled = !busy, role = Role.Button, onClick = onDelete)
+                    .semantics { contentDescription = "Delete backup of ${backup.label}" },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(21.dp), tint = ProfileGlass.Destructive) }
+        },
+    )
 }
 
-/** A round badge in the profile's colour with its emoji, or its first letter. */
+/** A round badge in the profile's colour with its emoji, or its letter. */
 @Composable
-internal fun ProfileBadge(emoji: String?, color: Long?, label: String, size: Int = 44) {
-    Box(
-        Modifier.size(size.dp).clip(CircleShape).background(Color(color ?: 0xFF3E7BFA)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(emoji ?: label.take(1).uppercase(), fontSize = (size * 0.45f).sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-    }
-}
+internal fun ProfileBadge(emoji: String?, color: Long?, label: String, size: Int = 44) =
+    ProfileAvatar(label, emoji, color, size = size.dp)
 
-/** Name, emoji and colour in one small sheet. */
+/** Name, emoji and colour in one sheet, with the face changing as you type. */
 @Composable
 internal fun ProfileLookDialog(
     record: CycloneProfileRecord,
@@ -110,62 +106,50 @@ internal fun ProfileLookDialog(
     var label by remember { mutableStateOf(record.label) }
     var emoji by remember { mutableStateOf(record.emoji.orEmpty()) }
     var color by remember { mutableStateOf(record.color ?: ProfileColors.first()) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Rename profile") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ProfileBadge(emoji.ifBlank { null }, color, label.ifBlank { "?" }, 52)
-                    OutlinedTextField(label, { label = it.take(40) }, Modifier.weight(1f), label = { Text("Name") }, singleLine = true)
-                }
-                OutlinedTextField(emoji, { emoji = it.take(16) }, Modifier.fillMaxWidth(), label = { Text("Emoji (optional)") }, singleLine = true)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ProfileColors.forEach { c ->
-                        Box(
-                            Modifier.size(28.dp).clip(CircleShape).background(Color(c))
-                                .then(if (c == color) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
-                                .clickable(role = Role.RadioButton) { color = c }
-                                .semantics { contentDescription = if (c == color) "Colour, selected" else "Colour" },
-                        )
-                    }
-                }
+    ProfileSheet(onDismiss, "Edit profile") {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            ProfileAvatar(label.ifBlank { "?" }, emoji.ifBlank { null }, color, size = 88.dp)
+        }
+        ProfileTextField(label, { label = it.take(40) }, "Name", large = true)
+        ProfileTextField(emoji, { emoji = it.take(16) }, "Emoji (optional)")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            ProfileColors.forEach { c ->
+                Box(
+                    Modifier.size(32.dp).clip(CircleShape).background(Color(c))
+                        .then(if (c == color) Modifier.border(2.5.dp, Color.White, CircleShape) else Modifier)
+                        .clickable(role = Role.RadioButton) { color = c }
+                        .semantics { contentDescription = if (c == color) "Colour, selected" else "Colour" },
+                )
             }
-        },
-        confirmButton = { TextButton(onClick = { onSave(label, emoji.ifBlank { null }, color) }, enabled = label.isNotBlank()) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        }
+        ProfileButton("Save", { onSave(label, emoji.ifBlank { null }, color) }, Modifier.fillMaxWidth(),
+            style = ProfileButtonStyle.PRIMARY, enabled = label.isNotBlank())
+        ProfileButton("Cancel", onDismiss, Modifier.fillMaxWidth(), style = ProfileButtonStyle.QUIET)
+    }
 }
 
 /** A plain confirmation with the consequence spelled out. */
 @Composable
-internal fun ProfileConfirmDialog(title: String, body: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(body) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
+internal fun ProfileConfirmDialog(title: String, body: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) =
+    ProfileConfirmSheet(title, body, confirm, onConfirm, onDismiss)
 
 /**
- * Plan 40 P2: one quiet line about Cyclone Carry: what the last switch brought into this profile, and a note when the
- * last carry out of it didn't arrive (the switch itself still happened).
+ * Plan 40 P2: Cyclone Carry in one quiet line: what the last switch brought into this profile, or a note when the last
+ * carry out of it didn't arrive (the switch itself still happened). Nothing is shown when there is nothing to say.
  */
 @Composable
 internal fun ProfileCarryNote(report: CarryReport?, sentFailed: Boolean) {
     val line = report?.let { r -> CarryRules.line(r)?.let { "$it · ${DateUtils.getRelativeTimeSpanString(r.atMs)}" } }
-    CycloneSimpleCard(Modifier.fillMaxWidth()) {
-        Text("Cyclone Carry", style = MaterialTheme.typography.titleSmall)
-        Text(
-            listOfNotNull(
-                line ?: "Your memory, skills and settings go with you each time you switch profiles.",
-                if (sentFailed) "Last time, what you learned here couldn't be carried to the next profile. It will go with your next switch." else null,
-            ).joinToString("\n"),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    when {
+        sentFailed -> ProfileNotice("What you learned here goes with your next switch.", ProfileNoticeKind.INFO)
+        line != null -> Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Rounded.Sync, null, Modifier.size(16.dp), tint = AskGlass.Muted)
+            Text(line, color = AskGlass.Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

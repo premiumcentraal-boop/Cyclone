@@ -12,13 +12,17 @@ class CycloneProfile429ContractTest {
         File("apps/mobile/app/src/main/java/com/cyclone/mobile/$path"),
     ).first { it.isFile }.readText()
 
-    @Test fun profilesDefaultToAllAndRetainActiveAndAppGroups() {
+    @Test fun profilesHomeIsOneGridOfFacesWithWorkingNowAndNoTabs() {
         val source = source("ui/v32/CycloneProfilesPage.kt")
-        // Plan 40 P1 adds Deleted, shown only when something is in it.
-        assertTrue(source.contains("private enum class ProfilesTab { ACTIVE, ALL, GROUPS, DELETED }"))
-        assertTrue(source.contains("mutableStateOf(ProfilesTab.ALL)"))
-        assertTrue(source.contains("\"Active (\${activeProfiles.size})\", \"All profiles\", \"Groups\""))
-        assertTrue(source.contains("listOf(\"Deleted (\${trash.size})\")"))
+        // The redesign: one home (a grid of profiles, a New tile last), pages for the rest, no tab strip.
+        assertTrue(source.contains("private enum class ProfilesScreen { HOME, DETAIL, DETAILS, SHARED_APPS, SHARED_APP, DELETED, ESSENTIALS }"))
+        assertTrue(source.contains("mutableStateOf(ProfilesScreen.HOME)"))
+        assertTrue(source.contains("val tiles: List<ProfileCluster?> = allProfiles + listOf(null)"))
+        assertTrue(source.contains("tiles.chunked(3)"))
+        assertTrue(source.contains("ProfileSectionLabel(\"Working now\")"))
+        assertFalse(source.contains("CycloneSegmentedControl("))
+        // Plan 40 P1: Recently deleted is offered only when something is in it.
+        assertTrue(source.contains("if (trash.isNotEmpty() || backups.isNotEmpty())"))
     }
 
     @Test fun profilesAggregateWorkspacesByAndroidIdentityNotByApp() {
@@ -32,8 +36,8 @@ class CycloneProfile429ContractTest {
         val source = source("ui/v32/CycloneProfilesPage.kt")
         assertTrue(source.contains("CycloneAppIcon(packageName"))
         assertTrue(source.contains("\"\$app · \${profile.label}\""))
-        assertTrue(source.contains("Text(\"View progress\")"))
-        assertTrue(source.contains("\"Open profile\""))
+        assertTrue(source.contains("UiTask(exactTask).open(context)"))
+        assertTrue(source.contains("\"Switch to \${profile.label}\""))
         assertTrue(source.contains("val openingMain = profile.owner"))
         assertTrue(source.contains("ProfileSetupRuntime.openProfile(context, if (openingMain) null else recordId)"))
         assertTrue(source.contains("ProfilePresentationPolicy.isCurrent(userId, verifiedCurrentUser)"))
@@ -42,11 +46,12 @@ class CycloneProfile429ContractTest {
         assertFalse(source.contains("it.id in emptySet<String>()"))
     }
 
-    @Test fun allProfilesAreIdentityCardsWithAppCountsAndIcons() {
+    @Test fun allProfilesAreFacesWithTheCurrentOneRingedAndAppCounts() {
         val source = source("ui/v32/CycloneProfilesPage.kt")
         assertTrue(source.contains("private fun ProfileIdentityCard429"))
-        assertTrue(source.contains("profile.packages.take(5).forEach"))
-        assertTrue(source.contains("if (profile.packages.size == 1) \"app\" else \"apps\""))
+        assertTrue(source.contains("ring = profile.current"))
+        assertTrue(source.contains("ProfileWords.apps(packages.size)"))
+        assertTrue(source.contains("apps.chunked(4)"))
     }
 
     @Test fun rootedAndNativePillsFollowStoredCloakProfileBindings() {
@@ -56,7 +61,9 @@ class CycloneProfile429ContractTest {
         assertTrue(page.contains("ProfileSourcePill429(profile.cloakHealth)"))
         assertTrue(page.contains("health.pill"))
         assertTrue(page.contains("cloakBindings = cloakBindings.filter { it.profileId == record?.id }"))
-        assertTrue(page.contains("onInfo = { selectedProfileKey = profile.key; showProfileIdentifiers = true }"))
+        assertTrue(page.contains("onIdentifiers = { screen = ProfilesScreen.DETAILS }"))
+        // A plain profile needs no label: the Cloak line shows only when Cloak is in play.
+        assertTrue(page.contains("if (profile.cloakHealth != com.cyclone.mobile.connector.CloakHealth.NATIVE) ProfileSourcePill429(profile.cloakHealth)"))
     }
 
     @Test fun profileInfoPageShowsManagedIdsAndCopiesValuesWithoutInventingDeviceIds() {
@@ -105,14 +112,13 @@ class CycloneProfile429ContractTest {
         assertTrue(source.contains("private data class AppProfileGroup"))
         assertTrue(source.contains("profile.packages.map { it to profile }"))
         assertTrue(source.contains("AppGroupDetail429"))
-        assertTrue(source.contains("if (group.profiles.size == 1) \"profile\" else \"profiles\""))
+        assertTrue(source.contains("if (group.profiles.size == 1) \"1 profile\" else \"\${group.profiles.size} profiles\""))
     }
 
     @Test fun profileCreationNamesIdentityBeforeSelectingApps() {
         val source = source("ui/ProfileSetup429.kt")
-        assertTrue(source.contains("Text(\"Name your profile\""))
-        assertTrue(source.contains("label = { Text(\"Profile name\") }"))
-        assertTrue(source.contains("placeholder = { Text(\"Profile name\") }"))
+        assertTrue(source.contains("StepHeader(\"Name your profile\""))
+        assertTrue(source.contains("placeholder = \"Profile name\""))
         assertFalse(source.contains("listOf(\"Creator\", \"Store\", \"Personal\")"))
         assertTrue(source.contains("ProfileSetupAction(\"Choose apps\""))
         assertTrue(source.contains("JOURNAL_DISPLAY_LABEL"))
@@ -122,7 +128,7 @@ class CycloneProfile429ContractTest {
         val source = source("ui/ProfileSetup429.kt")
         assertTrue(source.contains("ProfileAppIcon429"))
         assertTrue(source.contains("getApplicationIcon(packageName)"))
-        assertTrue(source.contains("Text(\"Open\")"))
+        assertTrue(source.contains("AppIconGrid(context, packages, max = 24, onOpen ="))
         assertFalse(source.contains("Open Chrome"))
         assertFalse(source.contains("Open AnyDesk"))
         assertFalse(source.contains("Two spaces. One phone."))

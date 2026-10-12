@@ -18,8 +18,9 @@ class CycloneProfileProvisioningUiTest {
         assertTrue(panel.contains("Text(issue.action"))
         assertTrue(panel.contains("ProfileDebugButtons(issue)"))
         // Plan 57 W7: + always starts a new plan.
-        assertTrue(page.contains("FilledIconButton(onClick = { startNewProfile() }"))
-        assertFalse(page.contains("FilledIconButton(onClick = { setup = true }"))
+        assertTrue(page.contains("AskRoundChip(\"New profile\", { startNewProfile() }"))
+        assertTrue(page.contains("NewProfileTile { startNewProfile() }"))
+        assertFalse(page.contains("{ setup = true }) {\n                            Icon(Icons.Rounded.Add"))
     }
 
     @Test fun profileErrorUiDoesNotMisrouteRootFailuresToShizuku() {

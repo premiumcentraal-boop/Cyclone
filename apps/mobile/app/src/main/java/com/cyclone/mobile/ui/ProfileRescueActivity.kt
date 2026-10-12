@@ -9,6 +9,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.rounded.Home
 import com.cyclone.mobile.MainActivity
 import com.cyclone.mobile.runtime.workspaces.ProfileSetupRuntime
 import com.cyclone.mobile.runtime.workspaces.ProfileBootstrapRuntime
@@ -21,11 +23,12 @@ class ProfileRescueActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            com.cyclone.mobile.ui.v32.CycloneV32Theme {
+            com.cyclone.mobile.ui.v32.CycloneV32Theme(glass = true) {
                 val scope = rememberCoroutineScope()
                 var busy by remember { mutableStateOf(false) }
                 val setupState by ProfileSetupRuntime.state.collectAsState()
-                var message by remember { mutableStateOf(if (intent.getBooleanExtra("repair_failed", false)) "Repair could not finish. You can return to your main profile safely below." else "This profile hasn't inherited Cyclone's setup yet.") }
+                var debug by remember { mutableStateOf(false) }
+                var message by remember { mutableStateOf(if (intent.getBooleanExtra("repair_failed", false)) "Repair couldn't finish. You can go back to Main safely." else "This profile hasn't got Cyclone's setup yet.") }
                 fun perform(repair: Boolean) {
                     busy = true
                     scope.launch {
@@ -33,30 +36,41 @@ class ProfileRescueActivity : ComponentActivity() {
                             runCatching {
                                 if (repair) ProfileBootstrapRuntime.requestRepair(this@ProfileRescueActivity)
                                 else ProfileSetupRuntime.openProfile(this@ProfileRescueActivity, null)
-                                if (repair) "Repair started. Cyclone will reopen when your settings are ready." else "Returning to your main profile…"
-                            }.getOrElse { "Cyclone couldn't complete that action. If root is unavailable here, use Android's profile switcher below." }
+                                if (repair) "Repair started. Cyclone reopens when it's ready." else "Going back to Main…"
+                            }.getOrElse { "That didn't work. If root isn't available here, use Android's switcher." }
                         }
                         busy = false
                     }
                 }
-                Surface(Modifier.fillMaxSize()) {
-                    Column(Modifier.fillMaxSize().systemBarsPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Text("Get back to your Cyclone", style = MaterialTheme.typography.headlineMedium)
-                        Text(message)
-                        Button(enabled = !busy, onClick = { perform(false) }) { Text("Return to main profile") }
-                        OutlinedButton(enabled = !busy, onClick = { perform(true) }) { Text("Repair from main profile") }
-                        TextButton(onClick = {
+                com.cyclone.mobile.ui.v32.ProfileCalmPage {
+                    Column(
+                        Modifier.fillMaxSize().systemBarsPadding().padding(24.dp),
+                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp, androidx.compose.ui.Alignment.CenterVertically),
+                    ) {
+                        com.cyclone.mobile.ui.v32.ProfileAvatar("Main", size = 96.dp, icon = androidx.compose.material.icons.Icons.Rounded.Home)
+                        Text("Get back to Main", color = com.cyclone.mobile.ui.v32.ask.AskGlass.Ink, fontSize = 30.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                        Text(message, color = com.cyclone.mobile.ui.v32.ask.AskGlass.Muted, fontSize = 16.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Spacer(Modifier.height(8.dp))
+                        com.cyclone.mobile.ui.v32.ProfileButton("Back to Main", { perform(false) }, Modifier.fillMaxWidth(),
+                            style = com.cyclone.mobile.ui.v32.ProfileButtonStyle.PRIMARY, enabled = !busy)
+                        com.cyclone.mobile.ui.v32.ProfileButton("Repair from Main", { perform(true) }, Modifier.fillMaxWidth(), enabled = !busy)
+                        com.cyclone.mobile.ui.v32.ProfileButton("Open Android's switcher", {
                             runCatching { startActivity(Intent("android.settings.USER_SETTINGS")) }
                                 .onFailure { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) }
-                        }) { Text("Open Android profile switcher") }
-                        TextButton(onClick = {
+                        }, Modifier.fillMaxWidth(), style = com.cyclone.mobile.ui.v32.ProfileButtonStyle.QUIET)
+                        com.cyclone.mobile.ui.v32.ProfileButton("Stay in this profile", {
                             startActivity(Intent(this@ProfileRescueActivity, MainActivity::class.java).putExtra("skip_profile_rescue", true))
                             finish()
-                        }) { Text("Continue in this profile") }
+                        }, Modifier.fillMaxWidth(), style = com.cyclone.mobile.ui.v32.ProfileButtonStyle.QUIET)
                         // Plan 57 W8: the debug file is reachable even here, where nothing else of Cyclone runs.
-                        ProfileDebugButtons(setupState.issue)
+                        com.cyclone.mobile.ui.v32.ProfileButton("Debug report", { debug = true },
+                            style = com.cyclone.mobile.ui.v32.ProfileButtonStyle.QUIET, compact = true)
                     }
                 }
+                if (debug) com.cyclone.mobile.ui.v32.ProfileSheet({ debug = false }, "Debug report") { ProfileDebugButtons(setupState.issue) }
             }
         }
     }
