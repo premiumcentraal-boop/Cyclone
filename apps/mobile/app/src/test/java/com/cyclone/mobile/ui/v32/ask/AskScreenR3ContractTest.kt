@@ -66,8 +66,9 @@ class AskScreenR3ContractTest {
         }
         val tilt = source("com/cyclone/mobile/ui/overlay/glass/TiltGlass.kt")
         assertTrue(tilt.contains("SMOKE(Triple(Color(0xFF1C1E23)"))
-        assertTrue(tilt.contains("val LocalGlassPalette = androidx.compose.runtime.staticCompositionLocalOf { GlassPalette.TEAL }"))
-        // The shared task cards take the page's palette; the floating overlay never sets it, so it stays teal.
+        assertTrue(tilt.contains("val LocalGlassPalette = androidx.compose.runtime.staticCompositionLocalOf { GlassPalette.VEIL }"))
+        // The shared task cards take the page's palette; the floating overlay never sets it, so it takes the VEIL:
+        // the in-app Ask bar's darkened smoke, no teal.
         val stack = source("com/cyclone/mobile/ui/overlay/OverlayGlassStack.kt")
         assertEquals(4, Regex("palette = LocalGlassPalette.current").findAll(stack).count())
         assertFalse(source("com/cyclone/mobile/ui/overlay/OverlayChrome.kt").contains("LocalGlassPalette provides"))

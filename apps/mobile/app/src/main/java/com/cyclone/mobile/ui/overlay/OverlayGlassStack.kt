@@ -101,7 +101,7 @@ internal val GlassMuted = Color(0xFFA6CCCA)
 internal val GlassDim = Color(0xFF6F9896)
 internal val GlassTeal = Color(0xFF83DBD7)
 internal val GlassWarm = Color(0xFFE9C78B)
-private val VeilTint = Color(0x4D04181D)
+private val VeilTint = Color(0x47000000)
 
 /** Plan 27 geometry: the gaps between the stacked capsules. */
 object OverlayStackGeometry {
@@ -339,7 +339,7 @@ private fun DepthLogos(apps: List<String>, onClick: (() -> Unit)?) {
                     },
             ) {
                 AppLogo(pkg, front, current = depth == 0)
-                if (depth > 0) Box(Modifier.size(front).clip(CircleShape).background(Color(0xFF041418).copy(alpha = 0.18f * depth)))
+                if (depth > 0) Box(Modifier.size(front).clip(CircleShape).background(Color.Black.copy(alpha = 0.18f * depth)))
             }
         }
     }

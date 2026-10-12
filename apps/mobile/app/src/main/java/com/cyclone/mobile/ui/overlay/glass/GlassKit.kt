@@ -207,7 +207,7 @@ fun GlassRoundButton(
 }
 
 /** The soft pill text sits on: no edge, fully rounded, so the dots show faintly through it. */
-fun Modifier.veilPill(): Modifier = background(Color(0x4D04181D), RoundedCornerShape(percent = 50))
+fun Modifier.veilPill(): Modifier = background(Color(0x47000000), RoundedCornerShape(percent = 50))
 
 /**
  * The voice button (plan 27): a normal round glass button until the owner talks, then a living teal orb. The orb is a
@@ -355,7 +355,7 @@ fun AppLogo(packageName: String?, size: Dp, current: Boolean = false, modifier: 
         .drawWithContent {
             drawContent()
             val r = this.size.minDimension / 2f
-            drawCircle(Color(0xF2062026), radius = r + 1.dp.toPx(), style = Stroke(2.dp.toPx()))
+            drawCircle(Color(0xF2101114), radius = r + 1.dp.toPx(), style = Stroke(2.dp.toPx()))
             if (current) drawCircle(Teal.copy(alpha = 0.55f), radius = r + 2.6.dp.toPx(), style = Stroke(1.4.dp.toPx()))
         }) {
         Image(bitmap, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(size).clip(CircleShape))

@@ -208,11 +208,11 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
                     horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box(Modifier.size(Lane), contentAlignment = Alignment.Center) {
                         when (state) {
-                            0 -> Box(Modifier.size(16.dp).clip(CircleShape).background(Color(0xFF0B2226)), contentAlignment = Alignment.Center) {
+                            0 -> Box(Modifier.size(16.dp).clip(CircleShape).background(Color(0xFF15171A)), contentAlignment = Alignment.Center) {
                                 Icon(Icons.Rounded.Check, null, Modifier.size(12.dp), tint = Branch)
                             }
-                            1 -> Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF0B2226)), contentAlignment = Alignment.Center) { GlassSpinner(13) }
-                            else -> Box(Modifier.size(9.dp).clip(CircleShape).background(Color(0xFF0B2226))
+                            1 -> Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF15171A)), contentAlignment = Alignment.Center) { GlassSpinner(13) }
+                            else -> Box(Modifier.size(9.dp).clip(CircleShape).background(Color(0xFF15171A))
                                 .border(1.3.dp, GlassMuted.copy(alpha = 0.55f), CircleShape))
                         }
                     }

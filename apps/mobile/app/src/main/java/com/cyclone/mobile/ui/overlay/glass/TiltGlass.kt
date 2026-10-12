@@ -19,6 +19,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -106,13 +107,21 @@ enum class GlassPalette(
     internal val hairline: Color,
     internal val glow: Color,
     internal val rim: Color,
+    /** How much of the app underneath the body hides: 1 is solid, lower lets it show through, darkened. */
+    internal val bodyAlpha: Float = 0.95f,
 ) {
     TEAL(Triple(Color(0xFF10383E), Color(0xFF062228), Color(0xFF08282E)), Teal, 0x83DBD7, Color(0xFFA0E2DE), Color(0xFF83E6DE), Color(0xFFF0FFFD)),
     SMOKE(Triple(Color(0xFF1C1E23), Color(0xFF0F1013), Color(0xFF14161A)), Color(0xFFFFFFFF), 0xD6DCE4, Color(0xFFFFFFFF), Color(0xFFE8ECF2), Color(0xFFFFFFFF)),
+    /**
+     * The overlay's glass, matched to the in-app Ask bar: no teal, a darkened see-through veil over whatever app is
+     * underneath ([bodyAlpha] below 1), light grey dots and a white shine.
+     */
+    VEIL(Triple(Color(0xFF16181C), Color(0xFF08090B), Color(0xFF0C0D10)), Color(0xFFFFFFFF), 0xD6DCE4, Color(0xFFFFFFFF), Color(0xFFE8ECF2), Color(0xFFFFFFFF),
+        bodyAlpha = 0.86f),
 }
 
 /** The palette glass under this point uses; surfaces that call [tiltGlass] pass it on. The overlay never sets it. */
-val LocalGlassPalette = androidx.compose.runtime.staticCompositionLocalOf { GlassPalette.TEAL }
+val LocalGlassPalette = androidx.compose.runtime.staticCompositionLocalOf { GlassPalette.VEIL }
 
 /**
  * The glass itself (plan 27): dark teal body with a sheen leaning towards the light, a crisp hairline, a sharp shine
@@ -124,21 +133,20 @@ fun Modifier.tiltGlass(
     dots: Boolean = true,
     thin: Boolean = false,
     seeThrough: Float = 1f,
-    palette: GlassPalette = GlassPalette.TEAL,
+    palette: GlassPalette = GlassPalette.VEIL,
 ): Modifier = drawWithCache {
     val w = size.width
     val h = size.height
     val r = min(cornerRadius.toPx(), min(w, h) / 2f)
-    val outline = Path().apply { addRoundRect(RoundRect(0f, 0f, w, h, CornerRadius(r))) }
+    // Continuous (squircle) corners, like the in-app Ask bar: the curve eases into the straight edges.
+    val outline = continuousOutline(0f, w, h, r)
     // The dots stop just inside the lit rim (its line and glow), so none show between the shine and the edge.
     val dotInset = 1.5.dp.toPx()
-    val dotOutline = Path().apply {
-        addRoundRect(RoundRect(dotInset, dotInset, w - dotInset, h - dotInset, CornerRadius(max(0f, r - dotInset))))
-    }
+    val dotOutline = continuousOutline(dotInset, w, h, max(0f, r - dotInset))
     val body = Brush.verticalGradient(
-        0f to palette.body.first.copy(alpha = 0.94f * seeThrough),
-        0.55f to palette.body.second.copy(alpha = 0.95f * seeThrough),
-        1f to palette.body.third.copy(alpha = 0.95f * seeThrough),
+        0f to palette.body.first.copy(alpha = (palette.bodyAlpha - 0.01f) * seeThrough),
+        0.55f to palette.body.second.copy(alpha = palette.bodyAlpha * seeThrough),
+        1f to palette.body.third.copy(alpha = palette.bodyAlpha * seeThrough),
     )
     // Halftone band: dot centres and their place relative to the rim, computed once per size.
     val step = 4.3.dp.toPx()
@@ -174,7 +182,8 @@ fun Modifier.tiltGlass(
         strokeCap = android.graphics.Paint.Cap.ROUND
     }
     val dpPx = 1.dp.toPx()
-    val rim = rimSegments(w - 1.2f, h - 1.2f, max(0f, r - 0.6f), 260)
+    // The shine traces the same continuous outline, set in by 0.6 px.
+    val rim = pathSegments(continuousOutline(0.6f, w, h, max(0f, r - 0.6f)), w / 2f, h / 2f, 260)
     val hairline = Stroke(0.8.dp.toPx())
     // A tight glow under a crisp line: the shine reads as one sharp edge.
     val glowWidth = 2.dp.toPx()
@@ -245,9 +254,9 @@ fun Modifier.tiltGlass(
                 val level = if (intensity < 0.02f) -1 else (alpha * RIM_LEVELS).roundToInt().coerceIn(1, RIM_LEVELS)
                 if (level != runLevel) {
                     flush()
-                    if (level > 0) { rimRun.moveTo(rim[i] + 0.6f, rim[i + 1] + 0.6f); runLevel = level }
+                    if (level > 0) { rimRun.moveTo(rim[i], rim[i + 1]); runLevel = level }
                 }
-                if (level > 0) rimRun.lineTo(rim[i + 2] + 0.6f, rim[i + 3] + 0.6f)
+                if (level > 0) rimRun.lineTo(rim[i + 2], rim[i + 3])
                 i += 5
             }
             flush()
@@ -261,6 +270,45 @@ private const val RIM_LEVELS = 48
 /** The halftone sits quietly in the glass: a little under full strength. */
 internal const val DOT_OPACITY = 0.68f
 private const val RADIUS_LEVELS = 8
+
+/** A continuous-corner (squircle) rounded rectangle, inset by [inset] on every side, as a path. */
+private fun androidx.compose.ui.draw.CacheDrawScope.continuousOutline(inset: Float, w: Float, h: Float, radius: Float): Path {
+    val iw = max(0f, w - 2 * inset)
+    val ih = max(0f, h - 2 * inset)
+    val path = Path()
+    when (val o = com.kyant.capsule.ContinuousRoundedRectangle(radius.toDp())
+        .createOutline(androidx.compose.ui.geometry.Size(iw, ih), layoutDirection, this)) {
+        is androidx.compose.ui.graphics.Outline.Generic -> path.addPath(o.path)
+        is androidx.compose.ui.graphics.Outline.Rounded -> path.addRoundRect(o.roundRect)
+        is androidx.compose.ui.graphics.Outline.Rectangle -> path.addRect(o.rect)
+    }
+    if (inset != 0f) path.translate(Offset(inset, inset))
+    return path
+}
+
+/**
+ * Segments along any closed outline: x0, y0, x1, y1 and the outward normal angle, five floats each. The normal is the
+ * tangent turned to face away from the centre ([cx], [cy]).
+ */
+internal fun pathSegments(path: Path, cx: Float, cy: Float, n: Int): FloatArray {
+    val measure = android.graphics.PathMeasure(path.asAndroidPath(), true)
+    val length = measure.length
+    if (length <= 0f || n <= 0) return FloatArray(0)
+    val pos = FloatArray(2); val tan = FloatArray(2)
+    val xs = FloatArray(n + 1); val ys = FloatArray(n + 1); val normals = FloatArray(n + 1)
+    for (i in 0..n) {
+        measure.getPosTan(length * (i % n) / n, pos, tan)
+        xs[i] = pos[0]; ys[i] = pos[1]
+        var nx = tan[1]; var ny = -tan[0]
+        if (nx * (pos[0] - cx) + ny * (pos[1] - cy) < 0f) { nx = -nx; ny = -ny }
+        normals[i] = kotlin.math.atan2(ny, nx)
+    }
+    val out = FloatArray(n * 5)
+    for (i in 0 until n) {
+        out[i * 5] = xs[i]; out[i * 5 + 1] = ys[i]; out[i * 5 + 2] = xs[i + 1]; out[i * 5 + 3] = ys[i + 1]; out[i * 5 + 4] = normals[i]
+    }
+    return out
+}
 
 /** Segments around a rounded rectangle: x0, y0, x1, y1, outward normal angle — five floats each. */
 internal fun rimSegments(w: Float, h: Float, radius: Float, n: Int): FloatArray {
