@@ -2049,6 +2049,10 @@ class PhoneMindToolbox(
                 row.optString("app").trim().take(40).takeIf { it.isNotBlank() }, row.optString("why").trim().take(120).takeIf { it.isNotBlank() })
         }.take(20)
         plan = detailed.map { MindPlanStep(it.text, it.status) }
+        // The step it is on and the model's own "why" for it, for the confirmation gate's info icon.
+        detailed.firstOrNull { it.status == "doing" }?.let { step ->
+            com.cyclone.mobile.policy.ActionReason.set(step.why?.let { "${step.text}: $it" } ?: step.text)
+        }
         val notes = mutableListOf<String>()
         // Plan 38: every plan is versioned; a diversion (a steer, a declared divert, dropped steps) becomes plan vN.
         val divert = arguments.optJSONObject("divert")?.let { d ->

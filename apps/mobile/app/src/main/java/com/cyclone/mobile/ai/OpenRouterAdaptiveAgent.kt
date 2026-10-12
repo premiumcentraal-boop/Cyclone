@@ -968,6 +968,8 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                     if (session.navigation.index != beforeClause) return planNext(taskState, observation)
                 }
                 if (decision.displaySummary.isNotBlank()) onProgress(decision.displaySummary)
+                // The model's user-facing reason, for the confirmation gate's info icon.
+                com.cyclone.mobile.policy.ActionReason.set(decision.displaySummary)
                 return planFromDecision(decision, session.state.page.pageKey)
             }
         }

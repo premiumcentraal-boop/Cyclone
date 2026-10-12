@@ -581,7 +581,13 @@ private fun OutcomeHistory(outcome: String, milestones: List<TaskPresentationMil
  * app) with a small line, then the content itself. Approvals and the confirmation gate share it.
  */
 @Composable
-internal fun ContextBox(app: String?, caption: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun ContextBox(
+    app: String?,
+    caption: String,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
     Column(
         modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.07f))
             .litRim(cornerRadius = 20.dp).padding(horizontal = 16.dp, vertical = 14.dp),
@@ -591,7 +597,8 @@ internal fun ContextBox(app: String?, caption: String, modifier: Modifier = Modi
             Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
                 if (app == null) CycloneMark(20) else AppLogo(app, 26.dp, ring = false)
             }
-            Text(caption, color = GlassMuted, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(caption, Modifier.weight(1f), color = GlassMuted, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            trailing?.invoke()
         }
         content()
     }

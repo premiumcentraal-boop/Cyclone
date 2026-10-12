@@ -154,6 +154,8 @@ object OverlayChromeRuntime {
 
     fun missionFinished(sessionId: String, ok: Boolean, message: String) {
         voiceOwnedAt = 0L
+        GateShown.clear()
+        com.cyclone.mobile.policy.ActionReason.clear()
         synchronized(lock) {
             pendingGateChallenge = null
             approvedGateChallenge = null
@@ -292,6 +294,8 @@ object OverlayChromeRuntime {
             pendingGateChallenge = null
             approvedGateChallenge = null
         }
+        GateShown.clear()
+        com.cyclone.mobile.policy.ActionReason.clear()
         mutate { it.resetIdle(idleChipVisible) }
     }
 
@@ -311,7 +315,7 @@ object OverlayChromeRuntime {
             )
             approvedGateChallenge = null
         }
-        GateShown.record(gateClass, labels)
+        GateShown.record(gateClass)
     }
 
     fun hasGateApproval(gateClass: OverlayGateClass, action: String, labels: List<String>): Boolean =

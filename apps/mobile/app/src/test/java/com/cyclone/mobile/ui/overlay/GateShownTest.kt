@@ -1,30 +1,30 @@
 package com.cyclone.mobile.ui.overlay
 
+import com.cyclone.mobile.policy.ActionReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GateShownTest {
-    @Test fun controlIsTheFirstShortLabelWithLetters() {
-        assertEquals("Pay €12.99", GateShown.control(listOf("", "Pay  €12.99", "Checkout")))
-        assertEquals("Send", GateShown.control(listOf("123456789", "Send")))
-        assertNull(GateShown.control(listOf("A very long paragraph of message text that is not a button label at all")))
+    @Test fun gateTitleSaysWhatAndWhere() {
+        assertEquals("Send a message in WhatsApp", OverlayGlassCopy.gate(OverlayGateClass.SEND, "WhatsApp").title)
+        assertEquals("Make a payment", OverlayGlassCopy.gate(OverlayGateClass.PAY, null).title)
+        assertEquals("Give access", OverlayGlassCopy.gate(OverlayGateClass.GRANT, null).title)
     }
 
-    @Test fun gateWordsSayWhatWhereAndThatNothingHappensYet() {
-        val send = OverlayGlassCopy.gate(OverlayGateClass.SEND, "WhatsApp", "Send")
-        assertEquals("Send a message in WhatsApp", send.title)
-        assertEquals("Cyclone stopped before tapping “Send”. Nothing is sent until you say so.", send.detail)
-        val grant = OverlayGlassCopy.gate(OverlayGateClass.GRANT, null, null)
-        assertEquals("Give access", grant.title)
-        assertTrue(grant.detail.startsWith("Cyclone stopped before doing this."))
-    }
-
-    @Test fun theGateRemembersTheAppAndControl() {
-        GateShown.record(OverlayGateClass.PAY, listOf("Pay now"), "com.example.shop")
-        assertEquals(GateShown(OverlayGateClass.PAY, "com.example.shop", "Pay now"), GateShown.current.value)
+    @Test fun theGateRemembersTheAppAndTheModelsReason() {
+        ActionReason.set("  Send the photos:   she asked for them  ")
+        GateShown.record(OverlayGateClass.PAY, "com.example.shop")
+        assertEquals(GateShown(OverlayGateClass.PAY, "com.example.shop", "Send the photos: she asked for them"), GateShown.current.value)
         GateShown.clear()
+        ActionReason.clear()
         assertNull(GateShown.current.value)
+    }
+
+    @Test fun aStaleReasonIsNotShown() {
+        ActionReason.set("Old step", nowMs = 0L)
+        assertNull(ActionReason.current(nowMs = 11 * 60_000L))
+        assertEquals("Old step", ActionReason.current(nowMs = 60_000L))
+        ActionReason.clear()
     }
 }

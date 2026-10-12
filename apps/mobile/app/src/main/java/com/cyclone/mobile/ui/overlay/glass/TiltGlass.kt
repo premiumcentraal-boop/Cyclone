@@ -268,7 +268,7 @@ private const val ALPHA_LEVELS = 16
 /** Brightness steps of the shine: neighbouring segments in the same step are drawn as one stroke. */
 private const val RIM_LEVELS = 48
 /** The halftone sits quietly in the glass: a little under full strength. */
-internal const val DOT_OPACITY = 0.68f
+internal const val DOT_OPACITY = 0.45f
 private const val RADIUS_LEVELS = 8
 
 /** A continuous-corner (squircle) rounded rectangle, inset by [inset] on every side, as a path. */

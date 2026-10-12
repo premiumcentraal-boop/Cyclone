@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -224,7 +226,7 @@ fun OverlayChrome(
                 } else {
                     Box(Modifier.size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp))
                 }
-                "gate" -> GatePanel(snapshot, onAction)
+                "gate" -> GatePanel(snapshot, onAction = onAction)
                 else -> { com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight(); ComposerPanel(
                     snapshot = snapshot,
                     minimized = snapshot.minimized,
@@ -560,6 +562,7 @@ private fun ComposerPanel(
 @Composable
 private fun GatePanel(
     snapshot: OverlayChromeSnapshot,
+    whyOpenAtStart: Boolean = false,
     onAction: (OverlayUserAction) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -568,7 +571,7 @@ private fun GatePanel(
     val mine = shown?.takeIf { it.gateClass == snapshot.gateClass }
     val app = mine?.app
     val appName = app?.let { com.cyclone.mobile.ui.v32.appLabel(context, it) }?.takeIf { it != "Other" }
-    val words = snapshot.gateClass?.let { OverlayGlassCopy.gate(it, appName, mine?.control) }
+    val words = snapshot.gateClass?.let { OverlayGlassCopy.gate(it, appName) }
     // The same one-panel glass card as the working card: a warm chip, the action in its lit box with its app, one button.
     Box(Modifier.fillMaxWidth().wrapContentHeight().padding(horizontal = 12.dp)) {
         GlassCard {
@@ -583,11 +586,29 @@ private fun GatePanel(
                 }
             }
             if (words != null) {
-                ContextBox(app.takeIf { appName != null }, appName ?: "Cyclone", Modifier.padding(top = 16.dp)) {
+                // The model's own reason sits behind an info icon in the box: there when wanted, quiet otherwise.
+                var whyOpen by remember(mine) { mutableStateOf(whyOpenAtStart) }
+                val why = mine?.why
+                ContextBox(
+                    app.takeIf { appName != null }, appName ?: "Cyclone", Modifier.padding(top = 16.dp, bottom = 16.dp),
+                    trailing = if (why == null) null else ({
+                        Box(
+                            Modifier.size(32.dp).clip(CircleShape)
+                                .background(Color.White.copy(alpha = if (whyOpen) 0.16f else 0.0f))
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button,
+                                    onClickLabel = if (whyOpen) "Hide Cyclone's reason" else "Why Cyclone wants this") { whyOpen = !whyOpen },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Rounded.Info, "Why", Modifier.size(19.dp), tint = if (whyOpen) GlassInk else GlassMuted) }
+                    }),
+                ) {
                     Text(words.title, color = Color(0xFFF7F8FA), fontSize = 19.sp, fontWeight = FontWeight.SemiBold, lineHeight = 25.sp)
+                    androidx.compose.animation.AnimatedVisibility(whyOpen && why != null) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Cyclone's reason", color = GlassDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(why.orEmpty(), color = GlassInk.copy(alpha = 0.92f), fontSize = 14.5.sp, lineHeight = 20.sp)
+                        }
+                    }
                 }
-                Text(words.detail, color = GlassMuted, fontSize = 14.5.sp, lineHeight = 20.sp,
-                    modifier = Modifier.padding(top = 12.dp, bottom = 16.dp, start = 2.dp))
             } else {
                 Text(OverlayCopy.GATE, color = GlassInk, fontSize = 18.sp, fontWeight = FontWeight.Medium, lineHeight = 24.sp,
                     modifier = Modifier.padding(top = 18.dp, bottom = 18.dp))
