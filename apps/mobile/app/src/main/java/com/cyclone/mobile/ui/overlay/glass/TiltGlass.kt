@@ -46,14 +46,33 @@ object GlassLight {
     var y by mutableFloatStateOf(GlassOptics.REST_Y)
         private set
 
+    /** The glass's clock (seconds), for the dots' slow breathing; stays 0 with animations off. */
+    var time by mutableFloatStateOf(0f)
+        internal set
+
+    // Motion energy: set when the phone moves, then dies away on its own (read against [time], so any number of
+    // clocks can run without decaying it twice).
+    private var kick = 0f
+    private var kickAt = 0f
+
+    /** How much the phone has just moved, 0..1, fading over about a second. */
+    fun energyAt(t: Float): Float = GlassOptics.energyAfter(kick, t - kickAt)
+
     internal fun ease(tx: Float, ty: Float, amount: Float = 0.22f) {
-        x += (tx - x) * amount
-        y += (ty - y) * amount
+        val dx = (tx - x) * amount
+        val dy = (ty - y) * amount
+        x += dx
+        y += dy
+        // A quick tilt excites the dots; holding still lets them settle.
+        val now = time
+        kick = min(1f, energyAt(now) + GlassOptics.motionKick(dx, dy))
+        kickAt = now
     }
 
     internal fun rest() {
         x = GlassOptics.REST_X
         y = GlassOptics.REST_Y
+        kick = 0f
     }
 }
 
@@ -92,7 +111,32 @@ fun FollowPhoneLight() {
         sensors.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
         onDispose { sensors.unregisterListener(listener) }
     }
+    GlassClock(context)
 }
+
+/**
+ * Runs the glass clock while glass is on screen. Every frame while the dots ripple after a movement; otherwise about
+ * 20 times a second, which is plenty for the slow breathing and spares the battery. Off with animations off.
+ */
+@Composable
+private fun GlassClock(context: Context) {
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val still = runCatching {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        }.getOrDefault(false)
+        if (still) { GlassLight.time = 0f; return@LaunchedEffect }
+        while (true) {
+            androidx.compose.runtime.withFrameNanos { nanos ->
+                val now = (nanos / 1_000_000L % CLOCK_WRAP_MS) / 1000f
+                val due = now - GlassLight.time
+                if (due < 0f || due >= 0.05f || GlassLight.energyAt(now) > 0.02f) GlassLight.time = now
+            }
+        }
+    }
+}
+
+/** The clock wraps every hour so it keeps float precision; the breathing is periodic, so the wrap is one soft step. */
+private const val CLOCK_WRAP_MS = 3_600_000L
 
 private val Teal = Color(0xFF83DBD7)
 
@@ -155,20 +199,18 @@ fun Modifier.tiltGlass(
     val innerW = max(0f, w - 2 * band)
     val innerH = max(0f, h - 2 * band)
     val innerR = min(r, min(innerW, innerH) / 2f)
+    val rooms = ArrayList<Float>()
     if (dots && w > 0f && h > 0f) {
-        // The grid is centred on the panel, so both sides (and both corners of an edge) get the same dots; it used
-        // to start at the left and leave whatever was over at the right, which crowded and cut the right side.
+        // The grid is centred on the panel, so both sides and all four corners get the same dots.
         val cx = w / 2f
         val cy = h / 2f
         val rowsHalf = (cy / step).toInt() + 1
         val colsHalf = (cx / step).toInt() + 1
-        // The inset edge the dots must stay inside, whole: a dot that would cross it is left out instead of being
-        // cut in half by the clip (the "chunks" at the corners). Continuous corners sit inside a circular corner of
-        // the same radius, so the check uses a slightly rounder corner.
+        // The inset edge the dots live inside. Near it a dot is drawn smaller rather than cut or left out, so the
+        // band runs right into the corners and thins out along the curve.
         val edgeW = w - 2 * dotInset
         val edgeH = h - 2 * dotInset
-        val edgeR = min(max(0f, r - dotInset) * 1.3f, min(edgeW, edgeH) / 2f)
-        val maxScale = 1f + GlassOptics.DOT_FAR_GROWTH
+        val edgeR = min(max(0f, r - dotInset) * 1.1f, min(edgeW, edgeH) / 2f)
         for (row in -rowsHalf..rowsHalf) {
             val y = cy + row * step
             if (y < 0f || y > h) continue
@@ -176,27 +218,33 @@ fun Modifier.tiltGlass(
             for (col in -colsHalf - 1..colsHalf) {
                 val x = cx + col * step + shift
                 if (x < 0f || x > w) continue
-                // The band's inner edge is the panel's own rounded shape, set in by [band] with the same corner radius,
-                // so the dots fade out along a soft rounded line (never a sharp inner rectangle).
+                // The band's inner edge is the panel's own rounded shape, set in by [band]: the dots fade out along a
+                // soft rounded line (never a sharp inner rectangle).
                 val out = GlassOptics.roundedRectDistance(x - band, y - band, innerW, innerH, innerR)
                 if (out <= 0f) continue
-                val fall = min(1f, out / band)
                 val room = -GlassOptics.roundedRectDistance(x - dotInset, y - dotInset, edgeW, edgeH, edgeR)
-                if (room < GlassOptics.dotRadiusAt(fall) * maxScale * 1.dp.toPx()) continue
-                xs += x; ys += y; falls += fall
+                if (room < 0.6.dp.toPx()) continue
+                xs += x; ys += y; falls += min(1f, out / band); rooms += room
             }
         }
     }
     val dotCount = xs.size
-    val nxs = FloatArray(dotCount) { (xs[it] - w / 2f) / (w / 2f) }
-    val nys = FloatArray(dotCount) { (ys[it] - h / 2f) / (h / 2f) }
-    val buckets = Array(ALPHA_LEVELS * RADIUS_LEVELS) { FloatArray(0) }
+    // Each dot's place around the panel (radians, in the panel's own proportions, so a corner is 45°).
+    val phis = FloatArray(dotCount) { GlassOptics.angle((xs[it] - w / 2f) / (w / 2f), (ys[it] - h / 2f) / (h / 2f)) }
+    val fallArr = FloatArray(dotCount) { falls[it] }
+    val roomArr = FloatArray(dotCount) { rooms[it] }
+    val keys = IntArray(dotCount)
     val counts = IntArray(ALPHA_LEVELS * RADIUS_LEVELS)
+    val starts = IntArray(ALPHA_LEVELS * RADIUS_LEVELS)
+    val points = FloatArray(dotCount * 2)
+    val lit = FloatArray(2)
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         style = android.graphics.Paint.Style.STROKE
         strokeCap = android.graphics.Paint.Cap.ROUND
     }
     val dpPx = 1.dp.toPx()
+    val maxRadiusPx = MAX_DOT_RADIUS_DP * dpPx
+    val minRadiusPx = 0.32f * dpPx
     // The shine traces the same continuous outline, set in by 0.6 px.
     val rim = pathSegments(continuousOutline(0.6f, w, h, max(0f, r - 0.6f)), w / 2f, h / 2f, 260)
     val hairline = Stroke(0.8.dp.toPx())
@@ -214,32 +262,51 @@ fun Modifier.tiltGlass(
             drawRect(body)
             val span = max(w, h) * 0.6f
             drawRect(Brush.linearGradient(
-                0f to palette.sheen.copy(alpha = 0.16f * power * seeThrough), 0.45f to Color.Transparent,
+                // Eased stops: the sheen melts into the glass instead of ending on a visible diagonal line.
+                0f to palette.sheen.copy(alpha = 0.16f * power * seeThrough),
+                0.18f to palette.sheen.copy(alpha = 0.09f * power * seeThrough),
+                0.36f to palette.sheen.copy(alpha = 0.03f * power * seeThrough), 0.55f to Color.Transparent,
                 0.8f to Color.Transparent, 1f to palette.sheen.copy(alpha = 0.06f * power * seeThrough),
                 start = Offset(w / 2f + lx * span, h / 2f + ly * span), end = Offset(w / 2f - lx * span, h / 2f - ly * span),
             ))
             if (dotCount > 0) clipPath(dotOutline) {
+                // Living halftone: every frame each dot is lit by where the phone leans (a highlight that slides
+                // around the rim), breathes with a slow wave travelling round the panel, and ripples outward from the
+                // highlight when the phone moves. Dots are sorted into alpha × size buckets (counting sort, no
+                // allocation) and each bucket is one drawPoints call.
+                val t = GlassLight.time
+                val energy = GlassLight.energyAt(t)
                 counts.fill(0)
-                for (i in 0 until dotCount) {
-                    val alpha = GlassOptics.dotAlpha(nxs[i], nys[i], falls[i], lx, ly, power) * DOT_OPACITY
-                    if (alpha < 0.015f) continue
-                    val a = (alpha * (ALPHA_LEVELS - 1) / DOT_ALPHA_TOP).roundToInt().coerceIn(0, ALPHA_LEVELS - 1)
-                    val radius = GlassOptics.dotRadius(nxs[i], nys[i], falls[i], lx, ly)
-                    val rq = ((radius - 0.2f) / 2.4f * (RADIUS_LEVELS - 1)).roundToInt().coerceIn(0, RADIUS_LEVELS - 1)
-                    val b = a * RADIUS_LEVELS + rq
-                    if (buckets[b].size < dotCount * 2) buckets[b] = FloatArray(dotCount * 2)
-                    buckets[b][counts[b] * 2] = xs[i]
-                    buckets[b][counts[b] * 2 + 1] = ys[i]
-                    counts[b]++
+                for (k in 0 until dotCount) {
+                    GlassOptics.liveDot(phis[k], fallArr[k], theta, power, t, energy, lit)
+                    val alpha = lit[0] * DOT_OPACITY
+                    val radiusPx = min(lit[1] * dpPx, roomArr[k] - 0.25f * dpPx)
+                    if (alpha < 0.012f || radiusPx < minRadiusPx) { keys[k] = -1; continue }
+                    val a = (alpha / DOT_ALPHA_TOP * (ALPHA_LEVELS - 1)).roundToInt().coerceIn(0, ALPHA_LEVELS - 1)
+                    val rq = (radiusPx / maxRadiusPx * (RADIUS_LEVELS - 1)).roundToInt().coerceIn(1, RADIUS_LEVELS - 1)
+                    val key = a * RADIUS_LEVELS + rq
+                    keys[k] = key
+                    counts[key]++
+                }
+                var run = 0
+                for (b in counts.indices) { starts[b] = run; run += counts[b] }
+                for (k in 0 until dotCount) {
+                    val key = keys[k]
+                    if (key < 0) continue
+                    val at = starts[key] * 2
+                    points[at] = xs[k]; points[at + 1] = ys[k]
+                    starts[key]++
                 }
                 drawIntoCanvas { canvas ->
-                    for (b in buckets.indices) {
-                        if (counts[b] == 0) continue
+                    var offset = 0
+                    for (b in counts.indices) {
+                        val n = counts[b]
+                        if (n == 0) continue
                         val alpha = (b / RADIUS_LEVELS) * DOT_ALPHA_TOP / (ALPHA_LEVELS - 1)
-                        val radius = 0.2f + (b % RADIUS_LEVELS) * 2.4f / (RADIUS_LEVELS - 1)
                         paint.color = android.graphics.Color.argb((alpha * 255).roundToInt(), (palette.dotRgb shr 16) and 0xFF, (palette.dotRgb shr 8) and 0xFF, palette.dotRgb and 0xFF)
-                        paint.strokeWidth = radius * 2f * dpPx
-                        canvas.nativeCanvas.drawPoints(buckets[b], 0, counts[b] * 2, paint)
+                        paint.strokeWidth = (b % RADIUS_LEVELS) * maxRadiusPx / (RADIUS_LEVELS - 1) * 2f
+                        canvas.nativeCanvas.drawPoints(points, offset * 2, n * 2, paint)
+                        offset += n
                     }
                 }
             }
@@ -285,9 +352,11 @@ private const val RIM_LEVELS = 48
 /** The halftone sits quietly in the glass: a little under full strength. */
 internal const val DOT_OPACITY = 0.30f
 
-/** The brightest a drawn dot gets ([GlassOptics.dotAlpha]'s cap times [DOT_OPACITY]); the alpha steps span up to it. */
-private const val DOT_ALPHA_TOP = 0.85f * DOT_OPACITY
-private const val RADIUS_LEVELS = 8
+/** The brightest a drawn dot gets ([GlassOptics.liveDot]'s cap times [DOT_OPACITY]); the alpha steps span up to it. */
+private const val DOT_ALPHA_TOP = GlassOptics.DOT_ALPHA_CAP * DOT_OPACITY
+private const val RADIUS_LEVELS = 24
+/** The largest a dot is drawn (dp): [GlassOptics.liveDot]'s biggest radius. */
+private const val MAX_DOT_RADIUS_DP = 2.3f
 
 /** A continuous-corner (squircle) rounded rectangle, inset by [inset] on every side, as a path. */
 private fun androidx.compose.ui.draw.CacheDrawScope.continuousOutline(inset: Float, w: Float, h: Float, radius: Float): Path {

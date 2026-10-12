@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
+import kotlin.math.abs
 
 class GlassOpticsTest {
     @Test fun theRimFacingTheLightShinesMostAndTheOppositeRimLess() {
@@ -22,25 +23,48 @@ class GlassOpticsTest {
         assertTrue(GlassOptics.rimIntensity(offAxis, theta, thin = true) > GlassOptics.rimIntensity(offAxis, theta, thin = false))
     }
 
-    @Test fun dotsAreBrighterOnTheLitSideButNeverGoneOnTheFarSide() {
-        val lx = 1f; val ly = 0f
-        val litAlpha = GlassOptics.dotAlpha(1f, 0f, 1f, lx, ly, 1f)
-        val farAlpha = GlassOptics.dotAlpha(-1f, 0f, 1f, lx, ly, 1f)
-        val litRadius = GlassOptics.dotRadius(1f, 0f, 1f, lx, ly)
-        val farRadius = GlassOptics.dotRadius(-1f, 0f, 1f, lx, ly)
-        assertTrue(litAlpha > farAlpha * 2)
-        // Even all around: the far side and the sides stay visible, so the band has no gaps.
-        assertTrue(farAlpha > 0.15f)
-        assertTrue(GlassOptics.dotAlpha(0f, 1f, 1f, lx, ly, 1f) > 0.15f)
-        assertTrue(farRadius < litRadius * 1.3f)
-        assertTrue(farRadius > litRadius)
-        val (a, r) = GlassOptics.dot(1f, 0f, 1f, lx, ly, 1f)
-        assertEquals(litAlpha, a, 0.0001f)
-        assertEquals(litRadius, r, 0.0001f)
+    private fun dot(phi: Float, fall: Float = 1f, theta: Float = 0f, t: Float = 0f, energy: Float = 0f): FloatArray =
+        FloatArray(2).also { GlassOptics.liveDot(phi, fall, theta, 1f, t, energy, it) }
+
+    @Test fun theHighlightFollowsTheLightAndTheRestStaysVisible() {
+        val lit = dot(0f)
+        val side = dot((PI / 2).toFloat())
+        val far = dot(PI.toFloat())
+        assertTrue(lit[0] > side[0] * 1.6f)
+        assertTrue(lit[1] > side[1])
+        // No gaps: the side and the far side keep their dots.
+        assertTrue(side[0] > 0.1f)
+        assertTrue(far[0] > 0.1f)
+        // Tilting moves the highlight: lit from the left, the left dots are the bright ones.
+        assertTrue(dot(PI.toFloat(), theta = PI.toFloat())[0] > dot(0f, theta = PI.toFloat())[0] * 1.6f)
     }
 
     @Test fun dotsFadeTowardsTheInnerEdgeOfTheBand() {
-        assertTrue(GlassOptics.dotAlpha(1f, 0f, 1f, 1f, 0f, 1f) > GlassOptics.dotAlpha(1f, 0f, 0.2f, 1f, 0f, 1f))
+        assertTrue(dot(0f, fall = 1f)[0] > dot(0f, fall = 0.2f)[0])
+        assertTrue(dot(0f, fall = 1f)[1] > dot(0f, fall = 0.2f)[1])
+    }
+
+    @Test fun theGlassBreathesGently() {
+        val a = dot(1f, t = 0f)
+        val b = dot(1f, t = 3f)
+        assertTrue(abs(a[0] - b[0]) > 0.001f)
+        // Gentle: the breath alone never changes a dot by more than about a tenth.
+        assertTrue(abs(a[0] - b[0]) < a[0] * 0.25f)
+    }
+
+    @Test fun movementRipplesAndThenSettles() {
+        val calm = dot(0.4f, t = 0.1f)
+        val moved = dot(0.4f, t = 0.1f, energy = 1f)
+        assertTrue(abs(moved[1] - calm[1]) > 0.01f)
+        assertEquals(1f, GlassOptics.energyAfter(1f, 0f), 0.0001f)
+        assertTrue(GlassOptics.energyAfter(1f, 3f) < 0.03f)
+        assertEquals(0f, GlassOptics.motionKick(0.001f, 0f), 0.0001f)
+        assertTrue(GlassOptics.motionKick(0.05f, 0f) > 0.2f)
+    }
+
+    @Test fun angularDistanceWrapsRoundTheCircle() {
+        assertEquals(0.2f, GlassOptics.angularDistance(PI.toFloat() - 0.1f, -PI.toFloat() + 0.1f), 0.001f)
+        assertEquals(PI.toFloat(), GlassOptics.angularDistance(0f, PI.toFloat()), 0.0001f)
     }
 
     @Test fun holdingStillRestsTheLightAndTiltingMovesIt() {
