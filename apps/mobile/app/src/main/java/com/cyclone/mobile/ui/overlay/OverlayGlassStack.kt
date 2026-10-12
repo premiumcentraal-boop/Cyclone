@@ -274,7 +274,7 @@ private fun DepthAppStack(apps: List<String>) {
 private fun DepthLogos(apps: List<String>) {
     val shown = apps.takeLast(3)
     val front = 38.dp
-    val step = 25.dp
+    val step = 20.dp
     Box(Modifier.size(width = front + step * (shown.size - 1), height = front), contentAlignment = Alignment.CenterEnd) {
         shown.forEachIndexed { index, pkg ->
             val depth = shown.lastIndex - index

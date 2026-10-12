@@ -118,10 +118,10 @@ private val Branch = Color(0xFF83DBD7)
 private val BranchWarm = Color(0xFFE9C78B)
 
 /** Width of the marker column every row shares, so the fork, the old steps and the new steps sit on one line. */
-private val Lane = 30.dp
+private val Lane = 26.dp
 
 /** Height of the first row: the switch glyph fills it, and the rail starts where it ends. */
-private val ForkHeight = 36.dp
+private val ForkHeight = 28.dp
 
 /**
  * The whole diversion as one timeline. The first row is the fork (no frame), "Changed course" and the plan it left,
@@ -227,36 +227,28 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
 }
 
 /**
- * The switch, like points on a railway: the old track comes in from the top right and runs on, faded and dashed, while
- * the bright new track switches off it, curves left and down and ends in an arrow pointing into the steps below. It
- * draws itself in once as [progress] runs; the arrow's tip meets the rail.
+ * The diversion mark: one short, clean stroke that swings in from the right and turns down into an arrow, pointing at
+ * the first new step. It draws itself in once as [progress] runs; its tip meets the rail.
  */
 @Composable
 private fun ForkGlyph(progress: Float, tint: Color) {
     Canvas(Modifier.size(Lane, ForkHeight)) {
         val w = size.width
         val h = size.height
-        val stroke = 1.9.dp.toPx()
-        val right = w * 0.88f
+        val stroke = 2.dp.toPx()
         val rail = w / 2
-        val split = h * 0.22f
-        // The track it was on: in from the top, then on past the switch, faded and dashed.
-        drawLine(tint.copy(alpha = 0.55f), Offset(right, h * 0.04f), Offset(right, split), stroke, StrokeCap.Round)
-        drawLine(Color.White.copy(alpha = 0.34f), Offset(right, split), Offset(right, h * 0.78f), stroke, StrokeCap.Round,
-            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * stroke, 1.8f * stroke)))
-        // The new track: leaves at the switch, curves left onto the rail and runs down.
-        val track = Path().apply {
-            moveTo(right, split)
-            cubicTo(right, h * 0.52f, rail, h * 0.42f, rail, h * 0.80f)
-            lineTo(rail, h - stroke)
+        val tip = Offset(rail, h - stroke)
+        val path = Path().apply {
+            moveTo(w * 0.84f, h * 0.14f)
+            cubicTo(w * 0.84f, h * 0.48f, rail, h * 0.40f, rail, h * 0.74f)
+            lineTo(tip.x, tip.y)
         }
-        val measure = PathMeasure().apply { setPath(track, false) }
+        val measure = PathMeasure().apply { setPath(path, false) }
         val part = Path()
         measure.getSegment(0f, measure.length * progress, part, true)
-        drawPath(part, tint, style = Stroke(stroke * 1.15f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(part, tint, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
         if (progress > 0.92f) {
-            val tip = Offset(rail, h - stroke)
-            val a = 4.2.dp.toPx()
+            val a = 3.6.dp.toPx()
             drawLine(tint, tip, Offset(tip.x - a, tip.y - a), stroke, StrokeCap.Round)
             drawLine(tint, tip, Offset(tip.x + a, tip.y - a), stroke, StrokeCap.Round)
         }
