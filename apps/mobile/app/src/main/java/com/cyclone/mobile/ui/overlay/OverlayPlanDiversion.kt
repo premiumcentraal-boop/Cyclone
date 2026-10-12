@@ -55,7 +55,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -122,7 +121,7 @@ private val BranchWarm = Color(0xFFE9C78B)
 private val Lane = 30.dp
 
 /** Height of the first row: the switch glyph fills it, and the rail starts where it ends. */
-private val ForkHeight = 46.dp
+private val ForkHeight = 36.dp
 
 /**
  * The whole diversion as one timeline. The first row is the fork (no frame), "Changed course" and the plan it left,
@@ -132,7 +131,7 @@ private val ForkHeight = 46.dp
 @Composable
 internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = Modifier, maxNext: Int = 4, startOpen: Boolean = false) {
     var open by rememberSaveable(diversion.version) { mutableStateOf(startOpen) }
-    val turn by animateFloatAsState(if (open) 180f else 0f, tween(220), label = "Earlier plan chevron")
+    val turn by animateFloatAsState(if (open) 180f else 0f, tween(220), label = "Diversion chevron")
     val draw = remember(diversion.version) { Animatable(0f) }
     LaunchedEffect(diversion.version) { draw.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
     val tint = BranchWarm
@@ -140,46 +139,34 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
     val more = (diversion.next.size - maxNext).coerceAtLeast(0)
     val current = next.indexOfFirst { it.status == "doing" }.takeIf { it >= 0 } ?: next.indexOfFirst { it.status == "todo" }
 
-    Column(
-        modifier.fillMaxWidth().drawBehind {
-            // One rail for the whole block: it leaves the fork's branch and runs down past the last step, fading out.
-            val x = Lane.toPx() / 2
-            drawLine(
-                Brush.verticalGradient(listOf(tint.copy(alpha = 0.6f), Branch.copy(alpha = 0.4f), Branch.copy(alpha = 0f)),
-                    startY = ForkHeight.toPx(), endY = size.height),
-                Offset(x, ForkHeight.toPx()), Offset(x, size.height), 1.4.dp.toPx(), StrokeCap.Round,
-            )
-        },
-    ) {
-        // The fork and the plan it left, on one line.
+    Column(modifier.fillMaxWidth()) {
+        // One short row: the switch and "Plan diverted". A tap shows why, and the plan it left.
         Row(
             Modifier.fillMaxWidth().height(ForkHeight).clip(RoundedCornerShape(12.dp))
-                .clickable(role = Role.Button, onClickLabel = if (open) "Fold the earlier plan" else "Show the earlier plan") { open = !open }
+                .clickable(role = Role.Button, onClickLabel = if (open) "Hide why" else "Show why") { open = !open }
                 .semantics(mergeDescendants = true) {
-                    contentDescription = diversion.title + (diversion.dropped.firstOrNull()?.let { ". Let go: $it" } ?: "")
-                    stateDescription = if (open) "Earlier plan shown" else "Earlier plan folded"
+                    contentDescription = diversion.title
+                    stateDescription = if (open) "Details shown" else "Details hidden"
                 },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             ForkGlyph(draw.value, tint)
             Text(diversion.title, color = tint, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
-            Text(diversion.dropped.firstOrNull() ?: diversion.tucked, Modifier.weight(1f), color = GlassDim, fontSize = 13.5.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                textDecoration = if (diversion.dropped.isNotEmpty()) TextDecoration.LineThrough else null)
-            Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(turn), tint = GlassDim)
+            Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(turn), tint = tint.copy(alpha = 0.7f))
         }
-        diversion.reason?.let {
-            Text(it, Modifier.padding(start = Lane + 10.dp, bottom = 4.dp), color = GlassMuted, fontSize = 13.sp, lineHeight = 18.sp,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        // The earlier plan, unfolded in place: faded, in the same column as the words above it.
+        // Why, and the plan it left: only after a tap, as one soft panel in the words' column.
         AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
             Column(
-                Modifier.padding(start = Lane + 10.dp, top = 4.dp, bottom = 6.dp).fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.035f)).padding(horizontal = 10.dp, vertical = 8.dp),
+                Modifier.padding(start = Lane + 10.dp, bottom = 8.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.04f)).padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                diversion.reason?.let {
+                    Text(it, color = GlassInk.copy(alpha = 0.9f), fontSize = 13.5.sp, lineHeight = 18.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(bottom = 4.dp))
+                }
+                Text("Earlier plan", color = GlassDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 val shown = diversion.earlier.ifEmpty { diversion.dropped.map { MindPlanStep(it, MindPlanStep.DROPPED) } }
                 shown.forEach { step ->
                     val left = step.dropped || step.text in diversion.dropped
@@ -188,38 +175,51 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
                         Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
                             when {
                                 step.status == "done" -> Icon(Icons.Rounded.Check, null, Modifier.size(13.dp), tint = GlassDim)
-                                left -> Icon(Icons.Rounded.Close, null, Modifier.size(12.dp), tint = GlassDim.copy(alpha = 0.8f))
+                                left -> Icon(Icons.Rounded.Close, null, Modifier.size(12.dp), tint = BranchWarm.copy(alpha = 0.75f))
                                 else -> Box(Modifier.size(5.dp).clip(CircleShape).background(GlassDim.copy(alpha = 0.7f)))
                             }
                         }
-                        Text(step.text, color = GlassDim, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            textDecoration = if (left) TextDecoration.LineThrough else null)
+                        Text(step.text, color = if (left) GlassDim.copy(alpha = 0.7f) else GlassDim, fontSize = 13.sp,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
         }
-        // The new route, hanging from the fork on the rail.
-        next.forEachIndexed { i, step ->
-            val state = when {
-                step.status == "done" -> 0
-                i == current -> 1
-                else -> 2
-            }
-            Row(Modifier.fillMaxWidth().heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(Lane), contentAlignment = Alignment.Center) {
-                    when (state) {
-                        0 -> Box(Modifier.size(16.dp).clip(CircleShape).background(Color(0xFF0B2226)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.Check, null, Modifier.size(12.dp), tint = Branch)
-                        }
-                        1 -> Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF0B2226)), contentAlignment = Alignment.Center) { GlassSpinner(13) }
-                        else -> Box(Modifier.size(9.dp).clip(CircleShape).background(Color(0xFF0B2226))
-                            .border(1.3.dp, GlassMuted.copy(alpha = 0.55f), CircleShape))
-                    }
+        // The new route: the switch's arrow lands on the first step; the rail joins the steps and stops at the last.
+        Column(
+            Modifier.fillMaxWidth().drawBehind {
+                val x = Lane.toPx() / 2
+                // Folded, the rail picks up from the arrow at the top; open, the panel sits between, so it starts at the first step.
+                val start = if (open) 16.dp.toPx() else 0f
+                val end = size.height - 16.dp.toPx()
+                if (end > start) drawLine(
+                    Brush.verticalGradient(listOf(tint.copy(alpha = 0.55f), Branch.copy(alpha = 0.35f)), startY = start, endY = end),
+                    Offset(x, start), Offset(x, end), 1.4.dp.toPx(), StrokeCap.Round,
+                )
+            },
+        ) {
+            next.forEachIndexed { i, step ->
+                val state = when {
+                    step.status == "done" -> 0
+                    i == current -> 1
+                    else -> 2
                 }
-                Text(step.text, Modifier.weight(1f), color = if (state == 1) GlassInk else if (state == 0) GlassDim else GlassMuted,
-                    fontSize = 14.5.sp, fontWeight = if (state == 1) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.size(Lane), contentAlignment = Alignment.Center) {
+                        when (state) {
+                            0 -> Box(Modifier.size(16.dp).clip(CircleShape).background(Color(0xFF0B2226)), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Check, null, Modifier.size(12.dp), tint = Branch)
+                            }
+                            1 -> Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF0B2226)), contentAlignment = Alignment.Center) { GlassSpinner(13) }
+                            else -> Box(Modifier.size(9.dp).clip(CircleShape).background(Color(0xFF0B2226))
+                                .border(1.3.dp, GlassMuted.copy(alpha = 0.55f), CircleShape))
+                        }
+                    }
+                    Text(step.text, Modifier.weight(1f), color = if (state == 1) GlassInk else if (state == 0) GlassDim else GlassMuted,
+                        fontSize = 14.5.sp, fontWeight = if (state == 1) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         if (more > 0) Text("+$more more", color = GlassDim, fontSize = 12.5.sp, modifier = Modifier.padding(start = Lane + 10.dp, top = 2.dp))
@@ -239,9 +239,9 @@ private fun ForkGlyph(progress: Float, tint: Color) {
         val stroke = 1.9.dp.toPx()
         val right = w * 0.88f
         val rail = w / 2
-        val split = h * 0.16f
+        val split = h * 0.22f
         // The track it was on: in from the top, then on past the switch, faded and dashed.
-        drawLine(tint.copy(alpha = 0.55f), Offset(right, 0f), Offset(right, split), stroke, StrokeCap.Round)
+        drawLine(tint.copy(alpha = 0.55f), Offset(right, h * 0.04f), Offset(right, split), stroke, StrokeCap.Round)
         drawLine(Color.White.copy(alpha = 0.34f), Offset(right, split), Offset(right, h * 0.78f), stroke, StrokeCap.Round,
             pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * stroke, 1.8f * stroke)))
         // The new track: leaves at the switch, curves left onto the rail and runs down.
