@@ -58,14 +58,15 @@ object GlassLight {
     /** How much the phone has just moved, 0..1, fading over about a second. */
     fun energyAt(t: Float): Float = GlassOptics.energyAfter(kick, t - kickAt)
 
-    internal fun ease(tx: Float, ty: Float, amount: Float = 0.22f) {
+    /** Moves the light [amount] of the way to (tx, ty); [dt] is the seconds since the last move. */
+    internal fun ease(tx: Float, ty: Float, amount: Float = 0.22f, dt: Float = 0.06f) {
         val dx = (tx - x) * amount
         val dy = (ty - y) * amount
         x += dx
         y += dy
-        // A quick tilt excites the dots; holding still lets them settle.
+        // A real tilt excites the dots; tremor and holding still let them settle.
         val now = time
-        kick = min(1f, energyAt(now) + GlassOptics.motionKick(dx, dy))
+        kick = max(energyAt(now), GlassOptics.motionEnergy(kotlin.math.hypot(dx, dy) / max(dt, 0.008f)))
         kickAt = now
     }
 
@@ -96,15 +97,26 @@ fun FollowPhoneLight() {
         }
         var baseX = Float.NaN
         var baseY = Float.NaN
+        var smoothX = 0f
+        var smoothY = 0f
+        var lastNs = 0L
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
                 val gx = event.values[0]
                 val gy = event.values[1]
-                if (baseX.isNaN()) { baseX = gx; baseY = gy }
-                baseX += (gx - baseX) * 0.004f
-                baseY += (gy - baseY) * 0.004f
-                val (tx, ty) = GlassOptics.lightFromGravity(gx, gy, baseX, baseY)
-                GlassLight.ease(tx, ty)
+                val dt = if (lastNs == 0L) 0.06f else ((event.timestamp - lastNs) / 1e9f).coerceIn(0.005f, 0.25f)
+                lastNs = event.timestamp
+                if (baseX.isNaN()) { baseX = gx; baseY = gy; smoothX = gx; smoothY = gy }
+                // Gravity is smoothed first (a low-pass of about a third of a second), so shaking the phone left and
+                // right averages out towards the middle instead of whipping the light about; a real tilt still
+                // arrives, just softly.
+                val k = GlassOptics.smoothing(dt, GlassOptics.TILT_SMOOTHING_S)
+                smoothX += (gx - smoothX) * k
+                smoothY += (gy - smoothY) * k
+                baseX += (smoothX - baseX) * 0.004f
+                baseY += (smoothY - baseY) * 0.004f
+                val (tx, ty) = GlassOptics.lightFromGravity(smoothX, smoothY, baseX, baseY)
+                GlassLight.ease(tx, ty, GlassOptics.smoothing(dt, GlassOptics.LIGHT_EASE_S), dt)
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
@@ -196,36 +208,36 @@ fun Modifier.tiltGlass(
     val step = 4.3.dp.toPx()
     val band = min(30.dp.toPx(), h * 0.46f)
     val xs = ArrayList<Float>(); val ys = ArrayList<Float>(); val falls = ArrayList<Float>()
-    val innerW = max(0f, w - 2 * band)
-    val innerH = max(0f, h - 2 * band)
-    val innerR = min(r, min(innerW, innerH) / 2f)
     val rooms = ArrayList<Float>()
     if (dots && w > 0f && h > 0f) {
-        // The grid is centred on the panel, so both sides and all four corners get the same dots.
-        val cx = w / 2f
-        val cy = h / 2f
-        val rowsHalf = (cy / step).toInt() + 1
-        val colsHalf = (cx / step).toInt() + 1
-        // The inset edge the dots live inside. Near it a dot is drawn smaller rather than cut or left out, so the
-        // band runs right into the corners and thins out along the curve.
-        val edgeW = w - 2 * dotInset
-        val edgeH = h - 2 * dotInset
-        val edgeR = min(max(0f, r - dotInset) * 1.1f, min(edgeW, edgeH) / 2f)
-        for (row in -rowsHalf..rowsHalf) {
-            val y = cy + row * step
-            if (y < 0f || y > h) continue
-            val shift = if (row and 1 == 1) step / 2f else 0f
-            for (col in -colsHalf - 1..colsHalf) {
-                val x = cx + col * step + shift
-                if (x < 0f || x > w) continue
-                // The band's inner edge is the panel's own rounded shape, set in by [band]: the dots fade out along a
-                // soft rounded line (never a sharp inner rectangle).
-                val out = GlassOptics.roundedRectDistance(x - band, y - band, innerW, innerH, innerR)
-                if (out <= 0f) continue
-                val room = -GlassOptics.roundedRectDistance(x - dotInset, y - dotInset, edgeW, edgeH, edgeR)
-                if (room < 0.6.dp.toPx()) continue
-                xs += x; ys += y; falls += min(1f, out / band); rooms += room
+        // The dots sit in rows that follow the panel's own outline: each row is the continuous outline set in a
+        // little further, sampled at even steps along its length. Straight edges get straight rows, and in the
+        // corners every row bends with the curve, so the corners fill evenly instead of breaking a grid apart.
+        // Alternate rows are shifted half a step, which keeps the honeycomb look of a halftone.
+        val rowGap = step * 0.87f
+        val minR = 3.dp.toPx()
+        val pos = FloatArray(2)
+        var row = 0
+        var d = dotInset + step * 0.5f
+        while (d < dotInset + band) {
+            val iw = w - 2 * d
+            val ih = h - 2 * d
+            if (iw <= step || ih <= step) break
+            val ring = continuousOutline(d, w, h, min(max(minR, r - d), min(iw, ih) / 2f))
+            val measure = android.graphics.PathMeasure(ring.asAndroidPath(), true)
+            val length = measure.length
+            val n = (length / step).roundToInt()
+            if (n > 0) {
+                val gap = length / n
+                val shift = if (row and 1 == 1) gap / 2f else 0f
+                val fall = (1f - (d - dotInset) / band).coerceIn(0f, 1f)
+                for (k in 0 until n) {
+                    measure.getPosTan(shift + k * gap, pos, null)
+                    xs += pos[0]; ys += pos[1]; falls += fall; rooms += d - dotInset
+                }
             }
+            d += rowGap
+            row++
         }
     }
     val dotCount = xs.size
@@ -260,14 +272,21 @@ fun Modifier.tiltGlass(
         val power = GlassOptics.power(lx, ly)
         clipPath(outline) {
             drawRect(body)
-            val span = max(w, h) * 0.6f
-            drawRect(Brush.linearGradient(
-                // Eased stops: the sheen melts into the glass instead of ending on a visible diagonal line.
-                0f to palette.sheen.copy(alpha = 0.16f * power * seeThrough),
-                0.18f to palette.sheen.copy(alpha = 0.09f * power * seeThrough),
-                0.36f to palette.sheen.copy(alpha = 0.03f * power * seeThrough), 0.55f to Color.Transparent,
-                0.8f to Color.Transparent, 1f to palette.sheen.copy(alpha = 0.06f * power * seeThrough),
-                start = Offset(w / 2f + lx * span, h / 2f + ly * span), end = Offset(w / 2f - lx * span, h / 2f - ly * span),
+            // The sheen is a soft pool of light entering from the lit edge, round rather than a band, so no angle of
+            // the phone shows a line across the glass; a faint answer glows at the opposite edge.
+            val len = max(0.001f, kotlin.math.hypot(lx, ly))
+            val ux = lx / len
+            val uy = ly / len
+            val reach = max(w, h) * 0.85f
+            drawRect(Brush.radialGradient(
+                0f to palette.sheen.copy(alpha = 0.11f * power * seeThrough),
+                0.35f to palette.sheen.copy(alpha = 0.05f * power * seeThrough),
+                0.7f to palette.sheen.copy(alpha = 0.012f * power * seeThrough), 1f to Color.Transparent,
+                center = Offset(w / 2f + ux * w / 2f, h / 2f + uy * h / 2f), radius = reach,
+            ))
+            drawRect(Brush.radialGradient(
+                0f to palette.sheen.copy(alpha = 0.035f * power * seeThrough), 1f to Color.Transparent,
+                center = Offset(w / 2f - ux * w / 2f, h / 2f - uy * h / 2f), radius = reach * 0.6f,
             ))
             if (dotCount > 0) clipPath(dotOutline) {
                 // Living halftone: every frame each dot is lit by where the phone leans (a highlight that slides
@@ -331,8 +350,8 @@ fun Modifier.tiltGlass(
             }
             while (i < rim.size) {
                 val intensity = GlassOptics.rimIntensity(rim[i + 4], theta, thin)
-                val alpha = if (pass == 0) (0.22f * intensity * power).coerceIn(0f, 1f)
-                    else min(if (thin) 0.8f else 1f, (if (thin) 0.8f else 1.15f) * intensity * power)
+                val alpha = if (pass == 0) (0.17f * intensity * power).coerceIn(0f, 1f)
+                    else min(if (thin) 0.72f else 0.9f, (if (thin) 0.72f else 1f) * intensity * power)
                 val level = if (intensity < 0.02f) -1 else (alpha * RIM_LEVELS).roundToInt().coerceIn(1, RIM_LEVELS)
                 if (level != runLevel) {
                     flush()

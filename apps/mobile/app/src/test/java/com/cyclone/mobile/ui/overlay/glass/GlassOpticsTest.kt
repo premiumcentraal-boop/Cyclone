@@ -58,8 +58,26 @@ class GlassOpticsTest {
         assertTrue(abs(moved[1] - calm[1]) > 0.01f)
         assertEquals(1f, GlassOptics.energyAfter(1f, 0f), 0.0001f)
         assertTrue(GlassOptics.energyAfter(1f, 3f) < 0.03f)
-        assertEquals(0f, GlassOptics.motionKick(0.001f, 0f), 0.0001f)
-        assertTrue(GlassOptics.motionKick(0.05f, 0f) > 0.2f)
+        assertEquals(0f, GlassOptics.motionEnergy(0.1f), 0.0001f)
+        assertTrue(GlassOptics.motionEnergy(1.5f) > 0.3f)
+        assertTrue(GlassOptics.motionEnergy(50f) <= 0.6f)
+    }
+
+    @Test fun aShakeAveragesOutButATiltComesThrough() {
+        // Shake gravity ±4 m/s² at 4 Hz for two seconds through the low-pass: it stays near the middle.
+        var v = 0f
+        var peak = 0f
+        val dt = 0.016f
+        for (i in 0 until 125) {
+            val g = if ((i * dt * 8).toInt() % 2 == 0) 4f else -4f
+            v += (g - v) * GlassOptics.smoothing(dt, GlassOptics.TILT_SMOOTHING_S)
+            if (i > 60) peak = maxOf(peak, abs(v))
+        }
+        assertTrue(peak < 1.2f)
+        // A held tilt arrives within about a second.
+        var held = 0f
+        repeat(75) { held += (4f - held) * GlassOptics.smoothing(dt, GlassOptics.TILT_SMOOTHING_S) }
+        assertTrue(held > 3.8f)
     }
 
     @Test fun angularDistanceWrapsRoundTheCircle() {

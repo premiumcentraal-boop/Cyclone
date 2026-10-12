@@ -68,7 +68,7 @@ object GlassOptics {
         val breath = sin(3f * phi - 0.55f * t + 2.4f * fall)
         val ripple = if (energy > 0.005f) energy * sin(7f * ad - 8f * t) * exp(-0.9f * ad) else 0f
         val depth = fall.pow(0.8f)
-        val alpha = (0.21f + 0.50f * spec * power + 0.10f * back) * depth * (0.9f + 0.1f * breath + 0.35f * ripple)
+        val alpha = (0.21f + 0.42f * spec * power + 0.08f * back) * depth * (0.9f + 0.1f * breath + 0.35f * ripple)
         out[0] = alpha.coerceIn(0f, DOT_ALPHA_CAP)
         val radius = dotRadiusAt(fall) * (0.82f + 0.38f * spec) * (0.94f + 0.08f * breath + 0.22f * ripple)
         out[1] = max(0f, radius)
@@ -86,8 +86,20 @@ object GlassOptics {
     /** Motion energy left [dt] seconds after a kick of [kick]: it dies away with a 0.8 s time constant. */
     fun energyAfter(kick: Float, dt: Float): Float = if (dt <= 0f) kick else kick * exp(-dt / 0.8f)
 
-    /** How much one eased light step excites the dots: small trembles do nothing, a real tilt fills it. */
-    fun motionKick(dx: Float, dy: Float): Float = ((hypot(dx, dy) - 0.004f) * 9f).coerceIn(0f, 0.35f)
+    /**
+     * How much the light's [speed] (light units a second) excites the dots: tremor does nothing, a real tilt gives a
+     * gentle ripple, never a full-strength one.
+     */
+    fun motionEnergy(speed: Float): Float = ((speed - 0.25f) / 2.5f).coerceIn(0f, 0.6f)
+
+    /** The share of the way a value moves in [dt] seconds towards its target with time constant [tau]. */
+    fun smoothing(dt: Float, tau: Float): Float = 1f - exp(-dt / tau)
+
+    /** Gravity's low-pass (seconds): shakes average out, tilts come through. */
+    const val TILT_SMOOTHING_S = 0.32f
+
+    /** How quickly the light then follows the smoothed tilt (seconds). */
+    const val LIGHT_EASE_S = 0.16f
 
     /** Signed distance from a point to a rounded rectangle's edge (negative inside). */
     fun roundedRectDistance(px: Float, py: Float, w: Float, h: Float, r: Float): Float {
