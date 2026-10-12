@@ -142,32 +142,67 @@ class ProfileHardening57Test {
         assertNull(ProfileRoom.detect("modules\n"))
     }
 
-    @Test fun `limits offered are above what is in use, default eight`() {
-        assertEquals(listOf(6, 8, 12, 16), ProfileRoom.choices(5))
-        assertEquals(listOf(12, 16), ProfileRoom.choices(8))
-        assertEquals(8, ProfileRoom.defaultChoice(5))
-        assertEquals(12, ProfileRoom.defaultChoice(9))
-        assertNull(ProfileRoom.defaultChoice(16))
+    @Test fun `limits offered are above what is in use, default twenty, up to one hundred`() {
+        assertEquals(listOf(10, 20, 50, 100), ProfileRoom.choices(5))
+        assertEquals(listOf(50, 100), ProfileRoom.choices(20))
+        assertEquals(20, ProfileRoom.defaultChoice(5))
+        assertEquals(50, ProfileRoom.defaultChoice(21))
+        assertNull(ProfileRoom.defaultChoice(100))
     }
 
     @Test fun `the module files are exactly what Cyclone writes`() {
-        assertEquals("fw.max_users=8\n", ProfileRoom.systemProp(8))
-        val prop = ProfileRoom.moduleProp("5.0.0-alpha.118.dev1", 8)
-        assertTrue(prop.startsWith("id=cyclone_profiles\nname=Cyclone profiles\nversion=5.0.0-alpha.118.dev1\nversionCode=1\nauthor=Cyclone\n"))
-        assertTrue(prop.contains("up to 8 profiles"))
-        assertEquals("id=cyclone_profiles", ProfileRoom.moduleProp("bad;\nversion", 8).lineSequence().first())
-        assertFalse(ProfileRoom.moduleProp("x\nid=evil", 8).contains("\nid=evil"))
-        assertEquals(8, ProfileRoom.readModuleLimit("fw.max_users=8\n"))
+        assertEquals("fw.max_users=20\n", ProfileRoom.systemProp(20))
+        val prop = ProfileRoom.moduleProp("5.0.0-alpha.125.dev1", 20)
+        assertTrue(prop.startsWith("id=cyclone_profiles\nname=Cyclone profiles\nversion=5.0.0-alpha.125.dev1\nversionCode=1\nauthor=Cyclone\n"))
+        assertTrue(prop.contains("up to 20 profiles"))
+        assertEquals("id=cyclone_profiles", ProfileRoom.moduleProp("bad;\nversion", 20).lineSequence().first())
+        assertFalse(ProfileRoom.moduleProp("x\nid=evil", 20).contains("\nid=evil"))
+        assertEquals(20, ProfileRoom.readModuleLimit("fw.max_users=20\n"))
         assertNull(ProfileRoom.readModuleLimit(null))
-        assertThrows(IllegalArgumentException::class.java) { ProfileRoom.systemProp(64) }
+        assertThrows(IllegalArgumentException::class.java) { ProfileRoom.systemProp(101) }
     }
 
-    @Test fun `allow is not offered for a per-type limit or without a root manager`() {
+    @Test fun `the per-type-cap unlock is carried only in the module system prop, never via resetprop`() {
+        // Plain total-limit phone: only fw.max_users, no debuggable flag.
+        assertEquals("fw.max_users=100\n", ProfileRoom.systemProp(100, unlockTypeCap = false))
+        assertFalse(ProfileRoom.readModuleUnlock("fw.max_users=100\n"))
+        // Phone that also caps this user type: the module also carries the creation override.
+        val unlocked = ProfileRoom.systemProp(50, unlockTypeCap = true)
+        assertEquals("fw.max_users=50\nro.debuggable=1\ndebug.user.creation_override=1\n", unlocked)
+        assertTrue(ProfileRoom.readModuleUnlock(unlocked))
+        assertEquals(50, ProfileRoom.readModuleLimit(unlocked))
+        assertTrue(ProfileRoom.moduleProp("v", 50, unlockTypeCap = true).contains("debuggable"))
+        // The resetprop command shape never accepts the override properties, only fw.max_users within range.
+        val m = ProfileSetupPlan.RootManager.MAGISK
+        assertTrue(ProfileSetupPlan.acceptsOnlyTyped(ProfileSetupPlan.roomSetProp(m, 100)))
+        assertFalse(ProfileSetupPlan.acceptsOnlyTyped(
+            ProfileSetupCommand.fixed(ProfileSetupOperation.ROOM_SET_PROP, "magisk", "resetprop", "ro.debuggable", "1")))
+    }
+
+    @Test fun `needsUnlock is true exactly when the phone caps this user type`() {
+        val none = ProfileCapacity.room(users, 50, records)
+        assertFalse(ProfileRoom.needsUnlock(none))
+        val capped = ProfileCapacity.room(users, 100, records, listOf(ProfileCapacity.TypeLimit(ProfileCapacity.FULL_SECONDARY, true, 3)))
+        assertTrue(ProfileRoom.needsUnlock(capped))
+        val disabled = ProfileCapacity.room(users, 100, records, listOf(ProfileCapacity.TypeLimit(ProfileCapacity.FULL_SECONDARY, false, null)))
+        assertTrue(ProfileRoom.needsUnlock(disabled))
+    }
+
+    @Test fun `allow is offered for a per-type limit now, and still needs a root manager`() {
         val full = ProfileCapacity.room(users, 6, records)
         assertNull(ProfileRoom.refusal(full, ProfileSetupPlan.RootManager.MAGISK))
         assertNotNull(ProfileRoom.refusal(full, null))
-        val typed = ProfileCapacity.room(users, 16, records, listOf(ProfileCapacity.TypeLimit(ProfileCapacity.FULL_SECONDARY, true, 3)))
-        assertNotNull(ProfileRoom.refusal(typed, ProfileSetupPlan.RootManager.MAGISK))
+        // A per-type cap is no longer a refusal: the creation override clears it.
+        val typed = ProfileCapacity.room(users, 100, records, listOf(ProfileCapacity.TypeLimit(ProfileCapacity.FULL_SECONDARY, true, 3)))
+        assertNull(ProfileRoom.refusal(typed, ProfileSetupPlan.RootManager.MAGISK))
+        assertTrue(ProfileRoom.needsUnlock(typed))
+    }
+
+    @Test fun `get-max-users is read on Android 16 as well as earlier`() {
+        assertEquals(4, ProfileSetupParser.maxUsers("Maximum supported users: 4"))
+        assertEquals(4, ProfileSetupParser.maxUsers("Maximum supported switchable users: 4 (limit reached)"))
+        assertEquals(100, ProfileSetupParser.maxUsers("Maximum supported switchable users: 100"))
+        assertNull(ProfileSetupParser.maxUsers("nothing here"))
     }
 
     @Test fun `room commands have one exact shape each`() {
@@ -177,7 +212,9 @@ class ProfileHardening57Test {
         assertEquals("magisk resetprop --delete fw.max_users", ProfileSetupPlan.shell(ProfileSetupPlan.roomResetProp(ProfileSetupPlan.RootManager.MAGISK, null)))
         assertEquals("/data/adb/ap/bin/resetprop fw.max_users 4",
             ProfileSetupPlan.shell(ProfileSetupPlan.roomResetProp(ProfileSetupPlan.RootManager.APATCH, 4)))
-        assertThrows(IllegalArgumentException::class.java) { ProfileSetupPlan.roomSetProp(ProfileSetupPlan.RootManager.MAGISK, 17) }
+        assertEquals("magisk resetprop fw.max_users 100", ProfileSetupPlan.shell(ProfileSetupPlan.roomSetProp(ProfileSetupPlan.RootManager.MAGISK, 100)))
+        assertThrows(IllegalArgumentException::class.java) { ProfileSetupPlan.roomSetProp(ProfileSetupPlan.RootManager.MAGISK, 101) }
+        assertThrows(IllegalArgumentException::class.java) { ProfileSetupPlan.roomSetProp(ProfileSetupPlan.RootManager.MAGISK, 3) }
         assertThrows(IllegalArgumentException::class.java) { ProfileSetupPlan.roomStageModule("/data/local/tmp/evil") }
         val source = "/data/user/0/com.cyclone.mobile/files/profile-room/cyclone_profiles"
         assertEquals("/system/bin/cp -r $source /data/adb/modules/cyclone_profiles.new", ProfileSetupPlan.shell(ProfileSetupPlan.roomStageModule(source)))
@@ -250,7 +287,9 @@ class ProfileHardening57Test {
         val room = ProfileCapacity.room(users, 6, records)
         assertEquals(listOf(ProfileProblem.Fix.DELETE_REMOVED, ProfileProblem.Fix.CLEAN_UP, ProfileProblem.Fix.ALLOW_MORE,
             ProfileProblem.Fix.ANDROID_USERS, ProfileProblem.Fix.RETRY), ProfileProblem.fixes(ProfileSetupFailureKind.MAX_USERS_REACHED, room, null))
-        assertFalse(ProfileProblem.Fix.ALLOW_MORE in ProfileProblem.fixes(ProfileSetupFailureKind.USER_TYPE_LIMIT, room, null))
+        // The creation override now clears a per-type cap too, so Allow more profiles is offered for it.
+        assertTrue(ProfileProblem.Fix.ALLOW_MORE in ProfileProblem.fixes(ProfileSetupFailureKind.USER_TYPE_LIMIT, room, null))
+        assertTrue(ProfileProblem.Fix.ALLOW_MORE in ProfileProblem.fixes(ProfileSetupFailureKind.USER_TYPE_DISABLED, room, null))
         assertFalse(ProfileProblem.Fix.ALLOW_MORE in ProfileProblem.fixes(ProfileSetupFailureKind.MAX_USERS_REACHED, room, "Needs Magisk"))
         assertTrue(ProfileProblem.Fix.ROOT_MANAGER in ProfileProblem.fixes(ProfileSetupFailureKind.ROOT_DENIED, null, null))
         ProfileSetupFailureKind.values().forEach { ProfileProblem.fixes(it, room, null) } // none throws

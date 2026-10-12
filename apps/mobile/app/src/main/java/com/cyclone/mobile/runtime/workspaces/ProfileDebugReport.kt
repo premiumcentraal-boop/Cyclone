@@ -57,6 +57,7 @@ object ProfileDebugReport {
                 put("fw.max_users", s.property ?: JSONObject.NULL).put("androidLimit", s.androidLimit ?: JSONObject.NULL)
                     .put("moduleLimit", s.moduleLimit ?: JSONObject.NULL).put("moduleDisabled", s.moduleDisabled)
                     .put("raisedByCyclone", s.raisedByCyclone).put("needsApplyAgain", s.needsApplyAgain)
+                    .put("unlockTypeCap", s.unlockTypeCap).put("restartNeeded", s.restartNeeded)
             }
         })
         out.put("users", JSONObject().apply {
@@ -118,6 +119,7 @@ object ProfileDebugReport {
         appendLine("Root manager: ${f.rootManager ?: "not found"}")
         f.roomStatus?.let { s ->
             appendLine("  fw.max_users ${s.property ?: "unset"} · Android limit ${s.androidLimit ?: "?"} · Cyclone module ${s.moduleLimit ?: "none"}${if (s.moduleDisabled) " (disabled)" else ""}")
+            if (s.unlockTypeCap) appendLine("  Per-type cap unlock: on${if (s.restartNeeded) " (restart to finish)" else ""}")
         }
         appendLine()
         appendLine("Profiles:")

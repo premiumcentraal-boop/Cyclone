@@ -20,9 +20,9 @@ object ProfileProblem {
         if (isRoomProblem(kind)) {
             if (room?.slots?.any { it.kind == ProfileCapacity.SlotKind.CYCLONE_REMOVED } == true) out += Fix.DELETE_REMOVED
             if (room?.slots?.any { it.kind == ProfileCapacity.SlotKind.CYCLONE_UNFINISHED } == true) out += Fix.CLEAN_UP
-            if (roomRefusal == null && kind != ProfileSetupFailureKind.USER_TYPE_LIMIT && kind != ProfileSetupFailureKind.USER_TYPE_DISABLED) {
-                out += Fix.ALLOW_MORE
-            }
+            // A per-type cap (USER_TYPE_LIMIT / USER_TYPE_DISABLED) is now offered too: the module's creation override
+            // clears it. Only an actual refusal (no root manager, or no number left to pick) hides the button.
+            if (roomRefusal == null) out += Fix.ALLOW_MORE
             out += Fix.ANDROID_USERS
         }
         if (kind in setOf(ProfileSetupFailureKind.ROOT_DENIED, ProfileSetupFailureKind.ROOT_UNAVAILABLE, ProfileSetupFailureKind.ROOT_COMMAND_FAILED)) {
@@ -48,9 +48,10 @@ object ProfileProblem {
     }
 
     /** The confirm sheet's words for Allow more profiles. */
-    fun allowText(limit: Int, used: Int, freeGb: Long?, manager: String?): String = buildString {
+    fun allowText(limit: Int, used: Int, freeGb: Long?, manager: String?, unlockTypeCap: Boolean = false): String = buildString {
         append("Let this phone hold up to $limit profiles? It holds $used now. ")
         append("Cyclone sets Android's user limit and keeps it after restarts with a small ${manager?.let { managerName(it) } ?: "root"} module, \"Cyclone profiles\". ")
+        if (unlockTypeCap) append("This phone also caps extra users of this kind, so the module unlocks that too: it needs a restart to finish, and it makes the phone debuggable while it is installed. ")
         append("Each profile uses storage")
         freeGb?.let { append("; you have $it GB free") }
         append(". You can undo it in Profiles → Profile room → Restore default; profiles you have stay.")

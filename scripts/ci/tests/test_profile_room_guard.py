@@ -46,7 +46,7 @@ def test_only_the_cyclone_profiles_module_folder_is_written_under_data_adb():
 def test_resetprop_only_ever_sets_the_user_limit():
     plan = text(WS / "ProfileSetupPlan.kt")
     assert 'const val ROOM_PROPERTY = "fw.max_users"' in plan
-    assert "val ROOM_LIMITS = 4..16" in plan
+    assert "val ROOM_LIMITS = 4..100" in plan
     # Every resetprop shape check pins the property.
     set_shape = plan[plan.index("ProfileSetupOperation.ROOM_SET_PROP ->"):plan.index("ProfileSetupOperation.ROOM_RESET_PROP ->")]
     assert "tokens[m.resetprop.size] == ROOM_PROPERTY" in set_shape and "in ROOM_LIMITS" in set_shape
@@ -57,6 +57,26 @@ def test_resetprop_only_ever_sets_the_user_limit():
             # Comments elsewhere are fine; code that runs resetprop is not.
             code = "\n".join(line for line in body.splitlines() if not line.strip().startswith(("*", "//", "/*")))
             assert "resetprop" not in code, path
+
+
+def test_the_creation_override_lives_only_in_the_module_system_prop():
+    # The per-type-cap unlock sets two extra properties. They are applied by the root manager at boot through the
+    # module's generated system.prop, never through Cyclone's runtime resetprop, so the resetprop shape stays pinned
+    # to fw.max_users and the override is fully reversible by removing the module.
+    plan = text(WS / "ProfileSetupPlan.kt")
+    assert 'const val ROOM_DEBUGGABLE_PROPERTY = "ro.debuggable"' in plan
+    assert 'const val ROOM_OVERRIDE_PROPERTY = "debug.user.creation_override"' in plan
+    # The resetprop shape only ever carries ROOM_PROPERTY, never the override properties.
+    set_shape = plan[plan.index("ProfileSetupOperation.ROOM_SET_PROP ->"):plan.index("ProfileSetupOperation.ROOM_RESET_PROP ->")]
+    assert "ROOM_DEBUGGABLE_PROPERTY" not in set_shape and "ROOM_OVERRIDE_PROPERTY" not in set_shape
+    # Only systemProp (the generated module file) writes the override properties, and only in ProfileRoom.kt.
+    for name in ("ro.debuggable", "debug.user.creation_override"):
+        for path, body in kotlin_sources().items():
+            if name in body:
+                assert path.name in {"ProfileSetupPlan.kt", "ProfileRoom.kt"}, (path, name)
+    room = text(WS / "ProfileRoom.kt")
+    system_prop = room[room.index("fun systemProp("):room.index("fun readNumber(")]
+    assert "ROOM_DEBUGGABLE_PROPERTY" in system_prop and "ROOM_OVERRIDE_PROPERTY" in system_prop
 
 
 def test_profile_room_and_clean_up_are_owner_buttons_only():

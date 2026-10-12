@@ -328,11 +328,23 @@ Cyclone raises Android's limit for this phone, keeps it after reboots, and can p
 - **CI guard:** the only `/data/adb` path in the app is `/data/adb/modules/cyclone_profiles`, and `resetprop` only
   ever sets `fw.max_users`.
 
-### 5.8 Later, only if a debug file shows a per-type limit
+### 5.8 The per-type cap (**built, alpha.125**)
 
-A framework overlay module (RRO) raising that user type's `maxAllowed` would be phone- and ROM-specific. It would need
-a reboot and its own device proof, so it is a research item: built only when a real debug file shows
-`TYPE_LIMIT` on an owner's phone.
+A real debug file from the owner's Pixel 8 (Android 16, alpha.124) showed `TYPE_LIMIT`: the phone caps full secondary
+users at three, which `fw.max_users` does not change. Rather than a phone-specific framework overlay (RRO) of
+`config_user_types.xml`, alpha.125 uses Android's own escape hatch. `UserManagerService.isCreationOverrideEnabled()`
+skips **both** the total-user limit and the per-type cap; it is on when the device is debuggable
+(`ro.debuggable=1`) and `debug.user.creation_override=1`. The "Cyclone profiles" module's generated `system.prop`
+carries those two properties (only when a per-type cap is detected), so the root manager applies them before
+`system_server` starts. They take effect after one restart and are fully removed by Restore default.
+
+Rules kept: Cyclone's runtime `resetprop` still only ever sets `fw.max_users` (the CI guard proves it); the override
+properties are never a `resetprop` command, only lines in the generated, read-back `system.prop`. The range is now
+`4..100` (default 20). Also in alpha.125: the Android-16 wording of `pm get-max-users`
+("Maximum supported switchable users") is read, and the debug file records the unlock and any pending restart.
+
+**Unverified on hardware:** the override, the one restart and the 100 ceiling have not run on a physical phone. The
+framework-overlay route stays the fallback if a future debug file shows the override is refused on some ROM.
 
 ## 6. The runs
 
