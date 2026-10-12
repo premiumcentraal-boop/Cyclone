@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/root.status.result.schema.json",
+  "title": "root.status.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "rootManager",
+    "profileRoom",
+    "profiles"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "rootManager": {
+      "enum": [
+        "magisk",
+        "kernelsu",
+        "apatch",
+        null
+      ]
+    },
+    "profileRoom": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "limit",
+            "raisedByCyclone"
+          ],
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "raisedByCyclone": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "rootProven",
+          "checkedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^Cyclone_[0-9a-f]{16}$"
+          },
+          "rootProven": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "checkedAt": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

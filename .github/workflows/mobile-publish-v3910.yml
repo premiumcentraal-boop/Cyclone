@@ -132,6 +132,10 @@ jobs:
 
       - name: Set up Android signing tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # Google's legacy aggregate `tools` package is retired. The publisher only needs adb/sdkmanager
+          # bootstrap here; the exact signing build-tools are installed in the following step.
+          packages: platform-tools
 
       - name: Install Android build tools
         shell: bash

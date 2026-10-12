@@ -270,7 +270,9 @@ class DeviceDiagnosticRecorder:
             "capturedAtEpochMs": int(time.time() * 1000),
             "snapshotKind": "heavy" if heavy else "baseline",
             "deviceId": self.session.device_id,
-            "adbState": self.session.adb_device.state,
+            # What adb reports right now: after a disconnect the fleet's cached "device" would contradict every read below.
+            "adbState": capture(lambda: adb.run(["get-state"], timeout=3).strip()),
+            "fleetAdbState": self.session.adb_device.state,
             "model": self.session.adb_device.model,
             "product": self.session.adb_device.product,
             "processPid": self._read_pid(),

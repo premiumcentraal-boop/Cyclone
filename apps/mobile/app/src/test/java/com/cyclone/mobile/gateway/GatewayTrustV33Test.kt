@@ -130,6 +130,48 @@ class GatewayTrustV33Test {
     }
 
     @Test
+    fun oneLinkedPcCanBeLoggedOutWhileOthersStay() {
+        val fixture = createTrust()
+        val otherPc = ecKeyPair()
+        val begin = fixture.engine.beginTrust(beginArgs(otherPc, "pc-nonce-zyxwvutsrqponmlk"))
+        fixture.engine.decideTrust(begin.getString("challengeId"), true)
+        val other = fixture.engine.completeTrust(completeArgs(begin, otherPc))
+        val first = openSession(fixture.engine, fixture.trustId, fixture.generation, fixture.pc).getString("sessionToken")
+        val second = openSession(fixture.engine, other.getString("trustId"), other.getLong("generation"), otherPc).getString("sessionToken")
+        assertEquals(2, fixture.engine.linkedPcs().size)
+        assertTrue(fixture.engine.isSessionActive(fixture.trustId))
+
+        assertNotNull(fixture.engine.revokeLocal(fixture.trustId))
+        assertNull(fixture.engine.authenticateSession(first))
+        assertNotNull(fixture.engine.authenticateSession(second))
+        assertEquals(listOf(other.getString("trustId")), fixture.engine.linkedPcs().map { it.trustId })
+        assertFalse(fixture.engine.isSessionActive(fixture.trustId))
+        expectCode("TRUST_REVOKED") {
+            fixture.engine.beginSession(sessionBeginArgs(fixture.trustId, fixture.generation, "session-nonce-after-revoke"))
+        }
+        assertNull(fixture.engine.revokeLocal("missing-trust"))
+    }
+
+    @Test
+    fun linkedPcLastUsedReadsLikeAChatApp() {
+        val pc = GatewayTrustedPc("t", "p", "pc", "Desk PC", "k", 1, createdAtMs = 1_000, lastSessionAtMs = 0)
+        assertEquals("Last used just now", linkedPcLastUsed(pc, now = 30_000))
+        assertEquals("Last used 5 min ago", linkedPcLastUsed(pc, now = 1_000 + 5 * 60_000))
+        assertEquals("Last used 3 h ago", linkedPcLastUsed(pc, now = 1_000 + 3 * 3_600_000))
+        assertEquals("Last used 4 days ago", linkedPcLastUsed(pc, now = 1_000 + 4 * 86_400_000L))
+    }
+
+    @Test
+    fun aPcComingBackAfterAWhileIsAnnouncedButQuickReconnectsAreNot() {
+        val hour = 3_600_000L
+        val pc = GatewayTrustedPc("t", "p", "pc", "Desk PC", "k", 1, createdAtMs = 0, lastSessionAtMs = 10 * hour)
+        assertFalse(GatewayPcConnectedNotice.shouldAnnounce(pc, 11 * hour))
+        assertTrue(GatewayPcConnectedNotice.shouldAnnounce(pc, 17 * hour))
+        assertFalse("just linked: the Allow card was the notice", GatewayPcConnectedNotice.shouldAnnounce(pc.copy(lastSessionAtMs = 0, createdAtMs = 10 * hour), 10 * hour + 60_000))
+        assertFalse(GatewayPcConnectedNotice.shouldAnnounce(pc.copy(revokedAtMs = 1), 30 * hour))
+    }
+
+    @Test
     fun persistedTrustSurvivesEngineRestartButSessionsDoNot() {
         val fixture = createTrust()
         val firstSession = openSession(fixture.engine, fixture.trustId, fixture.generation, fixture.pc)

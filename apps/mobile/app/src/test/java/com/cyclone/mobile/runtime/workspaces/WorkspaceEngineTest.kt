@@ -56,6 +56,17 @@ class WorkspaceEngineTest {
         fails { e.requireMutation("a", second.generation, { false }, { target(b) }) }
         assertNull(e.holder())
     }
+    @Test fun leftoverSelectionCannotBlockAForegroundTask() {
+        val e = engine()
+        e.arm("a"); e.arm("b")
+        e.switch("a", { false }, {}, ::target)
+        assertEquals("a", e.selectedId())
+        e.releaseForForegroundTask()
+        assertNull(e.selectedId())
+        assertNull(e.holder())
+        assertEquals(listOf("a", "b"), e.queue())
+        e.requireMutation(null, -1, { false }, ::target)
+    }
     @Test fun gateBeforeAndDuringSwitchAndQueueCannotBeBypassed() {
         val e = engine(); var launches = 0
         fails { e.switch("a", { true }, { launches++ }, ::target) }

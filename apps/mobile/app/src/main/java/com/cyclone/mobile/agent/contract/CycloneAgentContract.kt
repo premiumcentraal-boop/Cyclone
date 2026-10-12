@@ -71,11 +71,17 @@ data class AgentPageCard(
     val nextHopHints: JSONArray,
     val perceptionMode: String = "a11y",
     val treeUseful: Boolean = true,
+    val sessionId: String = "default-foreground",
+    val displayId: Int = 0,
+    // In-process projection of the same capture; never serialized as a second observation.
+    val legacyPage: com.cyclone.mobile.applearner.PageContext? = null,
+    val observation: com.cyclone.mobile.runtime.session.ObservationIdentity? = null,
 )
 
 data class AgentObservationResult(
     val page: AgentPageCard? = null,
     val failure: AgentFailure? = null,
+    val image: JSONObject? = null,
 )
 
 data class AgentSearchResult(
@@ -146,4 +152,5 @@ data class AgentActionEnvelope(
     val observationGeneration: Long?,
     val learning: AgentLearningResult,
     val safeMessage: String? = null,
+    val executorInvoked: Boolean = false,
 )

@@ -104,7 +104,10 @@ object TaskResultNotifierV292 {
 }
 
 class TaskResultActivityV292 : ComponentActivity() {
-    companion object { const val EXTRA_SESSION_ID = "cycloneAiTraceSessionId" }
+    companion object {
+        const val EXTRA_SESSION_ID = "cycloneAiTraceSessionId"
+        const val EXTRA_EXPORT = "cycloneAiTraceExport"
+    }
 
     private var exportSessionId: String? = null
     private val createDiagnosticDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -119,6 +122,7 @@ class TaskResultActivityV292 : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AgentTraceRuntime.initialize(this)
         val sessionId = intent.getStringExtra(EXTRA_SESSION_ID).orEmpty()
+        val exportImmediately = intent.getBooleanExtra(EXTRA_EXPORT, false)
         setContent {
             CycloneTheme {
                 TaskResultScreenV292(
@@ -130,6 +134,13 @@ class TaskResultActivityV292 : ComponentActivity() {
                     },
                 )
             }
+        }
+        if (exportImmediately && sessionId.isNotBlank()) {
+            val session = AgentTraceRuntime.store.session(sessionId)
+            exportSessionId = sessionId
+            createDiagnosticDocument.launch(
+                session?.let(AgentRunDiagnosticV39::suggestedFilename) ?: "Cyclone-run.txt",
+            )
         }
     }
 }

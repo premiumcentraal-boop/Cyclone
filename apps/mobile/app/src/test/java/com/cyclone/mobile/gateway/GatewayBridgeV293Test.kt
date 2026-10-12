@@ -136,6 +136,21 @@ class GatewayBridgeV293Test {
     }
 
     @Test
+    fun multiwordSearchDoesNotReturnUnrelatedSettingsRows() {
+        val page = PageContext("page", "com.android.settings", "Settings", "Settings", "struct", "content", emptyList(), 1, 1, 1)
+        val timeout = GatewayElement("raw:obs:timeout", "raw_accessibility", "Screen timeout", "screen_timeout", "row", JSONObject())
+        val dark = GatewayElement("raw:obs:dark", "raw_accessibility", "Dark theme", "dark_theme", "row", JSONObject())
+        val rotation = GatewayElement("raw:obs:rotation", "raw_accessibility", "Auto-rotate screen", "auto_rotate_screen", "row", JSONObject())
+        val observation = GatewayObservation("obs", 1, page, JSONObject(),
+            linkedMapOf(timeout.id to timeout, dark.id to dark, rotation.id to rotation))
+        val found = GatewayObservationAdapter.search(observation, "Auto-rotate screen setting", 20)
+        assertEquals(1, found.length())
+        assertEquals(rotation.id, found.getJSONObject(0).getString("elementId"))
+        val generic = GatewayObservationAdapter.search(observation, "screen", 20)
+        assertTrue(generic.length() >= 2)
+    }
+
+    @Test
     fun actionMappingUsesFrozenPhoneToolsAndNoLongerOwnsPolicy() {
         assertEquals(
             setOf(

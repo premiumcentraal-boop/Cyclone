@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """One-time source integration for the 2.9.3 diagnostic Teach card.
 
-The active mobile shell is still intentionally kept in CycloneMobileV292App.kt for compatibility with
-2.9.x state/migrations. This helper performs small, checked, idempotent edits rather than copying the
-large shell. CI runs it before compilation and persists the resulting source on release-branch pushes.
+The V292 compatibility shell was removed in the 4.4.8 Apple UI cleanup. This helper is a
+historical one-off and is a no-op when that file is absent.
 """
 from pathlib import Path
 
 path = Path("apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt")
+if not path.is_file():
+    raise SystemExit(0)
 text = path.read_text(encoding="utf-8")
 
 if "com.cyclone.mobile.debug.PageDebugSandboxV293" not in text:

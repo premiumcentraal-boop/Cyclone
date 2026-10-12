@@ -1,0 +1,481 @@
+[
+ {
+  "id": "tb.every.stopwatch",
+  "title": "Time something",
+  "goal": "time how long this takes, start a stopwatch",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Lap",
+     "Pause",
+     "Ronde",
+     "Onderbreken",
+     "Pauzeren"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.every.drive.time",
+  "title": "Driving time",
+  "goal": "How long does it take to drive from Utrecht to Amsterdam right now?",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.google.android.apps.maps"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.apps.maps"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "regex": "(?i)\\b\\d{1,3}\\s*(min|mins|minutes|minuten)\\b"
+   }
+  ]
+ },
+ {
+  "id": "tb.every.coffee.nearby",
+  "title": "Places nearby",
+  "goal": "Show me coffee places near Amsterdam Centraal on Google Maps",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.google.android.apps.maps"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.apps.maps"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.apps.maps"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Coffee",
+     "coffee",
+     "Koffie",
+     "koffie",
+     "Café",
+     "Cafe"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.every.youtube.topic",
+  "title": "A video on a topic",
+  "goal": "Find a YouTube video that explains how lighthouses work",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.google.android.youtube"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.youtube"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.youtube"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "lighthouse",
+     "Lighthouse",
+     "vuurtoren"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.every.play.browse",
+  "title": "Browse the store, install nothing",
+  "goal": "Find a free habit tracker app in the Play Store, but don't install it",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.android.vending"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.android.vending"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.android.vending"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "habit",
+     "Habit"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.every.weather",
+  "title": "Tomorrow's weather",
+  "goal": "What's the weather going to be in Amsterdam tomorrow?",
+  "category": "everyday",
+  "suites": [
+   "everyday",
+   "tb-smoke"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "regex": "-?\\d{1,2}\\s*°"
+   }
+  ]
+ },
+ {
+  "id": "tb.every.currency",
+  "title": "Currency",
+  "goal": "How many euros is 100 US dollars today?",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "regex": "\\b(7[5-9]|8\\d|9\\d|10[0-5])([.,]\\d+)?\\b"
+   }
+  ]
+ },
+ {
+  "id": "tb.every.split.bill",
+  "title": "Split a bill",
+  "goal": "Use the calculator to split a bill of 87.60 between 4 people",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.google.android.calculator"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.calculator"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "regex": "\\b21[.,]90?\\b"
+   }
+  ]
+ },
+ {
+  "id": "tb.every.wiki.year",
+  "title": "A fact from Wikipedia",
+  "goal": "Open Wikipedia and tell me the year the Eiffel Tower was finished",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.android.chrome"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "any": [
+     "1889"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.every.wifi.on",
+  "title": "Is Wi-Fi on",
+  "goal": "Is my Wi-Fi turned on?",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer_probe",
+    "probe": "setting",
+    "namespace": "global",
+    "key": "wifi_on"
+   }
+  ]
+ },
+ {
+  "id": "tb.every.airplane",
+  "title": "Airplane mode question",
+  "goal": "Am I in airplane mode?",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer_probe",
+    "probe": "setting",
+    "namespace": "global",
+    "key": "airplane_mode_on"
+   }
+  ]
+ },
+ {
+  "id": "tb.every.maker",
+  "title": "Who made this phone",
+  "goal": "Which company made this phone?",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer_probe",
+    "probe": "prop",
+    "name": "ro.product.manufacturer"
+   }
+  ]
+ },
+ {
+  "id": "tb.every.shopping.list",
+  "title": "A shopping list",
+  "goal": "Make a shopping list in Google Keep called \"tb 7731 shopping\" with eggs, bread and apples",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "all": [
+     "tb 7731 shopping",
+     "eggs",
+     "bread",
+     "apples"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.every.website",
+  "title": "Open a site",
+  "goal": "Open bbc.com",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.android.chrome"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.android.chrome"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "BBC"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.every.downloads",
+  "title": "What's in Downloads",
+  "goal": "Show me what's in my Downloads folder",
+  "category": "everyday",
+  "suites": [
+   "everyday"
+  ],
+  "apps": [
+   "com.google.android.apps.nbu.files"
+  ],
+  "setup": [
+   {
+    "do": "lab_file",
+    "present": true
+   },
+   {
+    "do": "force_stop",
+    "package": "com.google.android.apps.nbu.files"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.apps.nbu.files"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "cyclone-lab-note"
+    ]
+   }
+  ]
+ }
+]

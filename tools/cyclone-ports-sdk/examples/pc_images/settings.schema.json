@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "folder": {"type": "string", "title": "Pictures folder", "description": "The folder on this PC the pictures come from.", "minLength": 1, "maxLength": 400}
+  },
+  "required": ["folder"],
+  "additionalProperties": false
+}

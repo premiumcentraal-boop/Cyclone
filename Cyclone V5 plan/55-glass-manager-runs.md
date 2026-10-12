@@ -1,0 +1,210 @@
+# Plan 55: The Glass Manager — build runs
+
+Status: **R1–R5 built (2026-10-06/07, alpha.112 / Glass alpha.62, unreleased); R6–R10 planned. Owner decisions taken (design §11): Cyber, own loop, `openai/gpt-6-luna` for checks, GitHub read access, build now as part of V5.** Written 2026-10-06 at alpha.110 (Glass 1.0.0-alpha.61). Design: [54](54-glass-manager-design.md).
+Ten runs, about 6–7 weeks at one run per 2–4 days. Each run is one PR, one alpha, green CI, and states physical
+verification honestly.
+
+## 0. How the runs are cut
+
+- **Paths.** Gateway work stays in `apps/device-gateway/cyclone_device_gateway/command/agent/**` (new) and
+  `command/ai.py` (shrinks to a facade). Glass work stays in `apps/glass/src/manager/**`, `apps/glass/src/ui/cyber/**`
+  and `apps/glass/src/styles/manager.css`. None of these overlap the V5 reliability sprint (phone runtime, Lab).
+- **Order.** Plumbing first (R1–R2), then the look (R3–R4), then what it can see and do (R5–R6), then autonomy and
+  learning (R7–R9), then the overnight pass and polish (R10). Every run leaves Ask AI working.
+- **Laws (every run).** No model call or key in `apps/glass`; fixed tools only, no shell, file or network tools; no
+  secret in memory, playbooks, events or logs; proposals for every change; phone approvals untouched; spend inside the
+  caps; audit chain entry for every applied change.
+- **Checks (every run).** `python -m pytest apps/device-gateway/tests -q`, Glass `npm test` and `npm run build`,
+  `python scripts/ci/glass_guard.py`, `python scripts/ci/release_versions.py --check`.
+
+## R1 — The agent package (no visible change) · built, ships with alpha.112
+
+**Goal:** Hermes' layout under the existing behaviour.
+
+- Split `command/ai.py` into `command/agent/`: `registry.py` (tools self-register with `kind` = read / proposal / ui,
+  schema, availability check, error wrapping), `toolsets/workspace.py` (the 25 existing tools, unchanged), `prompt.py`
+  (three tiers: stable rules → page context → volatile time and settings), `loop.py` (the current turn loop),
+  `store.py` (settings, key, conversations, budgets — moved, not changed).
+- `ai.py` becomes a thin facade so `/v1/cc/ai/*` routes and their tests stay as they are.
+- Tests: every existing `test_*ai*` passes unchanged; new `test_agent_registry.py` (registration, kinds, unknown tool,
+  schema shape); a guard test that no registered tool name matches shell/file/http patterns.
+- Accept: diff in behaviour is zero; route snapshots equal.
+- **Built:** `command/agent/` = `common.py`, `registry.py` (kinds `read` / `workspace` / `phone` as before; forbidden
+  powers refused at registration), `toolsets/workspace.py` (the 25 tools, order and text unchanged), `prompt.py`
+  (tiers; text byte-for-byte as before), `store.py`, `loop.py`, `service.py` (`AiStore` = store + loop). `ai.py` is
+  the facade; `TOOLS` is built from the registry. The four CI guards that read `ai.py` now read the package, with the
+  same rules (one owner-apply path, one allowed workspace-edit path). PyInstaller lists the new modules.
+  Tests: `test_agent_registry.py` (22) + the existing suites unchanged. The ``ui`` kind arrives with R5.
+
+## R2 — Streaming, queue and compression · built in alpha.112
+
+**Goal:** replies stream; long chats stay inside context.
+
+- `agent/events.py`: `cyclone.manager.events/1` (design §8) with `seq`, a 500-event ring per conversation.
+- WebSocket `/v1/cc/ai/events` (auth and reconnect like `/v1/fleet/events`), resume with `afterSeq`.
+- `loop.py` streams from OpenRouter (`stream: true`), emits `run.*`, `text.delta`, `tool.*`, `proposal.*`.
+- One serial queue per conversation (a second message waits or steers; never two turns at once).
+- Steps 10 → 25, budget still enforced per step. `agent/compress.py`: summarize the middle of a conversation past
+  60% of the model's context; the summary is stored and shown as a collapsed "Earlier in this chat" row.
+- Glass: `services/managerStream.ts` (socket, resume, backoff); `aiPanel.ts` switches from 900 ms polling to the
+  stream, polling kept as fallback.
+- Tests: stream ordering, resume after drop, queue serialization, compression keeps tool pairs intact, budget stop
+  mid-stream emits `run.failed` with the reason.
+- **Built:** `agent/events.py` (one hub, 2,000-event ring, `afterSeq` resume, `gap`, partial answers for late
+  joiners; reserved fields cannot be overwritten), WebSocket `/v1/cc/ai/events` (bearer as subprotocol, ping every
+  15 s), `openapi.stream` (same pinned https as `request`, read line by line), streamed completions with secret
+  masking and a 200-character hold-back, queue (`queued` rows, at most 5, promoted in order; Stop drops them),
+  25 steps, summaries of older turns (`summary` rows; `<<<EARLIER` in the prompt; failure falls back to dropping).
+  Glass: `services/aiStream.ts` (reconnect 1 s → 15 s), live answer and running steps in `aiPanel.ts`, queued
+  bubbles, polling only while the socket is down. Tests: `test_agent_stream.py` (8), `ai-stream.test.mjs` (3).
+  Physical acceptance against a real key: UNVERIFIED.
+
+## R3 — Design foundation · built, rides in alpha.112 (unreleased)
+
+**Goal:** the components exist and look right before they are wired in.
+
+- Tokens: `--mgr-*` and motion tokens in `tokens.css` / `motion.css` (design §4), light and dark.
+- `ui/orb/`: `orbRenderer.ts` (WebGL2 port of Bloop's idea, seven poses, spring transitions), `orbFallback.ts`
+  (Canvas 2D), static SVG; visibility- and reduced-motion-aware loop.
+- `ui/reel.ts` (Handle Reel), `ui/trail.ts` (Timeline), `ui/heatgrid.ts` (GitHub Activity), `ui/statusDot.ts`,
+  `ui/alertList.ts` (Notification List), `ui/checklist.ts` (Interactive Checklist), `ui/phoneAvatar.ts`.
+- A developer gallery at `#/dev/cyber` (hidden from the sidebar) showing every component in every state, light and
+  dark, for visual review.
+- Licence: pin the Space UI commit, add the MIT entry to `docs/OPEN_SOURCE_COMPONENTS.md`, origin headers on ports;
+  `glass_guard.py` gains the origin-header rule.
+- Tests: each component's states, keyboard, reduced motion (no rAF scheduled), orb stops when `document.hidden`.
+- Accept: owner reviews the gallery screenshots (light/dark, 1440 and 400 px wide).
+- **Built:** `apps/glass/src/ui/cyber/` — `orb.ts` (seven poses; WebGL2 shader, Canvas 2D, still CSS orb; springs
+  k 170 / d 22; idle 20 fps, offline draws once, nothing while hidden), `reel.ts`, `trail.ts`, `heatgrid.ts`,
+  `statusDot.ts`, `alertList.ts` (swipe or ✕; "stop telling me" after three of a kind), `checklist.ts` (the six
+  defaults), `phoneAvatar.ts` (alpha 107 colours). `--mgr-*` and motion tokens in `tokens.css`, `styles/cyber.css`.
+  Gallery at `#/dev/cyber` (not in the sidebar). Space UI is a design reference only: no source copied; every file
+  carries an `Origin:` line and `glass_guard.py` requires it. Tests: `cyber-components.test.mjs` (9), guard test (+1).
+  Checked in Chromium (WebGL2 renderer) at 1280 px light and dark and at 400 px: no console errors, no sideways scroll.
+  R3 rode with R1–R2 instead of taking its own alpha. Human Hands (plan 52) then shipped as alpha.111 first, so R1–R5
+  ship together in alpha.112 and later runs move up one; these plans were numbered 52/53 until then.
+  **Changed in R4:** the orb is replaced by the character (`ui/cyber/character.ts`) at the owner's request; `orb.ts`
+  and its tests are removed.
+
+## R4 — Presence everywhere · built, rides in alpha.112 (unreleased)
+
+**Goal:** one Manager on every page.
+
+- `manager/dock.ts` (orb + reel at the sidebar foot; pill on narrow screens), `manager/panel.ts` (peek/open/full,
+  ⌘J, remembers width per tab in sessionStorage), the workspace panel replaced by the shared panel with page context.
+- Conversation view: streamed text with blur reveal, work trails under each reply, proposal cards (single and batch),
+  stop button, model and spend in the footer.
+- `manager/palette.ts`: ⌘K with Go to / Do / Ask sections (design §5.3), local route index for instant jumps.
+- Gateway: `status` event (reel items, pose hints) from existing data (phones, tasks, approvals, spend).
+- Tests: panel open ≤ 100 ms with cached state (timed in jsdom as a regression bound), palette keyboard flow,
+  page-context injection, proposal apply/discard from the panel.
+- **Built:** the character in place of the orb (nine moods, design §5.1; `manager/mood.ts` picks the mood from live
+  events and the dock summary). `manager/dock.ts`: character + "Cyber" + reel + badge at the foot of both sidebars, a
+  floating pill under 860 px; reads `GET /v1/cc/ai/presence` every 30 s and after turns and proposals.
+  `manager/palette.ts`: Go to (Glass screens, Command Center tabs, workspace pages by title), Do (open Cyber, new
+  conversation, Cyber settings, search the workspace), Ask Cyber (first when the text reads as a question).
+  Shortcuts in `core/keys.ts`: **Ctrl on Windows and Linux, ⌘ on a Mac**, labels follow the computer; palette Ctrl/⌘K,
+  panel Ctrl/⌘. (J kept as an alias; Ctrl+J is Downloads in Chrome on Windows). The panel (`workspace/aiPanel.ts`) is
+  now Cyber's on every page: character in its header, `ask()` for the palette, and each message carries `where` (the
+  Glass page, ≤ 160 characters, secret-screened) which reaches the model as "(The owner is looking at … in Glass.)".
+  Gateway: `AiStore.presence()` (counts only) and the `where` field. Sockets are passed in from `main.ts` only.
+  Tests: `test_agent_presence.py` (4), `cyber-presence.test.mjs` (6), character tests in `cyber-components.test.mjs`.
+  Panel-open timing was not measured; the palette and dock were checked in Chromium (light, dark, 400 px).
+
+## R5 — The Manager can move Glass · built, rides in alpha.112 (unreleased)
+
+**Goal:** it points at what it talks about.
+
+- `toolsets/glass_ui.py`: `open_page`, `set_filter`, `highlight`, `open_run`, `scroll_to` (kind `ui`; no data
+  change, no proposal needed). Arguments validated against a published route/filter list.
+- Glass `manager/uiActions.ts`: executes `ui.action`, replies `ui.result` (ok / not found); `data-mgr-target`
+  attributes added to Runs, Lab, Phones, Fleet, Apps and Workspace rows; highlight ring (design §5.10).
+- The current page's visible summary (title, filters, top rows) is sent as context with each message.
+- Tests: every route in the list resolves; unknown targets fail quietly; ring removed after 2.4 s; reduced motion
+  shows the ring without animation.
+- **Built:** `agent/toolsets/glass_ui.py` (kind `ui`, new in the registry): `open_page` (26 published pages; run,
+  experiment, app and workspace_page need an id), `set_filter` (a filter tab and/or the search box on the open page),
+  `highlight` (kind:id for run, app, phone, experiment, page, task, routine, account; it scrolls there too, so no
+  separate `scroll_to`) and `open_run`. Every argument is checked against what Glass publishes (no "..", no other
+  kinds). Each call publishes `ui.action`; nothing is written or audited. `POST /v1/cc/ai/ui-result` takes Glass's
+  "could not" (a quiet note the model reads next turn). Messages also carry `view`: the page title, active filter and
+  up to 12 marked rows (≤ 1,500 characters, secret-masked), shown to the model for the newest message only.
+  Glass: `manager/uiActions.ts` runs the actions in order, waits up to 3 s for a page to draw, touches only elements
+  marked `data-mgr-target` / `data-mgr-filter` / `data-mgr-search` inside the page area, rings for 2.4 s; the marks are
+  on Runs, Apps, Devices, Fleet, Lab, the workspace sidebar, Command Center tasks, routines, results and accounts, every
+  filter tab (`segmented`) and every search box (`searchInput`). Actions arrive on the dock's live socket.
+  Tests: `test_agent_glass_ui.py` (15), `cyber-ui.test.mjs` (5); the ring was checked in Chromium.
+
+## R6 — Project sight · alpha.113
+
+**Goal:** it can answer "how close are we to V5?" with numbers.
+
+- Read toolsets: `lab.py` (experiments, verdicts, arms, findings), `testbench.py` (local results and findings ledger,
+  dashboard numbers), `runs.py` (runs, run inspector steps, cause of death), `fleet.py` (phones, health, root status,
+  colours), `releases.py` (`release/version.toml`, release notes, the V5 gate scorecard), `github.py` (PRs and check
+  runs for the configured repo, read-only, token in the encrypted store, off until set).
+- Proposal tools: `lab.start_preset` (named presets only, owner applies), `routines.rerun` (existing).
+- Outside text (run summaries, PR bodies, notes) reaches the model as tool results marked as information.
+- Tests per toolset with fixtures; GitHub tool refuses any repo but the configured one and any write verb.
+
+## R7 — Proactive: heartbeat, alerts, brief, pulse · alpha.114 (Glass alpha.63)
+
+**Goal:** it speaks up only when it should.
+
+- `agent/heartbeat.py`: every 30 min while the gateway runs, a check-model turn over the owner's checklist with read
+  tools only; `HEARTBEAT_OK` is silent; findings become `alert.created`, deduplicated by kind + subject for 24 h.
+- Settings: check model (separate from chat model; default `openai/gpt-6-luna`), checklist editor (§5.8) with the six defaults, quiet hours.
+- Phone notification for items marked urgent, through the existing delivery path.
+- Morning brief: built at 06:00 local (or first open), stored, shown once; pulse heatmap from testbench history.
+- Glass: alerts tab (§5.7), brief card, pulse on Home, orb `attention`.
+- Tests: silence on nothing, dedup, quiet hours, caps cover heartbeat spend, brief shown once per day.
+
+## R8 — Memory and session search · alpha.115 (Glass alpha.64)
+
+**Goal:** it remembers you and the project.
+
+- `agent/memory.py`: three capped stores — MEMORY (2,200 chars, facts), OWNER (1,400, preferences), GOALS (1,400,
+  gates and this week's focus); tool actions `add` / `replace` / `remove`; a frozen snapshot per conversation (prompt
+  cache stays warm); every write passes the secret screen and emits `memory.changed` with an undo id.
+- `agent/sessions.py`: FTS5 index over stored conversations; tool `session_search` returns real messages, no summary.
+- Glass: memory chips with undo; Settings → Manager → Memory (view, edit, clear).
+- Tests: caps enforced, secret-shaped text refused, undo restores, snapshot frozen mid-conversation, search ranking.
+
+## R9 — Playbooks · alpha.116 (Glass alpha.65)
+
+**Goal:** it gets better at recurring work.
+
+- `agent/playbooks.py`: Hermes-compatible `SKILL.md` (frontmatter: name, description, version, tags; sections When
+  to use / Procedure / Pitfalls / Verification). Tools: `playbooks_list` (metadata only), `playbook_view`,
+  `playbook_manage` (`create`, `patch`). Created after a non-trivial workflow, a fixed error or an owner correction.
+- New and patched playbooks are **drafts** until the owner approves; a playbook that would create phone tasks must
+  also pass its Lab preset once before it is used.
+- Glass: playbook chips, Settings → Manager → Playbooks (draft / approved, diff of each patch, approve, delete).
+- Tests: progressive loading, drafts never used, patch diff, Lab gate, secret screen on content.
+
+## R10 — Overnight pass and polish · alpha.117 (Glass alpha.66)
+
+**Goal:** it learns while you sleep and the whole thing feels finished.
+
+- `agent/nightly.py` (Letta's sleep-time idea): merges duplicate memory lines, proposes playbook patches from the
+  day's failures and corrections, prepares the brief. Runs once at night inside the caps; its own trail in the panel.
+- Polish: performance budget check (orb ms per frame, panel bundle size), accessibility pass, empty and error states,
+  copy review, both themes.
+- Docs: Glass charter criterion 7 reworded to "no model calls in the browser code; the Manager lives in the runtime";
+  Glass README; release notes; plan statuses.
+- Accept: a week of daily use by the owner with the brief, alerts and memory on.
+
+## Later (M5)
+
+The same Manager from the phone's Ask screen; voice (orb `listen` / `speak`); read-only sub-agents for large triage.
+
+## Risks
+
+| Risk | Guard |
+|---|---|
+| Self-written playbooks drift unsafe ("Practice Makes Unsafe", Aug 2026) | Drafts + owner approval + Lab gate; no tools that can act outside proposals |
+| Heartbeat noise | Silent by default, 24 h dedup, "stop telling me" from the inbox, quiet hours |
+| Spend creep | One cap for chat, heartbeat and night; cheap check model; stop at the cap with a clear status |
+| Prompt injection via run text, PR bodies | Tool results marked as information; no tool can approve, delete or reach secrets |
+| Orb costs battery/GPU | Visibility-gated loop, idle 20 fps, static under reduced motion, fallback without WebGL2 |
+| Scope during the V5 freeze | Separate paths; the owner decides timing (design §11) |

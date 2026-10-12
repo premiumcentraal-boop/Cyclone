@@ -61,7 +61,7 @@ object LegacyAppGraphV2Adapter {
                     nodes[it] = ActivityNode(it, screen.packageName, className)
                     edges += edge(
                         appId, GraphEdgeType.CONTAINS, it,
-                        evidenceId = "legacy:activity:$className",
+                        evidenceId = "legacy:activity:$className:${screen.lastSeenAt}",
                         confidence = screen.confidence,
                         observedAt = screen.lastSeenAt,
                         appVersion = version,
@@ -71,7 +71,7 @@ object LegacyAppGraphV2Adapter {
             }
             edges += edge(
                 parent, GraphEdgeType.CONTAINS, pageId,
-                evidenceId = "legacy:page:${screen.id}",
+                evidenceId = "legacy:page:${screen.id}:${screen.lastSeenAt}",
                 confidence = screen.confidence,
                 observedAt = screen.lastSeenAt,
                 lastSuccessAt = screen.lastVerifiedAt,
@@ -99,7 +99,7 @@ object LegacyAppGraphV2Adapter {
             )
             edges += edge(
                 pageId, GraphEdgeType.CONTAINS, elementId,
-                evidenceId = "legacy:action:${action.id}",
+                evidenceId = "legacy:action:${action.id}:$actionObservedAt",
                 confidence = action.confidence,
                 observedAt = actionObservedAt,
                 lastSuccessAt = action.lastSuccessAt,
@@ -111,7 +111,7 @@ object LegacyAppGraphV2Adapter {
             )
             edges += edge(
                 selectorId, GraphEdgeType.SELECTOR_MATCHES, elementId,
-                evidenceId = "legacy:selector:${action.id}",
+                evidenceId = "legacy:selector:${action.id}:$actionObservedAt",
                 confidence = action.confidence,
                 observedAt = actionObservedAt,
                 lastSuccessAt = action.lastSuccessAt,
@@ -137,7 +137,7 @@ object LegacyAppGraphV2Adapter {
             )
             val failures = (transition.observedCount - transition.successfulCount).coerceAtLeast(0)
             val common = EdgeInput(
-                evidenceId = "legacy:transition:${transition.id}",
+                evidenceId = "legacy:transition:${transition.id}:${transition.lastObservedAt}:${transition.observedCount}",
                 confidence = transition.confidence,
                 observedAt = transition.lastObservedAt,
                 lastSuccessAt = transition.lastObservedAt.takeIf { transition.successfulCount > 0 },

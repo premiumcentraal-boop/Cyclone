@@ -37,4 +37,13 @@ class GroundedGateClassifierTest {
         assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Delete")))
         assertEquals(GateClass.GRANT, GateClassifier.classify("phone.click", listOf("Grant access")))
     }
+
+    @Test
+    fun forceStopClearStorageAndUninstallNeedTheOwner() {
+        for (label in listOf("Force stop", "Clear storage", "Clear data", "Uninstall", "Geforceerd stoppen")) {
+            assertEquals(label, GateClass.DELETE, GateClassifier.classify("phone.click", listOf(label)))
+        }
+        assertNull(GateClassifier.classify("phone.click", listOf("Storage & cache")))
+        assertNull(GateClassifier.classify("phone.click", listOf("Open")))
+    }
 }

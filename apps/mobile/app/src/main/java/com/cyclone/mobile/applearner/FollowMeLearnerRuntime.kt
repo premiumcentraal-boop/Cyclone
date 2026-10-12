@@ -1,5 +1,7 @@
 package com.cyclone.mobile.applearner
 
+import com.cyclone.mobile.places.PlaceResolver
+
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Rect
@@ -13,6 +15,8 @@ import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.OpenRouterSecretStore
 import com.cyclone.mobile.ai.RoutineTeachingAnalyzer
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
+import com.cyclone.mobile.applearner.graphv2.AtlasRuntime
+import com.cyclone.mobile.brain.graphv2.AtlasPersona
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.uiSnapshotFromJson
@@ -335,6 +339,21 @@ object FollowMeLearnerRuntime {
             ))
         }
 
+        // Promote the same stable Follow Me observation into the durable V5 Atlas immediately.
+        // The legacy App Graph remains the source for its own 4.8 behavior; Atlas receives only
+        // semantic structure and hashed selector metadata through FollowMeAtlasPromoter.
+        store.getApp(packageName)?.takeUnless { PlaceResolver.isChromePackage(packageName) }?.let { learnedApp ->
+            val learnedActions = store.listActions(packageName).filter { it.screenId == screen.id }
+            runCatching {
+                AtlasRuntime.followMe.observeScreen(
+                    app = learnedApp,
+                    screen = screen,
+                    actions = learnedActions,
+                    persona = AtlasPersona.LIVE,
+                )
+            }
+        }
+
         seenApps += packageName
         seenScreens += page.pageKey
         val previousPkg = previousPackage
@@ -358,6 +377,7 @@ object FollowMeLearnerRuntime {
                 it.screenId == previousScreen && it.semanticName == learned.semanticName
             }
             if (storedAction != null) {
+                val observedAt = System.currentTimeMillis()
                 store.upsertTransition(LearnedTransition(
                     packageName = packageName,
                     fromScreenId = previousScreen,
@@ -365,7 +385,23 @@ object FollowMeLearnerRuntime {
                     toScreenId = screen.id,
                     knowledgeState = KnowledgeState.UNDERSTOOD,
                     confidence = 0.84,
+                    lastObservedAt = observedAt,
                 ))
+                val fromScreen = store.graph(packageName)?.screens?.firstOrNull { it.id == previousScreen }
+                val learnedApp = store.getApp(packageName)
+                if (fromScreen != null && learnedApp != null &&
+                    !PlaceResolver.isChromePackage(packageName)) {
+                    runCatching {
+                        AtlasRuntime.followMe.demonstrateTransition(
+                            app = learnedApp,
+                            fromScreen = fromScreen,
+                            action = storedAction,
+                            toScreen = screen,
+                            observedAtEpochMillis = observedAt,
+                            persona = AtlasPersona.LIVE,
+                        )
+                    }
+                }
                 seenPaths += "$previousPage|${storedAction.semanticName}|${page.pageKey}"
             }
         } else if (previousPkg != null && previousPkg != packageName) {

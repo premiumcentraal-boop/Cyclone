@@ -155,8 +155,8 @@ Glass holds a local replica for pan/zoom. Diffs apply in place so the board does
 | G2.7 | Live mapping | Cursor, spawn, secrets interrupt, Take control on the same bar |
 | G2.8 | Empty / loading / stale | Honest copy, one primary action |
 | G2.9 | Phone small canvas | List + mini-graph only — must not block Glass |
-| G2.10 | Scenarios lens | Scenario cards, entry → landing → destinations layout, health from runs, route highlight on the Map lens |
-| G2.11 | Versions | Mapped versions per app, needs-remap, per-version diff, remap for this version |
+| G2.10 | Scenarios lens (✅ cards + health + route highlight in Glass alpha.5; board layout next) | Scenario cards, entry → landing → destinations layout, health from runs, route highlight on the Map lens |
+| G2.11 | Versions (✅ Glass alpha.5; per-version remap is the normal Remap for now) | Mapped versions per app, needs-remap, per-version diff, remap for this version |
 
 ## Exit tests
 

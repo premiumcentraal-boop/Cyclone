@@ -3,6 +3,7 @@ package com.cyclone.mobile.ai
 enum class ProviderFailureClass {
     MODEL_NOT_FOUND,
     MODEL_ACCESS_DENIED,
+    PROVIDER_REQUEST_BLOCKED,
     PROVIDER_AUTH_FAILED,
     NO_PROVIDER_AVAILABLE,
     RATE_LIMITED,
@@ -27,13 +28,14 @@ data class SanitizedProviderFailure(
     val code: String get() = failureClass.name
     val userMessage: String get() {
         val base = ProviderFailure.message(code) ?: "The model provider could not serve this request."
+        val explanation = providerMessage?.takeIf { it.isNotBlank() }?.let { " OpenRouter: $it" }.orEmpty()
         return if (selectedModelId?.contains("contributor") == true && failureClass in setOf(ProviderFailureClass.MODEL_ACCESS_DENIED, ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED))
             "$base Muse Contributor requires eligible account access and compatible OpenRouter data-policy settings. Prompts and outputs may be used for training; Cyclone has not changed your privacy settings."
-        else base
+        else base + explanation
     }
 }
 
-/** Provider failures are task blockers, never Android-navigation evidence. */
+/** Provider failures are model-boundary events, never Android-navigation evidence. */
 internal object ProviderFailure {
     fun classify(
         httpStatus: Int,
@@ -43,36 +45,49 @@ internal object ProviderFailure {
         requestId: String? = null,
     ): SanitizedProviderFailure {
         val body = rawBody.orEmpty()
+        val status = if (httpStatus in 200..299) runCatching {
+            val json = org.json.JSONObject(body)
+            // The chat boundary supplies an envelope; agent boundaries supply its error object.
+            val error = json.optJSONObject("error") ?: json
+            error.optInt("code", httpStatus).takeIf { it in 400..599 } ?: httpStatus
+        }.getOrDefault(httpStatus) else httpStatus
         val lower = body.lowercase()
         val providerCode = extractJsonScalar(body, "code")?.let(::sanitize)?.take(120)
         val providerMessage = extractJsonString(body, "message")
             ?.let(::sanitize)
             ?.take(600)
+        val typed = extractJsonString(body, "error_type").orEmpty().lowercase()
         val failureClass = when {
-            httpStatus == 401 -> ProviderFailureClass.PROVIDER_AUTH_FAILED
-            httpStatus in setOf(403, 404) && listOf("data policy", "data collection", "privacy", "training", "zdr").any(lower::contains) -> ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED
-            httpStatus == 404 && ("no endpoints" in lower || "no provider" in lower) -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
-            httpStatus == 403 -> ProviderFailureClass.MODEL_ACCESS_DENIED
-            httpStatus == 404 -> ProviderFailureClass.MODEL_NOT_FOUND
-            httpStatus == 402 -> ProviderFailureClass.PROVIDER_CREDIT_EXHAUSTED
-            httpStatus == 429 -> ProviderFailureClass.RATE_LIMITED
-            httpStatus == 0 || httpStatus == 408 || httpStatus == 504 -> ProviderFailureClass.NETWORK_FAILURE
+            typed == "authentication" -> ProviderFailureClass.PROVIDER_AUTH_FAILED
+            typed == "payment_required" -> ProviderFailureClass.PROVIDER_CREDIT_EXHAUSTED
+            typed == "rate_limit_exceeded" -> ProviderFailureClass.RATE_LIMITED
+            typed in setOf("content_policy_violation", "refusal") ||
+                (status == 403 && listOf("guardrail", "moderation", "content filter", "prompt injection", "request blocked").any(lower::contains)) -> ProviderFailureClass.PROVIDER_REQUEST_BLOCKED
+
+            status == 401 -> ProviderFailureClass.PROVIDER_AUTH_FAILED
+            status in setOf(403, 404) && listOf("data policy", "data collection", "privacy", "training", "zdr").any(lower::contains) -> ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED
+            status == 404 && ("no endpoints" in lower || "no provider" in lower) -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
+            typed == "permission_denied" || status == 403 -> ProviderFailureClass.MODEL_ACCESS_DENIED
+            status == 404 -> ProviderFailureClass.MODEL_NOT_FOUND
+            status == 402 -> ProviderFailureClass.PROVIDER_CREDIT_EXHAUSTED
+            status == 429 -> ProviderFailureClass.RATE_LIMITED
+            status == 0 || status == 408 || status == 504 -> ProviderFailureClass.NETWORK_FAILURE
             "context" in lower && ("limit" in lower || "length" in lower || "too long" in lower) -> ProviderFailureClass.CONTEXT_LIMIT
-            (httpStatus == 400 || httpStatus == 422) &&
+            (status == 400 || status == 422) &&
                 ("response_format" in lower || "response format" in lower || "unsupported parameter" in lower || "unsupported_param" in lower) ->
                 ProviderFailureClass.PARAMETER_UNSUPPORTED
             "routing" in lower && ("constraint" in lower || "require_parameters" in lower || "provider" in lower) ->
                 ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED
             ("no provider" in lower || "no endpoints" in lower || "no endpoint" in lower) ->
                 ProviderFailureClass.NO_PROVIDER_AVAILABLE
-            (httpStatus == 400 || httpStatus == 422) && "model" in lower &&
+            (status == 400 || status == 422) && "model" in lower &&
                 ("not found" in lower || "unknown" in lower || "invalid" in lower) -> ProviderFailureClass.MODEL_NOT_FOUND
-            httpStatus in 500..599 -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
+            status in 500..599 -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
             else -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
         }
         return SanitizedProviderFailure(
             failureClass = failureClass,
-            httpStatus = httpStatus,
+            httpStatus = status,
             providerCode = providerCode,
             providerMessage = providerMessage,
             selectedModelId = selectedModelId?.take(180),
@@ -91,7 +106,8 @@ internal object ProviderFailure {
 
     fun message(code: String): String? = when (runCatching { ProviderFailureClass.valueOf(code) }.getOrNull()) {
         ProviderFailureClass.MODEL_NOT_FOUND -> "The selected model was not found by the provider. Choose another explicitly supported model or try again later."
-        ProviderFailureClass.MODEL_ACCESS_DENIED -> "The provider denied access to the selected model. Check model access for this OpenRouter account."
+        ProviderFailureClass.MODEL_ACCESS_DENIED -> "OpenRouter denied this request. Refresh the catalog in Settings → Model & API and check this key's model permissions."
+        ProviderFailureClass.PROVIDER_REQUEST_BLOCKED -> "OpenRouter or the provider blocked this request under its content or guardrail policy. Review the request and your OpenRouter guardrails."
         ProviderFailureClass.PROVIDER_AUTH_FAILED -> "The provider rejected the OpenRouter credentials. Check the API key in Settings."
         ProviderFailureClass.NO_PROVIDER_AVAILABLE -> "No compatible provider could serve this model request. Try again or explicitly choose another model."
         ProviderFailureClass.RATE_LIMITED -> "The model provider is rate-limiting requests. Wait before trying again."
@@ -125,5 +141,17 @@ internal object ProviderFailure {
         extractJsonString(raw, key)?.let { return it }
         return Regex("\\\"${Regex.escape(key)}\\\"\\s*:\\s*([^,}\\s]+)")
             .find(raw)?.groupValues?.getOrNull(1)?.trim()?.trim('"')
+    }
+}
+
+
+/** When the owner's backup model may take over a task: the main route is busy or down, never an account/key problem. */
+object ProviderFallbackPolicy {
+    fun shouldSwitch(httpStatus: Int, lifecycle: String?, failureClass: ProviderFailureClass?): Boolean = when {
+        lifecycle == "provider.circuit_open" -> true
+        lifecycle != null -> false // deadline/cancel: the task budget, not the route, is the limit
+        failureClass == ProviderFailureClass.RATE_LIMITED -> true
+        httpStatus in setOf(502, 503) -> true
+        else -> false
     }
 }

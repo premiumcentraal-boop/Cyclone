@@ -2,8 +2,6 @@
 
 This directory contains only documentation that describes the current Cyclone product and how to extend it.
 
-**Next generation (not current product):** [Cyclone V5 plan](../Cyclone%20V5%20plan/README.md) — Mobile 5.0 + Glass 1.0 (App Maps, secrets card, Minitap-class operator canvas). Do not treat that folder as current 4.x behavior.
-
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current system shape and runtime boundaries
 - [`ONE_1.1_BUILD_PLAN.md`](ONE_1.1_BUILD_PLAN.md) — Cyclone One 1.1 Session Contract Glass (A1 tooling seam done; A2+ not started)
 - [`ONE_1.1_STAGE1_TOOLING.md`](ONE_1.1_STAGE1_TOOLING.md) — One 1.1 Stage A1 persisted PC bearer / Cursor MCP / doctor attach
@@ -18,4 +16,4 @@ This directory contains only documentation that describes the current Cyclone pr
 - [`DUO_RELIABILITY_REVIEW.md`](DUO_RELIABILITY_REVIEW.md) — versionCode 58 findings, fixes and ordered acceptance plan
 - [`OPEN_SOURCE_COMPONENTS.md`](OPEN_SOURCE_COMPONENTS.md) — third-party component notices
 
-Historical plans, sprint handoffs and release-specific notes live in Git history and GitHub Releases rather than the active documentation tree. The V5 generation plan is the exception: it lives at repo root in `Cyclone V5 plan/` until a 5.0 cut ships and the matching slice is promoted here.
+Historical plans, sprint handoffs and release-specific notes live in Git history and GitHub Releases rather than the active documentation tree.

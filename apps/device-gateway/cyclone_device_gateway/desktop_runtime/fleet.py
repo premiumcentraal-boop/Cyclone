@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import re
 import secrets
@@ -26,6 +26,7 @@ from .models import (
 )
 
 _SIZE_RE = re.compile(r"(?:Physical|Override) size:\s*(\d+)x(\d+)", re.IGNORECASE)
+_MOBILE_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$")
 
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_BACKOFF_SECONDS = (1, 2, 4, 8, 15)
@@ -36,6 +37,18 @@ class RememberedSession:
     device_id: str
     credential: str | None = None
     local_port: int | None = None
+
+
+_ROOT_SIGNALS = {"su", "magisk", "kernelsu", "apatch", "superuser", "test-keys"}
+
+
+def _root_of(raw: Any) -> dict[str, Any] | None:
+    """The phone's root report, reduced to known words. Anything else from the phone is dropped."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("rooted"), bool):
+        return None
+    signals = raw.get("signals") if isinstance(raw.get("signals"), list) else []
+    return {"rooted": raw["rooted"], "verified": raw.get("verified") is True,
+            "signals": [s for s in signals if isinstance(s, str) and s in _ROOT_SIGNALS][:8]}
 
 
 @dataclass
@@ -63,11 +76,16 @@ class DeviceSession:
     bridge_error_class: str | None = None
     bridge_gateway_enabled: bool | None = None
     bridge_socket_listening: bool | None = None
+    mobile_version: str | None = None
     accessibility_connected: bool | None = None
     source: str = "USB"
     provider: str | None = None
     provider_instance_id: str | None = None
     input_owner: str = "HUMAN"
+    # Alpha 88: the phone's own control owner (AGENT/HUMAN) from its last status, and whether Cyclone's process runs.
+    phone_controller: str | None = None
+    app_running: bool | None = None
+    fleet_health: dict[str, Any] | None = None
 
     def public(self) -> dict[str, Any]:
         suffix = self.serial[-4:] if len(self.serial) >= 4 else self.serial
@@ -76,6 +94,9 @@ class DeviceSession:
         height = self.display_height or 2400
         paired = self.credential is not None
         state = self.state.value
+        # Alpha 91: a phone whose Cyclone Accessibility is off can't see or act; it is never reported as READY.
+        if self.state == DeviceFleetState.READY and self.accessibility_connected is False:
+            state = DeviceFleetState.ATTENTION.value
         reconnecting_label = "Reconnecting"
         if self.reconnect_attempts:
             reconnecting_label = f"Reconnecting · attempt {self.reconnect_attempts} of {MAX_RECONNECT_ATTEMPTS}"
@@ -87,8 +108,8 @@ class DeviceSession:
             DeviceFleetState.UNAUTHORIZED: "Authorize USB debugging",
             DeviceFleetState.ATTENTION: "Needs attention",
             DeviceFleetState.DISCONNECTED: reconnecting_label,
-        }.get(self.state, state.replace("_", " ").title())
-        return {
+        }.get(DeviceFleetState(state), state.replace("_", " ").title())
+        public = {
             "deviceId": self.device_id,
             "id": self.device_id,
             "state": state,
@@ -113,9 +134,11 @@ class DeviceSession:
             "providerInstanceId": self.provider_instance_id,
             "transport": {
                 "kind": self.source,
-                "endpoint": "loopback" if self.source == "VIRTUAL" else ("lan" if self.source == "LAN" else "usb"),
+                "endpoint": "loopback" if self.source == "VIRTUAL" else {"LAN": "lan", "CLOUD": "cloud"}.get(self.source, "usb"),
             },
             "connectionLabel": connection_label,
+            "appRunning": self.app_running,
+            "health": self.fleet_health,
             "inputOwner": self.input_owner,
             "connectionHealth": {
                 "bridgeReachable": self.bridge_ok,
@@ -146,6 +169,13 @@ class DeviceSession:
                 "video": ["thumbnail", "focus"],
             },
         }
+        # Only an authenticated phone status can supply this version. Glass uses it to
+        # enable the live Atlas, so never infer 5.x from PC release metadata.
+        if self.credential and self.mobile_version and self.state not in {
+            DeviceFleetState.UNAUTHORIZED, DeviceFleetState.DISCONNECTED,
+        }:
+            public["mobileVersion"] = self.mobile_version
+        return public
 
     def bridge(self, token: str | None = None, *, auto_forward: bool = False) -> CycloneBridgeClient:
         return CycloneBridgeClient(
@@ -377,6 +407,14 @@ class DeviceFleetManager:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "Device is not connected.", retryable=True)
         return session
 
+    def find_by_serial(self, serial: str) -> DeviceSession | None:
+        needle = (serial or "").strip()
+        if not needle:
+            return None
+        with self._lock:
+            device_id = self._serial_to_device.get(needle)
+            return self._sessions.get(device_id) if device_id else None
+
     def refresh_once(self, *, source: str = "manual") -> list[dict[str, Any]]:
         started = time.perf_counter()
         with self._refresh_lock:
@@ -521,6 +559,8 @@ class DeviceFleetManager:
             return
         self._remembered[serial] = RememberedSession(session.device_id, session.credential, session.local_port)
         self._cleanup_session(session)
+        # adb no longer lists the phone: never keep reporting its last "device" state as USB-authorized (alpha 88).
+        session.adb_device = replace(session.adb_device, state="absent")
         session.bridge_ok = False
         session.next_reconnect_at_ms = 0
         session.bridge_error_class = "ADB_DISCONNECTED"
@@ -543,6 +583,7 @@ class DeviceFleetManager:
         try:
             self._ensure_bridge_forward(session)
             if not self._package_present(session):
+                session.mobile_version = None
                 self._mark_bridge_unhealthy(session, None, "Cyclone mobile app is not installed on this phone.")
                 self._set_state(session, DeviceFleetState.ATTENTION, "Install the Cyclone mobile app on this phone.")
                 return
@@ -587,6 +628,39 @@ class DeviceFleetManager:
             session.bridge_gateway_enabled = _optional_bool(value.get("gatewayEnabled"))
             session.bridge_socket_listening = _optional_bool(value.get("socketListening"))
             session.accessibility_connected = _optional_bool(value.get("accessibilityConnected"))
+            # The phone owns who is in control. When the owner takes over on the phone, the PC mirrors it and any
+            # AI control granted from the PC ends; the PC never overrides the phone (alpha 88).
+            controller = value.get("controllerOwner")
+            if controller in {"AGENT", "HUMAN"}:
+                session.phone_controller = controller
+                if controller == "HUMAN":
+                    session.input_owner = "HUMAN"
+            if value:
+                session.app_running = True
+            health = value.get("fleetHealth")
+            if isinstance(health, dict):
+                permissions = health.get("permissions") if isinstance(health.get("permissions"), dict) else {}
+                session.fleet_health = {
+                    "version": 1,
+                    "batteryPercent": health.get("batteryPercent") if isinstance(health.get("batteryPercent"), int) else None,
+                    "charging": bool(health.get("charging")),
+                    "network": str(health.get("network") or "unknown")[:24],
+                    "freeStorageMb": health.get("freeStorageMb") if isinstance(health.get("freeStorageMb"), int) else None,
+                    "os": str(health.get("os") or "")[:40],
+                    "model": str(health.get("model") or "")[:40],
+                    "manufacturer": str(health.get("manufacturer") or "")[:40] or None,
+                    # Alpha 107: rooted or not, from files a root manager leaves (the phone never runs su for this).
+                    "root": _root_of(health.get("root")),
+                    "permissions": {
+                        key: bool(permissions.get(key))
+                        for key in ("accessibility", "camera", "notifications")
+                        if key in permissions
+                    },
+                }
+            version = value.get("appVersion")
+            session.mobile_version = (
+                version if isinstance(version, str) and len(version) <= 64 and _MOBILE_VERSION_RE.fullmatch(version) else None
+            )
 
     def _mark_bridge_healthy(self, session: DeviceSession) -> None:
         with self._lock:
@@ -604,6 +678,7 @@ class DeviceFleetManager:
     ) -> None:
         with self._lock:
             session.bridge_ok = False
+            session.mobile_version = None
             session.bridge_error_class = error_class
             session.bridge_last_error = error
 
@@ -714,6 +789,10 @@ class DeviceFleetManager:
 
     def remember_credential(self, session: DeviceSession, credential: str | None) -> None:
         with self._lock:
+            # Re-confirming the same credential (trust restore, refresh) must not forget the version the
+            # phone already reported over it; only a new or cleared credential starts from unknown.
+            if credential != session.credential:
+                session.mobile_version = None
             session.credential = credential
             if credential:
                 session.bridge_ok = None
@@ -729,6 +808,7 @@ class DeviceFleetManager:
         """Fail closed on rejected per-device credentials without touching trust material."""
         with self._lock:
             session.credential = None
+            session.mobile_version = None
             session.bridge_ok = False
             session.bridge_error_class = reason_code
             session.bridge_last_error = message[:240]

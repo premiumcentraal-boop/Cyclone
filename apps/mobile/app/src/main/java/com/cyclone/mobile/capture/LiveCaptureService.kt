@@ -131,6 +131,8 @@ class LiveCaptureService : Service() {
                 resources.configuration.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, handler)
             startedAt = SystemClock.uptimeMillis()
             handler.postDelayed(watchdog, 1_000)
+            // Whole-screen sharing also serves linked PCs over Wi-Fi (view-only, AnyDesk-style); it stops with this service.
+            if (sessionId == SESSION) runCatching { com.cyclone.mobile.share.LanShareRuntime.start(applicationContext) }
         } catch (_: RuntimeException) { fail("Could not start screen sharing. Please try again.") }
         return START_NOT_STICKY
     }
@@ -176,6 +178,7 @@ class LiveCaptureService : Service() {
 
     override fun onDestroy() {
         closing = true
+        runCatching { com.cyclone.mobile.share.LanShareRuntime.stop() }
         if (ownsSession) invalidateSource(sessionId)
         handler.removeCallbacks(watchdog)
         // Serialize resource disposal after the last image callback.

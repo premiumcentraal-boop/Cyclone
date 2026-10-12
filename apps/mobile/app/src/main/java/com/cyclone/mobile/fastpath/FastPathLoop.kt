@@ -7,8 +7,20 @@ import org.json.JSONObject
 object FastPathTimings {
     const val SETTLE_MS = 300L
     val LADDER_MS = longArrayOf(500L, 1_000L)
+    const val GESTURE_COMPLETION_SLACK_MS = 1_500L
     const val UNCHANGED_WARNING =
         "UNCHANGED: UI fingerprint did not change after settle+ladder. Do not retry via a second click channel."
+
+    /**
+     * How long Human Gesture may wait for [android.accessibilityservice.GestureResultCallback]
+     * after queueing a stroke. Fast Path settle starts only after onCompleted. A timeout is
+     * incomplete, not a performed action.
+     */
+    fun gestureAwaitBudgetMs(durationMs: Long): Long =
+        durationMs.coerceAtLeast(0L) + GESTURE_COMPLETION_SLACK_MS
+
+    /** Stroke duration is already awaited; Fast Path then uses the ordinary 300ms settle. */
+    fun settleAfterCompletedGestureMs(): Long = SETTLE_MS
 }
 
 data class FastPathSettleResult(
@@ -34,6 +46,8 @@ data class FastPathSettleResult(
 /**
  * Perceive → one act → settle 300ms → fingerprint → optional +500/+1000.
  * Unchanged returns verified=false with a warning. Callers must not dispatch another click channel.
+ * Human Gesture waits for stroke completion before this settle starts, so SETTLE_MS is not
+ * increased by gesture duration.
  */
 object FastPathLoop {
     fun settle(
@@ -41,6 +55,7 @@ object FastPathLoop {
         sleepMs: (Long) -> Unit,
         observeFingerprint: () -> String?,
         nowMs: () -> Long = { System.currentTimeMillis() },
+        initialSettleMs: Long = FastPathTimings.SETTLE_MS,
     ): FastPathSettleResult {
         val started = nowMs()
         var observations = 0
@@ -49,7 +64,7 @@ object FastPathLoop {
             return observeFingerprint()
         }
 
-        sleepMs(FastPathTimings.SETTLE_MS)
+        sleepMs(initialSettleMs.coerceAtLeast(FastPathTimings.SETTLE_MS))
         var after = observe()
         if (fingerprintChanged(beforeFingerprint, after)) {
             return result(true, true, observations, started, nowMs(), warning = null, after)

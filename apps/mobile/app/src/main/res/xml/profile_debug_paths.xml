@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plan 57 W8: the profile debug file only, shared when the owner taps Share. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="profile-debug" path="profile-debug/" />
+</paths>

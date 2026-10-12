@@ -17,6 +17,63 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class ClickGateInterceptTest {
+    @Test fun genericTaggedCardWithDecorativeChildrenKeepsTheWholeCardAsItsActivationTarget() {
+        val card = node("card", "0/1", "0", "", "generic", true)
+            .copy(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"), childIds = listOf("icon", "title"))
+        val icon = node("icon", "0/1/0", "card", "", "image", false)
+        val title = node("title", "0/1/1", "card", "Prepare an Instagram post", "text", false)
+        val folded = com.cyclone.mobile.AccessibilityRoles.foldTalkBackHosts(listOf(card, icon, title))
+        val observed = folded.first { it.id == "card" }
+        assertTrue(observed.clickable)
+        assertEquals(card.resourceId, observed.resourceId)
+        assertEquals("Prepare an Instagram post", observed.text)
+        val activation = com.cyclone.mobile.AccessibilityRoles.resolveActivationTarget(folded, observed)
+        assertEquals("card", activation.id)
+        assertNull(GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(observed, activation, packageName = "com.cyclone.mobile")))
+    }
+
+    @Test fun labeledSkillButtonKeepsItsObservedNavigationIdentityWhenIconChildrenAreFolded() {
+        val card = node("card", "0/1", "0", "", "button", true)
+            .copy(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"), childIds = listOf("icon", "title"))
+        // The Pixel 8's AndroidView icon advertises ACTION_CLICK. A generic host was demoted onto this icon.
+        val icon = node("icon", "0/1/0", "card", "", "image", true)
+        val title = node("title", "0/1/1", "card", "Prepare an Instagram post", "text", false)
+        val folded = com.cyclone.mobile.AccessibilityRoles.foldTalkBackHosts(listOf(card, icon, title))
+        val observed = folded.first { it.id == "card" }
+        assertTrue(observed.clickable)
+        assertEquals(card.resourceId, observed.resourceId)
+        assertEquals("Prepare an Instagram post", observed.text)
+        val activation = com.cyclone.mobile.AccessibilityRoles.resolveActivationTarget(folded, observed)
+        assertEquals("card", activation.id)
+        assertNull(GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(observed, activation, packageName = "com.cyclone.mobile")))
+        assertEquals(GateClass.SEND, GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(observed, activation, packageName = "com.instagram.android")))
+    }
+
+    @Test fun nativeSkillDetailsAreNavigationButTheActualInstagramPostStillNeedsApproval() {
+        val card = node("card", "0/1", "0", "Prepare an Instagram post", "button", true)
+            .copy(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"))
+        val child = node("title", "0/1/0", "card", "Prepare an Instagram post", "generic", false)
+        val labels = ClickGateIntercept.labelsFor(child, card, packageName = "com.cyclone.mobile")
+        assertNull(GateClassifier.classify("phone.click", labels))
+        assertEquals(GateClass.SEND, GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(card, packageName = "com.instagram.android")))
+        assertEquals(GateClass.SEND, GateClassifier.classify("phone.click", listOf("Post")))
+    }
+
+    @Test fun navigationTagCannotBeSuppliedByThePcOrAnUntrustedAppOrInputField() {
+        val card = node("card", "0/1", "0", "Publish", "button", true)
+            .copy(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"))
+        listOf(null, "com.instagram.android", "com.other.app").forEach { pkg ->
+            assertEquals(GateClass.SEND, GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(card, packageName = pkg)))
+        }
+        listOf(card.copy(resourceId = ""), card.copy(resourceId = SkillDetailsNavigation.TAG_PREFIX + "../bad"),
+            card.copy(editable = true), card.copy(clickable = false)).forEach {
+            assertEquals(GateClass.SEND, GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(it, packageName = "com.cyclone.mobile")))
+        }
+        val untagged = card.copy(resourceId = "")
+        assertEquals(GateClass.SEND, GateClassifier.classify("phone.click", ClickGateIntercept.labelsFor(untagged,
+            selector = ElementSelector(resourceId = SkillDetailsNavigation.tag("cyclone.instagram-prepare-post"), contentDescription = "Open skill details"), packageName = "com.cyclone.mobile")))
+    }
+
     @Test
     fun moveToBinFromIdleEntersGateAndDoesNotClick() {
         val machine = OverlayChromeMachine()

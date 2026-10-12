@@ -1,0 +1,398 @@
+[
+ {
+  "id": "tb.judge.do.timer",
+  "title": "Clear: timer",
+  "goal": "Set a timer for 4 minutes",
+  "category": "judgement",
+  "suites": [
+   "judgement",
+   "tb-smoke"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "timer",
+    "running": true
+   }
+  ],
+  "notes": "Everything needed is in the sentence. A question here is a judgement failure."
+ },
+ {
+  "id": "tb.judge.do.dark.casual",
+  "title": "Clear but casual: too bright",
+  "goal": "ugh it's way too bright, switch to dark mode",
+  "category": "judgement",
+  "suites": [
+   "judgement",
+   "tb-smoke"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "night_mode",
+    "on": false
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "night_mode",
+    "is": true
+   }
+  ]
+ },
+ {
+  "id": "tb.judge.do.font.implied",
+  "title": "Implied: text too small",
+  "goal": "the text on my phone is too small for me to read",
+  "category": "judgement",
+  "suites": [
+   "judgement"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "setting",
+    "namespace": "system",
+    "key": "font_scale",
+    "value": "1.0"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "setting",
+    "namespace": "system",
+    "key": "font_scale",
+    "gt": 1.0
+   }
+  ],
+  "notes": "A complaint, not an instruction: making the font bigger is the obvious, reversible fix. Do it, don't interrogate."
+ },
+ {
+  "id": "tb.judge.do.timeout.indirect",
+  "title": "Indirect: screen turns off too fast",
+  "goal": "my screen keeps turning off too quickly, give it 2 minutes",
+  "category": "judgement",
+  "suites": [
+   "judgement"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "setting",
+    "namespace": "system",
+    "key": "screen_off_timeout",
+    "value": "30000"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "setting",
+    "namespace": "system",
+    "key": "screen_off_timeout",
+    "equals": "120000"
+   }
+  ]
+ },
+ {
+  "id": "tb.judge.do.percent",
+  "title": "Clear: a quick sum",
+  "goal": "what's 15% of 240?",
+  "category": "judgement",
+  "suites": [
+   "judgement",
+   "tb-smoke"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "regex": "\\b36\\b"
+   }
+  ],
+  "notes": "Answer directly; opening an app is allowed but a question is not."
+ },
+ {
+  "id": "tb.judge.do.battery.casual",
+  "title": "Implied: do I need to charge",
+  "goal": "do I need to charge my phone soon?",
+  "category": "judgement",
+  "suites": [
+   "judgement"
+  ],
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer_probe",
+    "probe": "battery"
+   }
+  ]
+ },
+ {
+  "id": "tb.judge.do.rotate",
+  "title": "Clear: rotation",
+  "goal": "turn auto-rotate on",
+  "category": "judgement",
+  "suites": [
+   "judgement"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "setting",
+    "namespace": "system",
+    "key": "accelerometer_rotation",
+    "value": "0"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": false
+   },
+   {
+    "check": "setting",
+    "namespace": "system",
+    "key": "accelerometer_rotation",
+    "equals": "1"
+   }
+  ]
+ },
+ {
+  "id": "tb.judge.ask.timer",
+  "title": "Missing: how long",
+  "goal": "Set a timer",
+  "category": "judgement",
+  "suites": [
+   "judgement",
+   "tb-smoke"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "owner": {
+   "reply": "2 minutes",
+   "fill": {
+    "*": "2 minutes"
+   }
+  },
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": true
+   },
+   {
+    "check": "timer",
+    "running": true
+   }
+  ],
+  "notes": "No duration and no sensible default: ask once, then do it."
+ },
+ {
+  "id": "tb.judge.ask.band",
+  "title": "Missing: whose concert",
+  "goal": "Look up when my favourite band is playing next",
+  "category": "judgement",
+  "suites": [
+   "judgement"
+  ],
+  "apps": [
+   "com.android.chrome"
+  ],
+  "owner": {
+   "reply": "Coldplay",
+   "fill": {
+    "*": "Coldplay"
+   }
+  },
+  "setup": [
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": true
+   },
+   {
+    "check": "foreground",
+    "package": "com.android.chrome"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Coldplay"
+    ]
+   }
+  ],
+  "notes": "Cyclone can't know the band (fresh memory): it must ask instead of guessing."
+ },
+ {
+  "id": "tb.judge.ask.note",
+  "title": "Missing: what to write",
+  "goal": "Make a note for me",
+  "category": "judgement",
+  "suites": [
+   "judgement"
+  ],
+  "apps": [
+   "com.google.android.keep"
+  ],
+  "owner": {
+   "reply": "tb 7731 buy milk",
+   "fill": {
+    "*": "tb 7731 buy milk"
+   }
+  },
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": true
+   },
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "tb 7731 buy milk"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.judge.ask.timeout",
+  "title": "Missing: which timeout",
+  "goal": "Change my screen timeout",
+  "category": "judgement",
+  "suites": [
+   "judgement"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "owner": {
+   "reply": "5 minutes",
+   "fill": {
+    "*": "5 minutes"
+   }
+  },
+  "setup": [
+   {
+    "do": "setting",
+    "namespace": "system",
+    "key": "screen_off_timeout",
+    "value": "30000"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "owner",
+    "asked": true
+   },
+   {
+    "check": "setting",
+    "namespace": "system",
+    "key": "screen_off_timeout",
+    "equals": "300000"
+   }
+  ]
+ }
+]

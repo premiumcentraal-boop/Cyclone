@@ -290,6 +290,7 @@ class PairingCoordinator:
             ) from exc
 
         self.fleet.remember_credential(session, credential)
+        self.fleet.record_bridge_status(session, health)
         self.fleet.set_pairing(session, None)
         session.state = DeviceFleetState.READY if session.screen_awake else DeviceFleetState.SLEEPING
         live = self._mark_live(device_id, f"{phase}.health_verified")

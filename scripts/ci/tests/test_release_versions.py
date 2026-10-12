@@ -49,6 +49,22 @@ class ReleaseVersionsTest(unittest.TestCase):
             release_versions.check(values),
         )
 
+    def test_glass_has_its_own_version_line(self):
+        values = {**self.coherent_values(), "expectedGlass": "1.0.0-alpha.1", "glassPackage": "1.0.0-alpha.1"}
+        self.assertEqual([], release_versions.check(values))
+        values["glassPackage"] = "1.6.0-alpha.7"
+        self.assertIn("glassPackage='1.6.0-alpha.7' expected '1.0.0-alpha.1'", release_versions.check(values))
+        values["expectedGlass"] = ""
+        self.assertIn(
+            "components.glass is required: Cyclone Glass (apps/glass) has its own version line",
+            release_versions.check(values),
+        )
+
+    def test_live_tree_reports_glass(self):
+        values = release_versions.collect()
+        self.assertTrue(values["expectedGlass"])
+        self.assertEqual(values["expectedGlass"], values["glassPackage"])
+
 
 if __name__ == "__main__":
     unittest.main()

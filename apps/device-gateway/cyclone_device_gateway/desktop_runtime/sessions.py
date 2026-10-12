@@ -9,6 +9,7 @@ from typing import Any
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from ..execution_scope import DEFAULT_FOREGROUND_SESSION_ID, classify_session_plane
 from .fleet import DeviceFleetManager, DeviceSession
+from . import phone_errors
 from .models import CYCLONE_ONE_SESSION_PROTOCOL_VERSION, DesktopRuntimeError, FleetEventType, RuntimeErrorCode
 
 
@@ -286,6 +287,8 @@ class ExecutionSessionService:
             value = session.bridge().request(op, args, request_id=f"one-{secrets.token_urlsafe(18)}")
             return value if isinstance(value, dict) else {"value": value}
         except BridgeOperationError as exc:
+            if exc.code == "PHONE_APP_BUSY":
+                raise phone_errors.busy() from exc
             mapping = {
                 "AUTH_REJECTED": RuntimeErrorCode.AUTH_REJECTED,
                 "CAPABILITY_UNAVAILABLE": RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
@@ -298,14 +301,14 @@ class ExecutionSessionService:
                 "PROTOCOL_MISMATCH": RuntimeErrorCode.PROTOCOL_MISMATCH,
                 "HUMAN_HAS_CONTROL": RuntimeErrorCode.HUMAN_HAS_CONTROL,
             }
-            retryable = exc.code in {"STALE_OBSERVATION", "FOREGROUND_REQUIRED", "PHONE_LOCKED"}
+            retryable = phone_errors.retryable(exc.code)
             raise DesktopRuntimeError(
                 mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE),
                 f"Android rejected {op}.",
                 retryable=retryable,
             ) from exc
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
-            raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, "Phone disconnected from Cyclone Gateway.", retryable=True) from exc
+            raise phone_errors.transport(exc) from exc
 
     def _descriptor(self, value: dict[str, Any], *, allow_foreground: bool) -> dict[str, Any]:
         session_id = str(value.get("sessionId") or "").strip()

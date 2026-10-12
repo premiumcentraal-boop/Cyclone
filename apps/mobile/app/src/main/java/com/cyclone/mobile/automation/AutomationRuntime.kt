@@ -8,6 +8,7 @@ import com.cyclone.mobile.BridgeClient
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest as NativePhoneToolRequest
+import com.cyclone.mobile.automation.stock.instagram.InstagramStockSkillCollectionGateway
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -35,9 +36,11 @@ object AutomationRuntime {
                 DeviceState.setController(DeviceState.Controller.HUMAN)
                 DeviceState.addLog("Automation takeover required run=$runId step=$stepId reason=$reason")
                 true
-            }
+            },
+            stockSkills = InstagramStockSkillCollectionGateway(app),
         )
         router = AutomationEventRouter(store, runner)
+        seedStockSkills()
         seedExamples()
         initialized = true
         store.listAutomations().filter { it.enabled && it.trigger.type == TriggerType.SCHEDULE }.forEach { registerSchedule(app, it) }
@@ -125,6 +128,17 @@ object AutomationRuntime {
         val pending = PendingIntent.getBroadcast(context, automationId.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         context.getSystemService(AlarmManager::class.java)
             .setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis.coerceAtLeast(System.currentTimeMillis() + 1_000), pending)
+    }
+
+    private fun seedStockSkills() {
+        InstagramStockSkillCollectionGateway.definitions.forEach { definition ->
+            val existing = store.getSkill(definition.id)
+            if (existing == null || existing.version < definition.version) store.saveSkill(definition)
+        }
+        InstagramStockSkillCollectionGateway.routines().forEach { routine ->
+            val existing = store.getAutomation(routine.id)
+            if (existing == null || existing.version < routine.version) store.saveAutomation(routine)
+        }
     }
 
     private fun seedExamples() {
@@ -232,6 +246,13 @@ class CyclonePhoneToolAdapter(private val context: Context) : PhoneToolGateway {
 }
 
 private class CycloneIntegrationGateway(private val context: Context) : IntegrationGateway {
+    /** A saved skill runs through the same entry as a typed Ask (Marketplace.run): GATE, approvals, Secrets Card. */
+    override fun runGroundedSkill(skillId: String): PhoneToolResult {
+        val refusal = com.cyclone.mobile.market.Marketplace.run(context, skillId)
+            ?: return PhoneToolResult(true, output = mapOf("skillStarted" to skillId), message = "skill_started")
+        return PhoneToolResult(false, errorCode = refusal.code, message = refusal.message)
+    }
+
     override fun refreshObservation(): Boolean = PhoneToolExecutor.execute(
         context, NativePhoneToolRequest("automation-observe-${UUID.randomUUID()}", "phone.observe", JSONObject())
     ).ok

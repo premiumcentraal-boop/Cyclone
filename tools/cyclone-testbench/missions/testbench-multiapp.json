@@ -1,0 +1,163 @@
+[
+ {
+  "id": "tb.multi.maps.keep",
+  "title": "Address into a note",
+  "goal": "Look up the address of the Rijksmuseum on Google Maps, then save it in a new Google Keep note that starts with \"tb 7731 museum\"",
+  "category": "multi-app",
+  "suites": [
+   "multiapp2"
+  ],
+  "apps": [
+   "com.google.android.apps.maps",
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.apps.maps"
+   },
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "minutes": 10,
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "all": [
+     "tb 7731 museum",
+     "Museumstraat"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.multi.web.calc",
+  "title": "Fact, then math",
+  "goal": "Find out how many days a leap year has, then use the calculator to multiply that by 24 and tell me the result",
+  "category": "multi-app",
+  "suites": [
+   "multiapp2"
+  ],
+  "apps": [
+   "com.google.android.calculator"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.calculator"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "minutes": 10,
+  "checks": [
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   },
+   {
+    "check": "answer",
+    "any": [
+     "8784",
+     "8,784",
+     "8.784"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.multi.youtube.keep",
+  "title": "A title into a note",
+  "goal": "Search YouTube for \"lofi hip hop radio\", then write the title of the first result in a new Google Keep note that starts with \"tb 7731 yt\"",
+  "category": "multi-app",
+  "suites": [
+   "multiapp2"
+  ],
+  "apps": [
+   "com.google.android.youtube",
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.youtube"
+   },
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "minutes": 10,
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "tb 7731 yt"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tb.multi.three.apps",
+  "title": "Three apps",
+  "goal": "Work out 25 times 4 in the calculator, search the web for that number followed by \"km in miles\", then put the answer in a Google Keep note that starts with \"tb 7731 three\"",
+  "category": "multi-app",
+  "suites": [
+   "multiapp2"
+  ],
+  "apps": [
+   "com.google.android.calculator",
+   "com.android.chrome",
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.calculator"
+   },
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "minutes": 14,
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "tb 7731 three"
+    ]
+   },
+   {
+    "check": "screen",
+    "regex": "\\b62[.,]1"
+   }
+  ]
+ }
+]

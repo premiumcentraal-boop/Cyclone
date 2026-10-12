@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -14,7 +15,7 @@ from cyclone_device_gateway.desktop_runtime.models import (
     DesktopRuntimeError,
     VIDEO_PROTOCOL_VERSION,
 )
-from cyclone_device_gateway.desktop_runtime.video import VideoFleetLimiter, VideoStreamController
+from cyclone_device_gateway.desktop_runtime.video import StreamMessage, VideoFleetLimiter, VideoStreamController
 from cyclone_device_gateway.media.backend import ScrcpyMediaBackend
 
 _PNG_1X1 = (
@@ -59,6 +60,65 @@ class FakeStreamSession:
 
 
 class VideoStreamPipelineTests(unittest.TestCase):
+    def test_new_socket_before_old_close_gets_a_fresh_decoder_session(self):
+        controller = VideoStreamController(FakeStreamSession(FakeStreamADB()), VideoFleetLimiter(),
+            media_backend=unavailable_media_backend(), jpeg_first=True)
+        def produce(profile, stop):
+            controller._broadcast(profile, StreamMessage("text", '{"type":"stream.init"}'))
+            stop.wait(3)
+        controller._produce_jpeg = produce
+        old = controller.subscribe("focus")
+        self.assertIn("stream.init", old.get(timeout=2).data)
+        new = controller.subscribe("focus")
+        try:
+            self.assertIn("stream.init", new.get(timeout=2).data)
+            self.assertEqual(controller.limiter.snapshot()["sources"], 1)
+        finally:
+            controller.unsubscribe("focus", old)
+            controller.unsubscribe("focus", new)
+            controller.stop_all()
+
+    def test_new_viewer_restarts_dead_producer_even_with_an_orphan_queue(self):
+        controller = VideoStreamController(FakeStreamSession(FakeStreamADB()), VideoFleetLimiter(),
+            media_backend=unavailable_media_backend(), jpeg_first=True)
+        orphan = queue.Queue()
+        controller._subscribers["focus"].add(orphan)
+        q = controller.subscribe("focus")
+        try:
+            self.assertIn("stream.init", q.get(timeout=2).data)
+            self.assertEqual(q.get(timeout=2).kind, "binary")
+        finally:
+            controller.stop_all()
+        self.assertEqual(controller.subscriber_count(), 0)
+
+    def test_quick_reload_waits_for_old_producer_and_starts_exactly_one_replacement(self):
+        controller = VideoStreamController(FakeStreamSession(FakeStreamADB()), VideoFleetLimiter(),
+            media_backend=unavailable_media_backend(), jpeg_first=True)
+        started = queue.Queue()
+        allow_old_exit = threading.Event()
+        def produce(profile, stop):
+            started.put(stop)
+            stop.wait(3)
+            if not allow_old_exit.is_set():
+                allow_old_exit.wait(3)
+        controller._produce_jpeg = produce
+        first = controller.subscribe("focus")
+        old_stop = started.get(timeout=2)
+        controller.unsubscribe("focus", first)
+        second = controller.subscribe("focus")
+        self.assertTrue(old_stop.is_set())
+        self.assertTrue(started.empty(), "replacement must wait for old media cleanup")
+        allow_old_exit.set()
+        new_stop = started.get(timeout=2)
+        try:
+            self.assertIsNot(old_stop, new_stop)
+            self.assertIs(controller._stops["focus"], new_stop)
+            self.assertEqual(controller.limiter.snapshot()["sources"], 1)
+        finally:
+            controller.unsubscribe("focus", second)
+            controller.stop_all()
+        self.assertEqual(controller.limiter.snapshot()["sources"], 0)
+
     def test_capture_outage_emits_one_error_then_keepalives_and_keeps_subscription(self):
         adb = FakeStreamADB(fail_capture=True)
         controller = VideoStreamController(
@@ -155,7 +215,7 @@ class VideoStreamPipelineTests(unittest.TestCase):
         self.assertEqual(status.json()["protocol"], VIDEO_PROTOCOL_VERSION)
         self.assertIn("video", status.json())
 
-    def test_focus_producer_prefers_jpeg_without_provisional_avc(self):
+    def test_explicit_jpeg_mode_uses_screenshots_without_provisional_avc(self):
         adb = FakeStreamADB()
 
         class TrackingBackend:
@@ -174,6 +234,7 @@ class VideoStreamPipelineTests(unittest.TestCase):
             FakeStreamSession(adb),
             VideoFleetLimiter(),
             media_backend=TrackingBackend(),
+            jpeg_first=True,
         )
         q = controller.subscribe("focus")
         init = q.get(timeout=2)

@@ -1,54 +1,73 @@
 package com.cyclone.mobile.ui.v32
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.app.Activity
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material3.IconButton
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.ArrowDropDown
-import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,461 +77,819 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.ai.AgentRunDiagnosticV39
-import com.cyclone.mobile.ai.AgentTraceRuntime
+import androidx.compose.ui.zIndex
 import com.cyclone.mobile.ai.CycloneAiAccessProfile
-import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
-import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
 import com.cyclone.mobile.ai.OpenRouterModelPreset
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.OpenRouterSecretStore
-import com.cyclone.mobile.ai.ProviderFailureClass
 import com.cyclone.mobile.ai.QuickAgentConfig
 import com.cyclone.mobile.ai.QuickAgentResult
-import com.cyclone.mobile.ai.TaskResultActivityV292
-import com.cyclone.mobile.ai.model.ModelQualificationOutcome
-import com.cyclone.mobile.ai.model.ModelQualificationRunner
+import com.cyclone.mobile.ai.RequestDispatch
+import com.cyclone.mobile.ai.RequestIntent
+import com.cyclone.mobile.ai.RequestIntentRouter
 import com.cyclone.mobile.ai.model.ModelRegistry
+import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.ui.overlay.glass.GlassPalette
+import com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette
+import com.cyclone.mobile.ui.v32.ask.AskBackground
+import com.cyclone.mobile.ui.v32.ask.AskCopy
+import com.cyclone.mobile.ui.v32.ask.AskDim
+import com.cyclone.mobile.ui.v32.ask.AskGlass
+import com.cyclone.mobile.ui.v32.ask.AskHeader
+import com.cyclone.mobile.ui.v32.ask.AskHome
+import com.cyclone.mobile.ui.v32.ask.AskLogoPanel
+import com.cyclone.mobile.ui.v32.ask.AskMenuDrawer
+import com.cyclone.mobile.ui.v32.ask.AskModelSheet
+import com.cyclone.mobile.ui.v32.ask.AskRainField
+import com.cyclone.mobile.ui.v32.ask.AskScrim
+import com.cyclone.mobile.ui.v32.ask.AskVideoField
+import com.cyclone.mobile.ui.v32.ask.AskGreetingPool
+import com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop
+import com.cyclone.mobile.ui.v32.ask.LocalAskWorld
+import com.cyclone.mobile.ui.v32.ask.LocalAskShine
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
+import com.cyclone.mobile.ui.overlay.OverlayChromeState
+import com.cyclone.mobile.ui.overlay.PendingTaskAttachment
+import com.cyclone.mobile.ui.overlay.TaskAttachment
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 internal enum class V39ChatRole { USER, CYCLONE }
+internal data class V39ChatMessage(val id: Long, val role: V39ChatRole, val text: String, val ok: Boolean? = null)
 
-internal data class V39ChatMessage(
-    val id: Long,
-    val role: V39ChatRole,
-    val text: String,
-    val ok: Boolean? = null,
-)
-
-/** Process-session chat state only. Persistent diagnostics remain owned by Brain Recent Runs. */
+/** Process-session chat only. Brain owns persistent run diagnostics. The Ask page is the live Gemini-style canvas. Plus stays a short sheet. */
 internal object V39AiChatSessionRuntime {
     private val nextId = AtomicLong(1L)
     val messages = mutableStateListOf<V39ChatMessage>()
     val submitGate = V39AiSubmitGate()
+    var pendingRequest by mutableStateOf("")
+    /** R6: a run picked in the smart search; the page opens its menu on that run. */
+    var pendingOpenRun by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
     var status by mutableStateOf("")
 
     fun append(role: V39ChatRole, text: String, ok: Boolean? = null) {
-        val clean = text.trim()
-        if (clean.isNotBlank()) messages += V39ChatMessage(nextId.getAndIncrement(), role, clean, ok)
+        text.trim().takeIf(String::isNotBlank)?.let {
+            messages += V39ChatMessage(nextId.getAndIncrement(), role, it, ok)
+        }
     }
 }
 
 internal object V39AiChatContract {
     const val PREFS = "cyclone_ai"
     const val MODEL_KEY = "openrouter_model"
-    const val PLACEHOLDER = "Ask Cyclone to do something…"
+    const val PLACEHOLDER = "Ask Cyclone…"
 
-    fun normalizedRequest(value: String): String = value.trim()
-
+    fun normalizedRequest(value: String) = value.trim()
     fun modelForStored(stored: String?): OpenRouterModelPreset =
-        OpenRouterModelPresets.byId(stored.orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id })
-
-    fun storageId(model: OpenRouterModelPreset): String =
-        ModelRegistry.profileForPreset(model)?.cycloneId ?: model.id
-
-    fun models(): List<OpenRouterModelPreset> = OpenRouterModelPresets.all
+        OpenRouterModelPresets.byId(stored.orEmpty())
+    fun storageId(model: OpenRouterModelPreset): String = ModelRegistry.profileForPreset(model)?.cycloneId ?: model.id
 
     fun config(modelId: String, accessProfile: CycloneAiAccessProfile): QuickAgentConfig {
         val model = modelForStored(modelId)
-        val profile = ModelRegistry.profileForPreset(model)
         return QuickAgentConfig(
             model = model,
-            // Contributor never crosses into the normal default vision identity.
-            visionModel = if (profile?.isContributor == true) model else OpenRouterModelPresets.GEMINI_3_8_FLASH,
+            visionModel = model,
             safeMode = accessProfile != CycloneAiAccessProfile.FULL,
             accessProfile = accessProfile,
         )
     }
 
-    fun finalStatus(result: QuickAgentResult): String = if (result.ok) "Completed and checked" else "Stopped safely"
+    fun finalStatus(result: QuickAgentResult) = if (result.ok) "Completed and checked" else "Stopped safely"
 }
 
-/** Atomic guard means recomposition/keyboard + icon races cannot double-submit the same task. */
 internal class V39AiSubmitGate {
     private val active = AtomicBoolean(false)
-    val busy: Boolean get() = active.get()
 
     fun tryAccept(rawRequest: String, hasKey: Boolean): String? {
         val request = V39AiChatContract.normalizedRequest(rawRequest)
-        if (request.isBlank() || !hasKey) return null
-        if (!active.compareAndSet(false, true)) return null
+        if (request.isBlank() || !hasKey || !active.compareAndSet(false, true)) return null
         return request
     }
 
-    fun complete() {
-        active.set(false)
-    }
-}
-
-private fun recordPreflightFailure(
-    context: Context,
-    request: String,
-    outcome: ModelQualificationOutcome.Failed,
-): String {
-    val traceId = AgentTraceRuntime.start(context, request, outcome.profile.cycloneId)
-    AgentTraceRuntime.event(
-        context, traceId, "MODEL_SELECTED", outcome.profile.displayName,
-        code = outcome.profile.cycloneId, ok = true,
-        detail = "slug=${outcome.profile.openRouterSlug} · privacy=${outcome.profile.privacyClass}",
-    )
-    AgentTraceRuntime.event(
-        context, traceId, "MODEL_PREFLIGHT_STARTED", "Provider-only model qualification started before Android observation",
-        code = "model.preflight", ok = true,
-        detail = "phoneMutations=0 · phoneObservation=false · screenshot=false",
-    )
-    if (outcome.failure.failureClass == ProviderFailureClass.MALFORMED_MODEL_OUTPUT) {
-        AgentTraceRuntime.event(
-            context, traceId, "MODEL_OUTPUT_RECEIVED", "Qualification response received",
-            code = "model.output", ok = true,
-        )
-        AgentTraceRuntime.event(
-            context, traceId, "MODEL_OUTPUT_REJECTED", "Qualification output did not satisfy Cyclone's contract",
-            code = outcome.failure.code, ok = false,
-        )
-    }
-    AgentTraceRuntime.event(
-        context, traceId, "PROVIDER_ERROR", outcome.failure.userMessage,
-        code = outcome.failure.code, ok = false,
-        detail = listOfNotNull(
-            "http=${outcome.failure.httpStatus}",
-            outcome.failure.providerCode?.let { "providerCode=$it" },
-            outcome.failure.providerName?.let { "provider=$it" },
-            outcome.failure.requestId?.let { "requestId=$it" },
-            "retryable=${outcome.failure.retryable}",
-            "phoneMutations=0",
-        ).joinToString(" · "),
-    )
-    AgentTraceRuntime.event(
-        context, traceId, "MODEL_PREFLIGHT_FAILED", "Model qualification failed before Android execution",
-        code = outcome.failure.code, ok = false,
-        detail = "No Android failure attribution and no negative navigation evidence were recorded.",
-    )
-    AgentTraceRuntime.finish(context, traceId, "FAILED", outcome.failure.userMessage, 0)
-    AgentRunDiagnosticV39.ensureCanonical(context, traceId)
-    return traceId
-}
-
-private fun attachPreflightSuccess(
-    context: Context,
-    run: QuickAgentResult,
-    outcome: ModelQualificationOutcome.Passed,
-) {
-    val traceId = run.taskId ?: return
-    AgentTraceRuntime.event(
-        context, traceId, "MODEL_SELECTED", outcome.profile.displayName,
-        code = outcome.profile.cycloneId, ok = true,
-        detail = "slug=${outcome.profile.openRouterSlug} · privacy=${outcome.profile.privacyClass} · causalStage=pre_android",
-    )
-    AgentTraceRuntime.event(
-        context, traceId, "MODEL_PREFLIGHT_STARTED", "Provider-only qualification occurred before Android observation",
-        code = "model.preflight", ok = true,
-        detail = "phoneMutations=0 · phoneObservation=false · cached=${outcome.cached}",
-    )
-    if (!outcome.cached) {
-        AgentTraceRuntime.event(
-            context, traceId, "PROVIDER_ROUTED", "Qualification provider served the selected model identity",
-            code = outcome.profile.openRouterSlug, ok = true,
-            detail = listOfNotNull(
-                outcome.providerName?.let { "provider=$it" },
-                outcome.requestId?.let { "requestId=$it" },
-                "allowFallbacks=${outcome.profile.allowProviderFallbacks}",
-            ).joinToString(" · "),
-        )
-        AgentTraceRuntime.event(
-            context, traceId, "MODEL_OUTPUT_RECEIVED", "Qualification output received",
-            code = "model.output", ok = true,
-        )
-        if (outcome.repaired) {
-            AgentTraceRuntime.event(
-                context, traceId, "MODEL_OUTPUT_REPAIRED", "One harmless JSON wrapper was normalized",
-                code = "model.output.single_repair", ok = true,
-            )
-        }
-        AgentTraceRuntime.event(
-            context, traceId, "MODEL_OUTPUT_VALIDATED", "Qualification output matched the Cyclone contract",
-            code = "model.output.valid", ok = true,
-        )
-    }
-    AgentTraceRuntime.event(
-        context, traceId, "MODEL_PREFLIGHT_PASSED", if (outcome.cached) "Cached model qualification accepted" else "Model qualification passed",
-        code = "model.preflight", ok = true,
-        detail = "Qualification completed before phone observation/mutation; attached to this run after execution so it remains one downloadable diagnostic.",
-    )
-    AgentRunDiagnosticV39.ensureCanonical(context, traceId)
+    fun complete() = active.set(false)
 }
 
 @Composable
-internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () -> Unit) {
-    CycloneIntelligenceTheme { V39AiChatContent(context, refreshTick, onSettings) }
-}
-
-@Composable
-private fun V39AiChatContent(
+internal fun V39AiChatPage(
     context: Context,
     refreshTick: Int,
+    onSettingsSection: (String) -> Unit = {},
+    onRoutines: () -> Unit = {},
+    onBrain: () -> Unit = {},
     onSettings: () -> Unit,
 ) {
+    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val task by WorkspaceTasks.state.collectAsState()
+    val liveMission by com.cyclone.mobile.mind.mission.MindMissions.live.collectAsState()
+    var askOptions by remember { mutableStateOf<List<com.cyclone.mobile.task.AskWhileWorking.Option>?>(null) }
+    LaunchedEffect(liveMission?.id) { if (liveMission == null) askOptions = null }
+    val queuedRequests by WorkspaceTasks.requests.state.collectAsState()
+    val foregroundActivity by OverlayChromeRuntime.activity.collectAsState()
+    val foregroundSnapshot = remember(foregroundActivity) { OverlayChromeRuntime.snapshot() }
+    val foregroundWorking = task == null && foregroundActivity in setOf(OverlayChromeState.WORKING, OverlayChromeState.LIVE)
+    val attached by PendingTaskAttachment.present.collectAsState()
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     val scope = rememberCoroutineScope()
-    val agent = remember { OpenRouterAdaptiveAgent(context) }
-    val qualifier = remember { ModelQualificationRunner(context) }
     val session = V39AiChatSessionRuntime
+    var chatJob by remember { mutableStateOf<Job?>(null) }
     var composer by rememberSaveable { mutableStateOf("") }
-    var toolsMenuOpen by remember { mutableStateOf(false) }
-    var inputMessage by remember { mutableStateOf("") }
+    var toolsOpen by remember { mutableStateOf(false) }
+    var voiceOpen by remember { mutableStateOf(false) }
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    // R3: the burger opens the menu drawer, the mark opens the logo panel; a run tapped on home opens in the drawer.
+    var menuOpen by remember { mutableStateOf(false) }
+    var logoOpen by remember { mutableStateOf(false) }
+    var openRun by remember { mutableStateOf<String?>(null) }
+    var drawerCollapsed by rememberSaveable { mutableStateOf(false) }
+    var message by remember { mutableStateOf("") }
+    val catalogRevision by com.cyclone.mobile.ai.OpenRouterCatalogStore.revision.collectAsState()
+    var selectedModelId by rememberSaveable(catalogRevision, refreshTick) {
+        mutableStateOf(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context))
+    }
+    var reasoningEffort by rememberSaveable {
+        mutableStateOf(prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium")
+    }
+    val hasKey = remember(refreshTick) { OpenRouterSecretStore.hasKey(context) }
+    val previewRoute = remember(composer, attached) { RequestIntentRouter.route(composer, hasAttachment = attached) }
+    val emptyCanvas = session.messages.isEmpty() && !session.busy && task == null && !foregroundWorking
+
     val dictation = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        voiceOpen = false
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let {
                 composer = listOf(composer, it).filter(String::isNotBlank).joinToString(" ")
             }
         }
     }
-    var modelMenuOpen by remember { mutableStateOf(false) }
-    var selectedModelId by rememberSaveable {
-        mutableStateOf(
-            V39AiChatContract.storageId(
-                V39AiChatContract.modelForStored(prefs.getString(V39AiChatContract.MODEL_KEY, null)),
-            ),
+
+    fun restoreAttachmentAfterChatFailure(attachment: TaskAttachment?) {
+        if (attachment != null && !PendingTaskAttachment.present.value) PendingTaskAttachment.set(attachment)
+    }
+
+    fun persistAiControls(modelId: String, effort: String) {
+        selectedModelId = modelId
+        reasoningEffort = effort
+        prefs.edit()
+            .putString(V39AiChatContract.MODEL_KEY, modelId)
+            .putString("openrouter_reasoning_effort", effort)
+            .apply()
+    }
+
+    fun chooseAsk(choice: com.cyclone.mobile.task.AskWhileWorking.Choice) {
+        askOptions = null
+        val text = V39AiChatContract.normalizedRequest(composer)
+        val target = com.cyclone.mobile.mind.mission.MindMissions.viewedTaskId(com.cyclone.mobile.task.AskWhileWorking.viewed.value)
+        if (text.isBlank() || target == null) return
+        val result = com.cyclone.mobile.task.TaskCommands.send(context, target, com.cyclone.mobile.task.AskWhileWorking.command(choice, text))
+        if (result.handled) {
+            session.append(V39ChatRole.USER, text)
+            session.append(V39ChatRole.CYCLONE, result.detail)
+            composer = ""
+        } else message = result.detail
+    }
+
+    fun submit(raw: String = composer) {
+        message = ""
+        val normalized = V39AiChatContract.normalizedRequest(raw)
+        if (normalized.isBlank()) return
+        // Plan 38: while a mission runs, the owner chooses what the text is: a change to the task they are viewing
+        // (Steer, or Answer to its question), the next task (Queue) or a task at the same time (Parallel).
+        if (com.cyclone.mobile.mind.mission.MindMissions.isLive()) {
+            drawerCollapsed = false
+            askOptions = com.cyclone.mobile.mind.mission.MindMissions.askOptions(context,
+                com.cyclone.mobile.task.AskWhileWorking.viewed.value, normalized)
+            return
+        }
+
+        if (com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context).isBlank()) {
+            message = "Choose models in Settings → Model & API first."
+            return
+        }
+        val route = RequestIntentRouter.route(normalized, hasAttachment = attached)
+        val dispatch = if (route.intent == RequestIntent.CHAT) RequestDispatch.CHAT else
+            RequestIntentRouter.dispatch(route, canStartPhoneTask = WorkspaceTasks.canStartRequest())
+
+        when (dispatch) {
+            RequestDispatch.START_PHONE_TASK -> runCatching {
+                check(OverlayChromeRuntime.isAttached()) { "Phone control needs repair. Open Phone control in Settings." }
+                OverlayChromeRuntime.submitRequest(normalized)
+            }.onSuccess {
+                session.append(V39ChatRole.USER, normalized)
+                session.append(V39ChatRole.CYCLONE, "Got it. I'll work on that on your phone.")
+                composer = ""
+            }.onFailure { message = it.message ?: "Couldn't open the phone-task setup." }
+
+            RequestDispatch.QUEUE_PHONE_TASK -> runCatching { WorkspaceTasks.queueRequest(normalized) }
+                .onSuccess {
+                    session.append(V39ChatRole.USER, normalized)
+                    session.append(V39ChatRole.CYCLONE, "I've saved that to Up next. Your current task can keep going.")
+                    composer = ""
+                    message = "Saved to Up next. Your current task continues."
+                }
+                .onFailure { message = it.message ?: "Couldn't save this task." }
+
+            RequestDispatch.CHAT -> {
+                val request = session.submitGate.tryAccept(normalized, hasKey) ?: run {
+                    if (!hasKey) message = "Add an OpenRouter key in Settings to chat."
+                    return
+                }
+                val history = session.messages.map { (if (it.role == V39ChatRole.USER) "user" else "assistant") to it.text }
+                val attachment = PendingTaskAttachment.take()
+                val model = OpenRouterModelPresets.byId(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context)).copy(reasoningEffort = reasoningEffort)
+                composer = ""
+                session.busy = true
+                session.status = "Answering…"
+                session.append(V39ChatRole.USER, request)
+                chatJob = scope.launch {
+                    try {
+                        val answer = com.cyclone.mobile.ai.CycloneTextChat.answer(context, model, history, request, attachment)
+                        session.append(V39ChatRole.CYCLONE, answer)
+                        session.status = ""
+                    } catch (cancelled: CancellationException) {
+                        restoreAttachmentAfterChatFailure(attachment)
+                        session.status = "Reply stopped"
+                        throw cancelled
+                    } catch (error: Exception) {
+                        restoreAttachmentAfterChatFailure(attachment)
+                        session.status = "Couldn't get a reply"
+                        session.append(V39ChatRole.CYCLONE, error.message ?: "Chat failed. Try again.")
+                    } finally {
+                        session.submitGate.complete()
+                        session.busy = false
+                        chatJob = null
+                    }
+                }
+            }
+        }
+    }
+
+    fun startVoice() {
+        toolsOpen = false
+        modelMenuOpen = false
+        voiceOpen = true
+        runCatching {
+            dictation.launch(
+                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM),
+            )
+        }.onFailure {
+            voiceOpen = false
+            message = "Dictation isn't available. You can type your request."
+        }
+    }
+
+    fun openCamera() {
+        toolsOpen = false
+        context.startActivity(
+            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                .putExtra("camera", true),
         )
     }
-    val selectedModel = V39AiChatContract.modelForStored(selectedModelId)
-    val selectedProfile = ModelRegistry.profileForPreset(selectedModel)
-    val accessProfile = remember(refreshTick) { CycloneAiAccessProfileStore.read(context) }
-    val hasKey = remember(refreshTick) { OpenRouterSecretStore.hasKey(context) }
-    val latestRun = remember(refreshTick, session.busy, session.messages.size) {
-        AgentTraceRuntime.store.listSessions(1).firstOrNull()
+
+    fun openFiles() {
+        toolsOpen = false
+        context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
     }
 
-    fun submit() {
-        val request = session.submitGate.tryAccept(composer, hasKey) ?: return
-        val config = V39AiChatContract.config(selectedModelId, accessProfile)
-        composer = ""
-        session.busy = true
-        session.status = "Qualifying ${config.model.label}…"
-        session.append(V39ChatRole.USER, request)
-        scope.launch {
-            try {
-                when (val qualification = qualifier.qualify(config.model)) {
-                    is ModelQualificationOutcome.Failed -> {
-                        recordPreflightFailure(context, request, qualification)
-                        session.status = "Model unavailable"
-                        session.append(V39ChatRole.CYCLONE, qualification.failure.userMessage, false)
-                        return@launch
-                    }
-                    is ModelQualificationOutcome.Passed -> {
-                        session.status = if (qualification.cached) "Model ready · starting…" else "Model qualified · starting…"
-                        val run = agent.execute(request, config) { progress ->
-                            scope.launch {
-                                if (session.submitGate.busy) session.status = progress.trim().ifBlank { "Working…" }
+    fun openPhotos() {
+        toolsOpen = false
+        context.startActivity(
+            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                .putExtra("photos", true),
+        )
+    }
+
+    fun shareScreen() {
+        toolsOpen = false
+        com.cyclone.mobile.capture.LiveScreenShare.start(context)
+    }
+
+    LaunchedEffect(keyboardOpen, toolsOpen, modelMenuOpen) {
+        if (keyboardOpen) {
+            modelMenuOpen = false
+            toolsOpen = false
+        } else if (toolsOpen || modelMenuOpen) {
+            drawerCollapsed = false
+        }
+    }
+
+    LaunchedEffect(session.pendingOpenRun) {
+        session.pendingOpenRun?.let {
+            session.pendingOpenRun = null
+            openRun = it
+            menuOpen = true
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        session.pendingRequest.takeIf(String::isNotBlank)?.let {
+            session.pendingRequest = ""
+            composer = it
+            submit(it)
+        }
+    }
+
+    // R3 (docs/design/redesign/rounds/R3-ai-screen.md): the Cyclone rain behind smoked glass. The rain is recorded
+    // once as the backdrop every glass surface on the page blurs; the shine crosses them every six seconds.
+    val backdrop = rememberLayerBackdrop()
+    val shine = rememberInfiniteTransition(label = "Ask shine").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(AskGlass.SHINE_MS, easing = LinearEasing), RepeatMode.Restart),
+        label = "Ask shine phase",
+    )
+    val modelLabel = remember(catalogRevision, selectedModelId) {
+        AskCopy.modelLabel(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context).takeIf(String::isNotBlank)
+            ?.let { com.cyclone.mobile.ai.OpenRouterCatalogStore.preset(context, it).label })
+    }
+    androidx.activity.compose.BackHandler(menuOpen || logoOpen || modelMenuOpen) {
+        menuOpen = false
+        logoOpen = false
+        modelMenuOpen = false
+    }
+    val homeCanvas = emptyCanvas && composer.isBlank()
+    val backgroundVideo by AskBackground.video.collectAsState()
+    LaunchedEffect(Unit) { AskBackground.load(context) }
+
+    // R5: inside the app the glass world owns the rain (with the scene while this page is in front), the backdrop,
+    // the shine and the quality; the page only adds its greeting pool. Standing alone it still draws its own.
+    val world = LocalAskWorld.current
+    CompositionLocalProvider(
+        LocalAskBackdrop provides if (world) LocalAskBackdrop.current else backdrop,
+        LocalAskShine provides if (world) LocalAskShine.current else shine,
+        LocalGlassPalette provides GlassPalette.SMOKE,
+    ) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .then(if (world) Modifier else Modifier.background(Color(0xFF050608))),
+    ) {
+        if (world) {
+            if (homeCanvas) AskGreetingPool(Modifier.matchParentSize())
+        } else {
+            // The owner may pick a video from their phone instead (logo panel › Background video); the rain is the default.
+            val video = backgroundVideo
+            if (video != null) AskVideoField(video, Modifier.matchParentSize().layerBackdrop(backdrop))
+            else AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))
+            AskScrim(Modifier.matchParentSize(), greeting = homeCanvas)
+        }
+        com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
+
+        Column(
+            Modifier.fillMaxSize().padding(
+                horizontal = CycloneConversationTokens.space16,
+                vertical = CycloneConversationTokens.space8,
+            ),
+            verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
+        ) {
+            AskHeader(
+                modelLabel = modelLabel,
+                modelOpen = modelMenuOpen,
+                onMenu = {
+                    modelMenuOpen = false
+                    logoOpen = false
+                    openRun = null
+                    menuOpen = true
+                },
+                onModel = {
+                    toolsOpen = false
+                    logoOpen = false
+                    modelMenuOpen = !modelMenuOpen
+                },
+                onLogo = {
+                    modelMenuOpen = false
+                    menuOpen = false
+                    logoOpen = !logoOpen
+                },
+            )
+
+            if (homeCanvas) {
+                AskHome(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onSuggestion = { composer = it },
+                    onSeeAll = {
+                        openRun = null
+                        menuOpen = true
+                    },
+                    onRun = {
+                        openRun = it
+                        menuOpen = true
+                    },
+                )
+            } else {
+                CycloneConversationPanel(Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space12),
+                        contentPadding = PaddingValues(top = if (keyboardOpen) 2.dp else 4.dp, bottom = 8.dp),
+                    ) {
+                        if (session.messages.isNotEmpty()) {
+                            items(session.messages, key = { it.id }) { V39ChatBubble(it) }
+                        }
+
+                        // Plan 27: the task on the same glass as the overlay (pill above, card, island, moments).
+                        val mission = liveMission
+                        val missionTask = mission?.let { m -> task?.takeIf { it.taskId == "mission-${m.id}" } }
+                        if (mission != null && missionTask == null) {
+                            item(key = "mission-${mission.id}") { CycloneLiveMissionCard(mission) }
+                            item(key = "behind-missions") { CycloneBehindMissions() }
+                        } else (missionTask ?: task)?.let { current ->
+                            item(key = "current-${current.taskId}") {
+                                InAppTaskStack(current)
                             }
                         }
-                        attachPreflightSuccess(context, run, qualification)
-                        session.status = V39AiChatContract.finalStatus(run)
-                        session.append(V39ChatRole.CYCLONE, run.message, run.ok)
-                    }
-                }
-            } catch (cancelled: CancellationException) {
-                agent.cancelActiveTask()
-                throw cancelled
-            } catch (_: Exception) {
-                session.status = "Stopped safely"
-                session.append(V39ChatRole.CYCLONE, "Cyclone stopped before the task completed.", false)
-            } finally {
-                session.submitGate.complete()
-                session.busy = false
-            }
-        }
-    }
+                        if (foregroundWorking) {
+                            item(key = "foreground-${foregroundSnapshot.sessionId}") {
+                                InAppForegroundCard(foregroundSnapshot)
+                            }
+                        }
+                        if (queuedRequests.isNotEmpty()) {
+                            item(key = "queued") { CyclonePendingRequests() }
+                        }
 
-    Column(
-        Modifier.fillMaxSize().background(CycloneIntelligenceStyle.Ink).imePadding()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            CycloneOrbitMark(Modifier.size(32.dp))
-            Spacer(Modifier.size(10.dp))
-            Text("Cyclone", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-            IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        Box {
-            TextButton(onClick = { modelMenuOpen = true }, enabled = !session.busy,
-                modifier = Modifier.semantics { contentDescription = "AI model selector" }) {
-                Text(selectedModel.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Icon(Icons.Rounded.ArrowDropDown, null)
-            }
-            DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
-                V39AiChatContract.models().forEach { model ->
-                    DropdownMenuItem(text = { Text(model.label) }, onClick = {
-                        selectedModelId = V39AiChatContract.storageId(model)
-                        prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()
-                        modelMenuOpen = false
-                    })
-                }
-            }
-        }
-        if (selectedProfile?.isContributor == true) {
-            Text("Contributor · prompts and responses may be used for training.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-        }
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            if (session.messages.isEmpty()) {
-                item {
-                    Column(Modifier.fillMaxWidth().padding(top = 32.dp, bottom = 28.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        CycloneOrbitMark(Modifier.size(64.dp))
-                        Text("A little less doing.\nA little more done.", fontSize = 32.sp, lineHeight = 39.sp,
-                            fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurface)
-                        Text("What would you like me to do?", style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            } else {
-                items(session.messages, key = { it.id }) { message -> V39ChatBubble(message) }
-            }
-            if (session.busy || session.status.isNotBlank()) {
-                item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-                        Surface(
-                            shape = RoundedCornerShape(22.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth(.9f),
-                        ) {
-                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                if (session.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Column {
-                                    Text("Cyclone", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    Text(session.status.ifBlank { "Working…" }, style = MaterialTheme.typography.bodyMedium)
+                        if (session.busy || session.status.isNotBlank()) {
+                            item {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(
+                                            start = CycloneConversationTokens.space4,
+                                            end = CycloneConversationTokens.space24,
+                                            top = CycloneConversationTokens.space4,
+                                            bottom = CycloneConversationTokens.space4,
+                                        ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
+                                ) {
+                                    if (session.busy) {
+                                        CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 1.8.dp)
+                                    }
+                                    Text(
+                                        if (session.busy) "Thinking…" else session.status,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
                                 }
                             }
                         }
                     }
                 }
             }
-            if (!session.busy && session.messages.lastOrNull()?.role == V39ChatRole.CYCLONE && latestRun != null && latestRun.status != "RUNNING") {
-                item {
-                    TextButton(onClick = {
-                        context.startActivity(
-                            Intent(context, TaskResultActivityV292::class.java)
-                                .putExtra(TaskResultActivityV292.EXTRA_SESSION_ID, latestRun.id)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+
+            AnimatedContent(
+                targetState = drawerCollapsed,
+                transitionSpec = {
+                    (fadeIn(tween(CycloneConversationTokens.stateTransitionMs)) +
+                        slideInVertically(
+                            animationSpec = tween(
+                                CycloneConversationTokens.stateTransitionMs,
+                                easing = FastOutSlowInEasing,
+                            ),
+                        ) { it / 6 }
+                    ).togetherWith(
+                        fadeOut(tween(CycloneConversationTokens.fastTransitionMs)) +
+                            slideOutVertically(
+                                animationSpec = tween(CycloneConversationTokens.fastTransitionMs),
+                            ) { it / 8 },
+                    )
+                },
+                label = "Ask Cyclone retraction",
+            ) { minimized ->
+                if (minimized) {
+                val minimizedSendEnabled = composer.isNotBlank() && liveMission != null || composer.isNotBlank() && when (previewRoute.intent) {
+                    RequestIntent.PHONE_TASK -> true
+                    RequestIntent.CHAT -> hasKey && !session.busy
+                }
+                CycloneMinimizedComposerBar(
+                    text = composer,
+                    onTextChanged = { composer = it },
+                    onExpand = { drawerCollapsed = false },
+                    onAdd = {
+                        drawerCollapsed = false
+                        modelMenuOpen = false
+                        toolsOpen = true
+                    },
+                    onVoice = { startVoice() },
+                    onVoiceStop = { voiceOpen = false },
+                    onSubmit = { submit() },
+                    sendEnabled = minimizedSendEnabled,
+                    busy = session.busy,
+                    voiceActive = voiceOpen,
+                    modifier = Modifier.padding(bottom = CycloneConversationTokens.space8),
+                )
+            } else {
+                CycloneChatDrawerSurface(
+                    containerColor = Color.Transparent,
+                    outlineColor = Color.Transparent,
+                    onCollapse = {
+                        focusManager.clearFocus(force = true)
+                        keyboardController?.hide()
+                        toolsOpen = false
+                        modelMenuOpen = false
+                        drawerCollapsed = true
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                ) {
+            if (!hasKey) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .90f),
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.Key, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("OpenRouter key required for chat", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = onSettings) { Text("Settings") }
+                    }
+                }
+            }
+
+            if (message.isNotBlank()) {
+                Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+            if (attached) {
+                Text("Attachment ready", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            }
+
+            if (session.busy) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Answering",
+                        Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    TextButton(onClick = { chatJob?.cancel() }) { Text("Stop reply") }
+                }
+            }
+            val sendEnabled = composer.isNotBlank() && liveMission != null || composer.isNotBlank() && when (previewRoute.intent) {
+                RequestIntent.PHONE_TASK -> true
+                RequestIntent.CHAT -> hasKey && !session.busy
+            }
+            askOptions?.takeIf { composer.isNotBlank() }?.let { options -> CycloneAskOptions(options, ::chooseAsk) }
+            // Plan 27: the same glass Ask bar as the overlay.
+            GlassComposerBar(
+                text = composer,
+                onTextChanged = { composer = it },
+                placeholder = V39AiChatContract.PLACEHOLDER,
+                onAdd = {
+                    toolsOpen = !toolsOpen
+                    if (toolsOpen) modelMenuOpen = false
+                },
+                onVoice = { startVoice() },
+                onVoiceStop = { voiceOpen = false },
+                onSend = { submit() },
+                sendEnabled = sendEnabled,
+                busy = session.busy,
+                voiceActive = voiceOpen,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
+                }
+            }
+            }
+
+        AnimatedVisibility(
+            visible = toolsOpen,
+            modifier = Modifier.matchParentSize().zIndex(3f),
+            enter = fadeIn() + slideInVertically { it / 5 },
+            exit = fadeOut() + slideOutVertically { it / 5 },
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = .28f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { toolsOpen = false },
+                        ),
+                )
+                // Tilt Glass: the + drawer is a working card, like the overlay's.
+                InAppGlassSheet(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .heightIn(max = 460.dp)
+                        .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+                    handle = { CycloneSheetDismissHandle(onDismiss = { toolsOpen = false }, handleColor = GlassMutedHandle) },
+                ) {
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                        CycloneAttachmentTools(
+                            onCamera = { openCamera() },
+                            onPhotos = { openPhotos() },
+                            onFiles = { openFiles() },
+                            onShareScreen = { shareScreen() },
+                            filesLabel = "Files",
+                            extras = listOf(
+                                Icons.Rounded.Bolt to "Create a routine",
+                                Icons.Rounded.Tune to "Model & intelligence",
+                            ),
+                            onExtra = { label ->
+                                toolsOpen = false
+                                when (label) {
+                                    "Create a routine" -> composer = "Create a routine"
+                                    "Model & intelligence" -> modelMenuOpen = true
+                                }
+                            },
                         )
-                    }) {
-                        Icon(Icons.Rounded.History, null, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.size(5.dp))
-                        Text("View run")
                     }
                 }
             }
         }
 
-        if (!hasKey) {
-            Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Key, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(8.dp))
-                    Text("OpenRouter key required", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = onSettings) { Text("Add API key in Settings") }
-                }
+        // R3 state 2: the model selector drops from the header pill.
+        if (modelMenuOpen && !keyboardOpen) {
+            Box(Modifier.matchParentSize().zIndex(4f)) {
+                AskDim { modelMenuOpen = false }
+                AskModelSheet(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(
+                        start = CycloneConversationTokens.space16,
+                        end = CycloneConversationTokens.space16,
+                        top = 66.dp,
+                    ),
+                    onChanged = ::persistAiControls,
+                    onDismiss = { modelMenuOpen = false },
+                )
             }
         }
 
-        if (session.busy) {
-            TextButton(onClick = { session.status = "Stopping…"; agent.cancelActiveTask() }) { Text("Stop task") }
+        // R3 state 3: the menu drawer from the left.
+        AnimatedVisibility(
+            visible = menuOpen,
+            modifier = Modifier.matchParentSize().zIndex(5f),
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(160)),
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                AskDim { menuOpen = false }
+                AskMenuDrawer(
+                    openRun = openRun,
+                    newChatEnabled = !session.busy && (session.messages.isNotEmpty() || session.status.isNotBlank()),
+                    onNewChat = {
+                        session.messages.clear()
+                        session.status = ""
+                        composer = ""
+                        message = ""
+                        menuOpen = false
+                    },
+                    onRoutines = {
+                        menuOpen = false
+                        onRoutines()
+                    },
+                    onBrain = {
+                        menuOpen = false
+                        onBrain()
+                    },
+                    onSettings = {
+                        menuOpen = false
+                        onSettings()
+                    },
+                    onDismiss = { menuOpen = false },
+                )
+            }
         }
-        if (inputMessage.isNotBlank()) Text(inputMessage, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall)
-        Surface(shape = RoundedCornerShape(30.dp), color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp)) {
-                BasicTextField(value = composer, onValueChange = { composer = it }, enabled = !session.busy,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), minLines = 2, maxLines = 5,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { submit() }),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp)
-                        .semantics { contentDescription = "Ask Cyclone composer" },
-                    decorationBox = { field ->
-                        Box { if (composer.isEmpty()) Text("Ask Cyclone", color = MaterialTheme.colorScheme.onSurfaceVariant); field() }
-                    })
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box {
-                        IconButton(onClick = { toolsMenuOpen = true }, enabled = !session.busy) {
-                            Icon(Icons.Rounded.Add, "Add to your task")
-                        }
-                        DropdownMenu(expanded = toolsMenuOpen, onDismissRequest = { toolsMenuOpen = false }) {
-                            DropdownMenuItem(text = { Text("Share screen") }, onClick = {
-                                toolsMenuOpen = false
-                                context.startActivity(Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
-                            })
-                            DropdownMenuItem(text = { Text("Background task") }, onClick = {
-                                toolsMenuOpen = false
-                                context.startActivity(Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
-                                    .putExtra("goal", composer))
-                            })
-                        }
-                    }
-                    Text("On your phone", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                    IconButton(onClick = {
-                        runCatching { dictation.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask Cyclone")) }
-                            .onFailure { inputMessage = "Dictation isn't available. You can type your request." }
-                    }, enabled = !session.busy) { Icon(Icons.Rounded.Mic, "Dictate request") }
-                    FilledIconButton(onClick = { submit() }, enabled = hasKey && composer.isNotBlank() && !session.busy,
-                        shape = CircleShape, modifier = Modifier.size(48.dp)
-                            .semantics { contentDescription = "Send Ask Cyclone request" }) {
-                        if (session.busy) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.Rounded.ArrowUpward, "Send")
+
+        // R3 state 4: the logo panel from the top right.
+        if (logoOpen) {
+            Box(Modifier.matchParentSize().zIndex(5f)) {
+                AskDim { logoOpen = false }
+                AskLogoPanel(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = CycloneConversationTokens.space16, top = 66.dp),
+                    onSettings = { section ->
+                        logoOpen = false
+                        if (section.isBlank()) onSettings() else onSettingsSection(section)
+                    },
+                )
+            }
+        }
+
+        if (voiceOpen) {
+            AskCycloneVoiceMode(onClose = { voiceOpen = false })
+        }
+    }
+    }
+}
+
+@Composable
+private fun AskCycloneVoiceMode(onClose: () -> Unit) {
+    val pulse = rememberInfiniteTransition(label = "voice")
+    val scales = listOf(0.35f, 0.62f, 1f, 0.62f, 0.35f)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF07101F), Color(0xFF123D72), Color(0xFF07101F)),
+                ),
+            )
+            .semantics { contentDescription = "Listening…" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                scales.forEachIndexed { index, base ->
+                    val amount by pulse.animateFloat(
+                        initialValue = base * 0.45f,
+                        targetValue = base,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(700 + index * 90, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse,
+                        ),
+                        label = "bar$index",
+                    )
+                    Canvas(Modifier.size(width = 6.dp, height = 56.dp)) {
+                        val half = size.height / 2f * amount
+                        drawLine(
+                            color = Color(0xFF9EC5FF),
+                            start = Offset(size.width / 2f, size.height / 2f - half),
+                            end = Offset(size.width / 2f, size.height / 2f + half),
+                            strokeWidth = size.width,
+                            cap = StrokeCap.Round,
+                        )
                     }
                 }
             }
+            Text("Listening…", style = MaterialTheme.typography.headlineSmall, color = Color.White)
+            Text("Speak naturally", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = .72f))
+            Spacer(Modifier.height(24.dp))
+            Surface(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clickable(role = Role.Button, onClick = onClose),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shadowElevation = 0.dp,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Stop, "Stop listening", Modifier.size(28.dp))
+                }
+            }
         }
-        Spacer(Modifier.height(2.dp))
+        Icon(
+            Icons.Rounded.Close,
+            "Close voice",
+            Modifier
+                .align(Alignment.TopStart)
+                .padding(18.dp)
+                .size(28.dp)
+                .clickable(onClick = onClose),
+            tint = Color.White,
+        )
     }
 }
 
 @Composable
 private fun V39ChatBubble(message: V39ChatMessage) {
-    val isUser = message.role == V39ChatRole.USER
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Surface(
-            shape = RoundedCornerShape(22.dp),
-            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-            border = if (isUser) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier.fillMaxWidth(.88f),
-        ) {
-            Column(Modifier.padding(horizontal = 15.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(if (isUser) "You" else "Cyclone", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                Text(message.text, style = MaterialTheme.typography.bodyMedium)
-                if (!isUser && message.ok != null) {
-                    Text(
-                        if (message.ok) "Checked" else "Stopped",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (message.ok) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        }
+    CycloneConversationBubble(
+        text = message.text,
+        speaker = if (message.role == V39ChatRole.USER) {
+            CycloneConversationSpeaker.USER
+        } else {
+            CycloneConversationSpeaker.CYCLONE
+        },
+    )
+    if (message.role == V39ChatRole.CYCLONE && message.ok != null) {
+        Text(
+            if (message.ok) "Checked" else "Stopped",
+            modifier = Modifier.padding(top = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (message.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        )
     }
 }

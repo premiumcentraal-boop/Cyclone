@@ -1,24 +1,27 @@
-# Cyclone One 1.1.0 + gateway/MCP 4.1.0 release-lane identity; DEVICE TESTING: UNVERIFIED
-# publication_authorized=false; this is not a claim that GitHub tag one-1.1.0 already exists.
-# Mobile stays 4.0.4 / android_version_code 75.
+# Cyclone V5 alpha.125 dev1: profile room for up to 100 profiles on rooted phones (Android-16 fix, per-type-cap unlock, 4..100 range, default 20), on the published Alpha 124 source.
+# Owner-requested update on 2026-10-12. Physical profile creation and the 100-profile ceiling remain UNVERIFIED on a real phone.
 schema = 1
-product_version = "4.0.4"
+product_version = "5.0.0-alpha.125.dev1"
 channel = "development"
-android_version_code = 75
-python_version = "4.1.0"
+android_version_code = 279
+python_version = "5.0.0-alpha.123.dev1"
 
 [components]
-mobile = "4.0.4"
-pc_companion = "1.1.0"
-device_gateway = "4.1.0"
-mcp = "4.1.0"
+mobile = "5.0.0-alpha.125.dev1"
+# The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
+# Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
+pc_companion = "1.6.0-alpha.43"
+# Cyclone Glass web app (apps/glass). Its own line.
+glass = "1.0.0-alpha.65"
+device_gateway = "5.0.0-alpha.123.dev1"
+mcp = "5.0.0-alpha.123.dev1"
 
 [release]
-previous_mobile_version = "4.0.3"
-publication_authorized = false
+previous_mobile_version = "5.0.0-alpha.123.dev1"
+publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
-android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
+android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-one-1.1.0-session-contract-glass"
+candidate_generation = "cyclone-v5-alpha125-profile-room-100"

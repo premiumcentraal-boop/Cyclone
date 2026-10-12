@@ -84,6 +84,13 @@ object CycloneAiAccessPolicy {
         "phone.set_clipboard",
         "phone.share",
         "phone.launch_intent",
+        "phone.submit_text",
+        "phone.tap_point",
+        // Plan 52 run 6: free-form gestures stay out of Guided access.
+        "phone.double_tap",
+        "phone.drag",
+        "phone.pinch",
+        "phone.draw",
     )
 
     private val balancedBlockedTools = setOf("phone.share")
@@ -120,6 +127,8 @@ object CycloneAiAccessPolicy {
         "card number",
     )
 
+    private val searchFieldWords = setOf("search", "zoek", "query", "url", "address", "omnibox", "location_bar", "find")
+
     fun evaluate(
         profile: CycloneAiAccessProfile,
         tool: String,
@@ -132,10 +141,20 @@ object CycloneAiAccessPolicy {
                 "Cyclone stopped at a sensitive text field. Enter credentials or verification codes yourself.",
             )
         }
-        if (tool in setOf("phone.click", "phone.long_press", "phone.tap") && consequentialTargetWords.any(target::contains)) {
+        if (tool in setOf("phone.click", "phone.long_press", "phone.tap", "phone.double_tap", "phone.drag") && consequentialTargetWords.any(target::contains)) {
+            if (params.optBoolean("autofill_authorized") && LoginAutofillPolicy.isLoginSubmitLabel(target)) {
+                return CycloneAiAccessDecision(true, "LOGIN_AUTOFILL_AUTHORIZED", "User authorized login autofill.")
+            }
             return denied(
                 "LOCAL_CONFIRMATION_REQUIRED",
                 "Cyclone stopped before a consequential action that needs your confirmation.",
+            )
+        }
+        // The keyboard action key can send a message or submit a form. Only search and address fields submit freely.
+        if (tool == "phone.submit_text" && searchFieldWords.none(target::contains)) {
+            return denied(
+                "LOCAL_CONFIRMATION_REQUIRED",
+                "Cyclone stopped before pressing Enter in a field that may send or submit something.",
             )
         }
         if (profile == CycloneAiAccessProfile.GUIDED && tool in guidedBlockedTools) {

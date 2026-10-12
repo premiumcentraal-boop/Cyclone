@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/profiles.open.request.result.schema.json",
+  "title": "profiles.open.request.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "requested"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "requested": {
+      "const": true
+    }
+  }
+}

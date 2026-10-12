@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
+import json
 import hashlib
 import hmac
 import queue
@@ -8,7 +10,7 @@ import secrets
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,10 +29,14 @@ from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorC
 from .pairing import PairingCoordinator
 from .readiness import enrich_device_public
 from .layer2 import Layer2WorkspaceService
+from ..glass import LaunchCodes, create_glass_router, resolve_glass_dist
 from .sessions import ExecutionSessionService
+from .lan_share import LanShareDirectory
+from .v5_contract import V5ContractService
 from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 from .workspace import FleetWorkspaceStore
+from ..cloud_control import create_cloud_control_router
 
 
 class PairCompleteBody(BaseModel):
@@ -171,9 +177,22 @@ class DesktopRuntime:
             self.virtual_registry,
             [AndroidEmulatorProvider(settings.runtime_dir)],
         )
-        self.fleet.set_source_resolver(self.virtual_registry.metadata_for_serial)
+        # Plan 44 run 1 (alpha 90): cloud phones (VMOS Cloud, DuoPlus, remote ADB) kept connected by this PC.
+        from ..cloud_fleet import CloudFleetService
+        self.cloud = CloudFleetService(settings.runtime_dir / "cloud", self.fleet)
+        self.fleet.set_source_resolver(
+            lambda serial: self.virtual_registry.metadata_for_serial(serial) or self.cloud.metadata_for_serial(serial))
         self.workspace = FleetWorkspaceStore(settings.runtime_dir / "fleet-workspace.json")
         self.live_diagnostics = FleetDiagnosticSupervisor(self.fleet)
+        # Alpha 87: keep Cyclone on each phone current, and know why it stopped (health reports, freezes).
+        from ..phone_care.service import PhoneCareService
+        self.care = PhoneCareService(self.fleet, settings.runtime_dir / "phone-care", diagnostics=self.live_diagnostics)
+        self.cloud.care = self.care
+        # Alpha 88: wakes a stopped Cyclone app on its own, and runs the owner's one-click connection fixes.
+        from .connection_medic import ConnectionMedic
+        from .accessibility_keeper import AccessibilityKeeper
+        self.medic = ConnectionMedic(self.fleet, self.live_diagnostics,
+                                     keeper=AccessibilityKeeper(settings.runtime_dir / "accessibility-keeper.json", self.live_diagnostics))
         self.pairing = PairingCoordinator(self.fleet, self.live_diagnostics)
         self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
@@ -185,9 +204,70 @@ class DesktopRuntime:
             self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
         ))
         self.video_limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
+        # Wi-Fi screen share: the phone's own stream when it shares (AnyDesk-style), ADB screenshots otherwise.
+        share_contract = V5ContractService(self.fleet)
+        # Cyclone Lab: measured Mind missions, scored from the phone's real state through the lab's fixed probes.
+        from ..lab.probes import PhoneProbe
+        from ..lab.runner import LabService
+        self.lab = LabService(settings.runtime_dir / "lab", share_contract, lambda device_id: PhoneProbe(self.fleet.get(device_id).adb))
+        # Plan 33 (C0): the Command Center's accounts, tasks, routines, results and approvals, in one local SQLite file.
+        from ..command.center import CommandCenter
+        self.command = CommandCenter(settings.runtime_dir / "command" / "command.db", share_contract, self.fleet.list_public)
+        self.command.signup.install_starters()
+        from .scenes import SceneStore
+        from .fleet_orchestrator import FleetOrchestrator
+        self.scenes = SceneStore(settings.runtime_dir / "fleet-scenes.json")
+        self.fleet_orchestrator = FleetOrchestrator(
+            self.command, self.fleet.list_public, self.workspace.nickname_map, settings.runtime_dir / "fleet" / "missions.json",
+            groups=lambda: list(self.workspace.public().get("groups") or []),
+            events=getattr(self.fleet, "events", None),
+            colors=self.workspace.color_map,
+        )
+        self.command.set_task_listener(self.fleet_orchestrator.enqueue_task_change)
+        # Plan 48: the Port Hub (Cyclone Ports). Absent only when the ports kit isn't installed.
+        from ..ports.hub import PortHub
+        try:
+            self.ports: PortHub | None = PortHub(settings.runtime_dir / "ports",
+                                                 base_url=f"http://127.0.0.1:{settings.port}")
+        except RuntimeError:
+            self.ports = None
+        # Plan 48 run 4: the hub collects each ready phone's port messages and answers its runs' waits. Codes are sealed
+        # only to a phone key the owner trusted in Glass (the Command Center's device keys).
+        self.port_phones = None
+        if self.ports is not None:
+            from ..ports.phone import PhoneBridge
+
+            def trusted_key(device_id: str) -> dict[str, str] | None:
+                row = self.command.delivery.trusted_key(device_id)
+                return None if row is None else {"publicKey": row["public_key"], "fingerprint": row["fingerprint"]}
+
+            self.port_phones = PhoneBridge(self.ports, share_contract, self.fleet.list_public, trusted_key)
+        # Plan 50 (alpha.103): plugins installed from GitHub release files, run by the Plugin Host, joined to the Port Hub.
+        self.plugins = None
+        if self.ports is not None:
+            from ..plugins.service import PluginsService
+            try:
+                self.plugins = PluginsService(settings.runtime_dir / "plugins", self.ports)
+            except RuntimeError:
+                self.plugins = None
+        # Alpha.102: every number Cyclone can receive codes on (the fleet's SIMs, forwarders, rented numbers).
+        from ..numbers.service import NumbersService
+        self.numbers = NumbersService(
+            settings.runtime_dir / "numbers" / "numbers.db",
+            devices=self.fleet.list_public,
+            read_phone=share_contract.numbers_list,
+            plugins=lambda: self.ports.overview()["plugins"] if self.ports is not None else [],
+            accounts=self.command.list_accounts,
+        )
+        self.lan_share = LanShareDirectory(
+            status=share_contract.share_status,
+            trust_record=self.trust.store.record,
+            sign=self.trust.identity.sign,
+        )
         self.fleet.set_video_factory(lambda session: VideoStreamController(
             session,
             self.video_limiter,
+            lan_share=self.lan_share.for_device(session.device_id),
             diagnostic=lambda stage, details, device_id=session.device_id: self.live_diagnostics.mark(
                 device_id,
                 stage,
@@ -199,7 +279,7 @@ class DesktopRuntime:
         session = self.fleet.get(device_id)
         if session.video is None:
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture is unavailable.")
-        capture = session.video.snapshot()
+        capture = session.video.snapshot(fresh=True) if profile == "live-phone" else session.video.snapshot()
         data = capture.get("data")
         if not isinstance(data, bytes):
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture returned no image.")
@@ -207,7 +287,7 @@ class DesktopRuntime:
         suffix = ".png" if codec == "image/png" else ".jpg"
         root = self.settings.runtime_dir / "fleet-screenshots"
         root.mkdir(parents=True, exist_ok=True)
-        path = root / f"{device_id}-{int(time.time() * 1000)}{suffix}"
+        path = root / (f"{device_id}-live-phone{suffix}" if profile == "live-phone" else f"{device_id}-{int(time.time() * 1000)}{suffix}")
         path.write_bytes(data)
         return {
             "deviceId": device_id, "filePath": str(path.resolve()), "codec": codec,
@@ -221,8 +301,32 @@ class DesktopRuntime:
         # an authorized phone, it records a bounded baseline and follows only the Cyclone app PID.
         self.live_diagnostics.start()
         self.trust.start()
+        self.command.start()
+        if self.ports is not None:
+            self.ports.start()
+        if self.port_phones is not None:
+            self.port_phones.start()
+        if self.plugins is not None:
+            self.plugins.start()
+        self.care.start()
+        self.medic.start()
+        self.cloud.start()
 
     def stop(self) -> None:
+        closer = getattr(self, "fleet_orchestrator", None)
+        if closer is not None:
+            closer.close()
+        self.cloud.stop()
+        self.medic.stop()
+        self.care.stop()
+        self.command.stop()
+        if self.port_phones is not None:
+            self.port_phones.stop()
+        if self.plugins is not None:
+            self.plugins.stop()
+        if self.ports is not None:
+            self.ports.stop()
+        self.numbers.close()
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
         self.trust.stop()
         self.live_diagnostics.stop()
@@ -491,6 +595,15 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     def trust_status(device_id: str):
         return _call(lambda: runtime.trust.status(device_id))
 
+    @router.post("/v1/devices/{device_id}/connection/fix", dependencies=[Depends(auth)])
+    def connection_fix(device_id: str, body: dict[str, Any] = Body(...)):
+        # One of a few fixed repairs (start Cyclone, open Accessibility settings, open Cyclone); never a free command.
+        if not isinstance(body, dict) or set(body) != {"action"} or not isinstance(body.get("action"), str):
+            raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": "Send {action}."})
+        result = _call(lambda: runtime.medic.fix(device_id, body["action"]))
+        result["device"] = enrich_device_public(runtime.fleet.get(device_id), _safe_trust_status(runtime, device_id))
+        return result
+
     @router.post("/v1/devices/{device_id}/trust/begin", dependencies=[Depends(auth)])
     def trust_begin(device_id: str):
         runtime.live_diagnostics.mark(device_id, "trust.challenge.requested", details={"protocol": "3.3"})
@@ -689,32 +802,40 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             return
         try:
             session = runtime.fleet.get(device_id)
-            adb_state = str(getattr(getattr(session, "adb_device", None), "state", "") or "")
-            if adb_state != "device":
-                raise DesktopRuntimeError(
-                    RuntimeErrorCode.DEVICE_UNAUTHORIZED if adb_state == "unauthorized" else RuntimeErrorCode.DEVICE_DISCONNECTED,
-                    "ADB authorization is required for live display.",
-                    retryable=True,
-                )
             controller = session.video
             if controller is None:
                 raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Video runtime is unavailable.")
-        except DesktopRuntimeError as exc:
-            close_code = 4403 if exc.code == RuntimeErrorCode.DEVICE_UNAUTHORIZED.value else 4404
-            await websocket.close(code=close_code)
+        except DesktopRuntimeError:
+            await websocket.close(code=4404)
             return
         await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
-        if profile == "focus":
-            session.input_owner = "HUMAN"
+        # Self-healing live view: a phone that is known but not ready over USB right now (cable moved, debugging prompt
+        # pending, ADB restarting) gets a retryable reason instead of a closed door. The producer keeps capturing and
+        # frames flow again as soon as ADB is back, like a remote-desktop client that reconnects on its own.
+        adb_state = str(getattr(getattr(session, "adb_device", None), "state", "") or "")
+        if adb_state != "device":
+            reason = {"unauthorized": "USB_UNAUTHORIZED", "offline": "USB_OFFLINE"}.get(adb_state, "USB_ABSENT")
+            runtime.live_diagnostics.mark(device_id, "server.ws.usb_not_ready", details={"profile": profile, "code": reason})
+            await websocket.send_text(json.dumps({"type": "stream.error", "code": reason, "retryable": True}, separators=(",", ":")))
         q = controller.subscribe(profile)
         runtime.live_diagnostics.mark(device_id, "server.ws.accepted", details={"profile": profile, "transport": "websocket"})
         first_binary = True
+        async def watch_disconnect() -> None:
+            # Sending alone does not notice a closed browser while the encoder is quiet.
+            # Receive close frames so reloads cannot leave orphan subscriber queues.
+            while (await websocket.receive())["type"] != "websocket.disconnect":
+                pass
+
+        disconnect = asyncio.create_task(watch_disconnect())
         try:
-            while True:
+            while not disconnect.done():
                 try:
                     message: StreamMessage = await asyncio.to_thread(q.get, True, 1.0)
                 except queue.Empty:
                     continue
+                if message.kind == "close":
+                    await websocket.close(code=1012)
+                    break
                 if message.kind == "binary":
                     await websocket.send_bytes(message.data)  # type: ignore[arg-type]
                     if first_binary:
@@ -732,6 +853,9 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             )
         finally:
             controller.unsubscribe(profile, q)
+            disconnect.cancel()
+            with suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                await disconnect
 
     return router
 
@@ -756,6 +880,33 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     app.state.desktop_runtime = desktop
     app.include_router(create_desktop_router(desktop, settings.token))
     app.include_router(create_stream_router(desktop, settings.token))
+    app.include_router(create_cloud_control_router(desktop, settings.token))
+    from ..lab.api import create_lab_router
+    app.include_router(create_lab_router(desktop, settings.token))
+    from ..market.api import create_market_router
+    app.include_router(create_market_router(desktop, settings.token))
+    from ..command.api import create_command_router, create_oauth_callback_router
+    app.include_router(create_command_router(desktop, settings.token))
+    app.include_router(create_oauth_callback_router(desktop))
+    from ..ports.api import create_ports_router
+    app.include_router(create_ports_router(desktop, settings.token))
+    from ..plugins.api import create_plugins_router
+    app.include_router(create_plugins_router(lambda: getattr(desktop, "plugins", None), settings.token))
+    if getattr(desktop, "numbers", None) is not None:
+        from ..numbers.api import create_numbers_router
+        app.include_router(create_numbers_router(desktop.numbers, settings.token))
+    # Alpha 87: phone care (update the phone's Cyclone, why it stopped). Test doubles without it skip the routes.
+    if getattr(desktop, "care", None) is not None:
+        from ..phone_care.api import create_phone_care_router
+        app.include_router(create_phone_care_router(desktop.care, settings.token))
+    if getattr(desktop, "cloud", None) is not None:
+        from ..cloud_fleet.api import create_cloud_fleet_router
+        app.include_router(create_cloud_fleet_router(desktop.cloud, settings.token))
+    # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
+    app.state.glass_codes = LaunchCodes()
+    from .fleet_api import create_fleet_router
+    app.include_router(create_fleet_router(desktop, settings.token))
+    app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))
     app.add_event_handler("startup", desktop.start)
     app.add_event_handler("shutdown", desktop.stop)
     return app
@@ -861,6 +1012,7 @@ def _call(fn):
             RuntimeErrorCode.TRUST_REVOKED.value: 403,
             RuntimeErrorCode.TRUST_EXPIRED.value: 401,
             RuntimeErrorCode.TRUST_AUTH_FAILED.value: 403,
+            RuntimeErrorCode.TRUST_REJECTED.value: 403,
             RuntimeErrorCode.PROTOCOL_MISMATCH.value: 426,
             RuntimeErrorCode.PHONE_LOCKED.value: 423,
             RuntimeErrorCode.HUMAN_HAS_CONTROL.value: 409,

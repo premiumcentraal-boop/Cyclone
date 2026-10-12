@@ -123,6 +123,8 @@ jobs:
 
       - name: Set up Android SDK signing tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
 
       - name: Install Android build tools
         shell: bash
@@ -153,14 +155,17 @@ jobs:
             --ks-pass env:CYCLONE_STORE_PASSWORD \
             --key-pass env:CYCLONE_KEY_PASSWORD \
             --lineage "$lineage" \
-            --rotation-min-sdk-version 34 \
+            --rotation-min-sdk-version 33 \
             --v1-signing-enabled false \
             --v2-signing-enabled false \
             --v3-signing-enabled true \
             --out "signed/$APK_NAME" \
             "candidate/$APK_NAME"
-          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs "signed/$APK_NAME"
-          "$apksigner" lineage --in "signed/$APK_NAME" --print-certs -v > signed/signing-lineage.txt
+          # Mobile supports API 33; verify the entire supported install range.
+          "$apksigner" verify --min-sdk-version 33 --verbose --print-certs "signed/$APK_NAME"
+          # `lineage --in` accepts a proof-of-rotation file, not a signed APK.
+          cp "$lineage" signed/signing-lineage.bin
+          "$apksigner" lineage --in signed/signing-lineage.bin --print-certs -v > signed/signing-lineage.txt
           (cd signed && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
           cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
           printf '%s\n' 'SIGNED_PROTECTED_ENVIRONMENT_ROTATED' > signed/signing-state.txt

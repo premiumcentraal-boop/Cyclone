@@ -168,7 +168,10 @@ internal object GatewayV33TrustManager {
 
     fun beginTrust(context: Context, args: JSONObject): JSONObject {
         requirePhoneAvailable(context)
-        return engine(context).beginTrust(args)
+        val engine = engine(context)
+        val response = engine.beginTrust(args)
+        engine.pendingForUser()?.let { GatewayTrustPrompt.show(context, it) }
+        return response
     }
 
     fun completeTrust(context: Context, args: JSONObject): JSONObject {
@@ -183,7 +186,18 @@ internal object GatewayV33TrustManager {
 
     fun completeSession(context: Context, args: JSONObject): JSONObject {
         requirePhoneAvailable(context)
-        return engine(context).completeSession(args)
+        val engine = engine(context)
+        val before = runCatching { engine.linkedPcs().associateBy { it.trustId } }.getOrDefault(emptyMap())
+        val result = engine.completeSession(args)
+        // Like a chat app's "new login" notice: tell the owner when a linked PC comes back after a while.
+        runCatching {
+            val trustId = result.optString("trustId")
+            val previous = before[trustId] ?: engine.linkedPcs().firstOrNull { it.trustId == trustId }
+            if (previous != null && GatewayPcConnectedNotice.shouldAnnounce(previous, System.currentTimeMillis())) {
+                GatewayPcConnectedNotice.show(context, previous.pcLabel)
+            }
+        }
+        return result
     }
 
     fun rotate(context: Context, authToken: String, args: JSONObject): JSONObject =
@@ -191,6 +205,13 @@ internal object GatewayV33TrustManager {
 
     fun revoke(context: Context, authToken: String, args: JSONObject): JSONObject =
         engine(context).revoke(authToken, args)
+
+    fun linkedPcs(context: Context): List<GatewayTrustedPc> = engine(context).linkedPcs()
+
+    fun isSessionActive(context: Context, trustId: String): Boolean = engine(context).isSessionActive(trustId)
+
+    /** Local user authority in Cyclone Settings: log out one PC; the others stay linked. */
+    fun revokeOneLocal(context: Context, trustId: String): Boolean = engine(context).revokeLocal(trustId) != null
 
     /** Local user authority in Cyclone Settings; no PC credential is accepted or required. */
     fun revokeAllLocal(context: Context): Int {
@@ -208,8 +229,10 @@ internal object GatewayV33TrustManager {
 
     fun pendingForUser(context: Context): GatewayPendingTrust? = engine(context).pendingForUser()
 
-    fun decideTrust(context: Context, challengeId: String, allow: Boolean): Boolean =
-        engine(context).decideTrust(challengeId, allow)
+    fun decideTrust(context: Context, challengeId: String, allow: Boolean): Boolean {
+        GatewayTrustPrompt.clear(context)
+        return engine(context).decideTrust(challengeId, allow)
+    }
 
     fun disconnectSessions(context: Context) {
         engine(context).disconnectSessions()

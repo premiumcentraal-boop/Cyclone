@@ -48,6 +48,29 @@ For every run that did not finish, one line naming the **first step that went wr
 
 The classifier runs **on the phone** from the recorded events, so the phone's own diagnostics and Glass agree.
 
+**Built in Glass alpha.2** (`apps/mobile/**/ai/RunInsight.kt`): `needs-secret`, `gate`, `human-took-control`, `transport`,
+`timeout`, `unchanged`, `element-not-found`, `wrong-room`, `verification-failed`, `model-gave-up`, plus three the trace needs
+today: `cancelled` (stopped by the user), `provider-error` (model provider failed) and `blocked` (other hard blockers), and
+`unknown` with the last failed step.
+
+**Built in Glass alpha.4** (run record v2): each decision turn records the structural room (`room=`), the app (`place=package:…`)
+and its installed version (`appv=`); each check records `roomAfter=`. `decisionSource` is `map` for `graph:` / `compiled-skill:`
+actions and `model` otherwise. `stale-door` = a map-chosen step failed on the target or screen (named with the app version).
+Still to come: `expectedRoomId` recorded by the agent per step, redacted frames.
+
+**Built since (alpha.7–alpha.16):** `door-missing` (gave up in a mapped room with no door onward) and `wrong-room` (a
+map-chosen step left a mapped room for a room none of its doors lead to), both computed on the phone from the Atlas after the
+run. The inspector lists the **scenarios a run reached**, **compares** a failed run with the last good run of the same goal
+(where the routes split), and offers **Ask again**. Runs has a **Goals** view (success rate per sentence).
+
+**Built in Glass alpha.6:** mapping passes are written to the same trace (door steps with a `mapper:` action, neither map nor
+model), so Runs lists them and the classifier explains how they ended. **Mark as expected** (`runs.mark`) keeps a run in Runs but
+out of scenario health. The cause card links to the failing room on the map and, for `stale-door`, the app's Versions tab.
+Mapping from today's trace: GATE_SUSPEND without a later GATE_RESUME → `gate` / `needs-secret`; HARD_BLOCKER text → login wall,
+locked phone or lost accessibility; NON_CONVERGENCE codes (`convergence.task_timeout`, `.repeated_action`, `.stale_target`,
+`.backtrack`, `.mutations_without_verified_progress`, `completion.*`, `.malformed_model`, `.recovery_without_evidence`,
+`classifier.non_convergence`) → the classes above.
+
 ### Timeline
 
 One row per decision turn. Each step shows:

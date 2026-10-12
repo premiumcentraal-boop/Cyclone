@@ -1,0 +1,800 @@
+{
+  "contract": "cyclone.connector/1",
+  "about": "Test vectors: run each request against the state as the caller and compare the answer. Each case starts from the same state. Error messages are plain text for people and are not compared; codes are.",
+  "state": {
+    "now": 5000,
+    "current": "Cyclone_aaaaaaaaaaaaaaaa",
+    "approvals": [
+      {
+        "connectorId": "acme-profiles",
+        "package": "com.acme.profiles",
+        "cert": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "scopes": [
+          "events.profiles",
+          "profiles.ext",
+          "profiles.read",
+          "selector.contribute",
+          "profiles.config",
+          "profiles.startup"
+        ],
+        "label": "Acme Profiles",
+        "approvedAt": 1
+      }
+    ],
+    "profiles": [
+      {
+        "id": "Cyclone_aaaaaaaaaaaaaaaa",
+        "label": "Work",
+        "packages": [
+          "com.instagram.android"
+        ],
+        "ready": true,
+        "removedAt": null,
+        "emoji": "🦊",
+        "color": 4278255360,
+        "ext": {
+          "acme-profiles": {
+            "tier": "gold"
+          },
+          "other-connector": {
+            "private": 1
+          }
+        }
+      },
+      {
+        "id": "Cyclone_bbbbbbbbbbbbbbbb",
+        "label": "Old",
+        "packages": [],
+        "ready": true,
+        "removedAt": 9,
+        "emoji": null,
+        "color": null,
+        "ext": {}
+      }
+    ],
+    "entries": {
+      "acme-profiles": [
+        {
+          "id": "work-cloud",
+          "type": "acme.cloud",
+          "label": "Cloud work",
+          "subtitle": "3 devices",
+          "icon": "ic_cloud",
+          "status": {
+            "state": "ready",
+            "text": ""
+          }
+        }
+      ]
+    },
+    "events": [
+      {
+        "type": "profile.switched",
+        "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+        "at": 4000
+      }
+    ]
+  },
+  "caller": {
+    "package": "com.acme.profiles",
+    "certs": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "manifest": {
+      "contract": "cyclone.connector/1",
+      "id": "acme-profiles",
+      "label": "Acme Profiles",
+      "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles",
+      "entryActivity": ".Entry",
+      "wakeReceiver": ".Wake"
+    }
+  },
+  "cases": [
+    {
+      "name": "hello",
+      "request": {
+        "method": "hello",
+        "args": {
+          "contract": "cyclone.connector/1"
+        }
+      },
+      "schema": "hello.result.schema.json",
+      "answer": {
+        "ok": true,
+        "result": {
+          "contract": "cyclone.connector/1",
+          "minor": 3,
+          "connectorId": "acme-profiles",
+          "approved": true,
+          "granted": [
+            "events.profiles",
+            "profiles.ext",
+            "profiles.read",
+            "selector.contribute"
+          ],
+          "pending": [
+            "profiles.apps.read"
+          ],
+          "profileSchema": 2,
+          "limits": {
+            "extBytes": 4096,
+            "extKeys": 32,
+            "entries": 8,
+            "callsPerSecond": 20
+          }
+        }
+      }
+    },
+    {
+      "name": "hello for a newer major contract",
+      "request": {
+        "method": "hello",
+        "args": {
+          "contract": "cyclone.connector/2"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "UNSUPPORTED_CONTRACT"
+        }
+      }
+    },
+    {
+      "name": "profiles: own data only, no package names without profiles.apps.read",
+      "request": {
+        "method": "profiles"
+      },
+      "schema": "profiles.result.schema.json",
+      "answer": {
+        "ok": true,
+        "result": {
+          "schemaVersion": 2,
+          "current": "Cyclone_aaaaaaaaaaaaaaaa",
+          "profiles": [
+            {
+              "id": "owner",
+              "label": "This phone",
+              "kind": "owner",
+              "state": "ready"
+            },
+            {
+              "id": "Cyclone_aaaaaaaaaaaaaaaa",
+              "label": "Work",
+              "kind": "profile",
+              "state": "ready",
+              "emoji": "🦊",
+              "color": 4278255360,
+              "appCount": 1,
+              "ext": {
+                "tier": "gold"
+              },
+              "androidUserId": 10
+            },
+            {
+              "id": "Cyclone_bbbbbbbbbbbbbbbb",
+              "label": "Old",
+              "kind": "profile",
+              "state": "in_trash",
+              "emoji": null,
+              "color": null,
+              "appCount": 0,
+              "ext": null,
+              "androidUserId": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "profiles from an unapproved signing key",
+      "caller": {
+        "certs": [
+          "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ]
+      },
+      "request": {
+        "method": "profiles"
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "NOT_APPROVED"
+        }
+      }
+    },
+    {
+      "name": "ext.set",
+      "request": {
+        "method": "ext.set",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "value": {
+            "tier": "silver",
+            "seats": 3
+          }
+        }
+      },
+      "schema": "ext.set.result.schema.json",
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "cleared": false
+        }
+      }
+    },
+    {
+      "name": "ext.set clears with null",
+      "request": {
+        "method": "ext.set",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "value": null
+        }
+      },
+      "schema": "ext.set.result.schema.json",
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "cleared": true
+        }
+      }
+    },
+    {
+      "name": "ext.set refuses a secret",
+      "request": {
+        "method": "ext.set",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "value": {
+            "apiKey": "x"
+          }
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "SECRET_REFUSED"
+        }
+      }
+    },
+    {
+      "name": "ext.set on the owner profile",
+      "request": {
+        "method": "ext.set",
+        "args": {
+          "profileId": "owner",
+          "value": {}
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "BAD_REQUEST"
+        }
+      }
+    },
+    {
+      "name": "ext.set on a missing profile",
+      "request": {
+        "method": "ext.set",
+        "args": {
+          "profileId": "Cyclone_ffffffffffffffff",
+          "value": {}
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "NO_SUCH_PROFILE"
+        }
+      }
+    },
+    {
+      "name": "entries.get",
+      "request": {
+        "method": "entries.get"
+      },
+      "schema": "entries.get.result.schema.json",
+      "answer": {
+        "ok": true,
+        "result": {
+          "entries": [
+            {
+              "id": "work-cloud",
+              "type": "acme.cloud",
+              "label": "Cloud work",
+              "subtitle": "3 devices",
+              "icon": "ic_cloud",
+              "status": {
+                "state": "ready",
+                "text": ""
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "entries.set",
+      "request": {
+        "method": "entries.set",
+        "args": {
+          "entries": [
+            {
+              "id": "c",
+              "type": "acme.cloud",
+              "label": "Cloud"
+            }
+          ]
+        }
+      },
+      "schema": "entries.set.result.schema.json",
+      "answer": {
+        "ok": true,
+        "result": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "name": "entries.set can't take a profile's name",
+      "request": {
+        "method": "entries.set",
+        "args": {
+          "entries": [
+            {
+              "id": "c",
+              "type": "acme.cloud",
+              "label": "work"
+            }
+          ]
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "BAD_ENTRIES"
+        }
+      }
+    },
+    {
+      "name": "events",
+      "request": {
+        "method": "events",
+        "args": {
+          "since": 0
+        }
+      },
+      "schema": "events.result.schema.json",
+      "answer": {
+        "ok": true,
+        "result": {
+          "events": [
+            {
+              "seq": 1,
+              "type": "profile.switched",
+              "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+              "at": 4000
+            }
+          ],
+          "next": 1,
+          "reset": false,
+          "more": false
+        }
+      }
+    },
+    {
+      "name": "events with nothing new",
+      "request": {
+        "method": "events",
+        "args": {
+          "since": 1
+        }
+      },
+      "schema": "events.result.schema.json",
+      "answer": {
+        "ok": true,
+        "result": {
+          "events": [],
+          "next": 1,
+          "reset": false,
+          "more": false
+        }
+      }
+    },
+    {
+      "name": "events since a negative number",
+      "request": {
+        "method": "events",
+        "args": {
+          "since": -1
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "BAD_REQUEST"
+        }
+      }
+    },
+    {
+      "name": "a call that doesn't exist",
+      "request": {
+        "method": "profiles.switch"
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "UNKNOWN_METHOD"
+        }
+      }
+    },
+    {
+      "name": "a request that isn't JSON",
+      "rawRequest": "not json",
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "BAD_REQUEST"
+        }
+      }
+    },
+    {
+      "name": "config empty",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.get.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "version": 1,
+          "storageKey": "0cf9bb70c6a5cd90ef10edcfdde83559a0de9b6255fe6366177c146ed09be0ff",
+          "value": null,
+          "state": "unknown"
+        }
+      },
+      "schema": "config.result.schema.json"
+    },
+    {
+      "name": "config opaque set",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.set.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "value": {
+            "automation": true,
+            "token": "opaque"
+          }
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "version": 1,
+          "storageKey": "0cf9bb70c6a5cd90ef10edcfdde83559a0de9b6255fe6366177c146ed09be0ff",
+          "value": {
+            "automation": true,
+            "token": "opaque"
+          },
+          "state": "unknown"
+        }
+      },
+      "schema": "config.result.schema.json"
+    },
+    {
+      "name": "config clear",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.set.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "value": null
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "version": 1,
+          "storageKey": "0cf9bb70c6a5cd90ef10edcfdde83559a0de9b6255fe6366177c146ed09be0ff",
+          "value": null,
+          "state": "unknown"
+        }
+      },
+      "schema": "config.result.schema.json"
+    },
+    {
+      "name": "config readiness",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.status.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "state": "degraded"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android",
+          "version": 1,
+          "storageKey": "0cf9bb70c6a5cd90ef10edcfdde83559a0de9b6255fe6366177c146ed09be0ff",
+          "value": null,
+          "state": "degraded"
+        }
+      },
+      "schema": "config.result.schema.json"
+    },
+    {
+      "name": "config wrong user",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.get.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 11,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "NO_SUCH_PROFILE"
+        }
+      }
+    },
+    {
+      "name": "config unscoped package",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.get.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.other.app"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "BAD_REQUEST"
+        }
+      }
+    },
+    {
+      "name": "config missing value",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "config.set.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "BAD_REQUEST"
+        }
+      }
+    },
+    {
+      "name": "config scope required",
+      "caller": {},
+      "request": {
+        "method": "config.get.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "SCOPE_NOT_GRANTED"
+        }
+      }
+    },
+    {
+      "name": "startup version one",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "startup.check.v1",
+        "args": {
+          "version": 1
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "version": 1,
+          "deadlineMs": 250
+        }
+      },
+      "schema": "startup.check.result.schema.json"
+    },
+    {
+      "name": "startup version two",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "startup.check.v1",
+        "args": {
+          "version": 2
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "UNSUPPORTED_CONTRACT"
+        }
+      }
+    },
+    {
+      "name": "startup status empty",
+      "caller": {
+        "manifest": {
+          "contract": "cyclone.connector/1",
+          "id": "acme-profiles",
+          "label": "Acme Profiles",
+          "scopes": "profiles.read profiles.apps.read profiles.ext selector.contribute events.profiles profiles.config profiles.startup",
+          "entryActivity": ".Entry",
+          "wakeReceiver": ".Wake"
+        }
+      },
+      "request": {
+        "method": "startup.status.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+          "androidUserId": 10,
+          "packageName": "com.instagram.android"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "version": 1,
+          "state": "unknown",
+          "configRef": null
+        }
+      },
+      "schema": "startup.status.result.schema.json"
+    },
+    {
+      "name": "root.status.v1 needs device.root.read",
+      "request": {
+        "method": "root.status.v1",
+        "args": {}
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "SCOPE_NOT_GRANTED"
+        }
+      }
+    },
+    {
+      "name": "profiles.open.request.v1 needs profiles.open.request",
+      "request": {
+        "method": "profiles.open.request.v1",
+        "args": {
+          "profileId": "owner"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "SCOPE_NOT_GRANTED"
+        }
+      }
+    }
+  ]
+}

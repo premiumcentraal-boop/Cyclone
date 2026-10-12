@@ -28,6 +28,7 @@ def collect() -> dict[str, str | int]:
     components = metadata.get("components", {})
     mobile_version = str(components.get("mobile", product))
     pc_version = str(components.get("pc_companion", product))
+    glass_version = str(components.get("glass", ""))
     gateway_version = str(components.get("device_gateway", metadata.get("python_version", product)))
     mcp_version = str(components.get("mcp", metadata.get("python_version", product)))
     version_code = int(metadata["android_version_code"])
@@ -40,11 +41,13 @@ def collect() -> dict[str, str | int]:
     package_lock = read_text("apps/pc-companion/package-lock.json")
     cargo = read_text("apps/pc-companion/src-tauri/Cargo.toml")
     tauri = read_text("apps/pc-companion/src-tauri/tauri.conf.json")
+    glass_package = read_text("apps/glass/package.json")
 
     return {
         "product": product,
         "expectedMobile": mobile_version,
         "expectedPc": pc_version,
+        "expectedGlass": glass_version,
         "expectedGatewayPython": gateway_version,
         "expectedMcpPython": mcp_version,
         "androidVersionName": extract(r'^\s*versionName\s*=\s*"([^"]+)"', gradle, "Android versionName"),
@@ -56,6 +59,7 @@ def collect() -> dict[str, str | int]:
         "pcPackageLock": extract(r'^\s*"version"\s*:\s*"([^"]+)"', package_lock, "PC lockfile version"),
         "pcCargo": extract(r'^version\s*=\s*"([^"]+)"', cargo, "PC Cargo version"),
         "pcTauri": extract(r'^\s*"version"\s*:\s*"([^"]+)"', tauri, "Tauri version"),
+        "glassPackage": extract(r'^\s*"version"\s*:\s*"([^"]+)"', glass_package, "Glass package version"),
         "expectedAndroidVersionCode": version_code,
     }
 
@@ -75,6 +79,13 @@ def check(values: dict[str, str | int]) -> list[str]:
     for field in ("pcPackage", "pcCargo", "pcTauri"):
         if values[field] != pc_version:
             errors.append(f"{field}={values[field]!r} expected {pc_version!r}")
+    # Cyclone Glass (apps/glass) has its own line; collect() always reports it for the live tree.
+    if "expectedGlass" in values:
+        glass_version = str(values["expectedGlass"])
+        if not glass_version:
+            errors.append("components.glass is required: Cyclone Glass (apps/glass) has its own version line")
+        elif values.get("glassPackage") != glass_version:
+            errors.append(f"glassPackage={values.get('glassPackage')!r} expected {glass_version!r}")
     if values["gatewayPython"] != gateway_version:
         errors.append(f"gatewayPython={values['gatewayPython']!r} expected {gateway_version!r}")
     for field in ("mcpPython", "agentMcpPython"):

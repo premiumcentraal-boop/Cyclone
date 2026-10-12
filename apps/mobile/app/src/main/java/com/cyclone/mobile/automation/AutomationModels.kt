@@ -3,7 +3,7 @@ package com.cyclone.mobile.automation
 import java.util.UUID
 
 enum class TriggerType { MANUAL, NOTIFICATION, SCHEDULE, APP_OPENED, CYCLONE_REMOTE, WEBSOCKET, CALENDAR_TIME }
-enum class StepType { PHONE_TOOL, WAIT, CONDITION, BRANCH, REPEAT, VARIABLE_ASSIGNMENT, PARSE_TEXT, REGEX_EXTRACT, DELAY, ASSERTION, INVOKE_SKILL, HTTP_REQUEST, SEND_CYCLONE_EVENT, REQUEST_HUMAN_TAKEOVER }
+enum class StepType { PHONE_TOOL, WAIT, CONDITION, BRANCH, REPEAT, VARIABLE_ASSIGNMENT, PARSE_TEXT, REGEX_EXTRACT, DELAY, ASSERTION, INVOKE_SKILL, STOCK_SKILL, RUN_GROUNDED_SKILL, HTTP_REQUEST, SEND_CYCLONE_EVENT, REQUEST_HUMAN_TAKEOVER }
 enum class RunState { PENDING, RUNNING, SUCCESS, FAILED, WAITING, WAITING_FOR_HUMAN, SKIPPED }
 enum class ConditionOperator { EQUALS, NOT_EQUALS, CONTAINS, NOT_CONTAINS, MATCHES, EXISTS, GREATER_THAN, LESS_THAN }
 enum class FailureAction { RETRY, GO_BACK, RESTART_APP, REQUEST_AI_HELP, REQUEST_HUMAN, ABORT }
@@ -73,7 +73,10 @@ data class AutomationDefinition(
     val steps: List<StepDefinition>,
     val verification: List<ConditionDefinition> = emptyList(),
     val failureBehavior: FailureAction = FailureAction.ABORT,
-    val outputVariables: List<String> = emptyList()
+    val outputVariables: List<String> = emptyList(),
+    val appPackages: List<String> = emptyList(),
+    val categories: List<String> = emptyList(),
+    val associationVersion: Int = 0
 )
 
 data class SkillDefinition(

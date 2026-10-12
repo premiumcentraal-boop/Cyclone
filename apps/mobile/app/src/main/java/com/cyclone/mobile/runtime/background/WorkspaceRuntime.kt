@@ -20,6 +20,7 @@ import com.cyclone.mobile.ai.vision.live.LiveVisionRuntime
 import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionSession
 import com.cyclone.mobile.runtime.session.InputOwner
+import com.cyclone.mobile.gesture.GestureBounds
 import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.util.UUID
@@ -49,7 +50,7 @@ object WorkspaceRuntime {
             override fun onServiceDisconnected(name: ComponentName?) { backend = null; invalidateAll() }
         }
         Shizuku.bindUserService(Shizuku.UserServiceArgs(ComponentName(context, WorkspaceUserService::class.java))
-            .daemon(false).processNameSuffix("workspace").version(1), connection)
+            .daemon(false).processNameSuffix("workspace").version(2), connection)
         check(ready.await(8, TimeUnit.SECONDS) && backend != null) { "BACKGROUND_MODE_UNAVAILABLE: workspace service did not connect" }
     }
 
@@ -57,16 +58,86 @@ object WorkspaceRuntime {
         appContext = context.applicationContext
         connect(context)
         require(packageName != context.packageName && packageName != DeviceState.currentPackage) { "Choose an app that is not on your main screen" }
+        // Plan 26 (A42-2): an app that is only in Recents keeps its task and state: adopt it instead of refusing.
+        if (mainTaskPresent(packageName)) return@synchronized open(packageName) { id -> checked(backend!!.adopt(id, packageName)) }
         val component = context.packageManager.getLaunchIntentForPackage(packageName)?.component?.flattenToString()
             ?: error("No launchable app for that package")
+        open(packageName) { id ->
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeLaunch(context, packageName, android.os.Process.myUid() / 100_000)
+            checked(backend!!.launch(id, component))
+        }
+    }
+
+    /** Plan 26: where the app is now: on the owner's screen, only in Recents, or nowhere. */
+    fun holder(context: Context, packageName: String): com.cyclone.mobile.runtime.plane.TargetHolder = synchronized(lock) {
+        if (packageName == DeviceState.currentPackage || packageName == BackgroundSetup.foregroundPackage()) {
+            return@synchronized com.cyclone.mobile.runtime.plane.TargetHolder.OWNER
+        }
+        runCatching { connect(context) }
+        if (runCatching { mainTaskPresent(packageName) }.getOrDefault(false)) com.cyclone.mobile.runtime.plane.TargetHolder.RECENTS
+        else com.cyclone.mobile.runtime.plane.TargetHolder.NOBODY
+    }
+
+    private fun mainTaskPresent(packageName: String): Boolean =
+        backend?.mainTask(packageName)?.let { it.getBoolean("ok") && it.getBoolean("present") } == true
+
+    /** Plan 26 (A42-5): a second window of an app the owner is using; fails (and restores) for single-window apps. */
+    fun openSecond(context: Context, packageName: String): ExecutionSession = synchronized(lock) {
+        appContext = context.applicationContext
+        connect(context)
+        val component = context.packageManager.getLaunchIntentForPackage(packageName)?.component?.flattenToString()
+            ?: error("No launchable app for that package")
+        open(packageName) { id ->
+            com.cyclone.mobile.connector.ProfileBehaviorRuntime.beforeLaunch(context, packageName, android.os.Process.myUid() / 100_000, "relaunch")
+            checked(backend!!.launchSecond(id, component))
+        }
+    }
+
+    /** Plan 26 (A42-3): open a link in the app this background screen holds. */
+    fun view(sessionId: String, uri: String) = synchronized(lock) {
+        entries[sessionId] ?: error("STALE_SESSION")
+        checked(backend?.view(sessionId, uri) ?: error("BACKEND_DISCONNECTED"))
+        com.cyclone.mobile.gateway.GatewayObservationStore.clear(sessionId)
+    }
+
+    /**
+     * Planes (plan 25): move the app Cyclone is working in from the main screen into a new background screen, keeping
+     * its task (and so its page and state). The main screen shows whatever was underneath.
+     */
+    fun adopt(context: Context, packageName: String): ExecutionSession = synchronized(lock) {
+        appContext = context.applicationContext
+        connect(context)
+        require(packageName != context.packageName) { "Cyclone itself cannot move to the background" }
+        open(packageName) { id -> checked(backend!!.adopt(id, packageName)) }
+    }
+
+    /** The app a background session holds; null when unknown. */
+    fun packageOf(sessionId: String): String? = synchronized(lock) { entries[sessionId]?.session?.targetPackage }
+
+    /** True after [handoff]: the task is on the main screen and this session waits to take it back. */
+    fun handedOff(sessionId: String): Boolean = synchronized(lock) {
+        entries[sessionId]?.lifecycle?.state == WorkspaceState.WAITING_FOR_CONFIRMATION
+    }
+
+    /** Health facts for the plane watchdog: service alive, display and task present, frames fresh. */
+    fun probe(sessionId: String): Triple<Boolean, Boolean, Boolean> = synchronized(lock) {
+        val service = backend?.asBinder()?.isBinderAlive == true
+        val present = service && entries[sessionId] != null && runCatching { backend!!.status(sessionId).getBoolean("ok") }.getOrDefault(false)
+        Triple(service, present, present && LiveVisionRuntime.healthy(sessionId))
+    }
+
+    private fun open(packageName: String, attach: (String) -> Bundle): ExecutionSession {
         val id = "workspace-${UUID.randomUUID()}"
-        val reader = ImageReader.newInstance(720, 1280, PixelFormat.RGBA_8888, 2)
+        // Plan 26 (A42-3): the background screen has the phone's own shape and density (scaled to at most 1080 px
+        // wide), so apps pick the same layout as on the phone and learned maps keep matching.
+        val (width, height, density) = screenShape()
+        val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         val thread = HandlerThread("cyclone-workspace-frames").apply { start() }
         try {
-            val created = checked(backend!!.create(id, reader.surface, 720, 1280, 240))
+            val created = checked(backend!!.create(id, reader.surface, width, height, density))
             val displayId = created.getInt("displayId", -1)
             require(displayId > 0)
-            val launched = checked(backend!!.launch(id, component))
+            val launched = attach(id)
             val session = LiveVisionRuntime.sessions.registerOwned(id, displayId, packageName)
             val revision = LiveVisionRuntime.startSource(id, displayId, FrameSourceType.VIRTUAL_DISPLAY_SURFACE)
             val lifecycle = WorkspaceLifecycle(id, displayId).apply { transition(WorkspaceState.BACKGROUND_OK) }
@@ -87,7 +158,7 @@ object WorkspaceRuntime {
                     }
                 }
             }, Handler(thread.looper))
-            session
+            return session
         } catch (error: Exception) {
             runCatching { backend?.close(id) }; reader.close(); thread.quitSafely()
             entries.remove(id)
@@ -96,6 +167,16 @@ object WorkspaceRuntime {
             }
             throw error
         }
+    }
+
+    private fun screenShape(): Triple<Int, Int, Int> {
+        val metrics = android.util.DisplayMetrics()
+        runCatching {
+            @Suppress("DEPRECATION")
+            appContext?.getSystemService(android.hardware.display.DisplayManager::class.java)
+                ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.getRealMetrics(metrics)
+        }
+        return WorkspaceShape.of(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
     }
 
     fun requireScope(scope: ExecutionContext): ExecutionSession = synchronized(lock) {
@@ -108,9 +189,9 @@ object WorkspaceRuntime {
     fun observe(scope: ExecutionContext): UiSnapshot = synchronized(lock) {
         val session = requireScope(scope)
         val service = CycloneAccessibilityService.instance ?: error("ACCESSIBILITY_NOT_CONNECTED")
-        val snapshot = service.observeDisplay(session.displayId, session.targetPackage.orEmpty())
-        check(snapshot.packageName == session.targetPackage) { "FOREGROUND_REQUIRED: target is not observable on its display" }
-        snapshot
+        // The display holds only what this task opened; another app on top (a permission dialog, a sign-in page) is
+        // shown as it is. Approvals still apply to every tap there.
+        service.observeDisplay(session.displayId, session.targetPackage.orEmpty())
     }
 
     fun requestConfirmation(sessionId: String, action: String, nodeId: String, fingerprint: String, kind: String) = synchronized(lock) {
@@ -136,17 +217,37 @@ object WorkspaceRuntime {
     }
 
     fun input(scope: ExecutionContext, generation: Long, kind: Int, coordinates: FloatArray = floatArrayOf(), text: String = ""): Bundle = synchronized(lock) {
+        authorizeTouchLocked(scope, generation)
+        try { checked(backend!!.input(scope.sessionId, entries.getValue(scope.sessionId).remoteGeneration, kind, coordinates, text)) }
+        finally { LiveVisionRuntime.mutationFinished(scope.sessionId) }
+    }
+
+    /**
+     * Prove workspace input authority without injecting `/system/bin/input`.
+     * Touch tools then use [com.cyclone.mobile.HumanGestureDispatch] with [android.accessibilityservice.GestureDescription.Builder.setDisplayId].
+     */
+    fun authorizeTouch(scope: ExecutionContext, generation: Long): GestureBounds = synchronized(lock) {
+        authorizeTouchLocked(scope, generation)
+        val entry = entries.getValue(scope.sessionId)
+        GestureBounds(0f, 0f, entry.reader.width.toFloat(), entry.reader.height.toFloat())
+    }
+
+    private fun authorizeTouchLocked(scope: ExecutionContext, generation: Long) {
         val entry = entries[scope.sessionId] ?: error("STALE_SESSION")
         requireScope(scope)
         entry.lifecycle.requireMutation(WorkspaceLease(scope.sessionId, scope.displayId, generation), true, backend != null)
         val keyguard = appContext?.getSystemService(android.app.KeyguardManager::class.java)
-        if (keyguard?.isDeviceLocked != false) {
-            pause(scope.sessionId)
-            error("SCREEN_LOCKED: unlock and resume the task")
+        // Plan 28: a locked phone refuses the action but keeps the background screen as it is. Pausing here left the
+        // session paused after unlock with nothing to resume it, so every later action failed. The mission waits for
+        // the unlock before its next step (MindDevice.blocker).
+        check(keyguard?.isDeviceLocked == false) { "SCREEN_LOCKED: unlock and resume the task" }
+        // Plan 26 (A42-3): a still page sends no new frames. The accessibility fingerprint check before every action
+        // already proves the page is current, so a frame that exists is enough; none at all is still a stall.
+        check(LiveVisionRuntime.healthy(scope.sessionId) || LiveVisionRuntime.hasFrame(scope.sessionId)) {
+            "FRAME_STREAM_STALLED: no workspace vision"
         }
-        check(LiveVisionRuntime.healthy(scope.sessionId)) { "FRAME_STREAM_STALLED: no fresh workspace vision" }
-        try { checked(backend!!.input(scope.sessionId, entry.remoteGeneration, kind, coordinates, text)) }
-        finally { LiveVisionRuntime.mutationFinished(scope.sessionId) }
+        val remote = checked(backend!!.status(scope.sessionId))
+        check(remote.getBoolean("agent")) { "HUMAN_HAS_CONTROL: stale input authority" }
     }
 
     fun pause(sessionId: String, state: WorkspaceState = WorkspaceState.PAUSED) = synchronized(lock) {
@@ -168,6 +269,16 @@ object WorkspaceRuntime {
         entry.lifecycle.transition(WorkspaceState.BACKGROUND_OK)
         LiveVisionRuntime.sessions.setOwner(sessionId, InputOwner.CYCLONE)
         com.cyclone.mobile.gateway.GatewayObservationStore.clear(sessionId)
+    }
+
+    /**
+     * Plan 28: a background screen Cyclone still holds but whose input was paused (not handed to the owner) gets its
+     * input back. False when there is nothing to take back or the screen is the owner's.
+     */
+    fun reclaim(sessionId: String): Boolean = synchronized(lock) {
+        val entry = entries[sessionId] ?: return@synchronized false
+        if (entry.lifecycle.state !in setOf(WorkspaceState.PAUSED, WorkspaceState.BACKGROUND_NEEDS_HANDOFF)) return@synchronized false
+        runCatching { resume(sessionId) }.isSuccess
     }
 
     fun handoff(sessionId: String) = synchronized(lock) {

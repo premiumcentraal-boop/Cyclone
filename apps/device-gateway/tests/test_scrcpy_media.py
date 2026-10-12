@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import queue
 import struct
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,7 +18,7 @@ from cyclone_device_gateway.media.artifact import (
     ScrcpyArtifactError,
     metadata,
 )
-from cyclone_device_gateway.media.backend import MediaProfile, ScrcpyMediaBackend, ScrcpyMediaSession
+from cyclone_device_gateway.media.backend import MediaEvent, MediaProfile, MediaState, ScrcpyMediaBackend, ScrcpyMediaSession
 from cyclone_device_gateway.media.protocol import (
     CodecEvent,
     MediaPacket,
@@ -114,11 +116,28 @@ class ScrcpyArtifactTests(unittest.TestCase):
 
 
 class ScrcpyBackendTests(unittest.TestCase):
+    def test_late_viewer_receives_session_and_codec_configuration(self):
+        session = ScrcpyMediaSession(object(), MediaProfile.named("focus"), object())
+        config = MediaEvent("packet", {
+            "sessionId": session.session_id,
+            "ptsUs": None,
+            "config": True,
+            "keyframe": False,
+            "payload": b"\x00\x00\x00\x01\x67\x64\x00\x1f",
+        })
+        session._state = MediaState.LIVE
+        session._width, session._height = 864, 1920
+        session._last_config_event = config
+        viewer = queue.Queue()
+        session._seed_subscriber(viewer)
+        self.assertEqual([viewer.get_nowait().kind for _ in range(3)], ["state", "session", "packet"])
+
     def test_focus_profile_is_true_video_rate_and_thumbnail_is_bounded(self):
         focus = MediaProfile.named("focus")
         thumb = MediaProfile.named("thumbnail")
         self.assertEqual(focus.target_fps, 30)
-        self.assertEqual(focus.max_long_edge, 1080)
+        self.assertEqual(focus.max_long_edge, 1920)
+        self.assertEqual(focus.bitrate_bps, 12_000_000)
         self.assertLessEqual(thumb.target_fps, 10)
         self.assertLess(thumb.bitrate_bps, focus.bitrate_bps)
 
@@ -296,10 +315,12 @@ class ScrcpyBackendTests(unittest.TestCase):
         media = FakeMedia()
 
         class FakeBackend:
+            def __init__(self):
+                self.stops = 0
             def start(self, device, profile):
                 return media
             def stop(self, device):
-                pass
+                self.stops += 1
             def latest_safe_snapshot(self, device):
                 raise AssertionError("primary H.264 path must not request a screenshot")
             def status(self, device):
@@ -316,7 +337,8 @@ class ScrcpyBackendTests(unittest.TestCase):
             credential = None
             adb_device = type("AdbDevice", (), {"state": "device"})()
 
-        controller = VideoStreamController(Device(), VideoFleetLimiter(), media_backend=FakeBackend(), jpeg_first=False)
+        backend = FakeBackend()
+        controller = VideoStreamController(Device(), VideoFleetLimiter(), media_backend=backend)
         q = controller.subscribe("focus")
         init = q.get(timeout=2)
         config_msg = q.get(timeout=2)
@@ -334,7 +356,13 @@ class ScrcpyBackendTests(unittest.TestCase):
         self.assertTrue(key_header[1] & 0x40000000)
         self.assertTrue(key_header[1] & 0x20000000)
         self.assertEqual(key_msg.data[16:], key)
+        keepalive = q.get(timeout=3)
+        self.assertIn('"type":"stream.keepalive"', keepalive.data)
         controller.unsubscribe("focus", q)
+        deadline = time.monotonic() + 2
+        while controller.diagnostics()["activeProfiles"] and time.monotonic() < deadline:
+            time.sleep(.02)
+        self.assertEqual(backend.stops, 0, "closing one profile must not kill another live profile")
         controller.stop_all()
 
 

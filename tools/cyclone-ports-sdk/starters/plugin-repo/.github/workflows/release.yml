@@ -1,0 +1,20 @@
+# Copy into your plugin's repo. Push a tag v<version> (matching cyclone-plugin.toml) after creating its GitHub release.
+name: Release Cyclone plugin
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: premiumcentraal-boop/Cyclone/tools/cyclone-ports-sdk/action@main
+        with:
+          folder: .
+          script: plugin.py
+          requirements: requirements.txt
+          test-settings: '{}'

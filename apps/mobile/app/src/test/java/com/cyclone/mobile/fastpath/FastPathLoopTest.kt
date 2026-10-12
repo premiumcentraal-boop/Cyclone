@@ -77,4 +77,24 @@ class FastPathLoopTest {
         assertFalse(FastPathLoop.fingerprintChanged("a", ""))
         assertTrue(FastPathLoop.fingerprintChanged("a", "b"))
     }
+
+    @Test
+    fun completedGestureKeepsTheOrdinary300msSettleAndDoesNotAddStrokeDurationAgain() {
+        assertEquals(300L, FastPathTimings.SETTLE_MS)
+        assertEquals(300L, FastPathTimings.settleAfterCompletedGestureMs())
+        assertEquals(1_580L, FastPathTimings.gestureAwaitBudgetMs(80L))
+        assertEquals(1_850L, FastPathTimings.gestureAwaitBudgetMs(350L))
+        val sleeps = mutableListOf<Long>()
+        FastPathLoop.settle(
+            beforeFingerprint = "before",
+            sleepMs = { sleeps += it },
+            observeFingerprint = { "after" },
+            nowMs = { 0L },
+            initialSettleMs = FastPathTimings.settleAfterCompletedGestureMs(),
+        )
+        assertEquals(listOf(300L), sleeps)
+        assertFalse(FastPathLoop.allowSecondClickChannel(true, FastPathSettleResult(
+            changed = true, verified = true, observations = 1, elapsedMs = 300L, warning = null, afterFingerprint = "after",
+        )))
+    }
 }

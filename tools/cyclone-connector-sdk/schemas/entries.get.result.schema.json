@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/entries.get.result.schema.json",
+  "title": "entries.get",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "entries"
+  ],
+  "properties": {
+    "entries": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "label",
+          "subtitle",
+          "icon",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"
+          },
+          "type": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9._-]{0,39}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "subtitle": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z][a-z0-9_]{0,59}$"
+          },
+          "status": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state",
+              "text"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "ready",
+                  "attention",
+                  "off"
+                ]
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 60
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

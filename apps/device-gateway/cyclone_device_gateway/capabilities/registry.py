@@ -3,12 +3,15 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from ..actions.router import ALLOWED_TOOLS
+from ..cyclone_bridge.client import BridgeBusyError, BridgeOperationError
+from .human_gesture import discovery_from_bridge_status
 from .models import (
     CapabilityDescriptor,
     CapabilityDiscoveryResponse,
     CapabilityHealth,
     CapabilityHealthState,
     CapabilityKind,
+    HumanGestureDiscovery,
     SafetyMetadata,
 )
 
@@ -55,20 +58,42 @@ class CapabilityRegistry:
         )
 
     def discover(self, bridge) -> CapabilityDiscoveryResponse:
-        health = self._bridge_health(bridge)
+        # One phone status read drives both transport health and Human Gesture truth. Do not infer
+        # runtime support from PC schema availability or perform a second capability authority read.
+        status = self._bridge_status(bridge)
+        health = self._bridge_health_from_status(status)
+        answered = status if isinstance(status, dict) and _FAILURE not in status else None
+        gesture = HumanGestureDiscovery.model_validate(discovery_from_bridge_status(answered))
         return CapabilityDiscoveryResponse(
             gateway_health=health,
             capabilities=tuple(
                 self.descriptor(capability_id, health)
                 for capability_id in self._capability_ids
             ),
+            human_gesture=gesture,
         )
 
     @staticmethod
-    def _bridge_health(bridge) -> CapabilityHealth:
+    def _bridge_status(bridge):
+        # Say why the phone didn't answer (alpha 88): a busy app or a rejected session is not a lost phone.
         try:
             status = bridge.request("bridge.status", {})
+        except BridgeBusyError:
+            return {_FAILURE: "PHONE_APP_BUSY"}
+        except BridgeOperationError as exc:
+            return {_FAILURE: "TOKEN_SESSION_MISMATCH" if exc.code in _AUTH_CODES else exc.code}
         except Exception:
+            return None
+        return status if isinstance(status, dict) else None
+
+    @staticmethod
+    def _bridge_health(bridge) -> CapabilityHealth:
+        """Compatibility helper retained for existing callers/tests."""
+        return CapabilityRegistry._bridge_health_from_status(CapabilityRegistry._bridge_status(bridge))
+
+    @staticmethod
+    def _bridge_health_from_status(status) -> CapabilityHealth:
+        if status is None:
             return CapabilityHealth(
                 state=CapabilityHealthState.UNAVAILABLE,
                 reason_code="DEVICE_DISCONNECTED",
@@ -77,6 +102,12 @@ class CapabilityRegistry:
             return CapabilityHealth(
                 state=CapabilityHealthState.UNAVAILABLE,
                 reason_code="PROTOCOL_MISMATCH",
+            )
+        if _FAILURE in status:
+            reason = str(status[_FAILURE])
+            return CapabilityHealth(
+                state=CapabilityHealthState.DEGRADED if reason == "PHONE_APP_BUSY" else CapabilityHealthState.UNAVAILABLE,
+                reason_code=reason,
             )
         readiness_fields = ("gatewayEnabled", "socketListening", "accessibilityConnected")
         if any(not isinstance(status.get(field), bool) for field in readiness_fields):
@@ -97,3 +128,7 @@ class CapabilityRegistry:
             ),
             reason_code=None if ready else "ANDROID_NOT_READY",
         )
+
+
+_FAILURE = "__bridgeFailure"
+_AUTH_CODES = {"AUTH_REJECTED", "TRUST_EXPIRED", "TRUST_REVOKED", "AUTH_SIGNATURE_INVALID"}

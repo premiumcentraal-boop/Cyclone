@@ -19,6 +19,23 @@ import android.net.Uri
 class GatewayInitProvider : ContentProvider() {
     override fun onCreate(): Boolean {
         val app = context?.applicationContext ?: return true
+        // First, so a freeze during startup is caught too.
+        runCatching { com.cyclone.mobile.runtime.health.MainThreadWatchdog.start(app) }
+        runCatching { com.cyclone.mobile.ai.OpenRouterCatalogStore.initialize(app) }
+        // Plan 57 W1: privileged profile steps are journaled for the debug file from the first one.
+        runCatching { com.cyclone.mobile.runtime.workspaces.ProfileStepJournal.attach(app) }
+        // Plan 57 P1: the last switches, for Profiles and the debug file.
+        runCatching { com.cyclone.mobile.runtime.workspaces.ProfileSwitch.attach(app) }
+        // Plan 52 run 7: the owner's Hands style (Natural unless they chose otherwise) from the first moment of the
+        // process, not only once Accessibility connects.
+        runCatching { com.cyclone.mobile.gesture.HandsSettings.apply(app) }
+        runCatching { com.cyclone.mobile.secrets.VaultGatewayV5Integration.install(app) }
+            .onFailure {
+                GatewayRuntime.reportSafeError(
+                    "VAULT_SOURCE_UNAVAILABLE",
+                    "Phone Vault metadata source could not initialize safely.",
+                )
+            }
         runCatching { GatewayRuntime.startPairingBootstrap(app) }
             .onFailure {
                 GatewayRuntime.reportSafeError(

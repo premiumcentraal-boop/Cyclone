@@ -1,0 +1,50 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(cyclone-testbench:*)",
+      "Bash(.venv/Scripts/cyclone-testbench:*)",
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(python -m unittest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(adb devices:*)",
+      "Bash(adb shell dumpsys:*)",
+      "Bash(adb shell settings get:*)",
+      "Bash(adb shell input:*)",
+      "Bash(adb shell screencap:*)",
+      "Bash(adb shell screenrecord:*)",
+      "Bash(adb shell uiautomator dump:*)",
+      "Bash(adb shell pm list packages:*)",
+      "Bash(adb pull:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git fetch:*)",
+      "Bash(git switch:*)",
+      "Bash(git push origin testbench/results:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)"
+    ],
+    "deny": [
+      "Bash(adb uninstall:*)",
+      "Bash(adb shell pm uninstall:*)",
+      "Bash(adb shell pm clear:*)",
+      "Bash(adb shell rm:*)",
+      "Bash(adb shell reboot:*)",
+      "Bash(adb reboot:*)",
+      "Bash(adb shell locksettings:*)",
+      "Bash(adb shell settings put secure:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin claude/cyclone-v5-handoff-review-9qrs40:*)",
+      "Bash(git tag:*)",
+      "Read(**/.cyclone-signing/**)",
+      "Read(**/vault/**)",
+      "Read(**/*.dpapi*)",
+      "Edit(../Cyclone/**)"
+    ]
+  }
+}

@@ -133,7 +133,9 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         pc_runtime = (ROOT / "packaging/pc-companion/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")
         agent = (ROOT / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
         self.assertIn('windows_subsystem = "windows"', main)
-        self.assertIn("console=False", pc_runtime)
+        # The runtime is also the `cyclone` terminal command: console subsystem, owned console hidden early.
+        self.assertIn("console=True", pc_runtime)
+        self.assertIn('hide_console="hide-early"', pc_runtime)
         self.assertIn("console=True", agent)
         self.assertIn('hide_console="hide-early"', agent)
         self.assertIn("monitor-pc-console\\.ps1", runtime)

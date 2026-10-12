@@ -3,11 +3,41 @@ package com.cyclone.mobile
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class AccessibilityRolesTest {
+    @Test fun passiveSkillSheetDoesNotMoveItsDescriptionsOntoTheRunButton() {
+        val sheet = node("sheet", "0", null, listOf("description", "run"), "", "generic")
+        val description = node("description", "0/0", "sheet", emptyList(), "Nothing: it does not send, delete or pay. Verify my own profile.", "text")
+        val run = node("run", "0/1", "sheet", listOf("run-label"), "", "button", clickable = true, className = "android.widget.Button")
+        val label = node("run-label", "0/1/0", "run", emptyList(), "Run skill", "text")
+        val folded = AccessibilityRoles.foldTalkBackHosts(listOf(sheet, description, run, label))
+        assertEquals("Run skill", folded.first { it.id == "run" }.text)
+        assertEquals(description.text, folded.first { it.id == "description" }.text)
+        assertFalse(folded.first { it.id == "sheet" }.clickable)
+        assertEquals("run", AccessibilityRoles.resolveActivationTarget(folded, folded.first { it.id == "run-label" }).id)
+        assertNull(com.cyclone.mobile.policy.GateClassifier.classify("phone.click", listOf(folded.first { it.id == "run" }.text)))
+    }
+
+    @Test fun passiveLayoutsDoNotMoveSelectedTabLabelsOrConsequencesOntoSiblingButtons() {
+        val group = node("group", "0", null, listOf("selected", "skills", "send"), "", "generic")
+        val selected = node("selected", "0/0", "group", listOf("apps-label"), "", "generic", selected = true)
+        val apps = node("apps-label", "0/0/0", "selected", emptyList(), "Apps", "text")
+        val skills = node("skills", "0/1", "group", listOf("skills-label"), "", "button", clickable = true)
+        val skillsLabel = node("skills-label", "0/1/0", "skills", emptyList(), "Skills", "text")
+        val send = node("send", "0/2", "group", listOf("send-label"), "", "button", clickable = true)
+        val sendLabel = node("send-label", "0/2/0", "send", emptyList(), "Send", "text")
+        val folded = AccessibilityRoles.foldTalkBackHosts(listOf(group, selected, apps, skills, skillsLabel, send, sendLabel))
+        assertEquals("Skills", folded.first { it.id == "skills" }.text)
+        assertEquals("Send", folded.first { it.id == "send" }.text)
+        assertFalse(folded.first { it.id == "selected" }.clickable)
+        assertEquals(com.cyclone.mobile.policy.GateClass.SEND,
+            com.cyclone.mobile.policy.GateClassifier.classify("phone.click", listOf(folded.first { it.id == "send" }.text)))
+    }
+
     @Test
     fun inferRoleEmitsTabForTabLayoutAndSelectedClockTab() {
         assertEquals(

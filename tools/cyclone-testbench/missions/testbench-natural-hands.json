@@ -1,0 +1,362 @@
+[
+ {
+  "id": "tb.hands3.calc.taps",
+  "title": "Natural taps on a keypad",
+  "goal": "In Calculator, work out 12 × 34",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.google.android.calculator"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.calculator"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.calculator"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "408"
+    ]
+   }
+  ],
+  "notes": "Plan 52 matrix: taps land inside each key (natural placement), same-page pacing glances instead of re-reading."
+ },
+ {
+  "id": "tb.hands3.settings.scroll",
+  "title": "Thumb scroll to a row",
+  "goal": "Open Settings, scroll down to About phone and open it",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.android.settings"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.android.settings"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.android.settings"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Android version",
+     "Model",
+     "Build number"
+    ]
+   }
+  ],
+  "notes": "Plan 52 matrix: thumb scrolls with speed curves; the row is reached by scrolling, not guessed."
+ },
+ {
+  "id": "tb.hands3.clock.swipe",
+  "title": "Swipe between tabs",
+  "goal": "Open the Clock app and go to the Stopwatch",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.google.android.deskclock"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.deskclock"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Stopwatch"
+    ]
+   }
+  ],
+  "notes": "Plan 52 matrix: a tab or swipe, whichever a person would use."
+ },
+ {
+  "id": "tb.hands3.chrome.keys",
+  "title": "Keystrokes in Chrome",
+  "goal": "In Chrome, search for \"tb natural hands 7731\"",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.android.chrome"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.android.chrome"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.android.chrome"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "tb natural hands 7731"
+    ]
+   }
+  ],
+  "notes": "Plan 52 matrix: the keyboard opens and the text is typed key by key in Chrome's address bar."
+ },
+ {
+  "id": "tb.hands3.keep.keys",
+  "title": "Keystrokes in a native form",
+  "goal": "Create a new Google Keep note titled \"tb hands 7731\" with the text \"typed by hand\"",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "all": [
+     "tb hands 7731",
+     "typed by hand"
+    ]
+   }
+  ],
+  "notes": "Plan 52 matrix: key-by-key typing in a native (Compose) form, read back exactly."
+ },
+ {
+  "id": "tb.hands3.maps.zoom",
+  "title": "Zoom a map with two fingers",
+  "goal": "Open Google Maps and zoom in on the map",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.google.android.apps.maps"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.apps.maps"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.apps.maps"
+   },
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   }
+  ],
+  "notes": "Plan 52 run 6: phone.pinch on the main screen (two fingers, slanted axis, a small turn)."
+ },
+ {
+  "id": "tb.hands3.chrome.zoom",
+  "title": "Zoom a web page",
+  "goal": "Open example.com in Chrome and zoom in on the text",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.android.chrome"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.android.chrome"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.android.chrome"
+   },
+   {
+    "check": "screen",
+    "any": [
+     "Example Domain"
+    ]
+   },
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   }
+  ],
+  "notes": "Plan 52 run 6: phone.pinch in a WebView-backed page."
+ },
+ {
+  "id": "tb.hands3.photos.doubletap",
+  "title": "Double-tap a photo",
+  "goal": "Open Google Photos, open the newest photo and double-tap it to zoom in",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.google.android.apps.photos"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.apps.photos"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.apps.photos"
+   },
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   }
+  ],
+  "notes": "Plan 52 run 6: phone.double_tap, two taps 90-180 ms apart inside the photo."
+ },
+ {
+  "id": "tb.hands3.keep.draw",
+  "title": "Draw on a canvas",
+  "goal": "In Google Keep, start a new drawing and draw a circle on it",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "approval",
+    "requested": false
+   },
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   }
+  ],
+  "notes": "Plan 52 run 6: phone.draw on a grounded drawing canvas; no approval for a plain shape."
+ },
+ {
+  "id": "tb.hands3.keep.drag",
+  "title": "Drag to reorder a list",
+  "goal": "In Google Keep, make a new checklist with the items \"tb one\" and \"tb two\", then drag \"tb two\" above \"tb one\"",
+  "category": "hands",
+  "suites": [
+   "hands3"
+  ],
+  "apps": [
+   "com.google.android.keep"
+  ],
+  "setup": [
+   {
+    "do": "force_stop",
+    "package": "com.google.android.keep"
+   },
+   {
+    "do": "home"
+   }
+  ],
+  "checks": [
+   {
+    "check": "foreground",
+    "package": "com.google.android.keep"
+   },
+   {
+    "check": "screen",
+    "all": [
+     "tb one",
+     "tb two"
+    ]
+   },
+   {
+    "check": "status",
+    "is": [
+     "completed"
+    ]
+   }
+  ],
+  "notes": "Plan 52 run 6: phone.drag with a pickup hold, a carried stroke and a rest before release."
+ }
+]

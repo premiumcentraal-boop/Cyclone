@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/startup.event.schema.json",
+  "title": "startup.event",
+  "type": "object",
+  "required": [
+    "profileId",
+    "androidUserId",
+    "packageName",
+    "version",
+    "contract",
+    "eventType",
+    "deadlineElapsedRealtimeMs"
+  ],
+  "properties": {
+    "profileId": {
+      "type": "string",
+      "pattern": "^Cyclone_[a-f0-9]{16}$"
+    },
+    "androidUserId": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "packageName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+    },
+    "version": {
+      "const": 1
+    },
+    "contract": {
+      "const": "cyclone.profile-startup/1"
+    },
+    "eventType": {
+      "enum": [
+        "cold_start",
+        "profile_switch",
+        "relaunch"
+      ]
+    },
+    "deadlineElapsedRealtimeMs": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

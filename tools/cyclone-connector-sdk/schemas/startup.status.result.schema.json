@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/startup.status.result.schema.json",
+  "title": "startup.status.result",
+  "type": "object",
+  "required": [
+    "version",
+    "state",
+    "configRef"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "configRef": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1024
+    },
+    "state": {
+      "enum": [
+        "unknown",
+        "ready",
+        "degraded",
+        "failed"
+      ]
+    }
+  }
+}

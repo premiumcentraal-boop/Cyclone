@@ -1,0 +1,19 @@
+package = "cyclone.package/1"
+name = "run-logger"
+version = "0.1.0"
+title = "Run logger"
+summary = "Writes every run event, note and the account's fields to a file, and saves screenshots and files."
+kind = "local"
+homepage = "https://github.com/premiumcentraal-boop/Cyclone"
+license = "Cyclone example"
+
+[local]
+entry = "bin/run-logger.exe"
+platform = "windows-x64"
+
+[permissions]
+network = []
+files = "own"
+
+[settings]
+schema = "settings.schema.json"
