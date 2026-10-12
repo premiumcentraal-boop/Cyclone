@@ -88,13 +88,8 @@ internal fun OverlayAppleGlass(
     cornerRadius: androidx.compose.ui.unit.Dp,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    CycloneSignatureGlass(
-        modifier = modifier,
-        textured = false,
-        solidBacking = true,
-        cornerRadius = cornerRadius,
-        content = content,
-    )
+    // One background for every overlay surface: the same tilt-lit glass as the Ask bar and the working card.
+    Box(modifier.tiltGlass(cornerRadius, palette = com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette.current), content = content)
 }
 
 @Composable

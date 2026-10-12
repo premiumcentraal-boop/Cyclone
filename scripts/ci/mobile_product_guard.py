@@ -82,7 +82,8 @@ REQUIRED_OVERLAY_COMPOSER = (
     'OverlayAppleToolTile(Icons.Rounded.CameraAlt, "Camera"',
     'OverlayAppleMenuRow(Icons.Rounded.AttachFile, "Files"',
     'OverlayAppleMenuRow(Icons.Rounded.Tune, "Model & intelligence"',
-    "CycloneSignatureGlass(",
+    # One background for every overlay surface: the Ask bar's tilt-lit glass.
+    "tiltGlass(cornerRadius",
 )
 FORBIDDEN_OVERLAY_COMPOSER = (
     '"Files & photos"',

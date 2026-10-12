@@ -159,7 +159,7 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
         AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
             Column(
                 Modifier.padding(start = Lane + 10.dp, bottom = 8.dp).fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.04f)).padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(top = 2.dp, bottom = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 diversion.reason?.let {

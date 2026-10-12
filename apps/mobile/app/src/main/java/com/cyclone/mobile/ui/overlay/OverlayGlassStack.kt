@@ -90,6 +90,7 @@ import com.cyclone.mobile.ui.overlay.glass.litRim
 import com.cyclone.mobile.ui.overlay.glass.pressGlow
 import com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette
 import com.cyclone.mobile.ui.overlay.glass.tiltGlass
+import com.cyclone.mobile.ui.overlay.glass.veilPill
 import com.cyclone.mobile.ui.v32.CycloneTaskVisualState
 import com.cyclone.mobile.ui.v32.appLabel
 import com.cyclone.mobile.ui.v32.taskVisualState
@@ -234,6 +235,44 @@ internal fun GlassProgress(fraction: Float?, modifier: Modifier = Modifier, heig
     }
 }
 
+/**
+ * Cyclone asks a question, on the card's glass: the question large, any ready answers as capsules, and a reply line
+ * like the Ask bar's words pill with a send button at its end.
+ */
+@Composable
+private fun OverlayQuestion(moment: OwnerMoment) {
+    val context = LocalContext.current
+    var answer by remember(moment.requestId, moment.text) { mutableStateOf("") }
+    fun reply(text: String) { if (text.isNotBlank()) TaskCommands.send(context, moment.taskId, TaskCommand.Reply(text.trim())) }
+    Text(moment.text, color = Color(0xFFF2FFFD), fontSize = 20.sp, fontWeight = FontWeight.Medium, lineHeight = 27.sp,
+        modifier = Modifier.padding(top = 16.dp, bottom = 14.dp))
+    if (moment.choices.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+            moment.choices.forEach { choice -> GlassCapsuleButton(choice, false, { reply(choice) }, Modifier.fillMaxWidth()) }
+        }
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.foundation.text.BasicTextField(
+            value = answer,
+            onValueChange = { answer = it.take(500) },
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(color = GlassInk, fontSize = 16.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(GlassTeal),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { reply(answer) }),
+            modifier = Modifier.weight(1f).heightIn(min = 46.dp).veilPill().padding(horizontal = 18.dp, vertical = 12.dp)
+                .semantics { contentDescription = "Your answer" },
+            decorationBox = { field ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (answer.isEmpty()) Text("Your answer", color = GlassMuted, fontSize = 16.sp, maxLines = 1)
+                    field()
+                }
+            },
+        )
+        GlassCapsuleButton("Reply", true, { reply(answer) }, enabled = answer.isNotBlank())
+    }
+}
+
 /** A capsule button on the glass: teal when primary, soft dark otherwise; lit edge and press glow like the rest. */
 @Composable
 internal fun GlassCapsuleButton(label: String, primary: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
@@ -315,7 +354,7 @@ private fun AppTrailStrip(apps: List<String>, modifier: Modifier = Modifier, onC
     val context = LocalContext.current
     val newestFirst = apps.asReversed()
     Box(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.035f))
+        modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
             .clickable(role = Role.Button, onClickLabel = "Fold the apps", onClick = onClose),
     ) {
     androidx.compose.foundation.lazy.LazyRow(
@@ -363,17 +402,14 @@ private fun CollapseButton(onMinimize: () -> Unit) {
     }
 }
 
-/** The card's frame: the glass, the grabber inside its top edge, and one soft pill the words sit on. */
+/** The card's frame: one glass panel, the grabber inside its top edge, and the content straight on the glass. */
 @Composable
-private fun GlassCard(content: @Composable () -> Unit) {
+internal fun GlassCard(content: @Composable () -> Unit) {
     Box(Modifier.fillMaxWidth().tiltGlass(OverlayStackGeometry.CARD_RADIUS_DP.dp, palette = LocalGlassPalette.current)) {
-        Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 14.dp)) {
-            Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 10.dp)
+        Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 22.dp, top = 6.dp, bottom = 22.dp)) {
+            Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 14.dp)
                 .size(32.dp, 3.dp).background(GlassMuted.copy(alpha = 0.38f), CircleShape))
-            Column(
-                Modifier.fillMaxWidth().background(VeilTint, RoundedCornerShape(22.dp)).padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-            ) { content() }
+            Column(Modifier.fillMaxWidth()) { content() }
         }
     }
 }
@@ -575,10 +611,11 @@ internal fun OverlayOwnerCard(moment: OwnerMoment) {
     val context = LocalContext.current
     val apps = remember(moment.taskId) { TaskAppTrail.of(moment.taskId) }
     GlassCard {
+        // The same header as the working card: the state on the left, the apps on the right.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            HeaderApps(apps)
-            Spacer(Modifier.weight(1f))
             StatusChip(CycloneTaskVisualState.ACTION_NEEDED)
+            Spacer(Modifier.weight(1f))
+            DepthAppStack(apps, onClick = null)
             moment.dismissal?.let { dismissal ->
                 GlassRoundButton(dismissal.label, { TaskCommands.send(context, moment.taskId, dismissal.command) }, size = 40.dp) {
                     Icon(Icons.Rounded.Close, null, Modifier.size(20.dp), tint = GlassInk)
@@ -588,16 +625,17 @@ internal fun OverlayOwnerCard(moment: OwnerMoment) {
         if (moment.kind == MomentKind.APPROVAL) {
             val (where, message) = remember(moment.text, moment.title) { OverlayGlassCopy.approval(moment.text, moment.title) }
             Text(where, color = GlassMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 14.dp, bottom = 8.dp, start = 2.dp))
-            Box(
-                Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.075f), RoundedCornerShape(22.dp))
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-            ) { Text(message, color = Color(0xFFF2FFFD), fontSize = 20.sp, fontWeight = FontWeight.Medium, lineHeight = 27.sp) }
+            // What will be sent, large and bright, straight on the glass.
+            Text("\u201C$message\u201D", color = Color(0xFFF2FFFD), fontSize = 21.sp, fontWeight = FontWeight.Medium, lineHeight = 28.sp,
+                modifier = Modifier.padding(start = 2.dp))
             BackgroundGlimpse(moment.taskId, Modifier.padding(top = 12.dp))
             Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 moment.actions.forEach { action ->
                     GlassCapsuleButton(action.label, action.primary, { TaskCommands.send(context, moment.taskId, action.command) })
                 }
             }
+        } else if (moment.kind == MomentKind.QUESTION) {
+            OverlayQuestion(moment)
         } else {
             Spacer(Modifier.height(12.dp))
             com.cyclone.mobile.ui.v32.CycloneOwnerCard(moment, framed = false)

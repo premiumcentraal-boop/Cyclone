@@ -144,8 +144,10 @@ fun Modifier.tiltGlass(
         while (y < h) {
             var x = step / 2f + if (row % 2 == 1) step / 2f else 0f
             while (x < w) {
-                val inside = -GlassOptics.roundedRectDistance(x, y, w, h, r)
-                if (inside in 0f..band) { xs += x; ys += y; falls += 1f - inside / band }
+                // The band follows the straight edges only, and runs on under the rim: the rounded outline cuts the
+                // dots off cleanly at the corners instead of the band bending to follow them.
+                val inside = min(min(x, w - x), min(y, h - y))
+                if (inside in -step..band) { xs += x; ys += y; falls += 1f - max(0f, inside) / band }
                 x += step
             }
             y += step
@@ -183,7 +185,7 @@ fun Modifier.tiltGlass(
             if (dotCount > 0) {
                 counts.fill(0)
                 for (i in 0 until dotCount) {
-                    val alpha = GlassOptics.dotAlpha(nxs[i], nys[i], falls[i], lx, ly, power)
+                    val alpha = GlassOptics.dotAlpha(nxs[i], nys[i], falls[i], lx, ly, power) * DOT_OPACITY
                     if (alpha < 0.015f) continue
                     val a = (alpha * (ALPHA_LEVELS - 1) / 0.85f).roundToInt().coerceIn(0, ALPHA_LEVELS - 1)
                     val radius = GlassOptics.dotRadius(nxs[i], nys[i], falls[i], lx, ly)
@@ -227,6 +229,8 @@ fun Modifier.tiltGlass(
 }
 
 private const val ALPHA_LEVELS = 16
+/** The halftone sits quietly in the glass: a little under full strength. */
+internal const val DOT_OPACITY = 0.68f
 private const val RADIUS_LEVELS = 8
 
 /** Segments around a rounded rectangle: x0, y0, x1, y1, outward normal angle — five floats each. */

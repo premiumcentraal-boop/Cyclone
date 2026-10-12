@@ -12,6 +12,10 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -555,40 +559,25 @@ private fun GatePanel(
     snapshot: OverlayChromeSnapshot,
     onAction: (OverlayUserAction) -> Unit,
 ) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .wrapContentHeight()
-            .padding(horizontal = 12.dp),
-    ) {
-        OverlayAppleGlass(
-            modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 28.dp,
-        ) {
-            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Confirmation needed",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    CycloneTrayIconAction(onClick = { onAction(OverlayUserAction.EXIT) }, modifier = Modifier.size(44.dp)) {
-                        Icon(Icons.Rounded.Close, "Cancel", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+    // The same one-panel glass card as the working card: a warm chip, the words straight on the glass, one button.
+    Box(Modifier.fillMaxWidth().wrapContentHeight().padding(horizontal = 12.dp)) {
+        GlassCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.height(30.dp).background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(15.dp)).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) { Text("Confirm", color = GlassWarm, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold) }
+                Spacer(Modifier.weight(1f))
+                com.cyclone.mobile.ui.overlay.glass.GlassRoundButton("Cancel", { onAction(OverlayUserAction.EXIT) }, size = 40.dp) {
+                    Icon(Icons.Rounded.Close, null, Modifier.size(20.dp), tint = GlassInk)
                 }
-                Text(OverlayCopy.GATE, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(
-                    onClick = { onAction(OverlayUserAction.GATE_CONFIRM) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                ) { Text(OverlayCopy.CONFIRM) }
-                if (snapshot.gateClass != null) {
-                    Text(
-                        "Cyclone will authorize only this exact ${snapshot.gateClass.wire} action.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
+            }
+            Text(OverlayCopy.GATE, color = GlassInk, fontSize = 18.sp, fontWeight = FontWeight.Medium, lineHeight = 24.sp,
+                modifier = Modifier.padding(top = 18.dp, bottom = 18.dp))
+            GlassCapsuleButton(OverlayCopy.CONFIRM, true, { onAction(OverlayUserAction.GATE_CONFIRM) }, Modifier.fillMaxWidth())
+            if (snapshot.gateClass != null) {
+                Text("Only this exact ${snapshot.gateClass.wire} action.", color = GlassMuted, fontSize = 12.5.sp,
+                    modifier = Modifier.padding(top = 10.dp, start = 4.dp))
             }
         }
     }
