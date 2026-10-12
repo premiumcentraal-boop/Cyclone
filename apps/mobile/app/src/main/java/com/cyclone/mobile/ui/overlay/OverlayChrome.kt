@@ -473,8 +473,11 @@ private fun ComposerPanel(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     askOptions?.takeIf { snapshot.composerText.isNotBlank() }?.let { options ->
-                        com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7),
-                            surface = Color(0xE6141A22))
+                        // On the same glass as every other overlay surface: the rows straight on the panel.
+                        OverlayAppleGlass(Modifier.fillMaxWidth(), cornerRadius = 26.dp) {
+                            com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7), framed = false)
+                        }
                     }
                     OverlayAppleComposerBar(
                         text = snapshot.composerText,
