@@ -348,12 +348,13 @@ fun appIconBitmap(context: Context, packageName: String?): ImageBitmap? {
 
 /** One app logo: round, with a thin dark ring so it sits cleanly on the glass. [current] adds the teal ring. */
 @Composable
-fun AppLogo(packageName: String?, size: Dp, current: Boolean = false, modifier: Modifier = Modifier) {
+fun AppLogo(packageName: String?, size: Dp, current: Boolean = false, modifier: Modifier = Modifier, ring: Boolean = true) {
     val context = LocalContext.current
     val bitmap = remember(packageName) { appIconBitmap(context, packageName) } ?: return
     Box(modifier.size(size)
         .drawWithContent {
             drawContent()
+            if (!ring) return@drawWithContent
             val r = this.size.minDimension / 2f
             drawCircle(Color(0xF2101114), radius = r + 1.dp.toPx(), style = Stroke(2.dp.toPx()))
             if (current) drawCircle(Teal.copy(alpha = 0.55f), radius = r + 2.6.dp.toPx(), style = Stroke(1.4.dp.toPx()))

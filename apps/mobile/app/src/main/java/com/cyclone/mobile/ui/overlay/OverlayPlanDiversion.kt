@@ -121,7 +121,7 @@ private val BranchWarm = Color(0xFFE9C78B)
 private val Lane = 26.dp
 
 /** Height of the first row: the switch glyph fills it, and the rail starts where it ends. */
-private val ForkHeight = 28.dp
+private val ForkHeight = 24.dp
 
 /**
  * The whole diversion as one timeline. The first row is the fork (no frame), "Changed course" and the plan it left,
@@ -227,7 +227,7 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
 }
 
 /**
- * The diversion mark: one short, clean stroke that swings in from the right and turns down into an arrow, pointing at
+ * The diversion mark: one short, sturdy stroke that swings in from the right and turns down into an arrow, pointing at
  * the first new step. It draws itself in once as [progress] runs; its tip meets the rail.
  */
 @Composable
@@ -235,12 +235,13 @@ private fun ForkGlyph(progress: Float, tint: Color) {
     Canvas(Modifier.size(Lane, ForkHeight)) {
         val w = size.width
         val h = size.height
-        val stroke = 2.dp.toPx()
+        val stroke = 2.5.dp.toPx()
         val rail = w / 2
-        val tip = Offset(rail, h - stroke)
+        val tip = Offset(rail, h - stroke / 2)
+        // Compact: a short swing (a quarter of the lane) and a short drop, so it reads as one solid mark.
         val path = Path().apply {
-            moveTo(w * 0.84f, h * 0.14f)
-            cubicTo(w * 0.84f, h * 0.48f, rail, h * 0.40f, rail, h * 0.74f)
+            moveTo(w * 0.76f, h * 0.16f)
+            cubicTo(w * 0.76f, h * 0.46f, rail, h * 0.40f, rail, h * 0.70f)
             lineTo(tip.x, tip.y)
         }
         val measure = PathMeasure().apply { setPath(path, false) }
@@ -248,7 +249,7 @@ private fun ForkGlyph(progress: Float, tint: Color) {
         measure.getSegment(0f, measure.length * progress, part, true)
         drawPath(part, tint, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
         if (progress > 0.92f) {
-            val a = 3.6.dp.toPx()
+            val a = 3.3.dp.toPx()
             drawLine(tint, tip, Offset(tip.x - a, tip.y - a), stroke, StrokeCap.Round)
             drawLine(tint, tip, Offset(tip.x + a, tip.y - a), stroke, StrokeCap.Round)
         }

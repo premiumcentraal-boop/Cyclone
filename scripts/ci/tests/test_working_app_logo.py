@@ -13,7 +13,7 @@ class WorkingAppLogo(unittest.TestCase):
         uses = [line.strip() for line in stack.splitlines() if "CycloneMark(" in line and "private fun CycloneMark" not in line]
         self.assertTrue(uses)
         for line in uses:
-            self.assertRegex(line, r"(apps\.isEmpty\(\)\)\s*CycloneMark|else CycloneMark\(22\))", f"Cyclone's mark as more than a fallback: {line}")
+            self.assertRegex(line, r"((apps\.isEmpty\(\)|app == null)\)\s*CycloneMark|else CycloneMark\(22\))", f"Cyclone's mark as more than a fallback: {line}")
 
     def test_task_bars_use_the_working_app_not_the_raw_package(self):
         for path in list((MOBILE / "ui").rglob("*.kt")) + list((MOBILE / "runtime/background").rglob("*.kt")):

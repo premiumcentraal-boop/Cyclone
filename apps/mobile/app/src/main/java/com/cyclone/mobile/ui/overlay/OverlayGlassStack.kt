@@ -9,6 +9,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
@@ -76,6 +78,7 @@ import com.cyclone.mobile.R
 import com.cyclone.mobile.owner.MomentKind
 import com.cyclone.mobile.owner.OwnerMoment
 import com.cyclone.mobile.runtime.background.SemanticStepState
+import com.cyclone.mobile.runtime.background.TaskPresentationMilestone
 import com.cyclone.mobile.runtime.background.TaskFollowUpAction
 import com.cyclone.mobile.runtime.background.TaskPresentationProjector
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
@@ -256,15 +259,18 @@ private fun OverlayQuestion(moment: OwnerMoment) {
             value = answer,
             onValueChange = { answer = it.take(500) },
             singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(color = GlassInk, fontSize = 16.sp),
+            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 16.sp),
             cursorBrush = androidx.compose.ui.graphics.SolidColor(GlassTeal),
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { reply(answer) }),
-            modifier = Modifier.weight(1f).heightIn(min = 46.dp).veilPill().padding(horizontal = 18.dp, vertical = 12.dp)
+            // Lit like a button so the custom answer reads as a place to write, not a label.
+            modifier = Modifier.weight(1f).heightIn(min = 46.dp).clip(RoundedCornerShape(23.dp))
+                .background(Color.White.copy(alpha = 0.10f)).litRim(cornerRadius = 23.dp)
+                .padding(horizontal = 18.dp, vertical = 12.dp)
                 .semantics { contentDescription = "Your answer" },
             decorationBox = { field ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (answer.isEmpty()) Text("Your answer", color = GlassMuted, fontSize = 16.sp, maxLines = 1)
+                    if (answer.isEmpty()) Text("Your answer", color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, maxLines = 1)
                     field()
                 }
             },
@@ -331,19 +337,18 @@ private fun DepthLogos(apps: List<String>, onClick: (() -> Unit)?) {
                     .zIndex(-depth.toFloat())
                     .graphicsLayer {
                         scaleX = scale; scaleY = scale
-                        alpha = 1f - 0.22f * depth
-                        translationY = 1.5.dp.toPx() * depth
-                        shadowElevation = (if (depth == 0) 10.dp else 4.dp).toPx()
-                        shape = CircleShape
-                        clip = false
+                        // No rim and no shadow: the earlier apps simply fade back into the glass.
+                        alpha = DEPTH_ALPHA.getOrElse(depth) { DEPTH_ALPHA.last() }
                     },
             ) {
-                AppLogo(pkg, front, current = depth == 0)
-                if (depth > 0) Box(Modifier.size(front).clip(CircleShape).background(Color.Black.copy(alpha = 0.18f * depth)))
+                AppLogo(pkg, front, ring = false)
             }
         }
     }
 }
+
+/** How bright each app in the stack is, front to back. */
+internal val DEPTH_ALPHA = floatArrayOf(1f, 0.42f, 0.18f)
 
 /**
  * The stack fanned out: every app the task visited, oldest at the left, the one it is in now at the right, lit, with
@@ -384,7 +389,7 @@ private fun AppTrailStrip(apps: List<String>, modifier: Modifier = Modifier, onC
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Box(Modifier.size(48.dp).graphicsLayer { alpha = if (current) 1f else 0.72f }, contentAlignment = Alignment.Center) {
-                    AppLogo(pkg, if (current) 44.dp else 38.dp, current = current)
+                    AppLogo(pkg, if (current) 44.dp else 38.dp, ring = false)
                 }
                 Text(appLabel(context, pkg), color = if (current) GlassInk else GlassMuted, fontSize = 11.5.sp, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
@@ -426,7 +431,7 @@ internal fun OverlayWorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion? = 
 
 /** The working card itself; [appsOpen] starts it with the app strip fanned out (previews). */
 @Composable
-internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen: Boolean, onMinimize: () -> Unit) {
+internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen: Boolean, onMinimize: () -> Unit, historyOpen: Boolean = false) {
     val context = LocalContext.current
     val snapshot = remember(task) { TaskPresentationProjector.project(task) }
     // The app it is in now: the main screen's app when the task works on the screen, its own app when it works in the
@@ -480,10 +485,10 @@ internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen
                 }
             }
             else -> {
-                (snapshot.outcomeCopy ?: snapshot.supportingCopy)?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, color = GlassMuted, fontSize = 15.sp, lineHeight = 21.sp)
-                }
-                if (labels.isNotEmpty()) MetaLine((if (state == CycloneTaskVisualState.DONE) "Done in " else "In ") + labels.joinToString(" → "))
+                // What it did (or why it stopped) is the line; a tap unfolds the steps that got it there.
+                val outcome = (snapshot.outcomeCopy ?: snapshot.supportingCopy)?.takeIf { it.isNotBlank() }
+                    ?: OverlayGlassCopy.chip(state)
+                OutcomeHistory(outcome, snapshot.milestones, failed = state == CycloneTaskVisualState.FAILED, startOpen = historyOpen)
             }
         }
     }
@@ -527,11 +532,69 @@ private fun StepRow(label: String, current: Boolean) {
     }
 }
 
+/**
+ * A finished task's outcome: one line, with a chevron like "Plan diverted". A tap unfolds every step it took, on one
+ * quiet rail; when it could not finish, the step it stopped at is marked.
+ */
 @Composable
-private fun MetaLine(text: String) {
-    if (text.isBlank()) return
-    Text(text.uppercase(), color = GlassDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace, letterSpacing = 0.3.sp,
-        modifier = Modifier.padding(top = 12.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+private fun OutcomeHistory(outcome: String, milestones: List<TaskPresentationMilestone>, failed: Boolean, startOpen: Boolean) {
+    var open by rememberSaveable(outcome) { mutableStateOf(startOpen) }
+    val turn by animateFloatAsState(if (open) 180f else 0f, tween(220), label = "History chevron")
+    val steps = milestones.filter { it.state != SemanticStepState.PENDING }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .then(if (steps.isNotEmpty()) Modifier.clickable(role = Role.Button, onClickLabel = if (open) "Hide the steps" else "Show the steps") { open = !open } else Modifier)
+            .semantics(mergeDescendants = true) { if (steps.isNotEmpty()) stateDescription = if (open) "Steps shown" else "Steps hidden" }
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(outcome, Modifier.weight(1f, fill = false), color = GlassInk, fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 22.sp)
+        if (steps.isNotEmpty()) Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(20.dp).graphicsLayer { rotationZ = turn }, tint = GlassMuted)
+    }
+    AnimatedVisibility(open && steps.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        Column(
+            Modifier.fillMaxWidth().padding(top = 10.dp).drawBehind {
+                val x = 9.dp.toPx()
+                val top = 14.dp.toPx()
+                val end = size.height - 14.dp.toPx()
+                if (end > top) drawLine(Color.White.copy(alpha = 0.12f), Offset(x, top), Offset(x, end), 1.2.dp.toPx(), StrokeCap.Round)
+            },
+        ) {
+            steps.forEach { step ->
+                val stopped = step.state == SemanticStepState.FAILED || (failed && step === steps.last() && step.state != SemanticStepState.DONE)
+                Row(Modifier.fillMaxWidth().heightIn(min = 28.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF15171A)), contentAlignment = Alignment.Center) {
+                        if (stopped) Icon(Icons.Rounded.Close, null, Modifier.size(12.dp), tint = GlassWarm)
+                        else Icon(Icons.Rounded.Check, null, Modifier.size(12.dp), tint = GlassTeal)
+                    }
+                    Text(step.label, color = if (stopped) GlassInk else GlassMuted, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The thing being asked about, in its own lit box: the app it happens in (or Cyclone's mark when it is outside any
+ * app) with a small line, then the content itself. Approvals and the confirmation gate share it.
+ */
+@Composable
+internal fun ContextBox(app: String?, caption: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Column(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.07f))
+            .litRim(cornerRadius = 20.dp).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+                if (app == null) CycloneMark(20) else AppLogo(app, 26.dp, ring = false)
+            }
+            Text(caption, color = GlassMuted, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        content()
+    }
 }
 
 // ---- the island ------------------------------------------------------------------------------------------------
@@ -624,10 +687,10 @@ internal fun OverlayOwnerCard(moment: OwnerMoment) {
         }
         if (moment.kind == MomentKind.APPROVAL) {
             val (where, message) = remember(moment.text, moment.title) { OverlayGlassCopy.approval(moment.text, moment.title) }
-            Text(where, color = GlassMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 14.dp, bottom = 8.dp, start = 2.dp))
-            // What will be sent, large and bright, straight on the glass.
-            Text("\u201C$message\u201D", color = Color(0xFFF2FFFD), fontSize = 21.sp, fontWeight = FontWeight.Medium, lineHeight = 28.sp,
-                modifier = Modifier.padding(start = 2.dp))
+            // What will be sent, in its own lit box under the app it goes through, so it reads as the message itself.
+            ContextBox(apps.lastOrNull(), where, Modifier.padding(top = 14.dp)) {
+                Text(message, color = Color(0xFFF7F8FA), fontSize = 19.sp, fontWeight = FontWeight.Medium, lineHeight = 26.sp)
+            }
             BackgroundGlimpse(moment.taskId, Modifier.padding(top = 12.dp))
             Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 moment.actions.forEach { action ->

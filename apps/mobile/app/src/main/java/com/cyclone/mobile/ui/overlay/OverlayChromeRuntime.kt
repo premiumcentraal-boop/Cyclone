@@ -311,6 +311,7 @@ object OverlayChromeRuntime {
             )
             approvedGateChallenge = null
         }
+        GateShown.record(gateClass, labels)
     }
 
     fun hasGateApproval(gateClass: OverlayGateClass, action: String, labels: List<String>): Boolean =

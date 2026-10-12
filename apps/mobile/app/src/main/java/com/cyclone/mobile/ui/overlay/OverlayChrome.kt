@@ -562,7 +562,14 @@ private fun GatePanel(
     snapshot: OverlayChromeSnapshot,
     onAction: (OverlayUserAction) -> Unit,
 ) {
-    // The same one-panel glass card as the working card: a warm chip, the words straight on the glass, one button.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val shown by GateShown.current.collectAsState()
+    // What the owner is confirming, and where: only when the record is this gate's own.
+    val mine = shown?.takeIf { it.gateClass == snapshot.gateClass }
+    val app = mine?.app
+    val appName = app?.let { com.cyclone.mobile.ui.v32.appLabel(context, it) }?.takeIf { it != "Other" }
+    val words = snapshot.gateClass?.let { OverlayGlassCopy.gate(it, appName, mine?.control) }
+    // The same one-panel glass card as the working card: a warm chip, the action in its lit box with its app, one button.
     Box(Modifier.fillMaxWidth().wrapContentHeight().padding(horizontal = 12.dp)) {
         GlassCard {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -575,13 +582,17 @@ private fun GatePanel(
                     Icon(Icons.Rounded.Close, null, Modifier.size(20.dp), tint = GlassInk)
                 }
             }
-            Text(OverlayCopy.GATE, color = GlassInk, fontSize = 18.sp, fontWeight = FontWeight.Medium, lineHeight = 24.sp,
-                modifier = Modifier.padding(top = 18.dp, bottom = 18.dp))
-            GlassCapsuleButton(OverlayCopy.CONFIRM, true, { onAction(OverlayUserAction.GATE_CONFIRM) }, Modifier.fillMaxWidth())
-            if (snapshot.gateClass != null) {
-                Text("Only this exact ${snapshot.gateClass.wire} action.", color = GlassMuted, fontSize = 12.5.sp,
-                    modifier = Modifier.padding(top = 10.dp, start = 4.dp))
+            if (words != null) {
+                ContextBox(app.takeIf { appName != null }, appName ?: "Cyclone", Modifier.padding(top = 16.dp)) {
+                    Text(words.title, color = Color(0xFFF7F8FA), fontSize = 19.sp, fontWeight = FontWeight.SemiBold, lineHeight = 25.sp)
+                }
+                Text(words.detail, color = GlassMuted, fontSize = 14.5.sp, lineHeight = 20.sp,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 16.dp, start = 2.dp))
+            } else {
+                Text(OverlayCopy.GATE, color = GlassInk, fontSize = 18.sp, fontWeight = FontWeight.Medium, lineHeight = 24.sp,
+                    modifier = Modifier.padding(top = 18.dp, bottom = 18.dp))
             }
+            GlassCapsuleButton(OverlayCopy.CONFIRM, true, { onAction(OverlayUserAction.GATE_CONFIRM) }, Modifier.fillMaxWidth())
         }
     }
 }
