@@ -22,13 +22,17 @@ class GlassOpticsTest {
         assertTrue(GlassOptics.rimIntensity(offAxis, theta, thin = true) > GlassOptics.rimIntensity(offAxis, theta, thin = false))
     }
 
-    @Test fun dotsAreCrispOnTheLitSideAndSoftOnTheFarSide() {
+    @Test fun dotsAreBrighterOnTheLitSideButNeverGoneOnTheFarSide() {
         val lx = 1f; val ly = 0f
         val litAlpha = GlassOptics.dotAlpha(1f, 0f, 1f, lx, ly, 1f)
         val farAlpha = GlassOptics.dotAlpha(-1f, 0f, 1f, lx, ly, 1f)
         val litRadius = GlassOptics.dotRadius(1f, 0f, 1f, lx, ly)
         val farRadius = GlassOptics.dotRadius(-1f, 0f, 1f, lx, ly)
-        assertTrue(litAlpha > farAlpha * 3)
+        assertTrue(litAlpha > farAlpha * 2)
+        // Even all around: the far side and the sides stay visible, so the band has no gaps.
+        assertTrue(farAlpha > 0.15f)
+        assertTrue(GlassOptics.dotAlpha(0f, 1f, 1f, lx, ly, 1f) > 0.15f)
+        assertTrue(farRadius < litRadius * 1.3f)
         assertTrue(farRadius > litRadius)
         val (a, r) = GlassOptics.dot(1f, 0f, 1f, lx, ly, 1f)
         assertEquals(litAlpha, a, 0.0001f)

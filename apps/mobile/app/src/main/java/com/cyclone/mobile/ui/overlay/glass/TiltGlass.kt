@@ -156,20 +156,35 @@ fun Modifier.tiltGlass(
     val innerH = max(0f, h - 2 * band)
     val innerR = min(r, min(innerW, innerH) / 2f)
     if (dots && w > 0f && h > 0f) {
-        var row = 0
-        var y = step / 2f
-        while (y < h) {
-            var x = step / 2f + if (row % 2 == 1) step / 2f else 0f
-            while (x < w) {
+        // The grid is centred on the panel, so both sides (and both corners of an edge) get the same dots; it used
+        // to start at the left and leave whatever was over at the right, which crowded and cut the right side.
+        val cx = w / 2f
+        val cy = h / 2f
+        val rowsHalf = (cy / step).toInt() + 1
+        val colsHalf = (cx / step).toInt() + 1
+        // The inset edge the dots must stay inside, whole: a dot that would cross it is left out instead of being
+        // cut in half by the clip (the "chunks" at the corners). Continuous corners sit inside a circular corner of
+        // the same radius, so the check uses a slightly rounder corner.
+        val edgeW = w - 2 * dotInset
+        val edgeH = h - 2 * dotInset
+        val edgeR = min(max(0f, r - dotInset) * 1.3f, min(edgeW, edgeH) / 2f)
+        val maxScale = 1f + GlassOptics.DOT_FAR_GROWTH
+        for (row in -rowsHalf..rowsHalf) {
+            val y = cy + row * step
+            if (y < 0f || y > h) continue
+            val shift = if (row and 1 == 1) step / 2f else 0f
+            for (col in -colsHalf - 1..colsHalf) {
+                val x = cx + col * step + shift
+                if (x < 0f || x > w) continue
                 // The band's inner edge is the panel's own rounded shape, set in by [band] with the same corner radius,
-                // so the dots fade out along a soft rounded line (never a sharp inner rectangle). Towards the rim they
-                // run on and are cut off by the clip just inside the lit edge.
+                // so the dots fade out along a soft rounded line (never a sharp inner rectangle).
                 val out = GlassOptics.roundedRectDistance(x - band, y - band, innerW, innerH, innerR)
-                if (out > 0f) { xs += x; ys += y; falls += min(1f, out / band) }
-                x += step
+                if (out <= 0f) continue
+                val fall = min(1f, out / band)
+                val room = -GlassOptics.roundedRectDistance(x - dotInset, y - dotInset, edgeW, edgeH, edgeR)
+                if (room < GlassOptics.dotRadiusAt(fall) * maxScale * 1.dp.toPx()) continue
+                xs += x; ys += y; falls += fall
             }
-            y += step
-            row++
         }
     }
     val dotCount = xs.size
@@ -208,7 +223,7 @@ fun Modifier.tiltGlass(
                 for (i in 0 until dotCount) {
                     val alpha = GlassOptics.dotAlpha(nxs[i], nys[i], falls[i], lx, ly, power) * DOT_OPACITY
                     if (alpha < 0.015f) continue
-                    val a = (alpha * (ALPHA_LEVELS - 1) / 0.85f).roundToInt().coerceIn(0, ALPHA_LEVELS - 1)
+                    val a = (alpha * (ALPHA_LEVELS - 1) / DOT_ALPHA_TOP).roundToInt().coerceIn(0, ALPHA_LEVELS - 1)
                     val radius = GlassOptics.dotRadius(nxs[i], nys[i], falls[i], lx, ly)
                     val rq = ((radius - 0.2f) / 2.4f * (RADIUS_LEVELS - 1)).roundToInt().coerceIn(0, RADIUS_LEVELS - 1)
                     val b = a * RADIUS_LEVELS + rq
@@ -220,7 +235,7 @@ fun Modifier.tiltGlass(
                 drawIntoCanvas { canvas ->
                     for (b in buckets.indices) {
                         if (counts[b] == 0) continue
-                        val alpha = (b / RADIUS_LEVELS) * 0.85f / (ALPHA_LEVELS - 1)
+                        val alpha = (b / RADIUS_LEVELS) * DOT_ALPHA_TOP / (ALPHA_LEVELS - 1)
                         val radius = 0.2f + (b % RADIUS_LEVELS) * 2.4f / (RADIUS_LEVELS - 1)
                         paint.color = android.graphics.Color.argb((alpha * 255).roundToInt(), (palette.dotRgb shr 16) and 0xFF, (palette.dotRgb shr 8) and 0xFF, palette.dotRgb and 0xFF)
                         paint.strokeWidth = radius * 2f * dpPx
@@ -264,11 +279,14 @@ fun Modifier.tiltGlass(
     }
 }
 
-private const val ALPHA_LEVELS = 16
+private const val ALPHA_LEVELS = 32
 /** Brightness steps of the shine: neighbouring segments in the same step are drawn as one stroke. */
 private const val RIM_LEVELS = 48
 /** The halftone sits quietly in the glass: a little under full strength. */
-internal const val DOT_OPACITY = 0.45f
+internal const val DOT_OPACITY = 0.30f
+
+/** The brightest a drawn dot gets ([GlassOptics.dotAlpha]'s cap times [DOT_OPACITY]); the alpha steps span up to it. */
+private const val DOT_ALPHA_TOP = 0.85f * DOT_OPACITY
 private const val RADIUS_LEVELS = 8
 
 /** A continuous-corner (squircle) rounded rectangle, inset by [inset] on every side, as a path. */

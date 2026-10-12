@@ -47,37 +47,27 @@ object GlassOptics {
     }
 
     /**
-     * A fingerprint dot at normalized position ([nx], [ny]) from the centre (-1..1), [fall] 1 at the rim and 0 at
-     * the inner edge of the band. Returns (alpha, radius scale): lit dots are crisp and bright, far dots swell and
-     * fade so they read as out of focus.
+     * A halftone dot's alpha and radius scale. The light only shades the band: the lit side is brighter, the far side
+     * dimmer but never gone, so the band reads evenly all around (no side fading to nothing, no patches). The radius
+     * follows the band's fall and grows only a little on the far side, so dots never crowd into each other.
      */
-    fun dot(nx: Float, ny: Float, fall: Float, lx: Float, ly: Float, power: Float): Pair<Float, Float> {
-        val len = hypot(nx, ny).takeIf { it > 0f } ?: 1f
-        val ll = hypot(lx, ly).takeIf { it > 0f } ?: 1f
-        val dot = (nx * lx + ny * ly) / (len * ll)
-        val lit = max(0f, dot)
-        val far = max(0f, -dot)
-        val sharp = lit.pow(1.3f)
-        val soft = 1f - sharp
-        val radius = (0.25f + 1.05f * fall.pow(1.4f)) * (1f + 0.9f * soft * far)
-        val alpha = min(0.85f, (0.06f + 0.7f * sharp * power + 0.1f * far) * fall.pow(0.8f) * (1f - 0.45f * soft * far))
-        return alpha to radius
-    }
+    fun dot(nx: Float, ny: Float, fall: Float, lx: Float, ly: Float, power: Float): Pair<Float, Float> =
+        dotAlpha(nx, ny, fall, lx, ly, power) to dotRadius(nx, ny, fall, lx, ly)
 
     /** [dot]'s alpha without allocating (drawn many times per frame). */
     fun dotAlpha(nx: Float, ny: Float, fall: Float, lx: Float, ly: Float, power: Float): Float {
-        val d = facing(nx, ny, lx, ly)
-        val sharp = max(0f, d).pow(1.3f)
-        val far = max(0f, -d)
-        return min(0.85f, (0.06f + 0.7f * sharp * power + 0.1f * far) * fall.pow(0.8f) * (1f - 0.45f * (1f - sharp) * far))
+        val sharp = max(0f, facing(nx, ny, lx, ly)).pow(1.3f)
+        return min(0.85f, (0.22f + 0.38f * sharp * power) * fall.pow(0.8f))
     }
 
     /** [dot]'s radius scale without allocating. */
-    fun dotRadius(nx: Float, ny: Float, fall: Float, lx: Float, ly: Float): Float {
-        val d = facing(nx, ny, lx, ly)
-        val sharp = max(0f, d).pow(1.3f)
-        return (0.25f + 1.05f * fall.pow(1.4f)) * (1f + 0.9f * (1f - sharp) * max(0f, -d))
-    }
+    fun dotRadius(nx: Float, ny: Float, fall: Float, lx: Float, ly: Float): Float =
+        dotRadiusAt(fall) * (1f + DOT_FAR_GROWTH * max(0f, -facing(nx, ny, lx, ly)))
+
+    /** The radius scale before the light: what the band's fall alone gives. */
+    fun dotRadiusAt(fall: Float): Float = 0.25f + 1.05f * fall.pow(1.4f)
+
+    const val DOT_FAR_GROWTH = 0.25f
 
     private fun facing(nx: Float, ny: Float, lx: Float, ly: Float): Float {
         val len = hypot(nx, ny).takeIf { it > 0f } ?: 1f
