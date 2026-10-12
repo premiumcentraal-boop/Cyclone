@@ -190,6 +190,8 @@ fun Modifier.tiltGlass(
     thin: Boolean = false,
     seeThrough: Float = 1f,
     palette: GlassPalette = GlassPalette.VEIL,
+    /** How much lighter the smoke is right now (the app behind is blurred); read while drawing. */
+    lift: () -> Float = NoLift,
 ): Modifier = drawWithCache {
     val w = size.width
     val h = size.height
@@ -271,7 +273,12 @@ fun Modifier.tiltGlass(
         val theta = GlassOptics.angle(lx, ly)
         val power = GlassOptics.power(lx, ly)
         clipPath(outline) {
-            drawRect(body)
+            val l = lift()
+            drawRect(if (l <= 0f) body else Brush.verticalGradient(
+                0f to palette.body.first.copy(alpha = (palette.bodyAlpha - 0.01f - l) * seeThrough),
+                0.55f to palette.body.second.copy(alpha = (palette.bodyAlpha - l) * seeThrough),
+                1f to palette.body.third.copy(alpha = (palette.bodyAlpha - l) * seeThrough),
+            ))
             // The sheen is a soft pool of light entering from the lit edge, round rather than a band, so no angle of
             // the phone shows a line across the glass; a faint answer glows at the opposite edge.
             val len = max(0.001f, kotlin.math.hypot(lx, ly))
@@ -366,6 +373,7 @@ fun Modifier.tiltGlass(
 }
 
 private const val ALPHA_LEVELS = 32
+private val NoLift: () -> Float = { 0f }
 /** Brightness steps of the shine: neighbouring segments in the same step are drawn as one stroke. */
 private const val RIM_LEVELS = 48
 /** The halftone sits quietly in the glass: a little under full strength. */

@@ -410,7 +410,9 @@ private fun CollapseButton(onMinimize: () -> Unit) {
 /** The card's frame: one glass panel, the grabber inside its top edge, and the content straight on the glass. */
 @Composable
 internal fun GlassCard(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().tiltGlass(OverlayStackGeometry.CARD_RADIUS_DP.dp, palette = LocalGlassPalette.current)) {
+    val blur = com.cyclone.mobile.ui.overlay.glass.rememberBlurPanel(OverlayStackGeometry.CARD_RADIUS_DP.dp)
+    Box(Modifier.fillMaxWidth().then(blur.modifier)
+        .tiltGlass(OverlayStackGeometry.CARD_RADIUS_DP.dp, palette = LocalGlassPalette.current, lift = blur.lift)) {
         Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 22.dp, top = 6.dp, bottom = 22.dp)) {
             Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 14.dp)
                 .size(32.dp, 3.dp).background(GlassMuted.copy(alpha = 0.38f), CircleShape))
@@ -623,7 +625,9 @@ internal fun WorkIsland(
     onPause: () -> Unit,
     onStop: () -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth().height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).tiltGlass(OverlayStackGeometry.BAR_RADIUS_DP.dp, palette = LocalGlassPalette.current)) {
+    val blur = com.cyclone.mobile.ui.overlay.glass.rememberBlurPanel(OverlayStackGeometry.BAR_RADIUS_DP.dp)
+    Box(Modifier.fillMaxWidth().height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).then(blur.modifier)
+        .tiltGlass(OverlayStackGeometry.BAR_RADIUS_DP.dp, palette = LocalGlassPalette.current, lift = blur.lift)) {
         Row(
             Modifier.fillMaxWidth().height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -185,6 +185,7 @@ class OverlayChromeController(
         val attached = listOfNotNull(root, haloRoot, shareRoot, sheetRoot)
         if (attached.any { it.visibility == View.VISIBLE }) { speechRecognizer?.cancel(); voiceSession = false }
         attached.forEach { it.visibility = View.GONE }
+        blurWindows.sync(emptyList(), 0, 0, visible = false)
         return true
     }
     private val lockReceiver = object : BroadcastReceiver() {
@@ -249,6 +250,9 @@ class OverlayChromeController(
         latest.state == OverlayChromeState.IDLE &&
             com.cyclone.mobile.ui.overlay.BackgroundGlassPolicy.visible(backgroundTask)
     private val idleActivation = OverlayIdleActivationTracker()
+    // Blur behind the glass (GlassBlur): small blur windows under the overlay window, one per panel.
+    private val blurWindows = OverlayBlurWindows(service)
+    private val blurHost = com.cyclone.mobile.ui.overlay.glass.BlurHost(OverlayBlurWindows.SLOTS) { main.post(::syncBlur) }
     private var root: ComposeView? = null
     private var params: WindowManager.LayoutParams? = null
     private var shareRoot: ComposeView? = null
@@ -283,6 +287,9 @@ class OverlayChromeController(
             }
             lifecycle = OverlayComposeLifecycle()
             lifecycle.start()
+            com.cyclone.mobile.ui.overlay.glass.GlassBlur.start(service)
+            // Opened before the overlay window so the blur always sits under the glass, never over it.
+            blurWindows.prepare()
             val halo = ComposeView(service).apply {
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -300,6 +307,14 @@ class OverlayChromeController(
                 setViewTreeViewModelStoreOwner(lifecycle)
                 setViewTreeSavedStateRegistryOwner(lifecycle)
                 setContent {
+                    val blurOn by com.cyclone.mobile.ui.overlay.glass.GlassBlur.on.collectAsState()
+                    // A to B and back fades: the smoke lightens as the blur comes in, darkens as it goes.
+                    LaunchedEffect(blurOn) {
+                        syncBlur()
+                        androidx.compose.animation.core.animate(blurHost.lift, if (blurOn) com.cyclone.mobile.ui.overlay.glass.GlassBlur.VEIL_LIFT else 0f,
+                            animationSpec = androidx.compose.animation.core.tween(com.cyclone.mobile.ui.overlay.glass.GlassBlur.FADE_MS)) { v, _ -> blurHost.lift = v }
+                    }
+                    CompositionLocalProvider(com.cyclone.mobile.ui.overlay.glass.LocalBlurHost provides blurHost) {
                     val externalActive by OverlayExternalInteraction.active.collectAsState()
                     val secretCardState by com.cyclone.mobile.secrets.SecretsCardRuntime.state.collectAsState()
                     val ownerMoment = com.cyclone.mobile.owner.rememberOwnerMoment()
@@ -334,6 +349,7 @@ class OverlayChromeController(
                                 onIdleSemanticActivate = ::recordSemanticActivation,
                             )
                         }
+                    }
                     }
                 }
             }
@@ -412,6 +428,8 @@ class OverlayChromeController(
             latest = OverlayChromeSnapshot(idleChipVisible = false)
             backgroundTask = null
             windows.clear()
+            blurWindows.clear()
+            com.cyclone.mobile.ui.overlay.glass.GlassBlur.stop(service)
             listOfNotNull(root, haloRoot, shareRoot, sheetCompose).forEach { it.disposeComposition() }
             sheetCompose = null
             com.cyclone.mobile.ui.overlay.OverlayToolsSheetState.close()
@@ -431,6 +449,16 @@ class OverlayChromeController(
         }
     }
 
+    /** Moves the blur windows to the panels; all hidden when the overlay is hidden or blur is off. */
+    private fun syncBlur() {
+        val view = root
+        val visible = view != null && view.isAttachedToWindow && view.visibility == View.VISIBLE && view.alpha > 0f &&
+            com.cyclone.mobile.ui.overlay.glass.GlassBlur.on.value
+        val origin = IntArray(2)
+        if (visible) view!!.getLocationOnScreen(origin)
+        blurWindows.sync(blurHost.shown(), origin[0], origin[1], visible)
+    }
+
     fun keyboardClosed() {
         onMain {
             reportedImeBottomPx = 0
@@ -441,6 +469,8 @@ class OverlayChromeController(
 
     private fun applyLayout(snapshot: OverlayChromeSnapshot) {
         if (hideLockedWindows()) return
+        // The window may move or hide below; the blur follows once it has.
+        main.postDelayed(::syncBlur, 32)
         val yieldHost = OverlayGesturePassthrough.active()
         shareRoot?.let { share ->
             share.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
