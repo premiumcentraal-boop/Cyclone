@@ -22,9 +22,14 @@ class TaskAppTrailTest {
         assertEquals(emptyList<String>(), TaskAppTrail.of(id))
     }
 
-    @Test fun atMostThreeAppsAreShown() {
+    @Test fun theTrailKeepsTheLastTwelveAppsInVisitOrder() {
         val id = "mission-trail-" + System.nanoTime()
-        listOf("a.one", "b.two", "c.three", "d.four").forEach { TaskAppTrail.record(id, it) }
-        assertEquals(listOf("b.two", "c.three", "d.four"), TaskAppTrail.of(id))
+        val apps = (1..14).map { "app.n$it" }
+        apps.forEach { TaskAppTrail.record(id, it) }
+        assertEquals(apps.takeLast(TaskAppTrail.LIMIT), TaskAppTrail.of(id))
+        assertEquals(12, TaskAppTrail.LIMIT)
+        // A revisited app moves to the end: it is the one Cyclone is in now.
+        TaskAppTrail.record(id, "app.n5")
+        assertEquals("app.n5", TaskAppTrail.of(id).last())
     }
 }

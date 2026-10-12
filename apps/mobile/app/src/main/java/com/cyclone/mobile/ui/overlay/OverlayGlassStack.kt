@@ -1,6 +1,9 @@
 package com.cyclone.mobile.ui.overlay
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.width
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -44,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.CornerRadius
@@ -266,19 +270,23 @@ private fun HeaderApps(apps: List<String>) {
  * is known.
  */
 @Composable
-private fun DepthAppStack(apps: List<String>) {
-    if (apps.isEmpty()) CycloneMark(28) else DepthLogos(apps)
+private fun DepthAppStack(apps: List<String>, onClick: (() -> Unit)?) {
+    if (apps.isEmpty()) CycloneMark(28) else DepthLogos(apps, onClick)
 }
 
 @Composable
-private fun DepthLogos(apps: List<String>) {
+private fun DepthLogos(apps: List<String>, onClick: (() -> Unit)?) {
     val shown = apps.takeLast(3)
     val front = 38.dp
-    val step = 20.dp
-    Box(Modifier.size(width = front + step * (shown.size - 1), height = front), contentAlignment = Alignment.CenterEnd) {
+    val step = 13.dp
+    Box(
+        Modifier.size(width = front + step * (shown.size - 1), height = front)
+            .then(if (onClick != null) Modifier.clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClickLabel = "Show the apps", onClick = onClick) else Modifier),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
         shown.forEachIndexed { index, pkg ->
             val depth = shown.lastIndex - index
-            val scale = 1f - 0.16f * depth
+            val scale = 1f - 0.12f * depth
             Box(
                 Modifier.align(Alignment.CenterEnd).padding(end = step * depth)
                     .zIndex(-depth.toFloat())
@@ -295,6 +303,56 @@ private fun DepthLogos(apps: List<String>) {
                 if (depth > 0) Box(Modifier.size(front).clip(CircleShape).background(Color(0xFF041418).copy(alpha = 0.18f * depth)))
             }
         }
+    }
+}
+
+/**
+ * The stack fanned out: every app the task visited, oldest at the left, the one it is in now at the right, lit, with
+ * a small dot under its name. It scrolls sideways and opens scrolled to now; a tap anywhere folds it back.
+ */
+@Composable
+private fun AppTrailStrip(apps: List<String>, modifier: Modifier = Modifier, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val newestFirst = apps.asReversed()
+    Box(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.035f))
+            .clickable(role = Role.Button, onClickLabel = "Fold the apps", onClick = onClose),
+    ) {
+    androidx.compose.foundation.lazy.LazyRow(
+        Modifier.fillMaxWidth()
+            // Older apps fade out at the left edge instead of being cut: there is more to slide to.
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    Brush.horizontalGradient(0f to Color.Transparent, 0.16f to Color.Black, 1f to Color.Black),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+            }
+            .padding(vertical = 12.dp),
+        reverseLayout = true,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+    ) {
+        items(newestFirst.size, key = { newestFirst[it] }) { i ->
+            val pkg = newestFirst[i]
+            val current = i == 0
+            Column(
+                Modifier.width(64.dp).semantics(mergeDescendants = true) {
+                    contentDescription = appLabel(context, pkg) + if (current) ", now" else ""
+                },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(Modifier.size(48.dp).graphicsLayer { alpha = if (current) 1f else 0.72f }, contentAlignment = Alignment.Center) {
+                    AppLogo(pkg, if (current) 44.dp else 38.dp, current = current)
+                }
+                Text(appLabel(context, pkg), color = if (current) GlassInk else GlassMuted, fontSize = 11.5.sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                Box(Modifier.size(4.dp).clip(CircleShape).background(if (current) GlassTeal else Color.Transparent))
+            }
+        }
+    }
     }
 }
 
@@ -327,20 +385,36 @@ private fun GlassCard(content: @Composable () -> Unit) {
  * line; the last few steps; and one quiet line with the step count and apps.
  */
 @Composable
-internal fun OverlayWorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion? = null, onMinimize: () -> Unit) {
+internal fun OverlayWorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion? = null, onMinimize: () -> Unit) =
+    WorkCard(task, diversion, appsOpen = false, onMinimize = onMinimize)
+
+/** The working card itself; [appsOpen] starts it with the app strip fanned out (previews). */
+@Composable
+internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen: Boolean, onMinimize: () -> Unit) {
     val context = LocalContext.current
     val snapshot = remember(task) { TaskPresentationProjector.project(task) }
-    val apps = remember(task.taskId, task.packageName) { TaskAppTrail.record(task.taskId, task.packageName) }
+    // The app it is in now: the main screen's app when the task works on the screen, its own app when it works in the
+    // background. The trail keeps every app it visited in the order it last visited them.
+    val onScreen by WorkingApp.foreground.collectAsState()
+    val now = if (task.displayId == null || task.displayId == 0) onScreen ?: task.packageName else task.packageName
+    val apps = remember(task.taskId, now) { TaskAppTrail.record(task.taskId, now) }
     val labels = remember(apps) { apps.map { appLabel(context, it) }.filter { it != "Other" } }
     val state = task.taskVisualState()
+    var trailOpen by remember(task.taskId) { mutableStateOf(appsOpen) }
     GlassCard {
         // The apps it works in, stacked with depth at the top right, say what the card is about: no title line.
         Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = snapshot.title },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             StatusChip(state)
             Spacer(Modifier.weight(1f))
-            DepthAppStack(apps)
+            AnimatedVisibility(!trailOpen, enter = fadeIn(), exit = fadeOut()) {
+                DepthAppStack(apps, onClick = if (apps.size > 1) ({ trailOpen = true }) else null)
+            }
             CollapseButton(onMinimize)
+        }
+        // A tap on the stack fans it out into the strip of every app visited, newest at the right.
+        AnimatedVisibility(trailOpen, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            AppTrailStrip(apps, Modifier.padding(top = 14.dp)) { trailOpen = false }
         }
         Spacer(Modifier.height(16.dp))
         when (state) {
