@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -175,8 +176,10 @@ fun Modifier.tiltGlass(
     val dpPx = 1.dp.toPx()
     val rim = rimSegments(w - 1.2f, h - 1.2f, max(0f, r - 0.6f), 260)
     val hairline = Stroke(0.8.dp.toPx())
-    val glowWidth = 3.2.dp.toPx()
+    // A tight glow under a crisp line: the shine reads as one sharp edge.
+    val glowWidth = 2.dp.toPx()
     val lineWidth = (if (thin) 0.6.dp else 1.15.dp).toPx()
+    val rimRun = Path()
 
     onDrawBehind {
         val lx = GlassLight.x
@@ -218,26 +221,43 @@ fun Modifier.tiltGlass(
             }
         }
         drawPath(outline, palette.hairline.copy(alpha = 0.16f), style = hairline)
+        // The shine is drawn as continuous runs: neighbouring segments of the same brightness become one path, stroked
+        // once with flat ends and round joins. Separate round-capped segments overlapped at every joint and doubled
+        // the light there, which beaded the shine into a dotted line; one stroke per run keeps it a single sharp edge.
         for (pass in 0..1) {
             if (pass == 0 && thin) continue
+            val width = if (pass == 0) glowWidth else lineWidth
+            val stroke = Stroke(width, cap = StrokeCap.Butt, join = StrokeJoin.Round)
+            var runLevel = -1
             var i = 0
+            fun flush() {
+                if (runLevel >= 0) {
+                    val alpha = runLevel / RIM_LEVELS.toFloat()
+                    drawPath(rimRun, (if (pass == 0) palette.glow else palette.rim).copy(alpha = alpha), style = stroke)
+                }
+                rimRun.reset()
+                runLevel = -1
+            }
             while (i < rim.size) {
                 val intensity = GlassOptics.rimIntensity(rim[i + 4], theta, thin)
-                if (intensity >= 0.02f) {
-                    val start = Offset(rim[i] + 0.6f, rim[i + 1] + 0.6f)
-                    val end = Offset(rim[i + 2] + 0.6f, rim[i + 3] + 0.6f)
-                    if (pass == 0) drawLine(palette.glow.copy(alpha = (0.3f * intensity * power).coerceIn(0f, 1f)),
-                        start, end, glowWidth, StrokeCap.Round)
-                    else drawLine(palette.rim.copy(alpha = min(if (thin) 0.8f else 1f, (if (thin) 0.8f else 1.15f) * intensity * power)),
-                        start, end, lineWidth, StrokeCap.Round)
+                val alpha = if (pass == 0) (0.22f * intensity * power).coerceIn(0f, 1f)
+                    else min(if (thin) 0.8f else 1f, (if (thin) 0.8f else 1.15f) * intensity * power)
+                val level = if (intensity < 0.02f) -1 else (alpha * RIM_LEVELS).roundToInt().coerceIn(1, RIM_LEVELS)
+                if (level != runLevel) {
+                    flush()
+                    if (level > 0) { rimRun.moveTo(rim[i] + 0.6f, rim[i + 1] + 0.6f); runLevel = level }
                 }
+                if (level > 0) rimRun.lineTo(rim[i + 2] + 0.6f, rim[i + 3] + 0.6f)
                 i += 5
             }
+            flush()
         }
     }
 }
 
 private const val ALPHA_LEVELS = 16
+/** Brightness steps of the shine: neighbouring segments in the same step are drawn as one stroke. */
+private const val RIM_LEVELS = 48
 /** The halftone sits quietly in the glass: a little under full strength. */
 internal const val DOT_OPACITY = 0.68f
 private const val RADIUS_LEVELS = 8
