@@ -129,6 +129,11 @@ fun Modifier.tiltGlass(
     val h = size.height
     val r = min(cornerRadius.toPx(), min(w, h) / 2f)
     val outline = Path().apply { addRoundRect(RoundRect(0f, 0f, w, h, CornerRadius(r))) }
+    // The dots stop just inside the lit rim (its line and glow), so none show between the shine and the edge.
+    val dotInset = 2.4.dp.toPx()
+    val dotOutline = Path().apply {
+        addRoundRect(RoundRect(dotInset, dotInset, w - dotInset, h - dotInset, CornerRadius(max(0f, r - dotInset))))
+    }
     val body = Brush.verticalGradient(
         0f to palette.body.first.copy(alpha = 0.94f * seeThrough),
         0.55f to palette.body.second.copy(alpha = 0.95f * seeThrough),
@@ -182,7 +187,7 @@ fun Modifier.tiltGlass(
                 0.8f to Color.Transparent, 1f to palette.sheen.copy(alpha = 0.06f * power * seeThrough),
                 start = Offset(w / 2f + lx * span, h / 2f + ly * span), end = Offset(w / 2f - lx * span, h / 2f - ly * span),
             ))
-            if (dotCount > 0) {
+            if (dotCount > 0) clipPath(dotOutline) {
                 counts.fill(0)
                 for (i in 0 until dotCount) {
                     val alpha = GlassOptics.dotAlpha(nxs[i], nys[i], falls[i], lx, ly, power) * DOT_OPACITY
