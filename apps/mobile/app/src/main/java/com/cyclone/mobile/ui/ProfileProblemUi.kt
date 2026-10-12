@@ -138,11 +138,12 @@ internal fun ProfileProblemPanel(issue: ProfileSetupFailure, onRetry: (() -> Uni
             onConfirm = { confirm = null; run("Cleaning up…") { "Cleaned up ${ProfileLifecycle.cleanUpUnfinished(context)}." } },
             onDismiss = { confirm = null })
         "allow" -> room?.let { r ->
-            AllowMoreDialog(r.used, status?.manager?.name, onAllow = { limit ->
+            AllowMoreDialog(r.used, status?.manager?.name, ProfileRoom.needsUnlock(r), onAllow = { limit ->
                 confirm = null
                 run("Making room for $limit profiles…") {
-                    ProfileRoom.allow(context, limit)
-                    "This phone now holds up to $limit profiles."
+                    val after = ProfileRoom.allow(context, limit)
+                    if (after.restartNeeded) "This phone will hold up to $limit profiles. Restart it to finish unlocking the per-type cap."
+                    else "This phone now holds up to $limit profiles."
                 }
             }, onDismiss = { confirm = null })
         }
@@ -150,7 +151,7 @@ internal fun ProfileProblemPanel(issue: ProfileSetupFailure, onRetry: (() -> Uni
 }
 
 @Composable
-private fun AllowMoreDialog(used: Int, manager: String?, onAllow: (Int) -> Unit, onDismiss: () -> Unit) {
+private fun AllowMoreDialog(used: Int, manager: String?, unlockTypeCap: Boolean, onAllow: (Int) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val choices = ProfileRoom.choices(used)
     var pick by remember { mutableStateOf(ProfileRoom.defaultChoice(used) ?: choices.firstOrNull()) }
@@ -163,7 +164,7 @@ private fun AllowMoreDialog(used: Int, manager: String?, onAllow: (Int) -> Unit,
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     choices.forEach { n -> FilterChip(selected = pick == n, onClick = { pick = n }, label = { Text("$n") }) }
                 }
-                pick?.let { Text(ProfileProblem.allowText(it, used, freeGb, manager)) }
+                pick?.let { Text(ProfileProblem.allowText(it, used, freeGb, manager, unlockTypeCap)) }
             }
         },
         confirmButton = { TextButton(onClick = { pick?.let(onAllow) }, enabled = pick != null) { Text("Allow") } },
@@ -304,12 +305,18 @@ internal fun ProfileRoomCard(modifier: Modifier = Modifier) {
     }
     when (dialog) {
         "allow" -> room?.let { r ->
-            AllowMoreDialog(r.used, status?.manager?.name, onAllow = { n -> dialog = null; run { ProfileRoom.allow(context, n); "This phone now holds up to $n profiles." } },
-                onDismiss = { dialog = null })
+            AllowMoreDialog(r.used, status?.manager?.name, ProfileRoom.needsUnlock(r), onAllow = { n ->
+                dialog = null
+                run {
+                    val after = ProfileRoom.allow(context, n)
+                    if (after.restartNeeded) "This phone will hold up to $n profiles. Restart it to finish unlocking the per-type cap."
+                    else "This phone now holds up to $n profiles."
+                }
+            }, onDismiss = { dialog = null })
         }
         "restore" -> ProblemConfirm("Restore Android's own limit?",
             "Removes the Cyclone profiles module and puts the user limit back as it was. Profiles you have stay; only new ones are limited again.",
-            "Restore", onConfirm = { dialog = null; run { ProfileRoom.restoreDefault(context); "Restored Android's own limit." } },
+            "Restore", onConfirm = { dialog = null; run { val s = ProfileRoom.restoreDefault(context); if (s.unlockTypeCap) "Restored Android's own limit. Restart the phone to turn the debuggable flag back off." else "Restored Android's own limit." } },
             onDismiss = { dialog = null })
     }
 }

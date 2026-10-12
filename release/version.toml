@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.124 dev1: clear profile creation and automatic essentials, on the published Alpha 123 source.
-# Owner-requested update on 2026-10-12. Physical profile creation remains UNVERIFIED.
+# Cyclone V5 alpha.125 dev1: profile room for up to 100 profiles on rooted phones (Android-16 fix, per-type-cap unlock, 4..100 range, default 20), on the published Alpha 124 source.
+# Owner-requested update on 2026-10-12. Physical profile creation and the 100-profile ceiling remain UNVERIFIED on a real phone.
 schema = 1
-product_version = "5.0.0-alpha.124.dev1"
+product_version = "5.0.0-alpha.125.dev1"
 channel = "development"
-android_version_code = 278
+android_version_code = 279
 python_version = "5.0.0-alpha.123.dev1"
 
 [components]
-mobile = "5.0.0-alpha.124.dev1"
+mobile = "5.0.0-alpha.125.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -24,4 +24,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha124-profile-creation"
+candidate_generation = "cyclone-v5-alpha125-profile-room-100"

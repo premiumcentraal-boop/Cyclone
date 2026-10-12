@@ -217,7 +217,16 @@ object ProfileSetupPlan {
     const val ROOM_MODULE = "/data/adb/modules/cyclone_profiles"
     const val ROOM_MODULE_STAGING = "/data/adb/modules/cyclone_profiles.new"
     const val ROOM_PROPERTY = "fw.max_users"
-    val ROOM_LIMITS = 4..16
+    // Android's own default on phones is 4. Cyclone can raise it far higher on a rooted phone; storage, not Android,
+    // is the real ceiling, so the range is generous and the owner is warned by free space. 100 is the top.
+    val ROOM_LIMITS = 4..100
+    // Some phones also cap "extra users of this kind" (full secondary users), which `fw.max_users` does not change.
+    // Android's own `UserManagerService.isCreationOverrideEnabled()` skips BOTH that per-type cap and the total limit;
+    // it is on when the device is debuggable and this flag is set. Cyclone sets these two ONLY inside the module's
+    // generated `system.prop` (never through runtime `resetprop`), so the root manager applies them before
+    // `system_server` starts. They take effect on the next restart and clear when the module is removed.
+    const val ROOM_DEBUGGABLE_PROPERTY = "ro.debuggable"
+    const val ROOM_OVERRIDE_PROPERTY = "debug.user.creation_override"
     private val roomSourcePattern = Regex("(/data/user/0|/data/data)/com\\.cyclone\\.mobile/files/profile-room/cyclone_profiles")
     fun validRoomSource(path: String): Boolean = path.matches(roomSourcePattern)
 
@@ -388,7 +397,9 @@ object ProfileSetupParser {
         .firstOrNull { it.matches(Regex("[0-9]+")) }
         ?.toIntOrNull()
 
-    fun maxUsers(output: String): Int? = Regex("(?i)maximum supported users:\\s*([0-9]+)")
+    // `pm get-max-users` says "Maximum supported users: N" on Android 15 and earlier, and
+    // "Maximum supported switchable users: N" on Android 16. Accept either, with or without "switchable".
+    fun maxUsers(output: String): Int? = Regex("(?i)maximum supported (?:switchable )?users:\\s*([0-9]+)")
         .find(output)?.groupValues?.get(1)?.toIntOrNull()
 
     fun createdUser(output: String): Int? = Regex("(?i)success:\\s*created user id\\s+([0-9]+)")
