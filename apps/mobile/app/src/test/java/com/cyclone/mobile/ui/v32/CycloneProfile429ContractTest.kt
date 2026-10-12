@@ -112,8 +112,9 @@ class CycloneProfile429ContractTest {
         val source = source("ui/ProfileSetup429.kt")
         assertTrue(source.contains("Text(\"Name your profile\""))
         assertTrue(source.contains("label = { Text(\"Profile name\") }"))
-        assertTrue(source.contains("placeholder = { Text(\"Creator 1\") }"))
-        assertTrue(source.contains("Text(\"Choose apps\")"))
+        assertTrue(source.contains("placeholder = { Text(\"Profile name\") }"))
+        assertFalse(source.contains("listOf(\"Creator\", \"Store\", \"Personal\")"))
+        assertTrue(source.contains("ProfileSetupAction(\"Choose apps\""))
         assertTrue(source.contains("JOURNAL_DISPLAY_LABEL"))
     }
 
@@ -127,10 +128,16 @@ class CycloneProfile429ContractTest {
         assertFalse(source.contains("Two spaces. One phone."))
     }
 
-    @Test fun setupChoiceListOwnsItsContinueActionInsideScrollableContent() {
+    @Test fun setupActionsArePinnedOutsideTheAppListAndRespectKeyboardInsets() {
         val source = source("ui/ProfileSetup429.kt")
         assertTrue(source.contains("onContinue: () -> Unit"))
-        assertTrue(source.contains("Text(\"Continue with \${selected.size}"))
+        assertTrue(source.contains("ProfileSetupAction(\"Confirm apps\""))
+        assertTrue(source.contains("ProfileSetupAction(\"Create profile\""))
+        assertTrue(source.contains("Modifier.weight(1f).fillMaxWidth()"))
+        assertTrue(source.contains("systemBarsPadding().imePadding()"))
+        assertFalse(source.contains("Continue with \${selected.size}"))
+        assertTrue(source.contains("goBack()"))
+        assertTrue(source.contains("clickable(enabled = !app.automatic)"))
         assertTrue(source.contains("Box(Modifier.weight(1f).fillMaxWidth())"))
     }
 

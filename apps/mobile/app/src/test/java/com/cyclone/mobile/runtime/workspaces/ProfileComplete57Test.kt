@@ -96,13 +96,13 @@ class ProfileComplete57Test {
 
     // Cornerstones -----------------------------------------------------------------------------------------------------
 
-    @Test fun `cornerstones - Cyclone and root first and required, Cloak and the owner's apps best effort`() {
+    @Test fun `cornerstones - Cyclone root and installed Cloak required, the owner's apps best effort`() {
         val items = ProfileCornerstones.resolve("com.cyclone.mobile",
             setOf("moe.shizuku.privileged.api", "com.topjohnwu.magisk", "io.hidden.mgsk"), "io.hidden.mgsk",
             "com.cyclone.cloak", setOf("org.lsposed.manager", "com.cyclone.cloak", "bad name"))
         assertEquals(listOf("com.cyclone.mobile", "com.topjohnwu.magisk", "io.hidden.mgsk", "moe.shizuku.privileged.api",
             "com.cyclone.cloak", "org.lsposed.manager"), items.map { it.packageName })
-        assertEquals(listOf(true, true, true, true, false, false), items.map { it.required })
+        assertEquals(listOf(true, true, true, true, true, false), items.map { it.required })
         assertEquals(ProfileCornerstones.Role.ROOT_MANAGER, items[2].role)
         assertEquals(ProfileCornerstones.Role.CLOAK, items[4].role)
         assertFalse(ProfileCornerstones.canMark("com.cyclone.mobile", "com.cyclone.mobile", emptySet()))

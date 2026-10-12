@@ -1,15 +1,19 @@
 package com.cyclone.mobile.runtime.workspaces
 
 import android.content.Context
+import android.content.ComponentName
+import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.provider.Settings
 
 /**
  * Plan 57 P2 (alpha.120): the apps every profile is built on. On every switch into a profile, each is installed there
  * with `install-existing` (the same app, nothing downloaded), enabled and verified, and on Magisk its root grant is
  * shared when it had one here.
  *
- * - **Required** (the switch stops without them): Cyclone, the root manager (a hidden Magisk app included) and Shizuku,
- *   when installed here.
- * - **Best effort** (reported, never blocking): Cyclone Cloak, found by its connector id, and up to [MAX_MARKED] apps
+ * - **Required** (the switch stops without them): Cyclone, the root manager (a hidden Magisk app included), Shizuku,
+ *   Cyclone Cloak and the system basics, when installed here.
+ * - **Best effort** (reported, never blocking): up to [MAX_MARKED] apps
  *   the owner marks **Cornerstone** in Profiles. Only apps installed in this profile can be marked.
  */
 object ProfileCornerstones {
@@ -21,7 +25,7 @@ object ProfileCornerstones {
     enum class Role { CYCLONE, ROOT_MANAGER, SUPPORT, CLOAK, OWNER }
 
     data class Item(val packageName: String, val role: Role) {
-        val required: Boolean get() = role == Role.CYCLONE || role == Role.ROOT_MANAGER || role == Role.SUPPORT
+        val required: Boolean get() = role != Role.OWNER
     }
 
     val rootManagers = setOf("com.topjohnwu.magisk", "me.weishu.kernelsu", "com.rifsxd.ksunext", "me.bmax.apatch")
@@ -40,6 +44,24 @@ object ProfileCornerstones {
         add(cloak, Role.CLOAK)
         marked.sorted().take(MAX_MARKED).forEach { add(it, Role.OWNER) }
         return items.values.toList()
+    }
+
+    /** One source of truth for the picker, creation and every later profile bootstrap. No app data is copied. */
+    fun installed(context: Context): List<Item> {
+        val pm = context.packageManager
+        fun present(pkg: String): Boolean = runCatching { pm.getApplicationInfo(pkg, 0) }.isSuccess
+        fun systemPackage(pkg: String?): String? = pkg?.takeIf { ProfileSetupPlan.validPackageName(it) }?.takeIf {
+            runCatching {
+                pm.getApplicationInfo(it, 0).flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+            }.getOrDefault(false)
+        }
+        val home = systemPackage(pm.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName)
+        val keyboard = systemPackage(Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+            ?.let { ComponentName.unflattenFromString(it)?.packageName })
+        val hiddenMagisk = ProfileBootstrapRuntime.hiddenMagiskPackage(context)
+        val support = (ProfileRequiredPackages.supportAllowlist + listOfNotNull(hiddenMagisk, home, keyboard))
+            .filter(::present).toSet()
+        return resolve(context.packageName, support, hiddenMagisk, cloakPackage(context)?.takeIf(::present), marked(context).filter(::present).toSet())
     }
 
     /** Whether the owner may mark [pkg]: a real package, not Cyclone, and room left. */

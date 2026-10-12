@@ -30,6 +30,12 @@
 
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="com.android.settings" />
+        <package android:name="com.android.permissioncontroller" />
+        <package android:name="com.google.android.permissioncontroller" />
+        <intent>
+            <action android:name="android.view.InputMethod" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

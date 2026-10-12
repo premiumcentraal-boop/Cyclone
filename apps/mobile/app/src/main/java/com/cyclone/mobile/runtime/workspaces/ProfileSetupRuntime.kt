@@ -19,7 +19,7 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-data class ProfileApp(val label: String, val packageName: String)
+data class ProfileApp(val label: String, val packageName: String, val automatic: Boolean = false)
 
 /** Plan 57 W7: a profile whose setup was started but not finished. */
 data class UnfinishedSetup(val profileId: String, val label: String, val androidUserId: Int?)
@@ -305,14 +305,17 @@ object ProfileSetupRuntime {
         check(userSwitcherOn() == true) { "Android didn't turn its user switcher on." }
     }
 
-    fun apps(context: Context): List<ProfileApp> = context.packageManager.queryIntentActivities(
+    private fun automaticApps(context: Context): List<ProfileApp> = ProfileCornerstones.installed(context)
+        .map { ProfileApp(appLabel(context, it.packageName), it.packageName, automatic = true) }
+
+    fun apps(context: Context): List<ProfileApp> = (automaticApps(context) + context.packageManager.queryIntentActivities(
         Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
         PackageManager.MATCH_ALL,
     )
         .filter { it.activityInfo.packageName != context.packageName }
-        .map { ProfileApp(it.loadLabel(context.packageManager).toString(), it.activityInfo.packageName) }
+        .map { ProfileApp(it.loadLabel(context.packageManager).toString(), it.activityInfo.packageName) })
         .distinctBy { it.packageName }
-        .sortedBy { it.label.lowercase() }
+        .sortedWith(compareBy<ProfileApp> { !it.automatic }.thenBy { it.label.lowercase() })
 
     fun stop() {
         cancel.set(true)
@@ -331,7 +334,6 @@ object ProfileSetupRuntime {
         if (job?.isActive == true) return
         val ctx = context.applicationContext
         val requested = selected.distinctBy { it.packageName }.filter { ProfileSetupPlan.validPackageName(it.packageName) }
-        require(requested.isNotEmpty() && requested.size <= 50)
         cancel.set(false)
         setupLabel = runCatching { labelFor(ctx, prefs(ctx)) }.getOrDefault("the new profile")
         _state.value = ProfileSetupStatus(
@@ -349,13 +351,12 @@ object ProfileSetupRuntime {
 
                     val store = prefs(ctx)
                     val parentUserId = Layer2Workspaces.currentAndroidUserId()
-                    val selectedPackages = requested.map { it.packageName }.toSet()
-                    val installedSupportPackages = installedSourcePackages(ctx, ProfileRequiredPackages.supportAllowlist)
-                    val requestedPackages = ProfileRequiredPackages.resolve(
-                        ctx.packageName,
-                        selectedPackages,
-                        installedSupportPackages,
-                    )
+                    // Re-discover essentials here: callers cannot omit them or forge an automatic-app flag.
+                    val automaticPackages = automaticApps(ctx).map { it.packageName }.toSet()
+                    val selectedPackages = requested.map { it.packageName }.toSet() - automaticPackages
+                    require(selectedPackages.size <= ProfileAppSelection.MAX_OPTIONAL) { "Choose up to 50 additional apps." }
+                    val requestedPackages = selectedPackages + automaticPackages
+                    _state.value = _state.value.copy(total = requestedPackages.size + 5)
                     val existingName = store.getString(KEY_NAME, null)
                     val profileName = existingName ?: newProfileName().also { name ->
                         commitOrStorageFailure(store.edit().putString(KEY_NAME, name))

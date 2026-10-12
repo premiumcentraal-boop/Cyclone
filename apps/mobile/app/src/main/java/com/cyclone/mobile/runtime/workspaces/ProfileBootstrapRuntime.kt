@@ -88,14 +88,7 @@ internal object ProfileBootstrapRuntime {
         check(run("/system/bin/am", "get-current-user").trim() == (if (repairingActiveTarget) target else source).toString()) { "Open Cyclone in your active phone profile before preparing another." }
         // Plan 57 P1: which root manager this phone uses, and a hidden (renamed) Magisk app, so it comes along too.
         val manager = runCatching { ProfileRoom.detect(run("/system/bin/ls", "/data/adb")) }.getOrNull()
-        val hiddenMagisk = if (manager == ProfileSetupPlan.RootManager.MAGISK) hiddenMagiskPackage(context) else null
-        val installedSupport = (ProfileRequiredPackages.supportAllowlist + listOfNotNull(hiddenMagisk)).filter { pkg ->
-            runCatching { context.packageManager.getApplicationInfo(pkg, 0) }.isSuccess
-        }.toSet()
-        // Plan 57 P2: the cornerstones. Cyclone, the root manager and Shizuku are required; Cyclone Cloak and the apps the
-        // owner marked are installed too, best effort, and reported.
-        val items = ProfileCornerstones.resolve(PKG, installedSupport, hiddenMagisk,
-            runCatching { ProfileCornerstones.cloakPackage(context) }.getOrNull(), ProfileCornerstones.marked(context))
+        val items = ProfileCornerstones.installed(context)
         val checks = linkedMapOf<String, ProfileInventory.App>()
         items.forEach { item ->
             val label = runCatching {
@@ -132,8 +125,11 @@ internal object ProfileBootstrapRuntime {
         val targetUid = packageUid(target, PKG)
         val sourceUid = context.applicationInfo.uid
         if (manager == ProfileSetupPlan.RootManager.MAGISK) {
-            val shareable = checks.values.filter { it.installed && it.role != ProfileCornerstones.Role.CYCLONE }.map { it.packageName }.toSet()
-            val required = items.filter { it.required && it.role != ProfileCornerstones.Role.CYCLONE }.map { it.packageName }.toSet()
+            // System basics need installation, never a copied root policy.
+            val shareable = checks.values.filter { it.installed && (it.role in setOf(ProfileCornerstones.Role.ROOT_MANAGER,
+                ProfileCornerstones.Role.CLOAK, ProfileCornerstones.Role.OWNER) || it.packageName == "moe.shizuku.privileged.api") }
+                .map { it.packageName }.toSet()
+            val required = items.filter { it.required && it.packageName in shareable }.map { it.packageName }.toSet()
             val shared = prepareMagisk(source, target, sourceUid, targetUid, shareable, required)
             shareable.forEach { pkg -> checks[pkg]?.let { checks[pkg] = it.copy(rootShared = pkg in shared) } }
         }
@@ -200,7 +196,7 @@ internal object ProfileBootstrapRuntime {
     }
 
     /** Magisk's hidden app (its package is random after "Hide the Magisk app"), read from Magisk's own database. */
-    private fun hiddenMagiskPackage(context: Context): String? = runCatching {
+    internal fun hiddenMagiskPackage(context: Context): String? = runCatching {
         val out = run("magisk", "--sqlite", "SELECT value FROM strings WHERE key='requester';")
         Regex("value=([A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+)").find(out)?.groupValues?.get(1)
             ?.takeIf { ProfileSetupPlan.validPackageName(it) && it != PKG }

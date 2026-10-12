@@ -216,6 +216,9 @@ object ProfileRequiredPackages {
         "me.weishu.kernelsu",        // KernelSU
         "com.rifsxd.ksunext",        // KernelSU Next
         "me.bmax.apatch",            // APatch
+        "com.android.settings",     // Android Settings (fresh, per-user settings)
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
     )
 
     fun resolve(
