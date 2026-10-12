@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -116,157 +117,95 @@ internal data class PlanDiversion(
 private val Branch = Color(0xFF83DBD7)
 private val BranchWarm = Color(0xFFE9C78B)
 
-/** The whole diversion block, in the card's working state: tucked plan, the branch mark, the new steps. */
-@Composable
-internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = Modifier, maxNext: Int = 4) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        TuckedPlan(diversion)
-        DivertMark(diversion)
-        NextSteps(diversion.next.take(maxNext), more = (diversion.next.size - maxNext).coerceAtLeast(0))
-    }
-}
+/** Width of the marker column every row shares, so the fork, the old steps and the new steps sit on one line. */
+private val Lane = 22.dp
 
-/** One line for the plan Cyclone left, like a folded thought; tap to see it, faded, and tap again to fold it. */
+/**
+ * The whole diversion as one timeline. The first row is the fork (no frame), "Changed course" and the plan it left,
+ * folded to one struck line with a chevron; tap it to unfold the earlier plan, faded, right there. The reason follows
+ * in the same column, and the new steps hang from the fork on one lit rail, the current one turning.
+ */
 @Composable
-private fun TuckedPlan(diversion: PlanDiversion) {
-    var open by rememberSaveable(diversion.version) { mutableStateOf(false) }
-    val turn by animateFloatAsState(if (open) 180f else 0f, tween(220), label = "Tucked chevron")
+internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = Modifier, maxNext: Int = 4, startOpen: Boolean = false) {
+    var open by rememberSaveable(diversion.version) { mutableStateOf(startOpen) }
+    val turn by animateFloatAsState(if (open) 180f else 0f, tween(220), label = "Earlier plan chevron")
+    val draw = remember(diversion.version) { Animatable(0f) }
+    LaunchedEffect(diversion.version) { draw.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
+    val tint = if (diversion.steered) Branch else BranchWarm
+    val next = diversion.next.take(maxNext)
+    val more = (diversion.next.size - maxNext).coerceAtLeast(0)
+    val current = next.indexOfFirst { it.status == "doing" }.takeIf { it >= 0 } ?: next.indexOfFirst { it.status == "todo" }
+
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.045f))
-            .clickable(role = Role.Button, onClickLabel = if (open) "Fold the earlier plan" else "Show the earlier plan") { open = !open }
-            .semantics { stateDescription = if (open) "Shown" else "Folded" }
-            .padding(horizontal = 12.dp, vertical = 9.dp),
+        modifier.fillMaxWidth().drawBehind {
+            // One rail for the whole block: it leaves the fork's branch and runs down past the last step, fading out.
+            val x = Lane.toPx() / 2
+            drawLine(
+                Brush.verticalGradient(listOf(tint.copy(alpha = 0.6f), Branch.copy(alpha = 0.4f), Branch.copy(alpha = 0f)),
+                    startY = 24.dp.toPx(), endY = size.height),
+                Offset(x, 24.dp.toPx()), Offset(x, size.height), 1.4.dp.toPx(), StrokeCap.Round,
+            )
+        },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FoldedPlanGlyph()
-            Text(diversion.tucked, color = GlassMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
-            diversion.dropped.firstOrNull()?.let {
-                Text(it, Modifier.weight(1f), color = GlassDim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    textDecoration = TextDecoration.LineThrough)
-            } ?: Box(Modifier.weight(1f))
+        // The fork and the plan it left, on one line.
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 34.dp).clip(RoundedCornerShape(12.dp))
+                .clickable(role = Role.Button, onClickLabel = if (open) "Fold the earlier plan" else "Show the earlier plan") { open = !open }
+                .semantics(mergeDescendants = true) {
+                    contentDescription = diversion.title + (diversion.dropped.firstOrNull()?.let { ". Let go: $it" } ?: "")
+                    stateDescription = if (open) "Earlier plan shown" else "Earlier plan folded"
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(Modifier.size(Lane), contentAlignment = Alignment.Center) { ForkGlyph(draw.value, tint) }
+            Text(diversion.title, color = tint, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+            Text(diversion.dropped.firstOrNull() ?: diversion.tucked, Modifier.weight(1f), color = GlassDim, fontSize = 13.5.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textDecoration = if (diversion.dropped.isNotEmpty()) TextDecoration.LineThrough else null)
             Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(turn), tint = GlassDim)
         }
+        diversion.reason?.let {
+            Text(it, Modifier.padding(start = Lane + 10.dp, bottom = 4.dp), color = GlassMuted, fontSize = 13.sp, lineHeight = 18.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        // The earlier plan, unfolded in place: faded, in the same column as the words above it.
         AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            Column(Modifier.padding(top = 8.dp, start = 2.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Column(
+                Modifier.padding(start = Lane + 10.dp, top = 4.dp, bottom = 6.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.035f)).padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 val shown = diversion.earlier.ifEmpty { diversion.dropped.map { MindPlanStep(it, MindPlanStep.DROPPED) } }
                 shown.forEach { step ->
-                    val left = step.text in diversion.dropped || step.dropped
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val left = step.dropped || step.text in diversion.dropped
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.semantics(mergeDescendants = true) { if (left) contentDescription = "Let go: ${step.text}" }) {
                         Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
-                            if (step.status == "done") Icon(Icons.Rounded.Check, null, Modifier.size(13.dp), tint = GlassDim)
-                            else Box(Modifier.size(5.dp).clip(CircleShape).background(GlassDim.copy(alpha = 0.7f)))
+                            when {
+                                step.status == "done" -> Icon(Icons.Rounded.Check, null, Modifier.size(13.dp), tint = GlassDim)
+                                left -> Icon(Icons.Rounded.Close, null, Modifier.size(12.dp), tint = GlassDim.copy(alpha = 0.8f))
+                                else -> Box(Modifier.size(5.dp).clip(CircleShape).background(GlassDim.copy(alpha = 0.7f)))
+                            }
                         }
                         Text(step.text, color = GlassDim, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            textDecoration = if (left) TextDecoration.LineThrough else null,
-                            modifier = Modifier.semantics { if (left) contentDescription = "Let go: ${step.text}" })
+                            textDecoration = if (left) TextDecoration.LineThrough else null)
                     }
                 }
             }
         }
-    }
-}
-
-/** Three short stacked lines, the top one longer: a plan folded away. */
-@Composable
-private fun FoldedPlanGlyph() {
-    Canvas(Modifier.size(14.dp)) {
-        val w = size.width
-        val stroke = 1.6.dp.toPx()
-        listOf(0.22f to 1f, 0.5f to 0.72f, 0.78f to 0.48f).forEach { (y, len) ->
-            drawLine(GlassDim, Offset(w * 0.08f, size.height * y), Offset(w * (0.08f + 0.84f * len), size.height * y), stroke, StrokeCap.Round)
-        }
-    }
-}
-
-/**
- * The branch mark and its words: a small glowing circle where the old line stops and a new one curves away with an
- * arrow, drawn in once when the change arrives; "Changed course" (or "You changed the plan") and the reason.
- */
-@Composable
-private fun DivertMark(diversion: PlanDiversion) {
-    val draw = remember(diversion.version) { Animatable(0f) }
-    LaunchedEffect(diversion.version) { draw.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
-    Row(
-        Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
-            contentDescription = diversion.title + (diversion.reason?.let { ". $it" } ?: "")
-        },
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        BranchGlyph(draw.value, warm = !diversion.steered)
-        Column(Modifier.weight(1f).padding(top = 5.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(diversion.title, color = if (diversion.steered) Branch else BranchWarm, fontSize = 14.5.sp,
-                fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-            diversion.reason?.let {
-                Text(it, color = GlassMuted, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
-/** The fork: a faded, dashed trunk (the plan let go), and a bright branch that curves off to an arrowhead. */
-@Composable
-private fun BranchGlyph(progress: Float, warm: Boolean) {
-    val tint = if (warm) BranchWarm else Branch
-    Box(
-        Modifier.size(32.dp).clip(CircleShape)
-            .background(Brush.linearGradient(listOf(tint.copy(alpha = 0.30f), Branch.copy(alpha = 0.12f))))
-            .border(0.8.dp, tint.copy(alpha = 0.45f * progress + 0.15f), CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.size(19.dp)) {
-            val w = size.width
-            val h = size.height
-            val stroke = 1.8.dp.toPx()
-            // The old line: straight up, faded, and stopping short where it was let go.
-            drawLine(Color.White.copy(alpha = 0.32f), Offset(w * 0.32f, h * 0.95f), Offset(w * 0.32f, h * 0.10f), stroke,
-                StrokeCap.Round, pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * stroke, 1.6f * stroke)))
-            // The new route: it leaves the trunk and curves up and right, drawn in as [progress] runs.
-            val branch = Path().apply {
-                moveTo(w * 0.32f, h * 0.72f)
-                cubicTo(w * 0.32f, h * 0.42f, w * 0.60f, h * 0.50f, w * 0.80f, h * 0.24f)
-            }
-            val measure = PathMeasure().apply { setPath(branch, false) }
-            val part = Path()
-            measure.getSegment(0f, measure.length * progress, part, true)
-            drawPath(part, Color.White, style = Stroke(stroke * 1.1f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-            if (progress > 0.92f) {
-                val tip = Offset(w * 0.80f, h * 0.24f)
-                val a = 3.6.dp.toPx()
-                drawLine(Color.White, tip, Offset(tip.x - a, tip.y + a * 0.15f), stroke, StrokeCap.Round)
-                drawLine(Color.White, tip, Offset(tip.x - a * 0.1f, tip.y + a), stroke, StrokeCap.Round)
-            }
-        }
-    }
-}
-
-/** The new route: each step on one lit rail that runs from the branch mark down, the current one turning. */
-@Composable
-private fun NextSteps(steps: List<MindPlanStep>, more: Int) {
-    if (steps.isEmpty()) return
-    val current = steps.indexOfFirst { it.status == "doing" }.takeIf { it >= 0 } ?: steps.indexOfFirst { it.status == "todo" }
-    Column(
-        Modifier.fillMaxWidth().padding(start = 7.dp).drawBehind {
-            // The rail: centred under the branch mark's circle (16 dp from the left), fading towards the end.
-            val x = 9.dp.toPx()
-            drawLine(
-                Brush.verticalGradient(listOf(BranchWarm.copy(alpha = 0.55f), Branch.copy(alpha = 0.45f), Branch.copy(alpha = 0f))),
-                Offset(x, -6.dp.toPx()), Offset(x, size.height), 1.4.dp.toPx(), StrokeCap.Round,
-            )
-        },
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        steps.forEachIndexed { i, step ->
+        // The new route, hanging from the fork on the rail.
+        next.forEachIndexed { i, step ->
             val state = when {
                 step.status == "done" -> 0
                 i == current -> 1
                 else -> 2
             }
-            Row(Modifier.fillMaxWidth().heightIn(min = 30.dp), verticalAlignment = Alignment.CenterVertically,
+            Row(Modifier.fillMaxWidth().heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(Lane), contentAlignment = Alignment.Center) {
                     when (state) {
-                        0 -> Box(Modifier.size(16.dp).clip(CircleShape).background(Branch.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
+                        0 -> Box(Modifier.size(16.dp).clip(CircleShape).background(Color(0xFF0B2226)), contentAlignment = Alignment.Center) {
                             Icon(Icons.Rounded.Check, null, Modifier.size(12.dp), tint = Branch)
                         }
                         1 -> Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF0B2226)), contentAlignment = Alignment.Center) { GlassSpinner(13) }
@@ -279,6 +218,37 @@ private fun NextSteps(steps: List<MindPlanStep>, more: Int) {
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (more > 0) Text("+$more more", color = GlassDim, fontSize = 12.5.sp, modifier = Modifier.padding(start = 28.dp, top = 2.dp))
+        if (more > 0) Text("+$more more", color = GlassDim, fontSize = 12.5.sp, modifier = Modifier.padding(start = Lane + 10.dp, top = 2.dp))
+    }
+}
+
+/**
+ * The fork, unframed: a faded dashed line straight up (the plan let go) and a bright branch that leaves it, curves up
+ * and right and ends in an arrow. The branch draws itself in once as [progress] runs; its foot meets the rail below.
+ */
+@Composable
+private fun ForkGlyph(progress: Float, tint: Color) {
+    Canvas(Modifier.size(Lane)) {
+        val w = size.width
+        val h = size.height
+        val stroke = 1.8.dp.toPx()
+        val x = w / 2
+        drawLine(Color.White.copy(alpha = 0.32f), Offset(x, h * 0.62f), Offset(x, h * 0.06f), stroke, StrokeCap.Round,
+            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * stroke, 1.6f * stroke)))
+        val branch = Path().apply {
+            moveTo(x, h * 1.0f)
+            lineTo(x, h * 0.70f)
+            cubicTo(x, h * 0.44f, w * 0.70f, h * 0.52f, w * 0.92f, h * 0.22f)
+        }
+        val measure = PathMeasure().apply { setPath(branch, false) }
+        val part = Path()
+        measure.getSegment(0f, measure.length * progress, part, true)
+        drawPath(part, tint, style = Stroke(stroke * 1.15f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        if (progress > 0.92f) {
+            val tip = Offset(w * 0.92f, h * 0.22f)
+            val a = 4.dp.toPx()
+            drawLine(tint, tip, Offset(tip.x - a, tip.y + a * 0.1f), stroke, StrokeCap.Round)
+            drawLine(tint, tip, Offset(tip.x - a * 0.05f, tip.y + a), stroke, StrokeCap.Round)
+        }
     }
 }
