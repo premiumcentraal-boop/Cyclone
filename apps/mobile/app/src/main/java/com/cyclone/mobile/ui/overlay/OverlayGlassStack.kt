@@ -267,7 +267,11 @@ private fun HeaderApps(apps: List<String>) {
  */
 @Composable
 private fun DepthAppStack(apps: List<String>) {
-    if (apps.isEmpty()) { CycloneMark(28); return }
+    if (apps.isEmpty()) CycloneMark(28) else DepthLogos(apps)
+}
+
+@Composable
+private fun DepthLogos(apps: List<String>) {
     val shown = apps.takeLast(3)
     val front = 38.dp
     val step = 25.dp
