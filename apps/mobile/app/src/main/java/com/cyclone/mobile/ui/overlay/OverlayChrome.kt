@@ -512,21 +512,14 @@ private fun ComposerPanel(
         },
     ) {
         val minimize = { onAction(OverlayUserAction.MINIMIZE) }
+        // Plan 38 §4: a change of plan is drawn inside the working card, never as a box of its own under it.
+        val diversion = mindLive?.takeIf { mindTaskId == "mission-${it.id}" }?.let(PlanDiversion::of)
         if (task != null || foregroundWorking) {
             Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
                 when {
-                    task != null -> OverlayWorkCard(task, minimize)
+                    task != null -> OverlayWorkCard(task, diversion, minimize)
                     else -> OverlayForegroundCard(snapshot, minimize) { onAction(OverlayUserAction.STOP_TASK) }
                 }
-            }
-        }
-        // Plan 38 §4: after a diversion the card shows the branch: "Plan v2 · Changed course", the dropped step struck
-        // through and the new route with its reason. Nothing shows while the plan has not changed.
-        mindLive?.takeIf { mindTaskId == "mission-${it.id}" && it.planVersion > 1 }?.let { mission ->
-            Box(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-                .background(Color(0xB3141A22)).padding(horizontal = 16.dp, vertical = 10.dp)) {
-                com.cyclone.mobile.ui.v32.CyclonePlanView(mission, compact = true, ink = com.cyclone.mobile.ui.v32.SignatureInk,
-                    dim = com.cyclone.mobile.ui.v32.SignatureInk.copy(alpha = .62f), accent = Color(0xFF83DBD7))
             }
         }
         if (queued.isNotEmpty()) CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }

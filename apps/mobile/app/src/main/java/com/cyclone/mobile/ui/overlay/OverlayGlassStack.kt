@@ -287,7 +287,7 @@ private fun GlassCard(content: @Composable () -> Unit) {
  * line; the last few steps; and one quiet line with the step count and apps.
  */
 @Composable
-internal fun OverlayWorkCard(task: WorkspaceTaskUi, onMinimize: () -> Unit) {
+internal fun OverlayWorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion? = null, onMinimize: () -> Unit) {
     val context = LocalContext.current
     val snapshot = remember(task) { TaskPresentationProjector.project(task) }
     val apps = remember(task.taskId, task.packageName) { TaskAppTrail.record(task.taskId, task.packageName) }
@@ -306,9 +306,14 @@ internal fun OverlayWorkCard(task: WorkspaceTaskUi, onMinimize: () -> Unit) {
             CycloneTaskVisualState.WORKING -> {
                 GlassProgress(snapshot.progressFraction)
                 Spacer(Modifier.height(14.dp))
-                val steps = OverlayGlassCopy.steps(snapshot.milestones)
-                if (steps.isEmpty()) StepRow(snapshot.currentMilestone ?: task.message, current = true)
-                else steps.forEach { StepRow(it.label, current = it.state == SemanticStepState.ACTIVE || it.state == SemanticStepState.ACTION_NEEDED) }
+                if (diversion != null) {
+                    // Plan 38 §4: a change of plan stays in the card: the old plan tucked, the branch, the new steps.
+                    PlanDiversionBlock(diversion)
+                } else {
+                    val steps = OverlayGlassCopy.steps(snapshot.milestones)
+                    if (steps.isEmpty()) StepRow(snapshot.currentMilestone ?: task.message, current = true)
+                    else steps.forEach { StepRow(it.label, current = it.state == SemanticStepState.ACTIVE || it.state == SemanticStepState.ACTION_NEEDED) }
+                }
                 MetaLine(OverlayGlassCopy.meta(snapshot.completedCount, snapshot.totalCount, labels))
             }
             CycloneTaskVisualState.ACTION_NEEDED -> {
