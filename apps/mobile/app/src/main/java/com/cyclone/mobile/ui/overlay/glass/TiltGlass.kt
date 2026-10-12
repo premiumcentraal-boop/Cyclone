@@ -143,16 +143,20 @@ fun Modifier.tiltGlass(
     val step = 4.3.dp.toPx()
     val band = min(30.dp.toPx(), h * 0.46f)
     val xs = ArrayList<Float>(); val ys = ArrayList<Float>(); val falls = ArrayList<Float>()
+    val innerW = max(0f, w - 2 * band)
+    val innerH = max(0f, h - 2 * band)
+    val innerR = min(r, min(innerW, innerH) / 2f)
     if (dots && w > 0f && h > 0f) {
         var row = 0
         var y = step / 2f
         while (y < h) {
             var x = step / 2f + if (row % 2 == 1) step / 2f else 0f
             while (x < w) {
-                // The band follows the straight edges only, and runs on under the rim: the rounded outline cuts the
-                // dots off cleanly at the corners instead of the band bending to follow them.
-                val inside = min(min(x, w - x), min(y, h - y))
-                if (inside in -step..band) { xs += x; ys += y; falls += 1f - max(0f, inside) / band }
+                // The band's inner edge is the panel's own rounded shape, set in by [band] with the same corner radius,
+                // so the dots fade out along a soft rounded line (never a sharp inner rectangle). Towards the rim they
+                // run on and are cut off by the clip just inside the lit edge.
+                val out = GlassOptics.roundedRectDistance(x - band, y - band, innerW, innerH, innerR)
+                if (out > 0f) { xs += x; ys += y; falls += min(1f, out / band) }
                 x += step
             }
             y += step
