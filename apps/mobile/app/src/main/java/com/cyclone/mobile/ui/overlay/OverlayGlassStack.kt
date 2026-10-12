@@ -44,6 +44,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -258,6 +260,40 @@ private fun HeaderApps(apps: List<String>) {
     if (apps.isEmpty()) CycloneMark(28) else AppLogoStack(apps)
 }
 
+/**
+ * The task's apps at the top right, one behind the other with depth: the current app in front, full size, lit and
+ * casting a soft shadow; each earlier one set back to its left, smaller, dimmer and lower. Cyclone's mark until an app
+ * is known.
+ */
+@Composable
+private fun DepthAppStack(apps: List<String>) {
+    if (apps.isEmpty()) { CycloneMark(28); return }
+    val shown = apps.takeLast(3)
+    val front = 38.dp
+    val step = 25.dp
+    Box(Modifier.size(width = front + step * (shown.size - 1), height = front), contentAlignment = Alignment.CenterEnd) {
+        shown.forEachIndexed { index, pkg ->
+            val depth = shown.lastIndex - index
+            val scale = 1f - 0.16f * depth
+            Box(
+                Modifier.align(Alignment.CenterEnd).padding(end = step * depth)
+                    .zIndex(-depth.toFloat())
+                    .graphicsLayer {
+                        scaleX = scale; scaleY = scale
+                        alpha = 1f - 0.22f * depth
+                        translationY = 1.5.dp.toPx() * depth
+                        shadowElevation = (if (depth == 0) 10.dp else 4.dp).toPx()
+                        shape = CircleShape
+                        clip = false
+                    },
+            ) {
+                AppLogo(pkg, front, current = depth == 0)
+                if (depth > 0) Box(Modifier.size(front).clip(CircleShape).background(Color(0xFF041418).copy(alpha = 0.18f * depth)))
+            }
+        }
+    }
+}
+
 @Composable
 private fun CollapseButton(onMinimize: () -> Unit) {
     GlassRoundButton("Make smaller", onMinimize, size = 40.dp) {
@@ -294,14 +330,15 @@ internal fun OverlayWorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion? = 
     val labels = remember(apps) { apps.map { appLabel(context, it) }.filter { it != "Other" } }
     val state = task.taskVisualState()
     GlassCard {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            HeaderApps(apps)
-            Spacer(Modifier.weight(1f))
+        // The apps it works in, stacked with depth at the top right, say what the card is about: no title line.
+        Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = snapshot.title },
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             StatusChip(state)
+            Spacer(Modifier.weight(1f))
+            DepthAppStack(apps)
             CollapseButton(onMinimize)
         }
-        Text(snapshot.title, color = GlassInk, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp,
-            modifier = Modifier.padding(top = 14.dp, bottom = 12.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(16.dp))
         when (state) {
             CycloneTaskVisualState.WORKING -> {
                 GlassProgress(snapshot.progressFraction)
@@ -314,7 +351,6 @@ internal fun OverlayWorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion? = 
                     if (steps.isEmpty()) StepRow(snapshot.currentMilestone ?: task.message, current = true)
                     else steps.forEach { StepRow(it.label, current = it.state == SemanticStepState.ACTIVE || it.state == SemanticStepState.ACTION_NEEDED) }
                 }
-                MetaLine(OverlayGlassCopy.meta(snapshot.completedCount, snapshot.totalCount, labels))
             }
             CycloneTaskVisualState.ACTION_NEEDED -> {
                 (snapshot.supportingCopy ?: task.message).takeIf { it.isNotBlank() }?.let {

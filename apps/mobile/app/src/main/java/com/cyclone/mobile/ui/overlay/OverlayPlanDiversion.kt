@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -81,7 +82,7 @@ internal data class PlanDiversion(
     /** Steps already done before the change. */
     val done: Int,
 ) {
-    val title: String get() = if (steered) "You changed the plan" else "Changed course"
+    val title: String get() = "Plan diverted"
 
     /** The tucked line: what the earlier plan was, in a few words. */
     val tucked: String get() {
@@ -118,7 +119,10 @@ private val Branch = Color(0xFF83DBD7)
 private val BranchWarm = Color(0xFFE9C78B)
 
 /** Width of the marker column every row shares, so the fork, the old steps and the new steps sit on one line. */
-private val Lane = 22.dp
+private val Lane = 30.dp
+
+/** Height of the first row: the switch glyph fills it, and the rail starts where it ends. */
+private val ForkHeight = 46.dp
 
 /**
  * The whole diversion as one timeline. The first row is the fork (no frame), "Changed course" and the plan it left,
@@ -131,7 +135,7 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
     val turn by animateFloatAsState(if (open) 180f else 0f, tween(220), label = "Earlier plan chevron")
     val draw = remember(diversion.version) { Animatable(0f) }
     LaunchedEffect(diversion.version) { draw.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
-    val tint = if (diversion.steered) Branch else BranchWarm
+    val tint = BranchWarm
     val next = diversion.next.take(maxNext)
     val more = (diversion.next.size - maxNext).coerceAtLeast(0)
     val current = next.indexOfFirst { it.status == "doing" }.takeIf { it >= 0 } ?: next.indexOfFirst { it.status == "todo" }
@@ -142,14 +146,14 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
             val x = Lane.toPx() / 2
             drawLine(
                 Brush.verticalGradient(listOf(tint.copy(alpha = 0.6f), Branch.copy(alpha = 0.4f), Branch.copy(alpha = 0f)),
-                    startY = 24.dp.toPx(), endY = size.height),
-                Offset(x, 24.dp.toPx()), Offset(x, size.height), 1.4.dp.toPx(), StrokeCap.Round,
+                    startY = ForkHeight.toPx(), endY = size.height),
+                Offset(x, ForkHeight.toPx()), Offset(x, size.height), 1.4.dp.toPx(), StrokeCap.Round,
             )
         },
     ) {
         // The fork and the plan it left, on one line.
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 34.dp).clip(RoundedCornerShape(12.dp))
+            Modifier.fillMaxWidth().height(ForkHeight).clip(RoundedCornerShape(12.dp))
                 .clickable(role = Role.Button, onClickLabel = if (open) "Fold the earlier plan" else "Show the earlier plan") { open = !open }
                 .semantics(mergeDescendants = true) {
                     contentDescription = diversion.title + (diversion.dropped.firstOrNull()?.let { ". Let go: $it" } ?: "")
@@ -158,7 +162,7 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box(Modifier.size(Lane), contentAlignment = Alignment.Center) { ForkGlyph(draw.value, tint) }
+            ForkGlyph(draw.value, tint)
             Text(diversion.title, color = tint, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
             Text(diversion.dropped.firstOrNull() ?: diversion.tucked, Modifier.weight(1f), color = GlassDim, fontSize = 13.5.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -223,32 +227,38 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
 }
 
 /**
- * The fork, unframed: a faded dashed line straight up (the plan let go) and a bright branch that leaves it, curves up
- * and right and ends in an arrow. The branch draws itself in once as [progress] runs; its foot meets the rail below.
+ * The switch, like points on a railway: the old track comes in from the top right and runs on, faded and dashed, while
+ * the bright new track switches off it, curves left and down and ends in an arrow pointing into the steps below. It
+ * draws itself in once as [progress] runs; the arrow's tip meets the rail.
  */
 @Composable
 private fun ForkGlyph(progress: Float, tint: Color) {
-    Canvas(Modifier.size(Lane)) {
+    Canvas(Modifier.size(Lane, ForkHeight)) {
         val w = size.width
         val h = size.height
-        val stroke = 1.8.dp.toPx()
-        val x = w / 2
-        drawLine(Color.White.copy(alpha = 0.32f), Offset(x, h * 0.62f), Offset(x, h * 0.06f), stroke, StrokeCap.Round,
-            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * stroke, 1.6f * stroke)))
-        val branch = Path().apply {
-            moveTo(x, h * 1.0f)
-            lineTo(x, h * 0.70f)
-            cubicTo(x, h * 0.44f, w * 0.70f, h * 0.52f, w * 0.92f, h * 0.22f)
+        val stroke = 1.9.dp.toPx()
+        val right = w * 0.88f
+        val rail = w / 2
+        val split = h * 0.16f
+        // The track it was on: in from the top, then on past the switch, faded and dashed.
+        drawLine(tint.copy(alpha = 0.55f), Offset(right, 0f), Offset(right, split), stroke, StrokeCap.Round)
+        drawLine(Color.White.copy(alpha = 0.34f), Offset(right, split), Offset(right, h * 0.78f), stroke, StrokeCap.Round,
+            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * stroke, 1.8f * stroke)))
+        // The new track: leaves at the switch, curves left onto the rail and runs down.
+        val track = Path().apply {
+            moveTo(right, split)
+            cubicTo(right, h * 0.52f, rail, h * 0.42f, rail, h * 0.80f)
+            lineTo(rail, h - stroke)
         }
-        val measure = PathMeasure().apply { setPath(branch, false) }
+        val measure = PathMeasure().apply { setPath(track, false) }
         val part = Path()
         measure.getSegment(0f, measure.length * progress, part, true)
         drawPath(part, tint, style = Stroke(stroke * 1.15f, cap = StrokeCap.Round, join = StrokeJoin.Round))
         if (progress > 0.92f) {
-            val tip = Offset(w * 0.92f, h * 0.22f)
-            val a = 4.dp.toPx()
-            drawLine(tint, tip, Offset(tip.x - a, tip.y + a * 0.1f), stroke, StrokeCap.Round)
-            drawLine(tint, tip, Offset(tip.x - a * 0.05f, tip.y + a), stroke, StrokeCap.Round)
+            val tip = Offset(rail, h - stroke)
+            val a = 4.2.dp.toPx()
+            drawLine(tint, tip, Offset(tip.x - a, tip.y - a), stroke, StrokeCap.Round)
+            drawLine(tint, tip, Offset(tip.x + a, tip.y - a), stroke, StrokeCap.Round)
         }
     }
 }

@@ -28,7 +28,7 @@ class PlanDiversionTest {
     @Test fun cycloneChangingCourseKeepsItsReasonAndTucksTheEarlierPlan() {
         val d = PlanDiversion.of(mission(2, "Her DMs are closed", "Changed course"))!!
         assertFalse(d.steered)
-        assertEquals("Changed course", d.title)
+        assertEquals("Plan diverted", d.title)
         assertEquals("Her DMs are closed", d.reason)
         assertEquals(listOf("Send in Instagram DM"), d.dropped)
         assertEquals(listOf("Open WhatsApp", "Send the photos"), d.next.map { it.text })
@@ -39,7 +39,7 @@ class PlanDiversionTest {
     @Test fun theOwnersSteerIsNamedAsTheirsWithoutAReasonLine() {
         val d = PlanDiversion.of(mission(2, "You changed this", "You changed this"))!!
         assertTrue(d.steered)
-        assertEquals("You changed the plan", d.title)
+        assertEquals("Plan diverted", d.title)
         assertNull(d.reason)
     }
 
