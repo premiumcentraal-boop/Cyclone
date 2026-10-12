@@ -131,7 +131,7 @@ fun Modifier.tiltGlass(
     val r = min(cornerRadius.toPx(), min(w, h) / 2f)
     val outline = Path().apply { addRoundRect(RoundRect(0f, 0f, w, h, CornerRadius(r))) }
     // The dots stop just inside the lit rim (its line and glow), so none show between the shine and the edge.
-    val dotInset = 2.4.dp.toPx()
+    val dotInset = 1.5.dp.toPx()
     val dotOutline = Path().apply {
         addRoundRect(RoundRect(dotInset, dotInset, w - dotInset, h - dotInset, CornerRadius(max(0f, r - dotInset))))
     }
