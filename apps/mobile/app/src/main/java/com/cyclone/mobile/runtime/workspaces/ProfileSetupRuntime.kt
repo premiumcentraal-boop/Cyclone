@@ -673,7 +673,12 @@ object ProfileSetupRuntime {
                     lines.forEach { line ->
                         synchronized(output) {
                             if (inventory && output.length + line.length + 1 > outputLimit) incomplete.set(true)
-                            if (output.length < outputLimit) output.appendLine(line)
+                            if (output.length < outputLimit) {
+                                if (inventory) {
+                                    output.append(line.take((outputLimit - output.length - 1).coerceAtLeast(0)))
+                                    if (output.length < outputLimit) output.append('\n')
+                                } else output.appendLine(line)
+                            }
                         }
                     }
                 }
@@ -703,9 +708,10 @@ object ProfileSetupRuntime {
                 execution(command, null, text, failure, startedAt)
             } else {
                 reader.join(500)
+                val readerIncomplete = reader.isAlive
                 val text = synchronized(output) { output.toString() }
                 val exit = process.exitValue()
-                val failure = if (inventory && (incomplete.get() || reader.isAlive)) {
+                val failure = if (inventory && (incomplete.get() || readerIncomplete)) {
                     ProfileFailureClassifier.local(ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED, "Android's installed-app inventory could not be read completely.")
                 } else ProfileFailureClassifier.fromCommand(command.operation, exit, text)
                 execution(command, exit, text, failure, startedAt)
