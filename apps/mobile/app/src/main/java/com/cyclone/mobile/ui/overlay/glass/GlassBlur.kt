@@ -4,10 +4,12 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import android.view.WindowManager
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -95,39 +97,74 @@ object GlassBlur {
 data class BlurRegion(val bounds: Rect, val cornerRadiusPx: Float)
 
 /**
- * The overlay window's blur bookkeeping: the panels on screen and which of them have a blur window behind them.
- * [onChanged] runs whenever a panel moves, appears or goes; the owner of the windows then syncs them.
+ * The overlay window's blur bookkeeping: the panels on screen, which of them have a blur window behind them, and
+ * which are moving. A blur window can only follow a panel a frame or two late, so it never tries: while a panel moves
+ * (appears, slides, resizes, goes) its blur steps aside and the panel shows smoke; once it has been still for
+ * [SETTLE_MS] the blur comes back and its smoke lightens. [schedule] runs a callback later on the main thread;
+ * [onChanged] runs whenever the windows should be synced.
  */
-class BlurHost(private val slots: Int, private val onChanged: () -> Unit) {
+class BlurHost(
+    private val slots: Int,
+    private val schedule: (delayMs: Long, block: () -> Unit) -> Unit,
+    private val onChanged: () -> Unit,
+) {
     private val order = ArrayList<Any>()
     private val regions = HashMap<Any, BlurRegion>()
+    private val moving = HashSet<Any>()
+    private var moveGeneration = 0
     private var blurred by mutableStateOf<Set<Any>>(emptySet())
-
-    /** 0 with smoke, up to [GlassBlur.VEIL_LIFT] while blurred; animated by the overlay's root. */
-    var lift by mutableFloatStateOf(0f)
 
     fun place(key: Any, region: BlurRegion) {
         if (regions[key] == region) return
         if (key !in order) order += key
         regions[key] = region
-        assign()
-        onChanged()
+        moved(key)
     }
 
     fun remove(key: Any) {
         if (regions.remove(key) == null) return
         order -= key
-        assign()
+        moving -= key
+        publish()
         onChanged()
     }
 
-    /** The panels that get a blur window, in the order they appeared (at most [slots]). */
-    fun shown(): List<BlurRegion> = order.take(slots).mapNotNull { regions[it] }
+    /** The whole overlay window moved: every panel is in motion. */
+    fun jolt() {
+        if (order.isEmpty()) return
+        order.forEach { moving += it }
+        settleLater()
+    }
 
-    /** How much lighter this panel's smoke is: only a panel with a blur window behind it gets lighter. */
-    fun liftFor(key: Any): Float = if (key in blurred) lift else 0f
+    /** One entry per blur window, in order: the panel to blur behind, or null while it moves or is not there. */
+    fun shown(): List<BlurRegion?> = order.take(slots).map { if (it in moving) null else regions[it] }
 
-    private fun assign() { blurred = order.take(slots).toSet() }
+    /** Whether this panel has its blur behind it right now (a state: the panel's smoke follows it). */
+    fun isBlurred(key: Any): Boolean = key in blurred
+
+    private fun moved(key: Any) {
+        moving += key
+        settleLater()
+    }
+
+    private fun settleLater() {
+        val generation = ++moveGeneration
+        publish()
+        onChanged()
+        schedule(SETTLE_MS) {
+            if (generation != moveGeneration) return@schedule
+            moving.clear()
+            publish()
+            onChanged()
+        }
+    }
+
+    private fun publish() { blurred = order.take(slots).filter { it !in moving }.toSet() }
+
+    companion object {
+        /** How long a panel stays still before its blur returns. */
+        const val SETTLE_MS = 160L
+    }
 }
 
 /** The overlay window's [BlurHost]; null everywhere else (the app's own screens have their own blur). */
@@ -145,7 +182,13 @@ fun rememberBlurPanel(cornerRadius: Dp): BlurPanel {
     val key = remember { Any() }
     val radiusPx = with(LocalDensity.current) { cornerRadius.toPx() }
     DisposableEffect(host, key) { onDispose { host.remove(key) } }
+    val on by GlassBlur.on.collectAsState()
+    // This panel's smoke lightens only while its own blur is behind it: in as the blur settles, out quickly when the
+    // panel starts to move (the blur has already stepped aside).
+    val blurred = on && host.isBlurred(key)
+    val lift = animateFloatAsState(if (blurred) GlassBlur.VEIL_LIFT else 0f,
+        tween(if (blurred) GlassBlur.FADE_MS else 90), label = "Glass smoke")
     return remember(host, key, radiusPx) {
-        BlurPanel(Modifier.onGloballyPositioned { host.place(key, BlurRegion(it.boundsInWindow(), radiusPx)) }) { host.liftFor(key) }
+        BlurPanel(Modifier.onGloballyPositioned { host.place(key, BlurRegion(it.boundsInWindow(), radiusPx)) }) { lift.value }
     }
 }

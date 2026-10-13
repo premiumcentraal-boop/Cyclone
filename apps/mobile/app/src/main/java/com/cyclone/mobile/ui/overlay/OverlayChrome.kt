@@ -188,10 +188,8 @@ fun OverlayChrome(
         }
         AnimatedContent(
             targetState = presentation,
-            transitionSpec = {
-                (fadeIn(tween(180)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 3 })
-                    .togetherWith(fadeOut(tween(130)) + slideOutVertically(tween(160)) { it / 4 })
-            },
+            // One motion for the whole overlay (OverlayMotion): the panels hand over in place.
+            transitionSpec = { OverlayMotion.swap() },
             label = "Cyclone chat drawer",
         ) { mode ->
             when (mode) {
@@ -384,7 +382,9 @@ private fun ComposerPanel(
     // Plan 38: while a Mind mission runs, typed text + send offers Steer / Queue / Parallel for the task on this card
     // (D7), and the empty bar's button is the real pause (the mission holds at its next step) and the two-tap stop.
     val mindLive by com.cyclone.mobile.mind.mission.MindMissions.live.collectAsState()
-    val mindTask = mindTaskId ?: mindLive?.let { "mission-${it.id}" }
+    // Only a mission that still runs: a finished one's card can stay on screen, and new text then is a new request
+    // (offering Steer / Queue / Parallel for it sent the choice to nothing).
+    val mindTask = mindLive?.let { "mission-${it.id}" } ?: mindTaskId?.takeIf { task?.working == true }
     val mindPaused = mindLive?.paused == true
     var askOptions by remember { mutableStateOf<List<com.cyclone.mobile.task.AskWhileWorking.Option>?>(null) }
     LaunchedEffect(mindTask) { if (mindTask == null) askOptions = null }
@@ -397,10 +397,15 @@ private fun ComposerPanel(
         val text = snapshot.composerText
         askOptions = null
         val target = com.cyclone.mobile.mind.mission.MindMissions.viewedTaskId(mindTask)
-        if (target != null && text.isNotBlank()) {
-            val result = com.cyclone.mobile.task.TaskCommands.send(context, target, com.cyclone.mobile.task.AskWhileWorking.command(choice, text))
-            if (result.handled) onComposerChanged("")
-            else android.widget.Toast.makeText(context, result.detail, android.widget.Toast.LENGTH_LONG).show()
+        if (text.isNotBlank()) {
+            if (target == null) {
+                // The task ended while the choice was open: the text is simply a new request.
+                submit()
+            } else {
+                val result = com.cyclone.mobile.task.TaskCommands.send(context, target, com.cyclone.mobile.task.AskWhileWorking.command(choice, text))
+                if (result.handled) onComposerChanged("")
+                else android.widget.Toast.makeText(context, result.detail, android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
     val islandSnapshot = task?.let { remember(it) { com.cyclone.mobile.runtime.background.TaskPresentationProjector.project(it) } }
@@ -444,10 +449,7 @@ private fun ComposerPanel(
         composer = {
             AnimatedContent(
                 targetState = island,
-                transitionSpec = {
-                    (fadeIn(tween(220)) + slideInVertically(tween(320, easing = FastOutSlowInEasing)) { it / 5 })
-                        .togetherWith(fadeOut(tween(140)))
-                },
+                transitionSpec = { OverlayMotion.swap() },
                 label = "Ask bar or island",
             ) { showIsland ->
                 if (showIsland) {
@@ -474,11 +476,18 @@ private fun ComposerPanel(
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    askOptions?.takeIf { snapshot.composerText.isNotBlank() }?.let { options ->
-                        // On the same glass as every other overlay surface: the rows straight on the panel.
-                        OverlayAppleGlass(Modifier.fillMaxWidth(), cornerRadius = 26.dp) {
-                            com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                                ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7), framed = false)
+                    // The choice unfolds above the bar with the overlay's one motion; the last rows stay while it folds.
+                    val shownOptions = askOptions?.takeIf { snapshot.composerText.isNotBlank() }
+                    var lastOptions by remember { mutableStateOf(shownOptions) }
+                    if (shownOptions != null) lastOptions = shownOptions
+                    androidx.compose.animation.AnimatedVisibility(shownOptions != null,
+                        enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
+                        lastOptions?.let { options ->
+                            // On the same glass as every other overlay surface: the rows straight on the panel.
+                            OverlayAppleGlass(Modifier.fillMaxWidth(), cornerRadius = 26.dp) {
+                                com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                    ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7), framed = false)
+                            }
                         }
                     }
                     OverlayAppleComposerBar(
@@ -602,7 +611,7 @@ private fun GatePanel(
                     }),
                 ) {
                     Text(words.title, color = Color(0xFFF7F8FA), fontSize = 19.sp, fontWeight = FontWeight.SemiBold, lineHeight = 25.sp)
-                    androidx.compose.animation.AnimatedVisibility(whyOpen && why != null) {
+                    androidx.compose.animation.AnimatedVisibility(whyOpen && why != null, enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("Cyclone's reason", color = GlassDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(why.orEmpty(), color = GlassInk.copy(alpha = 0.92f), fontSize = 14.5.sp, lineHeight = 20.sp)

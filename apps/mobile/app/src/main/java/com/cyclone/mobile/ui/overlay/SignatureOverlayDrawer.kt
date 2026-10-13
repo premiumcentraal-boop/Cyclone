@@ -1,7 +1,6 @@
 package com.cyclone.mobile.ui.overlay
 
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -95,12 +94,12 @@ internal fun SignatureOverlayDrawer(
         settleJob?.cancel()
         settleJob = scope.launch {
             val fromFollow = follow
-            animate(0f, 1f, animationSpec = spring(dampingRatio = 0.86f, stiffness = 380f)) { t, _ ->
+            animate(0f, 1f, animationSpec = OverlayMotion.float) { t, _ ->
                 follow = fromFollow * (1f - t)
             }
         }
         scope.launch {
-            animate(reveal, target, animationSpec = spring(dampingRatio = 0.86f, stiffness = 380f)) { value, _ ->
+            animate(reveal, target, animationSpec = OverlayMotion.float) { value, _ ->
                 reveal = value.coerceIn(0f, 1f)
             }
             after()

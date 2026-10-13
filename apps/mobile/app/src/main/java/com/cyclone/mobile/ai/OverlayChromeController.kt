@@ -252,7 +252,9 @@ class OverlayChromeController(
     private val idleActivation = OverlayIdleActivationTracker()
     // Blur behind the glass (GlassBlur): small blur windows under the overlay window, one per panel.
     private val blurWindows = OverlayBlurWindows(service)
-    private val blurHost = com.cyclone.mobile.ui.overlay.glass.BlurHost(OverlayBlurWindows.SLOTS) { main.post(::syncBlur) }
+    private val blurHost = com.cyclone.mobile.ui.overlay.glass.BlurHost(OverlayBlurWindows.SLOTS,
+        schedule = { ms, block -> main.postDelayed(block, ms) }) { syncBlur() }
+    private var blurOrigin: IntArray? = null
     private var root: ComposeView? = null
     private var params: WindowManager.LayoutParams? = null
     private var shareRoot: ComposeView? = null
@@ -308,12 +310,8 @@ class OverlayChromeController(
                 setViewTreeSavedStateRegistryOwner(lifecycle)
                 setContent {
                     val blurOn by com.cyclone.mobile.ui.overlay.glass.GlassBlur.on.collectAsState()
-                    // A to B and back fades: the smoke lightens as the blur comes in, darkens as it goes.
-                    LaunchedEffect(blurOn) {
-                        syncBlur()
-                        androidx.compose.animation.core.animate(blurHost.lift, if (blurOn) com.cyclone.mobile.ui.overlay.glass.GlassBlur.VEIL_LIFT else 0f,
-                            animationSpec = androidx.compose.animation.core.tween(com.cyclone.mobile.ui.overlay.glass.GlassBlur.FADE_MS)) { v, _ -> blurHost.lift = v }
-                    }
+                    // Each panel fades its own smoke with its blur (rememberBlurPanel); here the windows follow the switch.
+                    LaunchedEffect(blurOn) { syncBlur() }
                     CompositionLocalProvider(com.cyclone.mobile.ui.overlay.glass.LocalBlurHost provides blurHost) {
                     val externalActive by OverlayExternalInteraction.active.collectAsState()
                     val secretCardState by com.cyclone.mobile.secrets.SecretsCardRuntime.state.collectAsState()
@@ -456,6 +454,11 @@ class OverlayChromeController(
             com.cyclone.mobile.ui.overlay.glass.GlassBlur.on.value
         val origin = IntArray(2)
         if (visible) view!!.getLocationOnScreen(origin)
+        // The overlay window itself moved (keyboard, a new layout): the panels are in motion, so the blur steps aside
+        // until they settle; the host calls back here.
+        val before = blurOrigin
+        blurOrigin = origin
+        if (visible && before != null && !before.contentEquals(origin)) { blurHost.jolt(); return }
         blurWindows.sync(blurHost.shown(), origin[0], origin[1], visible)
     }
 
