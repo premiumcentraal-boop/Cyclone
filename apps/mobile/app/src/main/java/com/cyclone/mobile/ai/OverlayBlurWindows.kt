@@ -37,10 +37,11 @@ internal class OverlayBlurWindows(private val context: Context, private val slot
      * Puts one blur window behind each region (window pixels of the overlay window at [originX], [originY] on screen)
      * and hides the rest; all hidden when [visible] is false.
      */
-    fun sync(regions: List<BlurRegion>, originX: Int, originY: Int, visible: Boolean) {
+    fun sync(regions: List<BlurRegion?>, originX: Int, originY: Int, visible: Boolean) {
         if (pool.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         val radius = (GlassBlur.RADIUS_DP * context.resources.displayMetrics.density).roundToInt()
         pool.forEachIndexed { i, dialog ->
+            // A panel in motion has no blur (null): hiding is immediate, a frozen blurred frame never lingers.
             val region = regions.getOrNull(i)?.takeIf { visible && it.bounds.width > 1f && it.bounds.height > 1f }
             val window = dialog.window ?: return@forEachIndexed
             if (region == null) {

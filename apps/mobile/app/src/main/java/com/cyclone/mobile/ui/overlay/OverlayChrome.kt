@@ -384,7 +384,9 @@ private fun ComposerPanel(
     // Plan 38: while a Mind mission runs, typed text + send offers Steer / Queue / Parallel for the task on this card
     // (D7), and the empty bar's button is the real pause (the mission holds at its next step) and the two-tap stop.
     val mindLive by com.cyclone.mobile.mind.mission.MindMissions.live.collectAsState()
-    val mindTask = mindTaskId ?: mindLive?.let { "mission-${it.id}" }
+    // Only a mission that still runs: a finished one's card can stay on screen, and new text then is a new request
+    // (offering Steer / Queue / Parallel for it sent the choice to nothing).
+    val mindTask = mindLive?.let { "mission-${it.id}" } ?: mindTaskId?.takeIf { task?.working == true }
     val mindPaused = mindLive?.paused == true
     var askOptions by remember { mutableStateOf<List<com.cyclone.mobile.task.AskWhileWorking.Option>?>(null) }
     LaunchedEffect(mindTask) { if (mindTask == null) askOptions = null }
@@ -397,10 +399,15 @@ private fun ComposerPanel(
         val text = snapshot.composerText
         askOptions = null
         val target = com.cyclone.mobile.mind.mission.MindMissions.viewedTaskId(mindTask)
-        if (target != null && text.isNotBlank()) {
-            val result = com.cyclone.mobile.task.TaskCommands.send(context, target, com.cyclone.mobile.task.AskWhileWorking.command(choice, text))
-            if (result.handled) onComposerChanged("")
-            else android.widget.Toast.makeText(context, result.detail, android.widget.Toast.LENGTH_LONG).show()
+        if (text.isNotBlank()) {
+            if (target == null) {
+                // The task ended while the choice was open: the text is simply a new request.
+                submit()
+            } else {
+                val result = com.cyclone.mobile.task.TaskCommands.send(context, target, com.cyclone.mobile.task.AskWhileWorking.command(choice, text))
+                if (result.handled) onComposerChanged("")
+                else android.widget.Toast.makeText(context, result.detail, android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
     val islandSnapshot = task?.let { remember(it) { com.cyclone.mobile.runtime.background.TaskPresentationProjector.project(it) } }
