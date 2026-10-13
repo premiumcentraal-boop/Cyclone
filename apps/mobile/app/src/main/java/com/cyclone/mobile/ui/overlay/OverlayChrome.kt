@@ -188,10 +188,8 @@ fun OverlayChrome(
         }
         AnimatedContent(
             targetState = presentation,
-            transitionSpec = {
-                (fadeIn(tween(180)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 3 })
-                    .togetherWith(fadeOut(tween(130)) + slideOutVertically(tween(160)) { it / 4 })
-            },
+            // One motion for the whole overlay (OverlayMotion): the panels hand over in place.
+            transitionSpec = { OverlayMotion.swap() },
             label = "Cyclone chat drawer",
         ) { mode ->
             when (mode) {
@@ -451,10 +449,7 @@ private fun ComposerPanel(
         composer = {
             AnimatedContent(
                 targetState = island,
-                transitionSpec = {
-                    (fadeIn(tween(220)) + slideInVertically(tween(320, easing = FastOutSlowInEasing)) { it / 5 })
-                        .togetherWith(fadeOut(tween(140)))
-                },
+                transitionSpec = { OverlayMotion.swap() },
                 label = "Ask bar or island",
             ) { showIsland ->
                 if (showIsland) {
@@ -481,11 +476,18 @@ private fun ComposerPanel(
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    askOptions?.takeIf { snapshot.composerText.isNotBlank() }?.let { options ->
-                        // On the same glass as every other overlay surface: the rows straight on the panel.
-                        OverlayAppleGlass(Modifier.fillMaxWidth(), cornerRadius = 26.dp) {
-                            com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                                ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7), framed = false)
+                    // The choice unfolds above the bar with the overlay's one motion; the last rows stay while it folds.
+                    val shownOptions = askOptions?.takeIf { snapshot.composerText.isNotBlank() }
+                    var lastOptions by remember { mutableStateOf(shownOptions) }
+                    if (shownOptions != null) lastOptions = shownOptions
+                    androidx.compose.animation.AnimatedVisibility(shownOptions != null,
+                        enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
+                        lastOptions?.let { options ->
+                            // On the same glass as every other overlay surface: the rows straight on the panel.
+                            OverlayAppleGlass(Modifier.fillMaxWidth(), cornerRadius = 26.dp) {
+                                com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                    ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7), framed = false)
+                            }
                         }
                     }
                     OverlayAppleComposerBar(
@@ -609,7 +611,7 @@ private fun GatePanel(
                     }),
                 ) {
                     Text(words.title, color = Color(0xFFF7F8FA), fontSize = 19.sp, fontWeight = FontWeight.SemiBold, lineHeight = 25.sp)
-                    androidx.compose.animation.AnimatedVisibility(whyOpen && why != null) {
+                    androidx.compose.animation.AnimatedVisibility(whyOpen && why != null, enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("Cyclone's reason", color = GlassDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(why.orEmpty(), color = GlassInk.copy(alpha = 0.92f), fontSize = 14.5.sp, lineHeight = 20.sp)

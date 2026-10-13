@@ -456,7 +456,7 @@ internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen
             CollapseButton(onMinimize)
         }
         // A tap on the stack fans it out into the strip of every app visited, newest at the right.
-        AnimatedVisibility(trailOpen, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        AnimatedVisibility(trailOpen, enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
             AppTrailStrip(apps, Modifier.padding(top = 14.dp)) { trailOpen = false }
         }
         Spacer(Modifier.height(16.dp))
@@ -554,7 +554,7 @@ private fun OutcomeHistory(outcome: String, milestones: List<TaskPresentationMil
         Text(outcome, Modifier.weight(1f, fill = false), color = GlassInk, fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 22.sp)
         if (steps.isNotEmpty()) Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(20.dp).graphicsLayer { rotationZ = turn }, tint = GlassMuted)
     }
-    AnimatedVisibility(open && steps.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+    AnimatedVisibility(open && steps.isNotEmpty(), enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
         Column(
             Modifier.fillMaxWidth().padding(top = 10.dp).drawBehind {
                 val x = 9.dp.toPx()

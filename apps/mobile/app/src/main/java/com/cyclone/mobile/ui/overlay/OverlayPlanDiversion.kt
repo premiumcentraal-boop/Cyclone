@@ -156,7 +156,7 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
             Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(turn), tint = tint.copy(alpha = 0.7f))
         }
         // Why, and the plan it left: only after a tap, as one soft panel in the words' column.
-        AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        AnimatedVisibility(open, enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
             Column(
                 Modifier.padding(start = Lane + 10.dp, bottom = 8.dp).fillMaxWidth()
                     .padding(top = 2.dp, bottom = 4.dp),
