@@ -64,3 +64,19 @@ def test_startup_callback_vectors_match_schemas():
         else:
             _validator("startup.reply.schema.json").validate(case["response"])
             _validator("startup.status.result.schema.json").validate(case["result"])
+
+
+def test_complete_app_inventory_schema_has_only_public_metadata():
+    validator = _validator("profiles.apps.result.schema.json")
+    row = {"packageName": "com.android.settings", "label": "Settings", "profileId": "Cyclone_aaaaaaaaaaaaaaaa",
+           "androidUserId": 11, "installed": True, "system": True, "bundled": True}
+    result = {"version": 1, "profileId": row["profileId"], "apps": [row], "nextOffset": None}
+    validator.validate(result)
+    for field, value in (("androidUserId", -1), ("installed", False), ("apkPath", "/private/path")):
+        bad = json.loads(json.dumps(result))
+        bad["apps"][0][field] = value
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(bad)
+    result["apps"] *= 101
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(result)

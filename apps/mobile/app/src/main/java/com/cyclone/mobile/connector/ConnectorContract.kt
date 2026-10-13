@@ -19,9 +19,10 @@ object ConnectorContract {
     const val MAJOR = 1
     /**
      * Minor 2 (alpha.121, plan 57 P3): `root.status.v1` and the `device.root.read` scope. Minor 3 (alpha.122): the
-     * owner-confirmed `profiles.open.request.v1` and the `profiles.open.request` scope.
+     * owner-confirmed `profiles.open.request.v1` and the `profiles.open.request` scope. Minor 4: complete installed
+     * profile packages and paginated `profiles.apps.v1` metadata under the existing app-read scope.
      */
-    const val MINOR = 3
+    const val MINOR = 4
     /** The action a connector's service declares, so Cyclone can find it. */
     const val ACTION_CONNECT = "com.cyclone.connector.CONNECT"
     /** The action a connector binds to on Cyclone. */

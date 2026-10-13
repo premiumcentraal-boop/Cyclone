@@ -156,6 +156,10 @@ class ConnectorTest {
         val journal = ConnectorJournal()
         override fun approvals() = approvalList
         override fun profiles() = records
+        // Fixture packages represent actual installed packages in these backend contract tests.
+        override fun profileApps(profileId: String) = profiles().filter { it.id == profileId }.flatMap { r ->
+            r.packages.map { com.cyclone.mobile.runtime.workspaces.ProfilePackageInventory.App(it, it, r.androidUserId!!, r.id) }
+        }
         override fun setExt(profileId: String, connectorId: String, json: String?) {
             records = records.map { if (it.id != profileId) it else it.copy(ext = if (json == null) it.ext - connectorId else it.ext + (connectorId to json)) }
         }

@@ -23,6 +23,7 @@ enum class ProfileSetupOperation {
     LABEL_BACKUP,
     // Plan 43 T4: the profile app manager (ProfileApps only, after its ownership guards).
     LIST_PROFILE_APPS,
+    LIST_PROFILE_INVENTORY,
     UNINSTALL_FOR_PROFILE,
     // Plan 57 W3: Android's user types and their limits (read-only).
     DUMP_USERS,
@@ -141,6 +142,14 @@ object ProfileSetupPlan {
     fun listProfileApps(userId: Int): ProfileSetupCommand {
         require(userId >= 0)
         return ProfileSetupCommand.fixed(ProfileSetupOperation.LIST_PROFILE_APPS, "/system/bin/pm", "list", "packages", "-3", "--user", userId.toString())
+    }
+
+    /** Connector inventory only: includes system apps, and never includes uninstalled packages. */
+    fun listProfileInventory(userId: Int, systemOnly: Boolean = false): ProfileSetupCommand {
+        require(userId >= 0)
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.LIST_PROFILE_INVENTORY,
+            *(listOf("/system/bin/pm", "list", "packages") + (if (systemOnly) listOf("-s") else emptyList()) +
+                listOf("--user", userId.toString())).toTypedArray())
     }
 
     /** Plan 43 T4: removes an app from one Cyclone profile only; the app stays in every other profile. */
@@ -300,6 +309,10 @@ object ProfileSetupPlan {
             tokens[4].toIntOrNull()?.let { it > 0 } == true && validPackageName(tokens[5])
         ProfileSetupOperation.LIST_PROFILE_APPS -> tokens.size == 6 && tokens.take(4) == listOf("/system/bin/pm", "list", "packages", "-3") &&
             tokens[4] == "--user" && tokens[5].toIntOrNull()?.let { it >= 0 } == true
+        ProfileSetupOperation.LIST_PROFILE_INVENTORY ->
+            (tokens.size == 5 || (tokens.size == 6 && tokens[3] == "-s")) &&
+                tokens.take(3) == listOf("/system/bin/pm", "list", "packages") && tokens[tokens.size - 2] == "--user" &&
+                tokens.last().toIntOrNull()?.let { it >= 0 } == true
         ProfileSetupOperation.UNINSTALL_FOR_PROFILE -> tokens.size == 5 && tokens.take(3) == listOf("/system/bin/pm", "uninstall", "--user") &&
             tokens[3].toIntOrNull()?.let { it > 0 } == true && validPackageName(tokens[4]) && tokens[4] != "com.cyclone.mobile"
         ProfileSetupOperation.LIST_PROFILE_PACKAGE -> tokens.size == 6 && tokens[0] == "/system/bin/pm" &&

@@ -172,6 +172,18 @@ Glass on the owner's PC shows your label and your entries' `id`, `type`, `label`
 
 ## 8. Versions
 
+Minor 4 (on Alpha 128): complete installed profile inventories. `profiles` keeps its shape; its scoped `packages`
+array now reads Android's installed set instead of the setup workspace selection. `profiles.apps.v1` (both
+`profiles.read` and `profiles.apps.read`) accepts `{profileId, offset?:0, limit?:100}`. `profileId` is `owner` or a
+Cyclone profile id; `offset` is nonnegative and `limit` is 1–100. It returns `{version:1, profileId, apps[], nextOffset}`.
+Each app has `{packageName, label, androidUserId, profileId, installed:true, system:boolean, bundled:boolean}`.
+Follow `nextOffset` until null. Records sort by package name; re-scan after package changes. A package in two Android
+users is two records; a non-zero user is never relabeled zero. `system` comes from Android; `bundled` marks Cyclone's
+known automatic support/Essentials packages. Classification never adds an absent package. Labels can fall back to
+package names when Android resources aren't visible. Failed inventory reads fail explicitly, with no stale fallback.
+Only package metadata is exposed. Existing scopes, config tuple/storage identities and startup behavior are unchanged.
+The SDK helper is `profileApps(profileId, offset, limit)`; the schema is `profiles.apps.result.schema.json`.
+
 `hello` tells you the contract and minor Cyclone speaks. Minor versions only add methods, fields and scopes; both
 sides ignore what they don't know. A new major is announced in the release notes at least two alphas ahead, and
 Cyclone then answers both majors for at least two alphas.

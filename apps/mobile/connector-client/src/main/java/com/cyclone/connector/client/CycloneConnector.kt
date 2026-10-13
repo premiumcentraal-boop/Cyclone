@@ -87,6 +87,10 @@ class CycloneConnector private constructor(
 
     fun profiles(): JSONObject = call("profiles")
 
+    /** Minor 4: installed apps, including Essentials and system apps; follow nextOffset until null. */
+    fun profileApps(profileId: String, offset: Int = 0, limit: Int = 100): JSONObject = call("profiles.apps.v1",
+        JSONObject().put("profileId", profileId).put("offset", offset).put("limit", limit))
+
     /** Saves your own data on a Cyclone profile (or clears it with null). At most 4 KB, never a secret. */
     fun setExt(profileId: String, value: JSONObject?): JSONObject =
         call("ext.set", JSONObject().put("profileId", profileId).put("value", value ?: JSONObject.NULL))

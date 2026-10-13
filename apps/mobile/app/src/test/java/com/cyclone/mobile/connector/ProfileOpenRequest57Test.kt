@@ -62,7 +62,7 @@ class ProfileOpenRequest57Test {
         assertTrue(backend.asked.isEmpty())
         assertEquals("BUSY", code(ask(Backend(answer = "BUSY"), c.id)))
         assertEquals("RATE_LIMITED", code(ask(Backend(answer = "RATE_LIMITED"), c.id)))
-        assertEquals(3, ConnectorContract.MINOR)
+        assertTrue(ConnectorContract.MINOR >= 3)
     }
 
     @Test fun `one question waits at a time, each connector asks at most every 10 seconds, and it expires`() {

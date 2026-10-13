@@ -191,6 +191,7 @@ object ConnectorRuntime {
     fun backend(context: Context): ConnectorBackend = object : ConnectorBackend {
         override fun approvals() = ConnectorRuntime.approvals(context)
         override fun profiles(): List<CycloneProfileRecord> = ProfileRegistryStore.records(context)
+        override fun profileApps(profileId: String) = com.cyclone.mobile.runtime.workspaces.ProfilePackageInventory.read(context, profileId)
         override fun setExt(profileId: String, connectorId: String, json: String?) = ProfileRegistryStore.setExt(context, profileId, connectorId, json)
         override fun entries(connectorId: String) = ConnectorRuntime.entries(context, connectorId)
         override fun setEntries(connectorId: String, entries: List<ConnectorEntry>) = ConnectorRuntime.setEntries(context, connectorId, entries)
