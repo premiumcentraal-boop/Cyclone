@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/schemas/connector/1/profiles.apps.result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "profileId",
+    "apps",
+    "nextOffset"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "profileId": {
+      "type": "string"
+    },
+    "nextOffset": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "apps": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "packageName",
+          "label",
+          "androidUserId",
+          "profileId",
+          "installed",
+          "system",
+          "bundled"
+        ],
+        "properties": {
+          "packageName": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "androidUserId": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "profileId": {
+            "type": "string"
+          },
+          "installed": {
+            "const": true
+          },
+          "system": {
+            "type": "boolean"
+          },
+          "bundled": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

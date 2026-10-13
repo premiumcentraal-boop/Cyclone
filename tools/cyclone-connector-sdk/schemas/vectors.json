@@ -103,7 +103,7 @@
         "ok": true,
         "result": {
           "contract": "cyclone.connector/1",
-          "minor": 3,
+          "minor": 4,
           "connectorId": "acme-profiles",
           "approved": true,
           "granted": [
@@ -787,6 +787,21 @@
         "method": "profiles.open.request.v1",
         "args": {
           "profileId": "owner"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "error": {
+          "code": "SCOPE_NOT_GRANTED"
+        }
+      }
+    },
+    {
+      "name": "profile inventory requires approved app-read scope",
+      "request": {
+        "method": "profiles.apps.v1",
+        "args": {
+          "profileId": "Cyclone_aaaaaaaaaaaaaaaa"
         }
       },
       "answer": {

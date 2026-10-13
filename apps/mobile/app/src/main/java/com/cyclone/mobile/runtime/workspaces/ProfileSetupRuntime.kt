@@ -647,7 +647,12 @@ object ProfileSetupRuntime {
         val shell = ProfileSetupPlan.shell(command)
         val startedAt = System.currentTimeMillis()
         // `dumpsys user` is long; its user types come after the users.
-        val outputLimit = if (command.operation == ProfileSetupOperation.DUMP_USERS) 262_144 else OUTPUT_LIMIT
+        val inventory = command.operation == ProfileSetupOperation.LIST_PROFILE_INVENTORY
+        val outputLimit = when (command.operation) {
+            ProfileSetupOperation.DUMP_USERS -> 262_144
+            ProfileSetupOperation.LIST_PROFILE_INVENTORY -> ProfilePackageInventory.MAX_OUTPUT_CHARS
+            else -> OUTPUT_LIMIT
+        }
         val process = try {
             ProcessBuilder("su", "-c", shell).redirectErrorStream(true).start()
         } catch (error: IOException) {
@@ -661,16 +666,23 @@ object ProfileSetupRuntime {
         }
 
         val output = StringBuilder()
+        val incomplete = AtomicBoolean(false)
         val reader = Thread {
             runCatching {
                 process.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line ->
                         synchronized(output) {
-                            if (output.length < outputLimit) output.appendLine(line)
+                            if (inventory && output.length + line.length + 1 > outputLimit) incomplete.set(true)
+                            if (output.length < outputLimit) {
+                                if (inventory) {
+                                    output.append(line.take((outputLimit - output.length - 1).coerceAtLeast(0)))
+                                    if (output.length < outputLimit) output.append('\n')
+                                } else output.appendLine(line)
+                            }
                         }
                     }
                 }
-            }
+            }.onFailure { incomplete.set(true) }
         }.apply {
             isDaemon = true
             start()
@@ -696,9 +708,12 @@ object ProfileSetupRuntime {
                 execution(command, null, text, failure, startedAt)
             } else {
                 reader.join(500)
+                val readerIncomplete = reader.isAlive
                 val text = synchronized(output) { output.toString() }
                 val exit = process.exitValue()
-                val failure = ProfileFailureClassifier.fromCommand(command.operation, exit, text)
+                val failure = if (inventory && (incomplete.get() || readerIncomplete)) {
+                    ProfileFailureClassifier.local(ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED, "Android's installed-app inventory could not be read completely.")
+                } else ProfileFailureClassifier.fromCommand(command.operation, exit, text)
                 execution(command, exit, text, failure, startedAt)
             }
         } finally {
@@ -715,19 +730,25 @@ object ProfileSetupRuntime {
         startedAt: Long = System.currentTimeMillis(),
     ): Execution {
         // Plan 57 W1: every privileged step, with Android's own words, for the debug file.
-        runCatching {
+        // Inventory metadata must not become a setup diagnostic or be silently cut to the old 8 KiB command cap.
+        val inventory = command.operation == ProfileSetupOperation.LIST_PROFILE_INVENTORY
+        if (!inventory) runCatching {
             ProfileStepJournal.record(command.operation.name, command.tokens().joinToString(" "), exitCode,
                 System.currentTimeMillis() - startedAt, output, failure?.kind?.name)
         }
         val result = ProfileCommandResult(
             operation = command.operation,
             exitCode = exitCode,
-            output = output.take(if (command.operation == ProfileSetupOperation.DUMP_USERS) 262_144 else OUTPUT_LIMIT),
+            output = output.take(when {
+                inventory -> ProfilePackageInventory.MAX_OUTPUT_CHARS
+                command.operation == ProfileSetupOperation.DUMP_USERS -> 262_144
+                else -> OUTPUT_LIMIT
+            }),
             classifiedResult = failure?.kind,
             sanitizedPlatformMessage = failure?.platformMessage,
             retryUseful = failure?.retryUseful ?: false,
         )
-        lastCommandResult = result
+        if (!inventory) lastCommandResult = result
         return Execution(result, failure)
     }
 

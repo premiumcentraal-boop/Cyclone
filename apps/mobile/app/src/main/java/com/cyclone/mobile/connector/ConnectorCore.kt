@@ -2,6 +2,7 @@ package com.cyclone.mobile.connector
 
 import com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord
 import com.cyclone.mobile.runtime.workspaces.ProfileRegistryCodec
+import com.cyclone.mobile.runtime.workspaces.ProfilePackageInventory
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -9,6 +10,8 @@ import org.json.JSONObject
 interface ConnectorBackend {
     fun approvals(): List<ConnectorApproval>
     fun profiles(): List<CycloneProfileRecord>
+    /** Actual installed packages; an implementation must not substitute registry selections on read failure. */
+    fun profileApps(profileId: String): List<ProfilePackageInventory.App> = emptyList()
     fun setExt(profileId: String, connectorId: String, json: String?)
     fun entries(connectorId: String): List<ConnectorEntry>
     fun setEntries(connectorId: String, entries: List<ConnectorEntry>)
@@ -69,7 +72,7 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
         return when (method) {
             "config.get.v1", "config.set.v1", "config.status.v1" -> {
                 need(ConnectorScope.PROFILE_CONFIG)
-                val key = ProfileConfigKey.parse(args, backend.profiles())
+                val key = configKey(args)
                 val user = caller.uid / 100_000
                 val stored = if (method == "config.get.v1") {
                     backend.config(manifest.id, user, key)?.let(::JSONObject) ?: JSONObject()
@@ -86,13 +89,18 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
                     .put("value", stored.opt("value") ?: JSONObject.NULL)
                     .put("state", stored.optString("state", "unknown"))
             }
-            "startup.status.v1" -> { need(ConnectorScope.PROFILE_STARTUP); backend.startupStatus(caller.uid, ProfileConfigKey.parse(args, backend.profiles())) }
+            "startup.status.v1" -> { need(ConnectorScope.PROFILE_STARTUP); backend.startupStatus(caller.uid, configKey(args)) }
             "startup.check.v1" -> {
                 need(ConnectorScope.PROFILE_STARTUP)
                 if (args.opt("version") != 1) throw ConnectorException("UNSUPPORTED_CONTRACT", "Startup contract version must be 1.")
                 JSONObject().put("version", 1).put("deadlineMs", 250)
             }
             "profiles" -> { need(ConnectorScope.PROFILES_READ); profiles(manifest.id, granted) }
+            "profiles.apps.v1" -> {
+                need(ConnectorScope.PROFILES_READ)
+                need(ConnectorScope.PROFILES_APPS_READ)
+                appInventory(args)
+            }
             "root.status.v1" -> { need(ConnectorScope.DEVICE_ROOT_READ); backend.rootStatus() }
             "profiles.open.request.v1" -> { need(ConnectorScope.PROFILES_OPEN_REQUEST); openRequest(manifest, args) }
             "ext.set" -> { need(ConnectorScope.PROFILES_EXT); setExt(manifest.id, args) }
@@ -132,12 +140,36 @@ class ConnectorCore(private val backend: ConnectorBackend, private val limiter: 
                 .put("state", when { record.inTrash -> "in_trash"; record.ready -> "ready"; else -> "setting_up" })
                 .put("emoji", record.emoji ?: JSONObject.NULL).put("color", record.color ?: JSONObject.NULL)
                 .put("appCount", record.packages.size).put("androidUserId", record.androidUserId ?: JSONObject.NULL)
-            if (ConnectorScope.PROFILES_APPS_READ in granted) o.put("packages", JSONArray(record.packages.sorted()))
+            if (ConnectorScope.PROFILES_APPS_READ in granted) {
+                val installed = backend.profileApps(record.id)
+                o.put("packages", JSONArray(installed.map { it.packageName }.distinct().sorted()))
+                    .put("appCount", installed.size)
+            }
             if (ConnectorScope.PROFILES_EXT in granted) o.put("ext", record.ext[connectorId]?.let(::JSONObject) ?: JSONObject.NULL)
             list.put(o)
         }
         return JSONObject().put("schemaVersion", ProfileRegistryCodec.SCHEMA_VERSION)
             .put("current", backend.currentProfile() ?: JSONObject.NULL).put("profiles", list)
+    }
+
+    private fun configKey(args: JSONObject): ProfileConfigKey = ProfileConfigKey.parse(args, backend.profiles()) { record, pkg ->
+        backend.profileApps(record.id).any { it.installed && it.profileId == record.id && it.androidUserId == record.androidUserId && it.packageName == pkg }
+    }
+
+    /** Bounded pages prevent a complete system-app inventory from exceeding Binder's transaction budget. */
+    private fun appInventory(args: JSONObject): JSONObject {
+        if (args.keys().asSequence().any { it !in setOf("profileId", "offset", "limit") }) throw ConnectorException("BAD_REQUEST", "Unexpected arguments.")
+        val id = args.opt("profileId") as? String ?: throw ConnectorException("BAD_REQUEST", "Send a profileId.")
+        if (id != ConnectorEvent.OWNER && backend.profiles().none { it.id == id }) throw ConnectorException("NO_SUCH_PROFILE", "No such profile.")
+        val offset = if (args.has("offset")) args.opt("offset") as? Int else 0
+        val limit = if (args.has("limit")) args.opt("limit") as? Int else 100
+        if (offset == null || offset < 0 || limit == null || limit !in 1..100) throw ConnectorException("BAD_REQUEST", "offset must be nonnegative; limit must be 1–100.")
+        val all = backend.profileApps(id).sortedBy { it.packageName }
+        val page = all.drop(offset).take(limit)
+        return JSONObject().put("version", 1).put("profileId", id).put("apps", JSONArray(page.map { a ->
+            JSONObject().put("packageName", a.packageName).put("label", a.label.take(80)).put("androidUserId", a.androidUserId)
+                .put("profileId", a.profileId).put("installed", a.installed).put("system", a.system).put("bundled", a.bundled)
+        })).put("nextOffset", if (offset < all.size && page.size < all.size - offset) offset + page.size else JSONObject.NULL)
     }
 
     /**

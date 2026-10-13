@@ -97,6 +97,10 @@ class ProfileConfigTest {
         var approved = m.scopes
         override fun approvals() = listOf(ConnectorApproval(m.id, m.packageName, "cert", approved, m.label, 1))
         override fun profiles() = listOf(record)
+        // Fixture packages represent actual installed packages in these backend contract tests.
+        override fun profileApps(profileId: String) = profiles().filter { it.id == profileId }.flatMap { r ->
+            r.packages.map { com.cyclone.mobile.runtime.workspaces.ProfilePackageInventory.App(it, it, r.androidUserId!!, r.id) }
+        }
         override fun setExt(profileId: String, connectorId: String, json: String?) = Unit
         override fun entries(connectorId: String) = emptyList<ConnectorEntry>()
         override fun setEntries(connectorId: String, entries: List<ConnectorEntry>) = Unit

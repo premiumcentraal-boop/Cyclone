@@ -45,7 +45,10 @@ class ConnectorGuard(unittest.TestCase):
         core = read(CONNECTOR / "ConnectorCore.kt")
         self.assertIn('if (method == "hello") return hello(caller, approval, args)', core)
         self.assertIn('throw ConnectorException("NOT_APPROVED"', core)
-        self.assertEqual(core.count("need(ConnectorScope."), 10, "each method family checks its scope")
+        self.assertEqual(core.count("need(ConnectorScope."), 12, "each method family checks its scope; inventory needs profile AND app read")
+        inventory = core[core.index('"profiles.apps.v1" ->'):core.index('"root.status.v1" ->')]
+        self.assertIn("need(ConnectorScope.PROFILES_READ)", inventory)
+        self.assertIn("need(ConnectorScope.PROFILES_APPS_READ)", inventory)
         # Plan 57 P3: root.status.v1 is built from what Cyclone last saw; nothing in its path runs a command.
         status = read(CONNECTOR / "ConnectorRootStatus.kt")
         self.assertNotRegex(status, r'ProcessBuilder|Runtime\.getRuntime|runRequired|runBestEffort|ProfileRoom\.status|"su"')

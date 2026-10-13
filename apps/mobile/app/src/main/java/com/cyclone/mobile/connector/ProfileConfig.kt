@@ -12,14 +12,15 @@ data class ProfileConfigKey(val profileId: String, val androidUserId: Int, val p
     ).joinToString("") { "%02x".format(it) }
 
     companion object {
-        fun parse(args: JSONObject, profiles: List<CycloneProfileRecord>): ProfileConfigKey {
+        fun parse(args: JSONObject, profiles: List<CycloneProfileRecord>,
+            installed: (CycloneProfileRecord, String) -> Boolean = { record, pkg -> pkg in record.packages }): ProfileConfigKey {
             val id = args.opt("profileId") as? String ?: throw ConnectorException("BAD_REQUEST", "profileId must be a string.")
             val user = args.opt("androidUserId")
             if (user !is Int || user < 0) throw ConnectorException("BAD_REQUEST", "androidUserId must be a nonnegative integer.")
             val pkg = args.opt("packageName") as? String ?: throw ConnectorException("BAD_REQUEST", "packageName must be a string.")
             val profile = profiles.singleOrNull { it.id == id && it.androidUserId == user && it.ready && !it.inTrash }
                 ?: throw ConnectorException("NO_SUCH_PROFILE", "No ready profile matches that id and Android user.")
-            if (!Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$").matches(pkg) || pkg !in profile.packages) {
+            if (!(pkg == "android" || Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$").matches(pkg)) || !installed(profile, pkg)) {
                 throw ConnectorException("BAD_REQUEST", "The package must belong to the selected profile.")
             }
             return ProfileConfigKey(id, user, pkg)
