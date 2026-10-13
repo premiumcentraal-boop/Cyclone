@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -103,7 +104,12 @@ internal fun InAppTaskStack(task: WorkspaceTaskUi) {
                         onStop = { TaskCommands.send(context, task.taskId, TaskCommand.Stop) },
                     )
                 }
-                else -> OverlayWorkCard(task) { folded = true }
+                else -> {
+                    val live by com.cyclone.mobile.mind.mission.MindMissions.live.collectAsState()
+                    val diversion = live?.takeIf { task.taskId == "mission-${it.id}" }
+                        ?.let(com.cyclone.mobile.ui.overlay.PlanDiversion::of)
+                    OverlayWorkCard(task, diversion) { folded = true }
+                }
             }
         }
     }

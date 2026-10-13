@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.widget.ImageView
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,36 +15,28 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,14 +45,23 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -74,6 +76,25 @@ import com.cyclone.mobile.runtime.workspaces.ProfileSetupRuntime
 import com.cyclone.mobile.runtime.workspaces.RootProbe
 import com.cyclone.mobile.runtime.workspaces.RootStatus
 import com.cyclone.mobile.runtime.workspaces.Workspace
+import com.cyclone.mobile.ui.v32.ProfileAppStack
+import com.cyclone.mobile.ui.v32.ProfileAvatar
+import com.cyclone.mobile.ui.v32.ProfileButton
+import com.cyclone.mobile.ui.v32.ProfileButtonStyle
+import com.cyclone.mobile.ui.v32.ProfileCalmPage
+import com.cyclone.mobile.ui.v32.ProfileGlass
+import com.cyclone.mobile.ui.v32.ProfileGroup
+import com.cyclone.mobile.ui.v32.ProfileIconTile
+import com.cyclone.mobile.ui.v32.ProfileNotice
+import com.cyclone.mobile.ui.v32.ProfileNoticeKind
+import com.cyclone.mobile.ui.v32.ProfileRow
+import com.cyclone.mobile.ui.v32.ProfileRowDivider
+import com.cyclone.mobile.ui.v32.ProfileSectionLabel
+import com.cyclone.mobile.ui.v32.ProfileStatus
+import com.cyclone.mobile.ui.v32.ProfileTextField
+import com.cyclone.mobile.ui.v32.ask.AskGlass
+import com.cyclone.mobile.ui.v32.ask.AskRoundChip
+import com.cyclone.mobile.ui.v32.ask.AskTextShadow
+import com.kyant.capsule.ContinuousCapsule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -233,17 +254,12 @@ internal fun ProfileSetup429(onClose: () -> Unit) {
         onDismissRequest = {
             goBack()
         },
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        ProfileCalmPage {
             Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
                 ProfileSetupTopBar(
-                    title = when (page) {
-                        0 -> "New profile"
-                        1 -> "Choose apps"
-                        2 -> "Review profile"
-                        else -> profileName
-                    },
+                    step = if (progress.busy) null else page.takeIf { it in 0..2 },
                     onBack = ::goBack,
                     onClose = {
                         if (progress.busy) ProfileSetupRuntime.stop()
@@ -349,47 +365,67 @@ internal fun ProfileSetup429(onClose: () -> Unit) {
                     }
                 }
 
-                if (checking) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
-                if (message.isNotBlank()) {
-                    Text(
-                        message,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (progress.issue != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                val issue = progress.issue
-                if (!progress.busy && !progress.ready && issue != null) {
-                    // Plan 57 W9: the error screen, with the fixes and the debug file.
-                    ProfileProblemPanel(
-                        issue = issue,
-                        onRetry = {
-                            val chosen = apps.filter { it.packageName in selected }
-                            if (chosen.isNotEmpty() && persistFriendlyName()) {
-                                message = ""
-                                ProfileSetupRuntime.create(context, chosen)
-                            } else chooseApps()
-                        },
-                        onChanged = { refresh() },
-                    )
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (checking) ProfileNotice("Checking your phone…", ProfileNoticeKind.WORKING)
+                    if (message.isNotBlank() && !(checking && message == "Checking your phone…")) {
+                        ProfileNotice(message, if (progress.issue != null) ProfileNoticeKind.PROBLEM else ProfileNoticeKind.INFO)
+                    }
+                    val issue = progress.issue
+                    if (!progress.busy && !progress.ready && issue != null) {
+                        // Plan 57 W9: the problem card, with the fixes and the debug report.
+                        ProfileProblemPanel(
+                            issue = issue,
+                            onRetry = {
+                                val chosen = apps.filter { it.packageName in selected }
+                                if (chosen.isNotEmpty() && persistFriendlyName()) {
+                                    message = ""
+                                    ProfileSetupRuntime.create(context, chosen)
+                                } else chooseApps()
+                            },
+                            onChanged = { refresh() },
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/** Back on the left, the step dots in the middle, Close on the right: round glass chips, as on Home. */
 @Composable
-private fun ProfileSetupTopBar(title: String, onBack: () -> Unit, onClose: () -> Unit) {
+private fun ProfileSetupTopBar(step: Int?, onBack: () -> Unit, onClose: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
-            Icon(Icons.Rounded.ArrowBack, "Back", modifier = Modifier.size(21.dp))
+        AskRoundChip("Back", onBack, shineOffset = 0.1f) {
+            Icon(Icons.Rounded.ArrowBack, "Back", modifier = Modifier.size(21.dp), tint = AskGlass.Ink)
         }
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-        IconButton(onClick = onClose, modifier = Modifier.size(44.dp)) {
-            Icon(Icons.Rounded.Close, "Close", modifier = Modifier.size(21.dp))
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            if (step != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.semantics { contentDescription = "Step ${step + 1} of 3" }) {
+                    repeat(3) { i ->
+                        Box(Modifier.size(width = if (i == step) 18.dp else 7.dp, height = 7.dp).clip(ContinuousCapsule)
+                            .background(if (i <= step) Color.White else Color.White.copy(alpha = 0.35f)))
+                    }
+                }
+            }
+        }
+        AskRoundChip("Close", onClose, shineOffset = 0.2f) {
+            Icon(Icons.Rounded.Close, null, modifier = Modifier.size(21.dp), tint = AskGlass.Ink)
+        }
+    }
+}
+
+/** A step's big centred title and its one quiet line, with an optional face above it. */
+@Composable
+private fun StepHeader(title: String, line: String?, face: (@Composable () -> Unit)? = null) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        face?.invoke()
+        Text(title, color = AskGlass.Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp,
+            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, style = TextStyle(shadow = AskTextShadow))
+        if (line != null) {
+            Text(line, color = AskGlass.Muted, fontSize = 16.sp, textAlign = TextAlign.Center, style = TextStyle(shadow = AskTextShadow))
         }
     }
 }
@@ -406,56 +442,25 @@ private fun NameProfileStep(
     Column(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Name your profile", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        "Use a name you will recognize when Cyclone is working across several accounts.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                StepHeader("Name your profile", "Its own apps and sign-ins, one tap away.") {
+                    ProfileAvatar(name.ifBlank { "?" }, size = 112.dp)
                 }
             }
             item {
-                OutlinedTextField(
+                ProfileTextField(
                     value = name,
                     onValueChange = { if (it.length <= 40) onName(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("Profile name") },
-                    placeholder = { Text("Profile name") },
-                    shape = RoundedCornerShape(18.dp),
+                    placeholder = "Profile name",
+                    large = true,
                 )
             }
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .58f)),
-                    shape = RoundedCornerShape(20.dp),
-                ) {
-                    Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(21.dp))
-                            }
-                        }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text("A separate phone space", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "Cyclone keeps this profile's app data separate from Main and can switch you into it with one tap.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
             if (onMainProfile == false) {
-                item {
-                    OutlinedButton(onClick = onReturnMain, modifier = Modifier.fillMaxWidth()) { Text("Return to Main first") }
-                }
+                item { ProfileNotice("New profiles are made from Main.", ProfileNoticeKind.INFO) }
+                item { ProfileButton("Back to Main", onReturnMain, Modifier.fillMaxWidth()) }
             }
         }
         ProfileSetupAction("Choose apps", name.isNotBlank() && onMainProfile != false && !checking, onContinue)
@@ -471,51 +476,51 @@ private fun ChooseAppsStep(
     onToggle: (String, Boolean) -> Unit,
     onContinue: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val essentials = apps.filter { it.automatic }
     Column(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Choose apps", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        "Each app starts with fresh data in this profile. You can add more later.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text("Essentials are included automatically and cannot be turned off.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            item { StepHeader("Choose apps", "Each one starts fresh here.") }
+            item { Spacer(Modifier.height(16.dp)) }
+            item { ProfileTextField(query, onQuery, "Search apps", leading = Icons.Rounded.Search) }
+            item { Spacer(Modifier.height(14.dp)) }
+            if (essentials.isNotEmpty() && query.isBlank()) {
+                item {
+                    ProfileGroup {
+                        ProfileRow(
+                            "Essentials",
+                            null,
+                            subtitle = "Always included",
+                            leading = { ProfileIconTile(Icons.Rounded.Check, Color(0xFF30B85A)) },
+                            trailing = { ProfileAppStack(essentials.map { it.packageName }) },
+                        )
+                    }
                 }
+                item { Spacer(Modifier.height(14.dp)) }
             }
-            item {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = onQuery,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Rounded.Search, null) },
-                    placeholder = { Text("Search apps") },
-                    shape = RoundedCornerShape(18.dp),
-                )
-            }
-            val filtered = apps.filter { it.label.contains(query, true) || it.packageName.contains(query, true) }
+            val filtered = apps.filter { !it.automatic && (it.label.contains(query, true) || it.packageName.contains(query, true)) }
             if (filtered.isEmpty()) {
-                item { Text("No matching apps found.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                item { ProfileNotice("No matching apps.", ProfileNoticeKind.INFO) }
             }
-            items(filtered, key = { it.packageName }) { app ->
-                AppPickerRow429(app, app.packageName in selected) { checked -> onToggle(app.packageName, checked) }
+            itemsIndexed(filtered, key = { _, app -> app.packageName }) { index, app ->
+                AppPickerRow429(context, app, app.packageName in selected, first = index == 0, last = index == filtered.lastIndex) { checked ->
+                    onToggle(app.packageName, checked)
+                }
             }
         }
         val optionalCount = ProfileAppSelection.optionalCount(apps, selected)
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            Text("${apps.count { it.automatic }} essentials · $optionalCount additional apps",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (optionalCount > ProfileAppSelection.MAX_OPTIONAL) {
-                Text("Choose up to 50 additional apps.", color = MaterialTheme.colorScheme.error)
-            }
-        }
+        Text(
+            if (optionalCount > ProfileAppSelection.MAX_OPTIONAL) "Choose up to ${ProfileAppSelection.MAX_OPTIONAL} apps."
+            else if (optionalCount == 0) "Essentials only" else "${optionalCount} ${if (optionalCount == 1) "app" else "apps"} + essentials",
+            Modifier.fillMaxWidth().padding(top = 10.dp),
+            color = if (optionalCount > ProfileAppSelection.MAX_OPTIONAL) ProfileGlass.Destructive else AskGlass.Muted,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+        )
         ProfileSetupAction("Confirm apps", ProfileAppSelection.canConfirm(apps, selected), onContinue)
     }
 }
@@ -523,34 +528,62 @@ private fun ChooseAppsStep(
 /** Kept outside the scrolling list and above keyboard/navigation insets on every setup page. */
 @Composable
 private fun ProfileSetupAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.background) {
-        // Leave the persistent Ask Cyclone activation orb its own space below this action.
-        Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 76.dp).height(52.dp)) {
-            Text(label)
-        }
-    }
+    // Leave the persistent Ask Cyclone activation orb its own space below this action.
+    ProfileButton(label, onClick, Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 76.dp),
+        style = ProfileButtonStyle.PRIMARY, enabled = enabled)
 }
 
+/** One app in the picker: a row of one continuous list (rounded at its ends), with a round tick. */
 @Composable
-private fun AppPickerRow429(app: ProfileApp, checked: Boolean, onChecked: (Boolean) -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(enabled = !app.automatic) { onChecked(!checked) },
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
+private fun AppPickerRow429(context: Context, app: ProfileApp, checked: Boolean, first: Boolean, last: Boolean, onChecked: (Boolean) -> Unit) {
+    val shape = RoundedCornerShape(
+        topStart = if (first) 22.dp else 0.dp, topEnd = if (first) 22.dp else 0.dp,
+        bottomStart = if (last) 22.dp else 0.dp, bottomEnd = if (last) 22.dp else 0.dp,
+    )
+    Column(Modifier.fillMaxWidth().clip(shape).background(Color.White.copy(alpha = 0.10f))) {
         Row(
-            Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+            Modifier.fillMaxWidth().heightIn(min = 58.dp).clickable(enabled = !app.automatic) { onChecked(!checked) }
+                .semantics(mergeDescendants = true) { stateDescription = if (checked) "Selected" else "Not selected" }
+                .padding(horizontal = 14.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ProfileAppIcon429(context, app.packageName, Modifier.size(40.dp))
-            Column(Modifier.weight(1f)) {
-                Text(app.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (app.automatic) Text("Always included", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ProfileAppIcon429(context, app.packageName, Modifier.size(38.dp))
+            Text(app.label, Modifier.weight(1f), color = AskGlass.Ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            RoundTick(checked || app.automatic)
+        }
+        if (!last) ProfileRowDivider(64.dp)
+    }
+}
+
+/** A grid of app icons with their names under them, like a home screen page. */
+@Composable
+private fun AppIconGrid(context: Context, packages: List<String>, onOpen: ((String) -> Unit)? = null, max: Int = 12) {
+    val shown = packages.take(max)
+    ProfileGroup(shineOffset = 0.5f) {
+        shown.chunked(4).forEach { row ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+                row.forEach { pkg ->
+                    val label = profileAppLabel429(context, pkg)
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(16.dp))
+                            .then(if (onOpen != null) Modifier.clickable(role = Role.Button) { onOpen(pkg) } else Modifier)
+                            .semantics(mergeDescendants = true) { contentDescription = label }
+                            .padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        ProfileAppIcon429(context, pkg, Modifier.size(46.dp))
+                        Text(label, color = AskGlass.Ink, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 2.dp))
+                    }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
             }
-            Checkbox(checked = checked || app.automatic, onCheckedChange = if (app.automatic) null else onChecked, enabled = !app.automatic)
+        }
+        if (packages.size > max) {
+            Text("+${packages.size - max} more", Modifier.fillMaxWidth().padding(bottom = 12.dp), color = AskGlass.Muted,
+                fontSize = 13.sp, textAlign = TextAlign.Center)
         }
     }
 }
@@ -567,31 +600,16 @@ private fun ReviewProfileStep(
     Column(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Create $name", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        "${apps.size} ${if (apps.size == 1) "app" else "apps"} will be available with separate app data.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text("Settings, your launcher and keyboard are available in the new profile. Android settings and app sign-ins stay separate.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                StepHeader("Create $name", "${apps.size} ${if (apps.size == 1) "app" else "apps"}, each with its own data") {
+                    ProfileAvatar(name, size = 96.dp)
                 }
             }
-            items(apps.take(8), key = { "review-${it.packageName}" }) { app ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ProfileAppIcon429(context, app.packageName, Modifier.size(36.dp))
-                    Text(app.label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                    Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
-                }
-            }
-            if (apps.size > 8) item { Text("+${apps.size - 8} more apps", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            item {
-                TextButton(onClick = onChangeApps, modifier = Modifier.fillMaxWidth()) { Text("Change apps") }
-            }
+            item { AppIconGrid(context, apps.map { it.packageName }) }
+            item { ProfileButton("Change apps", onChangeApps, Modifier.fillMaxWidth(), style = ProfileButtonStyle.QUIET) }
         }
         ProfileSetupAction("Create profile", enabled = canCreate, onClick = onCreate)
     }
@@ -599,17 +617,24 @@ private fun ReviewProfileStep(
 
 @Composable
 private fun CreatingProfileState(name: String, message: String, completed: Int, total: Int, onStop: () -> Unit) {
+    val fraction = if (total <= 0) 0f else completed.toFloat().div(total).coerceIn(0f, 1f)
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        Modifier.fillMaxSize().padding(horizontal = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterVertically),
     ) {
-        Text("Creating $name", style = MaterialTheme.typography.headlineMedium)
-        Text(message.ifBlank { "Setting up your phone space…" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        LinearProgressIndicator(
-            progress = { if (total <= 0) 0f else completed.toFloat().div(total).coerceIn(0f, 1f) },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        TextButton(onClick = onStop) { Text("Pause setup") }
+        Box(Modifier.size(140.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier.size(140.dp),
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.18f),
+                strokeWidth = 4.dp,
+            )
+            ProfileAvatar(name, size = 110.dp)
+        }
+        StepHeader("Creating $name", message.ifBlank { "Setting up your phone space…" })
+        ProfileButton("Pause setup", onStop, style = ProfileButtonStyle.QUIET)
     }
 }
 
@@ -630,126 +655,60 @@ private fun ReadyProfileStep(
     onAddProfile: () -> Unit,
     onReturnMain: () -> Unit,
 ) {
+    val ready = record?.ready == true
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
-            Card(
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Surface(shape = RoundedCornerShape(15.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                            Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.Person, null, Modifier.size(25.dp), tint = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(profileName, style = MaterialTheme.typography.titleLarge)
-                            Text(
-                                "${packageNames.size} ${if (packageNames.size == 1) "app" else "apps"} · separate phone space",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Surface(shape = RoundedCornerShape(999.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
-                            Text(
-                                if (record?.ready == true) "Ready" else "Setup",
-                                Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                        }
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ProfileAvatar(profileName, record?.emoji, record?.color, size = 104.dp)
+                if (renaming) {
+                    ProfileTextField(profileName, { if (it.length <= 40) onName(it) }, "Profile name", large = true)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ProfileButton("Cancel", { onRenaming(false) }, style = ProfileButtonStyle.QUIET)
+                        ProfileButton("Save name", onSaveName, style = ProfileButtonStyle.PRIMARY)
                     }
-                    if (renaming) {
-                        OutlinedTextField(
-                            value = profileName,
-                            onValueChange = { if (it.length <= 40) onName(it) },
-                            singleLine = true,
-                            label = { Text("Profile name") },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = onSaveName) { Text("Save name") }
-                            TextButton(onClick = { onRenaming(false) }) { Text("Cancel") }
-                        }
-                    } else {
-                        TextButton(onClick = { onRenaming(true) }, contentPadding = PaddingValues(0.dp)) {
-                            Icon(Icons.Rounded.Edit, null, Modifier.size(17.dp))
-                            Spacer(Modifier.size(6.dp))
-                            Text("Rename")
-                        }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(profileName, color = AskGlass.Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false), style = TextStyle(shadow = AskTextShadow))
+                        Box(
+                            Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))
+                                .clickable(role = Role.Button) { onRenaming(true) }
+                                .semantics { contentDescription = "Rename" },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Rounded.Edit, null, Modifier.size(18.dp), tint = AskGlass.Ink) }
                     }
+                    ProfileStatus(if (ready) "Ready" else "Setting up", if (ready) AskGlass.Done else AskGlass.Waiting)
                 }
             }
         }
 
         item {
-            Button(
-                onClick = onOpenProfile,
-                enabled = record?.ready == true,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Text("Open profile") }
+            ProfileButton("Switch to $profileName", onOpenProfile, Modifier.fillMaxWidth(), style = ProfileButtonStyle.PRIMARY,
+                icon = Icons.Rounded.SwapHoriz, enabled = ready)
         }
 
-        item { Text("Apps", style = MaterialTheme.typography.titleMedium) }
-        if (workspaces.isEmpty() && packageNames.isEmpty()) {
-            item { Text("Choose apps to finish this profile.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        items(workspaces, key = { "ready-${it.id}" }) { workspace ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    ProfileAppIcon429(context, workspace.appPackage, Modifier.size(40.dp))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                        Text(workspace.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("Ready in $profileName", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    TextButton(onClick = { onOpenWorkspace(workspace) }) { Text("Open") }
-                }
-            }
-        }
-        if (workspaces.isEmpty()) {
-            items(packageNames.toList().sorted(), key = { "ready-pkg-$it" }) { pkg ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                ) {
-                    Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ProfileAppIcon429(context, pkg, Modifier.size(40.dp))
-                        Text(profileAppLabel429(context, pkg), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                        Text("Ready", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
-                    }
-                }
+        val packages = if (workspaces.isNotEmpty()) workspaces.map { it.appPackage } else packageNames.sorted()
+        if (packages.isNotEmpty()) {
+            item { ProfileSectionLabel("Apps") }
+            item {
+                AppIconGrid(context, packages, max = 24, onOpen = { pkg ->
+                    workspaces.firstOrNull { it.appPackage == pkg }?.let(onOpenWorkspace)
+                })
             }
         }
 
         item {
-            OutlinedButton(onClick = onManageApps, modifier = Modifier.fillMaxWidth()) { Text("Manage apps") }
-        }
-        item {
-            FilledTonalButton(onClick = onAddProfile, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Rounded.Add, null, Modifier.size(19.dp))
-                Spacer(Modifier.size(7.dp))
-                Text("Add another profile")
+            ProfileGroup(shineOffset = 0.6f) {
+                ProfileRow("Edit apps", onManageApps, leading = { ProfileIconTile(Icons.Rounded.Apps, Color(0xFF5E5CE6)) })
+                ProfileRowDivider()
+                ProfileRow("New profile", onAddProfile, leading = { ProfileIconTile(Icons.Rounded.Add, Color(0xFF3E7BFA)) })
+                ProfileRowDivider()
+                ProfileRow("Back to Main", onReturnMain, leading = { ProfileIconTile(Icons.Rounded.Home, Color(0xFF30B85A)) })
             }
-        }
-        item {
-            TextButton(onClick = onReturnMain, modifier = Modifier.fillMaxWidth()) { Text("Return to Main") }
         }
     }
 }

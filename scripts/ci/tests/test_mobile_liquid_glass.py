@@ -76,9 +76,9 @@ class MobileLiquidGlassGuards(unittest.TestCase):
         self.assertNotIn("Color.White.copy(alpha = 0.22f)", chrome)
         self.assertNotIn("Color.Black.copy(alpha = 0.035f)", chrome)
         self.assertIn("LocalCycloneInsideLiquidHost.current", selectors)
-        self.assertIn("CycloneSignatureGlass(", overlay)
+        # The overlay's companion panels share the Ask bar's one tilt-lit glass (no second material, no inner box).
+        self.assertIn("tiltGlass(cornerRadius", overlay)
         self.assertIn("SignatureInk", overlay)
-        self.assertIn("textured = false", overlay)
         self.assertNotIn("chromaticAberration = false", overlay)
         self.assertNotIn("OverlayGlassRim", overlay)
 

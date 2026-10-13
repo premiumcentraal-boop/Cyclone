@@ -88,13 +88,11 @@ internal fun OverlayAppleGlass(
     cornerRadius: androidx.compose.ui.unit.Dp,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    CycloneSignatureGlass(
-        modifier = modifier,
-        textured = false,
-        solidBacking = true,
-        cornerRadius = cornerRadius,
-        content = content,
-    )
+    // One background for every overlay surface: the same tilt-lit glass as the Ask bar and the working card.
+    // Inside the overlay window the app behind is blurred too while Android allows it (GlassBlur).
+    val blur = com.cyclone.mobile.ui.overlay.glass.rememberBlurPanel(cornerRadius)
+    Box(modifier.then(blur.modifier)
+        .tiltGlass(cornerRadius, palette = com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette.current, lift = blur.lift), content = content)
 }
 
 @Composable
@@ -121,7 +119,8 @@ internal fun OverlayAppleComposerBar(
 ) {
     // Plan 27: the Ask bar on tilt-lit glass. Round controls carry the lit edge; the words sit on one soft pill that
     // fills the space between + and the voice button; the voice button becomes the glowing orb only while listening.
-    Box(modifier.fillMaxWidth().heightIn(min = 66.dp).tiltGlass(33.dp)) {
+    val blur = com.cyclone.mobile.ui.overlay.glass.rememberBlurPanel(33.dp)
+    Box(modifier.fillMaxWidth().heightIn(min = 66.dp).then(blur.modifier).tiltGlass(33.dp, lift = blur.lift)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 66.dp).clip(RoundedCornerShape(33.dp)).padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,

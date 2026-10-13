@@ -148,7 +148,8 @@ class CycloneAppleUiContractTest {
         assertTrue(selectors.contains("LocalCycloneInsideLiquidHost.current"))
         assertTrue(selectors.contains("if (embedded)"))
         val signature = source("CycloneSignatureGlass.kt")
-        assertTrue(overlay.contains("CycloneSignatureGlass("))
+        // The overlay's companion panels share the Ask bar's one tilt-lit glass.
+        assertTrue(overlay.contains("tiltGlass(cornerRadius"))
         assertTrue(signature.contains("LocalCycloneOverlayChrome provides true"))
         assertFalse(signature.contains("chromaticAberration = true"))
         val overlayChrome = sequenceOf(

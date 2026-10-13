@@ -21,7 +21,7 @@ class CycloneConversationSystem472Test {
 
         assertTrue(page.contains("CycloneConversationBubble("))
         // Plan 27: the overlay shows the task on its glass card, not as a conversation.
-        assertTrue(overlay.contains("OverlayWorkCard(task, minimize)"))
+        assertTrue(overlay.contains("OverlayWorkCard(task, diversion, minimize)"))
         assertTrue(bubble.contains("enum class CycloneConversationSpeaker { USER, CYCLONE }"))
         assertTrue(bubble.contains("CycloneConversationSpeaker.CYCLONE ->"))
         assertTrue(bubble.contains("CycloneConversationSpeaker.USER ->"))
@@ -68,7 +68,7 @@ class CycloneConversationSystem472Test {
     @Test
     fun overlayTaskCardIsNotWrappedInAnotherGlassCard() {
         val overlay = source("ui/overlay/OverlayChrome.kt")
-        val taskIndex = overlay.indexOf("task != null -> OverlayWorkCard(task, minimize)")
+        val taskIndex = overlay.indexOf("task != null -> OverlayWorkCard(task, diversion, minimize)")
         assertTrue(taskIndex >= 0)
         val nearby = overlay.substring((taskIndex - 1400).coerceAtLeast(0), (taskIndex + 300).coerceAtMost(overlay.length))
         assertFalse(nearby.contains("OverlayAppleGlass("))

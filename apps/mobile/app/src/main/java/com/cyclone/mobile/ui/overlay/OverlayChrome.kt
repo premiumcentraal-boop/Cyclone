@@ -12,7 +12,12 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -220,7 +226,7 @@ fun OverlayChrome(
                 } else {
                     Box(Modifier.size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp))
                 }
-                "gate" -> GatePanel(snapshot, onAction)
+                "gate" -> GatePanel(snapshot, onAction = onAction)
                 else -> { com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight(); ComposerPanel(
                     snapshot = snapshot,
                     minimized = snapshot.minimized,
@@ -469,8 +475,11 @@ private fun ComposerPanel(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     askOptions?.takeIf { snapshot.composerText.isNotBlank() }?.let { options ->
-                        com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7),
-                            surface = Color(0xE6141A22))
+                        // On the same glass as every other overlay surface: the rows straight on the panel.
+                        OverlayAppleGlass(Modifier.fillMaxWidth(), cornerRadius = 26.dp) {
+                            com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7), framed = false)
+                        }
                     }
                     OverlayAppleComposerBar(
                         text = snapshot.composerText,
@@ -512,21 +521,14 @@ private fun ComposerPanel(
         },
     ) {
         val minimize = { onAction(OverlayUserAction.MINIMIZE) }
+        // Plan 38 §4: a change of plan is drawn inside the working card, never as a box of its own under it.
+        val diversion = mindLive?.takeIf { mindTaskId == "mission-${it.id}" }?.let(PlanDiversion::of)
         if (task != null || foregroundWorking) {
             Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
                 when {
-                    task != null -> OverlayWorkCard(task, minimize)
+                    task != null -> OverlayWorkCard(task, diversion, minimize)
                     else -> OverlayForegroundCard(snapshot, minimize) { onAction(OverlayUserAction.STOP_TASK) }
                 }
-            }
-        }
-        // Plan 38 §4: after a diversion the card shows the branch: "Plan v2 · Changed course", the dropped step struck
-        // through and the new route with its reason. Nothing shows while the plan has not changed.
-        mindLive?.takeIf { mindTaskId == "mission-${it.id}" && it.planVersion > 1 }?.let { mission ->
-            Box(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-                .background(Color(0xB3141A22)).padding(horizontal = 16.dp, vertical = 10.dp)) {
-                com.cyclone.mobile.ui.v32.CyclonePlanView(mission, compact = true, ink = com.cyclone.mobile.ui.v32.SignatureInk,
-                    dim = com.cyclone.mobile.ui.v32.SignatureInk.copy(alpha = .62f), accent = Color(0xFF83DBD7))
             }
         }
         if (queued.isNotEmpty()) CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
@@ -560,43 +562,58 @@ private fun ComposerPanel(
 @Composable
 private fun GatePanel(
     snapshot: OverlayChromeSnapshot,
+    whyOpenAtStart: Boolean = false,
     onAction: (OverlayUserAction) -> Unit,
 ) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .wrapContentHeight()
-            .padding(horizontal = 12.dp),
-    ) {
-        OverlayAppleGlass(
-            modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 28.dp,
-        ) {
-            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Confirmation needed",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    CycloneTrayIconAction(onClick = { onAction(OverlayUserAction.EXIT) }, modifier = Modifier.size(44.dp)) {
-                        Icon(Icons.Rounded.Close, "Cancel", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                Text(OverlayCopy.GATE, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(
-                    onClick = { onAction(OverlayUserAction.GATE_CONFIRM) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                ) { Text(OverlayCopy.CONFIRM) }
-                if (snapshot.gateClass != null) {
-                    Text(
-                        "Cyclone will authorize only this exact ${snapshot.gateClass.wire} action.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val shown by GateShown.current.collectAsState()
+    // What the owner is confirming, and where: only when the record is this gate's own.
+    val mine = shown?.takeIf { it.gateClass == snapshot.gateClass }
+    val app = mine?.app
+    val appName = app?.let { com.cyclone.mobile.ui.v32.appLabel(context, it) }?.takeIf { it != "Other" }
+    val words = snapshot.gateClass?.let { OverlayGlassCopy.gate(it, appName) }
+    // The same one-panel glass card as the working card: a warm chip, the action in its lit box with its app, one button.
+    Box(Modifier.fillMaxWidth().wrapContentHeight().padding(horizontal = 12.dp)) {
+        GlassCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.height(30.dp).background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(15.dp)).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) { Text("Confirm", color = GlassWarm, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold) }
+                Spacer(Modifier.weight(1f))
+                com.cyclone.mobile.ui.overlay.glass.GlassRoundButton("Cancel", { onAction(OverlayUserAction.EXIT) }, size = 40.dp) {
+                    Icon(Icons.Rounded.Close, null, Modifier.size(20.dp), tint = GlassInk)
                 }
             }
+            if (words != null) {
+                // The model's own reason sits behind an info icon in the box: there when wanted, quiet otherwise.
+                var whyOpen by remember(mine) { mutableStateOf(whyOpenAtStart) }
+                val why = mine?.why
+                ContextBox(
+                    app.takeIf { appName != null }, appName ?: "Cyclone", Modifier.padding(top = 16.dp, bottom = 16.dp),
+                    trailing = if (why == null) null else ({
+                        Box(
+                            Modifier.size(32.dp).clip(CircleShape)
+                                .background(Color.White.copy(alpha = if (whyOpen) 0.16f else 0.0f))
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button,
+                                    onClickLabel = if (whyOpen) "Hide Cyclone's reason" else "Why Cyclone wants this") { whyOpen = !whyOpen },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Rounded.Info, "Why", Modifier.size(19.dp), tint = if (whyOpen) GlassInk else GlassMuted) }
+                    }),
+                ) {
+                    Text(words.title, color = Color(0xFFF7F8FA), fontSize = 19.sp, fontWeight = FontWeight.SemiBold, lineHeight = 25.sp)
+                    androidx.compose.animation.AnimatedVisibility(whyOpen && why != null) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Cyclone's reason", color = GlassDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(why.orEmpty(), color = GlassInk.copy(alpha = 0.92f), fontSize = 14.5.sp, lineHeight = 20.sp)
+                        }
+                    }
+                }
+            } else {
+                Text(OverlayCopy.GATE, color = GlassInk, fontSize = 18.sp, fontWeight = FontWeight.Medium, lineHeight = 24.sp,
+                    modifier = Modifier.padding(top = 18.dp, bottom = 18.dp))
+            }
+            GlassCapsuleButton(OverlayCopy.CONFIRM, true, { onAction(OverlayUserAction.GATE_CONFIRM) }, Modifier.fillMaxWidth())
         }
     }
 }

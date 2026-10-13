@@ -60,5 +60,21 @@ object OverlayGlassCopy {
     /** The outcome line beside the pill when a move did not happen (never silent). */
     fun outcome(ui: PlaneUi): String? = ui.outcome?.trim()?.takeIf { it.isNotEmpty() }
 
+    /**
+     * The confirmation gate's title: what Cyclone stopped before, and where. [app] is the app's name (null for an
+     * action outside any app). The owner's control words and the model's reason are shown apart.
+     */
+    fun gate(gateClass: OverlayGateClass, app: String?): GateWords {
+        val where = app?.let { " in $it" }.orEmpty()
+        return GateWords(when (gateClass) {
+            OverlayGateClass.SEND -> "Send a message$where"
+            OverlayGateClass.PAY -> "Make a payment$where"
+            OverlayGateClass.DELETE -> "Delete something$where"
+            OverlayGateClass.GRANT -> if (app != null) "Give $app access" else "Give access"
+        })
+    }
+
+    data class GateWords(val title: String)
+
     private val QUOTE = Regex("[“\"]([^”\"]+)[”\"]")
 }

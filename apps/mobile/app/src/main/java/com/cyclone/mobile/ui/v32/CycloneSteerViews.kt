@@ -48,11 +48,15 @@ fun CycloneAskOptions(
     ink: Color = MaterialTheme.colorScheme.onSurface,
     accent: Color = MaterialTheme.colorScheme.primary,
     surface: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    /** False when a host already draws the panel (the overlay's glass): no box of its own, just the rows. */
+    framed: Boolean = true,
 ) {
     var reason by remember(options) { mutableStateOf<String?>(null) }
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(surface)
-            .border(1.dp, ink.copy(alpha = .10f), RoundedCornerShape(22.dp)).padding(vertical = 6.dp),
+        modifier.fillMaxWidth()
+            .then(if (framed) Modifier.clip(RoundedCornerShape(22.dp)).background(surface)
+                .border(1.dp, ink.copy(alpha = .10f), RoundedCornerShape(22.dp)) else Modifier)
+            .padding(vertical = 6.dp),
     ) {
         options.forEach { option ->
             Row(

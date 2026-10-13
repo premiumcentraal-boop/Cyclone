@@ -1,0 +1,151 @@
+package com.cyclone.mobile.ui.overlay.glass
+
+import android.content.Context
+import android.os.Build
+import android.os.PowerManager
+import android.view.WindowManager
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * Whether the overlay's glass blurs the app behind it (B) or stays darkened smoke (A). Only Android's own signals
+ * decide, so the check itself costs nothing: nothing polls and nothing measures frames.
+ * - Android's cross-window blur switch (one listener): off on phones that cannot blur, in battery saver and when the
+ *   owner turns window blurs off.
+ * - The phone's heat (one listener): from "moderate" up, blur steps aside until it cools.
+ * Blur needs Android 12. A blur window that fails to open turns it off for the rest of the session.
+ */
+object GlassBlur {
+    /** The blur behind a panel (dp). */
+    const val RADIUS_DP = 24
+    /** How much lighter the smoke gets while the app behind is blurred (body alpha 0.86 → 0.74). */
+    const val VEIL_LIFT = 0.12f
+    /** The switch between A and B fades over this long, so it never jumps. */
+    const val FADE_MS = 320
+
+    private val _on = MutableStateFlow(false)
+    val on: StateFlow<Boolean> = _on
+
+    private var allowed = false
+    private var thermal = 0
+    private var failed = false
+    private var started = false
+    private var blurListener: java.util.function.Consumer<Boolean>? = null
+    private var heatListener: PowerManager.OnThermalStatusChangedListener? = null
+
+    /** The rule, kept pure: Android 12+, Android allows blur now, the phone is not hot, and no blur window failed. */
+    fun decide(sdk: Int, allowed: Boolean, thermalStatus: Int, failed: Boolean): Boolean =
+        sdk >= Build.VERSION_CODES.S && allowed && thermalStatus < PowerManager.THERMAL_STATUS_MODERATE && !failed
+
+    /** Starts listening (main thread, idempotent). */
+    fun start(context: Context) {
+        if (started || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        started = true
+        val wm = context.getSystemService(WindowManager::class.java) ?: return
+        val pm = context.getSystemService(PowerManager::class.java)
+        val executor = context.mainExecutor
+        runCatching {
+            val listener = java.util.function.Consumer<Boolean> { allowed = it; update() }
+            blurListener = listener
+            wm.addCrossWindowBlurEnabledListener(executor, listener)
+        }
+        if (pm != null) runCatching {
+            thermal = pm.currentThermalStatus
+            val listener = PowerManager.OnThermalStatusChangedListener { thermal = it; update() }
+            heatListener = listener
+            pm.addThermalStatusListener(executor, listener)
+        }
+        allowed = runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false)
+        update()
+    }
+
+    fun stop(context: Context) {
+        if (!started) return
+        started = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            blurListener?.let { l -> runCatching { context.getSystemService(WindowManager::class.java)?.removeCrossWindowBlurEnabledListener(l) } }
+            heatListener?.let { l -> runCatching { context.getSystemService(PowerManager::class.java)?.removeThermalStatusListener(l) } }
+        }
+        blurListener = null
+        heatListener = null
+        _on.value = false
+    }
+
+    /** A blur window could not open: stay with smoke for this session. */
+    fun failed() { failed = true; update() }
+
+    private fun update() { _on.value = decide(Build.VERSION.SDK_INT, allowed, thermal, failed) }
+}
+
+/** One panel that wants the app behind it blurred: where it is (window pixels) and its corner radius (px). */
+data class BlurRegion(val bounds: Rect, val cornerRadiusPx: Float)
+
+/**
+ * The overlay window's blur bookkeeping: the panels on screen and which of them have a blur window behind them.
+ * [onChanged] runs whenever a panel moves, appears or goes; the owner of the windows then syncs them.
+ */
+class BlurHost(private val slots: Int, private val onChanged: () -> Unit) {
+    private val order = ArrayList<Any>()
+    private val regions = HashMap<Any, BlurRegion>()
+    private var blurred by mutableStateOf<Set<Any>>(emptySet())
+
+    /** 0 with smoke, up to [GlassBlur.VEIL_LIFT] while blurred; animated by the overlay's root. */
+    var lift by mutableFloatStateOf(0f)
+
+    fun place(key: Any, region: BlurRegion) {
+        if (regions[key] == region) return
+        if (key !in order) order += key
+        regions[key] = region
+        assign()
+        onChanged()
+    }
+
+    fun remove(key: Any) {
+        if (regions.remove(key) == null) return
+        order -= key
+        assign()
+        onChanged()
+    }
+
+    /** The panels that get a blur window, in the order they appeared (at most [slots]). */
+    fun shown(): List<BlurRegion> = order.take(slots).mapNotNull { regions[it] }
+
+    /** How much lighter this panel's smoke is: only a panel with a blur window behind it gets lighter. */
+    fun liftFor(key: Any): Float = if (key in blurred) lift else 0f
+
+    private fun assign() { blurred = order.take(slots).toSet() }
+}
+
+/** The overlay window's [BlurHost]; null everywhere else (the app's own screens have their own blur). */
+val LocalBlurHost = staticCompositionLocalOf<BlurHost?> { null }
+
+/** A panel's hook into the blur: [modifier] reports where it is, [lift] lightens its smoke while it is blurred. */
+class BlurPanel(val modifier: Modifier, val lift: () -> Float)
+
+private val NoBlur = BlurPanel(Modifier) { 0f }
+
+/** For a top-level overlay panel with [cornerRadius]: outside the overlay window it does nothing. */
+@Composable
+fun rememberBlurPanel(cornerRadius: Dp): BlurPanel {
+    val host = LocalBlurHost.current ?: return NoBlur
+    val key = remember { Any() }
+    val radiusPx = with(LocalDensity.current) { cornerRadius.toPx() }
+    DisposableEffect(host, key) { onDispose { host.remove(key) } }
+    return remember(host, key, radiusPx) {
+        BlurPanel(Modifier.onGloballyPositioned { host.place(key, BlurRegion(it.boundsInWindow(), radiusPx)) }) { host.liftFor(key) }
+    }
+}
