@@ -188,8 +188,10 @@ fun OverlayChrome(
         }
         AnimatedContent(
             targetState = presentation,
-            // One motion for the whole overlay (OverlayMotion): the panels hand over in place.
+            // One motion for the whole overlay (OverlayMotion): the panels hand over in place, anchored at the
+            // bottom where the bar sits (the default top-left anchor made a size change grow from the wrong corner).
             transitionSpec = { OverlayMotion.swap() },
+            contentAlignment = Alignment.BottomCenter,
             label = "Cyclone chat drawer",
         ) { mode ->
             when (mode) {
@@ -450,6 +452,7 @@ private fun ComposerPanel(
             AnimatedContent(
                 targetState = island,
                 transitionSpec = { OverlayMotion.swap() },
+                contentAlignment = Alignment.BottomCenter,
                 label = "Ask bar or island",
             ) { showIsland ->
                 if (showIsland) {
@@ -532,7 +535,15 @@ private fun ComposerPanel(
         val minimize = { onAction(OverlayUserAction.MINIMIZE) }
         // Plan 38 §4: a change of plan is drawn inside the working card, never as a box of its own under it.
         val diversion = mindLive?.takeIf { mindTaskId == "mission-${it.id}" }?.let(PlanDiversion::of)
-        if (task != null || foregroundWorking) {
+        // While the card folds away (the task ended or was cleared), it keeps its last content, so the fold runs on
+        // the card's real height instead of the card vanishing in one frame.
+        var heldTask by remember { mutableStateOf(task) }
+        var heldForeground by remember { mutableStateOf(foregroundWorking) }
+        if (task != null || foregroundWorking) { heldTask = task; heldForeground = foregroundWorking }
+        val cardTask = task ?: heldTask.takeIf { !upperVisible }
+        val cardForeground = foregroundWorking || (task == null && heldTask == null && heldForeground && !upperVisible)
+        if (cardTask != null || cardForeground) {
+            @Suppress("NAME_SHADOWING") val task = cardTask
             Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
                 when {
                     task != null -> OverlayWorkCard(task, diversion, minimize)

@@ -138,17 +138,20 @@ private fun GlassClock(context: Context) {
         }.getOrDefault(false)
         if (still) { GlassLight.time = 0f; return@LaunchedEffect }
         while (true) {
-            androidx.compose.runtime.withFrameNanos { nanos ->
-                val now = (nanos / 1_000_000L % CLOCK_WRAP_MS) / 1000f
-                val due = now - GlassLight.time
-                if (due < 0f || due >= 0.05f || GlassLight.energyAt(now) > 0.02f) GlassLight.time = now
-            }
+            val now = androidx.compose.runtime.withFrameNanos { nanos -> (nanos / 1_000_000L % CLOCK_WRAP_MS) / 1000f }
+            GlassLight.time = now
+            // Calm glass asks for a frame only every 50 ms; a frame callback every vsync would keep the display
+            // pipeline busy the whole time the overlay shows.
+            if (GlassLight.energyAt(now) <= 0.02f) kotlinx.coroutines.delay(CALM_TICK_MS)
         }
     }
 }
 
 /** The clock wraps every hour so it keeps float precision; the breathing is periodic, so the wrap is one soft step. */
 private const val CLOCK_WRAP_MS = 3_600_000L
+
+/** Between ticks of the calm breathing (no ripple): about 20 a second. */
+private const val CALM_TICK_MS = 50L
 
 private val Teal = Color(0xFF83DBD7)
 

@@ -426,6 +426,9 @@ class OverlayChromeController(
             latest = OverlayChromeSnapshot(idleChipVisible = false)
             backgroundTask = null
             windows.clear()
+            liftAnimator?.cancel()
+            liftAnimator = null
+            liftTarget = null
             blurWindows.clear()
             com.cyclone.mobile.ui.overlay.glass.GlassBlur.stop(service)
             listOfNotNull(root, haloRoot, shareRoot, sheetCompose).forEach { it.disposeComposition() }
@@ -444,6 +447,32 @@ class OverlayChromeController(
             voiceSession = false
             speechRecognizer = null
             lifecycle.destroy()
+        }
+    }
+
+    private var liftAnimator: android.animation.ValueAnimator? = null
+    private var liftTarget: Int? = null
+
+    /**
+     * Moves the overlay window to [targetY] over the keyboard's own time and curve, one window update per frame, so the
+     * Ask bar rides up and down with the keyboard. A new target picks up from where the window is.
+     */
+    private fun glideTo(view: View, layout: WindowManager.LayoutParams, targetY: Int) {
+        val running = liftAnimator
+        if (running != null && running.isRunning && liftTarget == targetY) return
+        running?.cancel()
+        val from = layout.y
+        liftTarget = targetY
+        liftAnimator = android.animation.ValueAnimator.ofInt(from, targetY).apply {
+            duration = com.cyclone.mobile.ui.overlay.OverlayImeLift.GLIDE_MS
+            // The keyboard's own curve (fast out, slow in), so the bar and the keyboard move as one.
+            interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+            addUpdateListener { animator ->
+                if (root !== view || !view.isAttachedToWindow) { animator.cancel(); return@addUpdateListener }
+                layout.y = animator.animatedValue as Int
+                runCatching { wm.updateViewLayout(view, layout) }
+            }
+            start()
         }
     }
 
@@ -499,6 +528,8 @@ class OverlayChromeController(
             snapshot.state == OverlayChromeState.GATE && !snapshot.minimized -> OverlayCopy.GATE
             else -> null
         }
+        // Shown before this layout: only a window already on screen glides to a new height.
+        val wasShown = view.isAttachedToWindow && view.visibility == View.VISIBLE
         view.visibility = if (visible) View.VISIBLE else View.GONE
 
         val spec = when {
@@ -507,11 +538,22 @@ class OverlayChromeController(
             minimizedComposer -> OverlayChromeWindowPolicy.minimizedComposer()
             else -> OverlayChromeWindowPolicy.main(compact)
         }
+        val fromY = layout.y
         val changed = applyWindowContract(
             layout,
             spec,
             followKeyboard = secretVisible || (!compact && !glass()),
         )
+        // A new height above the keyboard glides there with the keyboard instead of jumping (the window moves by y).
+        val targetY = layout.y
+        if (wasShown && visible && targetY != fromY) {
+            layout.y = liftAnimator?.let { (it.animatedValue as? Int) } ?: fromY
+            glideTo(view, layout, targetY)
+        } else {
+            liftAnimator?.cancel()
+            liftAnimator = null
+            liftTarget = null
+        }
         if (changed || yieldHost != hostGestureYielded) {
             runCatching { wm.updateViewLayout(view, layout) }
         }

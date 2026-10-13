@@ -9,6 +9,9 @@ import androidx.compose.runtime.compositionLocalOf
 internal object OverlayImeLift {
     const val KEYBOARD_GAP_DP = 8
 
+    /** How long the Ask bar takes to glide to its new height when the keyboard opens or closes (the keyboard's own). */
+    const val GLIDE_MS = 280L
+
     /** Only docked IME windows can occlude the full bottom composer; floating IMEs do not lift it. */
     fun dockedHeight(screenWidth: Int, screenBottom: Int, left: Int, top: Int, right: Int,
         bottom: Int, navigationBottom: Int): Int =
