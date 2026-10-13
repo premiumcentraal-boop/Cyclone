@@ -53,6 +53,10 @@ apps/
   device-gateway/      PC ↔ phone gateway
   pc-companion/        Windows companion
 
+device-trust/          standalone bank-grade device attestation (not part of Cyclone releases)
+  service/             Python verifier: key attestation + Play Integrity
+  android/             Android client library
+
 tools/
   codex-phone-mcp/     constrained PC agent tools
   cyclone-agent-mcp/   generic Cyclone MCP adapter

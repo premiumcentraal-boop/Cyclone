@@ -30,6 +30,7 @@ Load more context only when the task needs it.
 - Windows companion: `apps/pc-companion/**`, `packaging/pc-companion/**`
 - PC agent adapters: `tools/codex-phone-mcp/**`, `tools/cyclone-agent-mcp/**`
 - CI/release: `.github/workflows/**`, `scripts/ci/**`, `release/version.toml`
+- Device trust (standalone, not part of Cyclone release identity): `device-trust/service/**`, `device-trust/android/**`, `.github/workflows/device-trust-ci.yml`
 
 Keep parallel agents on non-overlapping paths whenever possible.
 
