@@ -187,6 +187,35 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def phone_untrust(device_id: str):
         return call(lambda: cc().delivery.untrust(device_id))
 
+    # Plan 33 §10–11 (roadmap run 14): fleet health, quarantine and alerts. Releasing a phone is the owner's act.
+    @router.get("/v1/cc/health", dependencies=[Depends(auth)])
+    def health():
+        return call(lambda: cc().health.public())
+
+    @router.post("/v1/cc/health/phones/{device_id}/release", dependencies=[Depends(auth)])
+    def health_release(device_id: str):
+        return call(lambda: cc().health.release(device_id))
+
+    @router.post("/v1/cc/health/phones/{device_id}/quarantine", dependencies=[Depends(auth)])
+    def health_quarantine(device_id: str):
+        return call(lambda: cc().health.quarantine(device_id))
+
+    @router.post("/v1/cc/health/phones/{device_id}/forget", dependencies=[Depends(auth)])
+    def health_forget(device_id: str):
+        return call(lambda: cc().health.forget(device_id))
+
+    @router.post("/v1/cc/health/alerts/{alert_id}/seen", dependencies=[Depends(auth)])
+    def health_seen(alert_id: str):
+        return call(lambda: cc().health.seen(alert_id))
+
+    @router.put("/v1/cc/health/settings", dependencies=[Depends(auth)])
+    def health_settings(body: dict[str, Any]):
+        return call(lambda: cc().health.set_settings(body_of(body)))
+
+    @router.post("/v1/cc/health/test-alert", dependencies=[Depends(auth)])
+    def health_test_alert():
+        return call(lambda: cc().health.test_notify())
+
     @router.get("/v1/cc/leases", dependencies=[Depends(auth)])
     def leases(limit: int = Query(default=200, ge=1, le=1000)):
         return call(lambda: {"leases": cc().delivery.leases(limit)})

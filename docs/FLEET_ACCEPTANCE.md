@@ -18,3 +18,7 @@ Code-path checks run on the real Command Center and real SQLite. The phone RPC i
 | Scheduled run on a real phone | UNVERIFIED |
 | Glass at 100 phones in a browser | UNVERIFIED |
 | Load numbers | Not measured. |
+| Health: a phone unplugged for 10 minutes shows "offline" in Command Center → Health and the alert phone gets a notification | Passed in `test_command_health.py` with a harness phone. UNVERIFIED on a device. |
+| Health: three lost runs in a row quarantine a phone; Release puts it back | Passed in `test_command_health.py`. UNVERIFIED on a device. |
+| Health: battery, heat, storage and "can run behind" read correctly from a real phone | UNVERIFIED |
+| Health: Send a test shows the notification on the picked phone (notifications allowed) | UNVERIFIED |

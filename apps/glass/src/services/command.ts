@@ -246,6 +246,9 @@ export interface CcOverview {
   approvals: number;
   succeeded24h: number;
   failed24h: number;
+  /** Roadmap run 14: fleet alerts that need the owner (not yet seen), and phones in quarantine. */
+  alerts: number;
+  quarantined: number;
 }
 
 const str = (value: unknown, fallback = ""): string => (typeof value === "string" ? value : fallback);
@@ -468,6 +471,7 @@ export const command = {
     return {
       accounts: num(r?.accounts), openTasks: num(r?.openTasks), running: num(r?.running), routines: num(r?.routines),
       routinesPaused: num(r?.routinesPaused), approvals: num(r?.approvals), succeeded24h: num(r?.succeeded24h), failed24h: num(r?.failed24h),
+      alerts: num(r?.alerts), quarantined: num(r?.quarantined),
     };
   },
   accounts: async (client: GatewayClient) =>

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import secrets
 import sqlite3
@@ -57,6 +58,8 @@ MAX_GOAL = 1_800
 MAX_PREAUTH = 7
 PREAUTH_WINDOW_MS = 30 * 60_000
 MEDIA_CHUNK = 256 * 1024
+
+_log = logging.getLogger(__name__)
 
 
 class CommandError(ValueError):
@@ -139,7 +142,7 @@ class CommandCenter:
     def __init__(self, path: Path, contract: CommandContract, devices: Callable[[], list[dict[str, Any]]], *,
                  clock: Callable[[], int] = _now_ms, local_now: Callable[[], datetime] | None = None,
                  tick_seconds: float = 5.0, connections: dict[str, Any] | None = None,
-                 ai: dict[str, Any] | None = None) -> None:
+                 ai: dict[str, Any] | None = None, health: dict[str, Any] | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
@@ -193,6 +196,9 @@ class CommandCenter:
         # Plan 33 §7 (C4, moved forward): the AI project manager, on the owner's OpenRouter key.
         from .ai import AiStore
         self.ai = AiStore(self, **(ai or {}))
+        # Plan 33 §10–11 (roadmap run 14): phone health, quarantine and alerts.
+        from .health import HealthStore
+        self.health = HealthStore(self, **(health or {}))
         self._task_listener = None
         self._wake = threading.Event()
         self._tick_done = threading.Condition()
@@ -954,6 +960,7 @@ class CommandCenter:
                 "approvals": count("SELECT COUNT(*) FROM approval WHERE state = 'open'"),
                 "succeeded24h": count("SELECT COUNT(*) FROM run WHERE status = 'succeeded' AND started_at >= ?", day),
                 "failed24h": count("SELECT COUNT(*) FROM run WHERE status = 'failed' AND started_at >= ?", day),
+                **self.health.counts(),
             }
 
     # ---------------------------------------------------------------- the job loop
@@ -988,7 +995,13 @@ class CommandCenter:
             listed = self._devices()
         except Exception:  # noqa: BLE001 - discovery trouble means no phone is ready this tick
             return {}
-        return {str(d.get("deviceId")): d for d in listed if d.get("paired") and str(d.get("state") or "").upper() == "READY" and d.get("deviceId")}
+        try:
+            self.health.sweep(listed)
+        except Exception:  # noqa: BLE001 - health trouble never stops tasks from being assigned
+            _log.exception("Fleet health sweep failed")
+        quarantined = self.health.quarantined()
+        return {str(d.get("deviceId")): d for d in listed if d.get("paired") and str(d.get("state") or "").upper() == "READY"
+                and d.get("deviceId") and str(d.get("deviceId")) not in quarantined}
 
     def _dispatch(self, ready: dict[str, dict[str, Any]]) -> None:
         now = self._clock()
@@ -1032,6 +1045,9 @@ class CommandCenter:
                 candidates = [d for d in candidates if d in account["allowedDevices"]]
             candidates = [d for d in candidates if d in ready and d not in full and running.get(d, 0) < PHONE_TASKS]
             if not candidates:
+                if task["device_id"] and task["device_id"] in self.health.quarantined():
+                    self._wait(task, "The phone is in quarantine. Release it in Health when it is fixed.")
+                    continue
                 self._wait(task, "Waiting for a ready phone." if not task["device_id"] else "Waiting for the phone to be ready.")
                 continue
             # An idle phone first; a busy one only takes a task behind its current one.
@@ -1109,6 +1125,7 @@ class CommandCenter:
                     continue
                 self._set_task(task["id"], "failed", f"The phone refused the task ({code}).")
                 self._audit("engine", "task.refused", task["id"], {"device": device, "code": code})
+                self.health.task_refused(device, code)
                 continue
             run_id = _id("run")
             self._db.execute(
@@ -1273,9 +1290,9 @@ class CommandCenter:
                 status = self._contract.cc_status(run["device_id"], run["mission_id"])
             except DesktopRuntimeError as exc:
                 if str(exc.code) == "RUN_NOT_FOUND":
-                    self._finish_run(run, "failed", "The phone no longer knows this mission.")
+                    self._finish_run(run, "failed", "The phone no longer knows this mission.", infrastructure=True)
                 elif now - run["last_seen_at"] > UNREACHABLE_LIMIT_MS:
-                    self._finish_run(run, "failed", "The phone was unreachable for 30 minutes.")
+                    self._finish_run(run, "failed", "The phone was unreachable for 30 minutes.", infrastructure=True)
                 continue
             self._db.execute("UPDATE run SET turns = ?, working_ms = ?, cost_usd = ?, summary = ?, last_seen_at = ? WHERE id = ?",
                              (status["turns"], status["workingMs"], float(status["costUsd"]), status["summary"], now, run["id"]))
@@ -1294,7 +1311,9 @@ class CommandCenter:
             cause = {"gave_up": "Cyclone gave up.", "failed": "The mission failed.", "cancelled": "Stopped.",
                      "paused": "Its working time ran out.", "interrupted": "Cyclone was stopped or restarted on the phone."
                      }.get(status["status"], "")
-            self._finish_run(self._db.execute("SELECT * FROM run WHERE id = ?", (run["id"],)).fetchone(), outcome, cause)
+            # A Cyclone restart on the phone mid-run is the phone's trouble, not the task's.
+            self._finish_run(self._db.execute("SELECT * FROM run WHERE id = ?", (run["id"],)).fetchone(), outcome, cause,
+                             infrastructure=status["status"] == "interrupted")
 
     def _sync_approvals(self, run: sqlite3.Row, moment: dict[str, Any] | None) -> None:
         request_id = moment.get("requestId") if moment else None
@@ -1314,9 +1333,13 @@ class CommandCenter:
              1 if moment.get("approvableHere") else 0, "open", None, self._clock(), None))
         self._audit("phone", "approval.open", approval_id, {"task": run["task_id"], "kind": moment["kind"], "gate": moment.get("gate")})
 
-    def _finish_run(self, run: sqlite3.Row, outcome: str, cause: str) -> None:
+    def _finish_run(self, run: sqlite3.Row, outcome: str, cause: str, *, infrastructure: bool = False) -> None:
         now = self._clock()
-        self._db.execute("UPDATE run SET status = ?, cause = ?, ended_at = ? WHERE id = ?", (outcome, cause[:300], now, run["id"]))
+        kind = "infrastructure" if infrastructure else "task" if outcome == "failed" else ""
+        self._db.execute("UPDATE run SET status = ?, cause = ?, ended_at = ?, cause_kind = ? WHERE id = ?",
+                         (outcome, cause[:300], now, kind, run["id"]))
+        if outcome != "cancelled" or infrastructure:
+            self.health.run_ended(run["device_id"], outcome, infrastructure=infrastructure, cause=cause)
         self._db.execute("UPDATE approval SET state = 'withdrawn' WHERE run_id = ? AND state = 'open'", (run["id"],))
         self.delivery.finish_run(run["id"])
         task = self._db.execute("SELECT status FROM task WHERE id = ?", (run["task_id"],)).fetchone()

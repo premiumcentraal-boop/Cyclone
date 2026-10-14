@@ -37,6 +37,7 @@ import { checkGoalRefs, createConnectionsView, createMakeEditor, type Connection
 import { createNumbersView, type NumbersView } from "./numbersView.js";
 import { TASK_GROUPS, renderRows, taskRow } from "../workspace/views.js";
 import { createFleetView, type FleetView } from "./fleetView.js";
+import { createHealthView, type HealthView } from "./healthView.js";
 
 const POLL_MS = 5_000;
 const TABS: Array<{ id: CommandTab; label: string }> = [
@@ -49,6 +50,7 @@ const TABS: Array<{ id: CommandTab; label: string }> = [
   { id: "vault", label: "Vault" },
   { id: "connections", label: "Connections" },
   { id: "fleet", label: "Multi-phone" },
+  { id: "health", label: "Health" },
 ];
 
 interface Data {
@@ -71,6 +73,7 @@ const INFO: Record<CommandTab, [string, string, string | null]> = {
   vault: ["Vault", "Passwords sealed in your browser. This PC keeps only ciphertext.", null],
   connections: ["Connections", "MCP servers, APIs and programs Cyclone may call for your tasks.", null],
   fleet: ["Multi-phone", "One sentence, several phones. Each phone does its own part. You approve what matters.", null],
+  health: ["Health", "Is every phone fit to work: battery, heat, storage, updates, quarantine, and the alerts that need you.", null],
 };
 
 export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: { workspace?: boolean } = {}): GlassPage {
@@ -180,7 +183,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
 
   function renderStats(): void {
     const o = data.overview;
-    tabs.set(tab, { approvals: data.approvals.length });
+    tabs.set(tab, { approvals: data.approvals.length, health: o?.alerts ?? 0 });
     if (!o) {
       stats.replaceChildren();
       return;
@@ -193,12 +196,14 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       statTile("Routines", o.routinesPaused ? `${o.routines} (${o.routinesPaused} paused)` : String(o.routines)),
       statTile("Done today", String(o.succeeded24h), "success"),
       statTile("Failed today", String(o.failed24h), o.failed24h ? "danger" : "neutral"),
+      statTile("Fleet alerts", o.quarantined ? `${o.alerts} (${o.quarantined} in quarantine)` : String(o.alerts), o.alerts || o.quarantined ? "danger" : "neutral"),
     );
   }
 
   let vaultView: VaultView | null = null;
   let connectionsView: ConnectionsView | null = null;
   let numbersView: NumbersView | null = null;
+  let healthView: HealthView | null = null;
   let accountsBrowser: AccountsView | null = null;
   const accountsHost = el("div", "ac-all");
 
@@ -217,6 +222,11 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     if (tab === "connections") {
       connectionsView ??= createConnectionsView(ctx, say);
       if (body.firstChild !== connectionsView.element) setChildren(body, connectionsView.element);
+      return;
+    }
+    if (tab === "health") {
+      healthView ??= createHealthView(ctx, say);
+      if (body.firstChild !== healthView.element) setChildren(body, healthView.element);
       return;
     }
     if (tab === "fleet") {
@@ -800,6 +810,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       connectionsView?.destroy();
       fleetView?.destroy();
       numbersView?.destroy();
+      healthView?.destroy();
       accountsBrowser?.destroy();
       destroyed = true;
       clearInterval(timer);

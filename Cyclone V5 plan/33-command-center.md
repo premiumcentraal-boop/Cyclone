@@ -572,6 +572,57 @@ inside the dashboard"). It is the §7 coordinator's core, in the runtime (D7); G
   - Cyclone as an MCP server;
   - action buttons and automations (plan 35).
 
+### 12.7 Fleet health and alerts, as built (roadmap run 14, not yet released)
+
+- **The phone's heartbeat** (`bridge.status` → `fleetHealth`) now also sends:
+  - battery temperature and Android's thermal status (none … shutdown);
+  - free storage;
+  - whether Android may stop Cyclone (battery optimisation);
+  - whether missions can run behind the screen (`MissionPlanes.blocker`, read once a minute);
+  - whether notifications are allowed.
+
+  `DeviceFleetManager.record_bridge_status` keeps these as bounded facts.
+- **`command/health.py` (`HealthStore`)**, in the Command Center's file, lock and audit chain:
+  - it remembers every paired phone it has seen, so a phone that drops off the list stays listed, as offline;
+  - every finished run gets a cause kind (`infrastructure` or `task`);
+  - **quarantine:** 3 infrastructure failures in a row take the phone out of `_ready_devices`. The failures that count:
+    - the phone was unreachable for 30 minutes;
+    - the phone lost the mission;
+    - Cyclone restarted mid-run;
+    - a start refusal that isn't about the task.
+
+    A task failure ends the row. A task pinned to a quarantined phone waits and says why. The owner releases the phone
+    (or quarantines it) in Glass, and a run already going is never stopped.
+- **Alerts** keep one open alert per kind and subject, and each resolves by itself:
+  - **critical:** offline for more than 10 minutes, quarantined, a vault login that failed twice in a row;
+  - **warning:** a recipe or routine under 80% over 7 days (at least 5 runs), a connection's daily cap reached, a
+    severe thermal state, battery ≤ 15% and not charging, under 1 GB free;
+  - **info:** a phone older than this PC's release.
+- **Delivery** (`cc.alert`, a new phone op):
+  - critical and warning alerts become a plain notification on the phone the owner picks, at most 6 an hour;
+  - a notification is never sent to an offline phone, and an alert that resolved first is never sent;
+  - a failed send is retried for an hour;
+  - the notification carries no action. **Email is not built** (it needs an SMTP credential the PC would have to
+    keep).
+- **Metrics:** success per phone, per recipe or routine and per account over 7 days, plus the median time to pick
+  up and the median approval wait.
+- **Routes:**
+  - `GET /v1/cc/health`;
+  - `POST /v1/cc/health/phones/{id}/release|quarantine|forget`;
+  - `POST /v1/cc/health/alerts/{id}/seen`;
+  - `PUT /v1/cc/health/settings` (`notifyDevice`);
+  - `POST /v1/cc/health/test-alert`.
+
+  `/v1/cc/overview` adds `alerts` and `quarantined`.
+- **Glass:** Command Center → **Health**, which shows:
+  - the alerts first;
+  - a card per phone with its facts, quarantine with its reason, and Release / Quarantine / Forget;
+  - the alert phone picker with Send a test;
+  - the week's tables.
+
+  It is also in the workspace sidebar and quick find.
+- **Physical device:** UNVERIFIED. These rows are in `docs/FLEET_ACCEPTANCE.md`.
+
 ## 13. Open decisions for the owner
 
 1. **Pre-authorised routine leases** (routines log in while you're away), yes or no? Yes is convenient; no means every

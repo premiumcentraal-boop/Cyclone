@@ -212,3 +212,28 @@
 .nm-account { min-width: 180px; }
 .nm-editor { display: grid; gap: var(--space-3); padding: var(--space-2) 0; }
 .nm-row.nm-paused td { opacity: 0.7; }
+
+/* Command Center → Health (roadmap run 14): phones fit to work, quarantine and alerts. */
+.hl { display: grid; gap: var(--space-4); }
+.hl-title { margin-top: var(--space-2); }
+.hl-calm { margin: 0; }
+.hl-alert-card { display: grid; gap: var(--space-2); }
+.hl-alert { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  border-left: 3px solid var(--text-muted); }
+.hl-alert-critical { border-left-color: var(--danger); }
+.hl-alert-warning { border-left-color: var(--warning); }
+.hl-alert.hl-seen { opacity: 0.75; }
+.hl-alert-text { display: grid; gap: var(--space-1); min-width: 0; flex: 1 1 260px; }
+.hl-alert-side { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.hl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: var(--space-3); }
+.hl-phone { display: grid; gap: var(--space-2); align-content: start; }
+.hl-phone.hl-offline { opacity: 0.85; }
+.hl-phone.hl-quarantined { border-color: var(--danger); }
+.hl-phone-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.hl-facts { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--text-sm); }
+.hl-facts dt { color: var(--text-muted); }
+.hl-facts dd { margin: 0; overflow-wrap: anywhere; }
+.hl-notify .cc-row { flex-wrap: wrap; }
+.hl-notify-select { min-width: min(100%, 240px); }
+.hl-rates { overflow-x: auto; }
+.hl-week { display: grid; gap: var(--space-3); }

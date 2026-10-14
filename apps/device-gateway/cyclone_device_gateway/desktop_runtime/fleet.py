@@ -646,6 +646,11 @@ class DeviceFleetManager:
                     "charging": bool(health.get("charging")),
                     "network": str(health.get("network") or "unknown")[:24],
                     "freeStorageMb": health.get("freeStorageMb") if isinstance(health.get("freeStorageMb"), int) else None,
+                    # Roadmap run 14: heat, and whether Android may stop Cyclone in the background.
+                    "temperatureC": _temperature_of(health.get("temperatureC")),
+                    "thermal": health.get("thermal") if health.get("thermal") in _THERMAL else None,
+                    "batteryUnrestricted": _optional_bool(health.get("batteryUnrestricted")),
+                    "background": _optional_bool(health.get("background")),
                     "os": str(health.get("os") or "")[:40],
                     "model": str(health.get("model") or "")[:40],
                     "manufacturer": str(health.get("manufacturer") or "")[:40] or None,
@@ -849,6 +854,15 @@ class BridgeHealthError(RuntimeError):
     def __init__(self, reason_code: str, message: str):
         super().__init__(message)
         self.reason_code = reason_code
+
+
+_THERMAL = ("none", "light", "moderate", "severe", "critical", "emergency", "shutdown")
+
+
+def _temperature_of(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not -40 <= value <= 120:
+        return None
+    return round(float(value), 1)
 
 
 def _optional_bool(value: Any) -> bool | None:
