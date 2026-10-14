@@ -29,6 +29,15 @@ def text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def test_cold_started_bootstrap_public_key_has_thirty_second_poll_budget():
+    bootstrap = text(WS / "ProfileBootstrapRuntime.kt")
+    preparation = bootstrap.split("private fun prepareInternal(", 1)[1].split("val nonce =", 1)[0]
+    after_stop = preparation.split('"force-stop"', 1)[1]
+    assert after_stop.index('"start-foreground-service"') < after_stop.index("val publicKey =")
+    assert "val publicKey = poll(tries = 150) {" in after_stop
+    assert "Thread.sleep(200)" in bootstrap
+
+
 def kotlin_sources() -> dict[Path, str]:
     return {p: text(p) for p in APP.rglob("*.kt")}
 
