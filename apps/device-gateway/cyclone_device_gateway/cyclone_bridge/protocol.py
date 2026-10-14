@@ -21,8 +21,8 @@ ALLOWED_OPS = {
     # Cyclone Lab: measured Mind missions (start, watch, answer as the owner, read back).
     "lab.start", "lab.status", "lab.answer", "lab.record",
     "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert",
-    # Plan 59 (build 2): the hive key sealed to this phone, and leaving the hive.
-    "hive.join", "hive.leave",
+    # Plan 59 (build 2): the hive key sealed to this phone, leaving the hive, and syncing its items (ciphertext).
+    "hive.join", "hive.leave", "hive.sync",
     # Cyclone Ports (plan 48 run 4): the PC's Port Hub polls the phone's outbox and answers its runs' waits.
     "ports.poll", "ports.blob", "ports.answer", "ports.file",
     # Plan 43 T6: the sign-up maps the phone learned (schemas only), and forgetting one.

@@ -13,6 +13,9 @@ import java.util.UUID
  * - It is **bound** to one Cyclone profile. A profile that is gone from the roster turns its identities into **not
  *   bound** ("was: Food"); nothing is erased.
  * - **Delete** moves it to the trash for [TRASH_DAYS] days, then it is purged. Nothing here touches the real account.
+ * - **The hive** (run 2b): every change is stamped with when and by which phone, and queued for the hive ([pending]).
+ *   An account bound on another phone keeps that binding ([SavedIdentity.boundDevice]); this phone's roster never
+ *   unbinds it. The newest version wins ([newer]). Delete forever leaves a tombstone ([gone]), so every phone drops it.
  */
 data class IdentityCard(
     val firstName: String = "",
@@ -67,8 +70,15 @@ data class SavedIdentity(
     val updatedAtMs: Long,
     val trashedAtMs: Long? = null,
     val origin: String = ORIGIN_SIGNUP,
+    /** The hive's id of the phone the profile is on (null: this phone, before it joined the hive). */
+    val boundDevice: String? = null,
+    val boundDeviceName: String? = null,
+    /** Who made this version: a phone's hive id or "glass" (blank: this phone, before it joined the hive). */
+    val updatedBy: String = "",
 ) {
     val bound: Boolean get() = profileId != null
+    /** Bound to a profile on this phone (or not yet stamped with a phone, which means this one). */
+    fun boundHere(me: String): Boolean = bound && (boundDevice == null || boundDevice == me || me.isEmpty())
     val trashed: Boolean get() = trashedAtMs != null
     fun purgeAtMs(): Long? = trashedAtMs?.plus(IdentityBook.TRASH_MS)
 
@@ -78,6 +88,7 @@ data class SavedIdentity(
         .put("password", password).put("profileId", profileId ?: JSONObject.NULL).put("profileLabel", profileLabel ?: JSONObject.NULL)
         .put("wasProfileLabel", wasProfileLabel ?: JSONObject.NULL).put("createdAtMs", createdAtMs).put("updatedAtMs", updatedAtMs)
         .put("trashedAtMs", trashedAtMs ?: JSONObject.NULL).put("origin", origin)
+        .put("boundDevice", boundDevice ?: JSONObject.NULL).put("boundDeviceName", boundDeviceName ?: JSONObject.NULL).put("updatedBy", updatedBy)
 
     companion object {
         const val ORIGIN_SIGNUP = "signup"
@@ -99,6 +110,9 @@ data class SavedIdentity(
                 createdAtMs = json.optLong("createdAtMs"), updatedAtMs = json.optLong("updatedAtMs"),
                 trashedAtMs = if (json.isNull("trashedAtMs") || !json.has("trashedAtMs")) null else json.optLong("trashedAtMs"),
                 origin = json.optString("origin", ORIGIN_SIGNUP).take(20),
+                boundDevice = json.optString("boundDevice").takeIf { it.isNotBlank() && !json.isNull("boundDevice") }?.take(120),
+                boundDeviceName = json.optString("boundDeviceName").takeIf { it.isNotBlank() && !json.isNull("boundDeviceName") }?.take(60),
+                updatedBy = json.optString("updatedBy").take(120),
             )
         }.getOrNull()
 
@@ -106,8 +120,25 @@ data class SavedIdentity(
     }
 }
 
-class IdentityBook(entries: List<SavedIdentity> = emptyList()) {
+class IdentityBook(entries: List<SavedIdentity> = emptyList(), pending: Collection<String> = emptyList(), gone: Map<String, Long> = emptyMap()) {
     private val items = entries.associateBy { it.id }.toMutableMap()
+    /** Ids changed here and not yet kept by the hive. */
+    private val pendingIds = pending.toMutableSet()
+    /** Deleted forever: id → when. Kept so a late copy never brings it back, and so the hive learns of it. */
+    private val goneAt = gone.toMutableMap()
+    /** This phone's hive id (blank until it joins) and name: stamped on every change made here. */
+    var me: String = ""
+    var myName: String = ""
+
+    fun pending(): Set<String> = pendingIds.toSet()
+    fun gone(): Map<String, Long> = goneAt.toMap()
+
+    private fun touch(identity: SavedIdentity): SavedIdentity {
+        val stamped = identity.copy(updatedBy = me)
+        items[stamped.id] = stamped
+        pendingIds += stamped.id
+        return stamped
+    }
 
     fun all(): List<SavedIdentity> = items.values.sortedWith(compareBy({ it.app }, { it.handle.lowercase() }))
     fun active(): List<SavedIdentity> = all().filter { !it.trashed }
@@ -119,36 +150,93 @@ class IdentityBook(entries: List<SavedIdentity> = emptyList()) {
         val same = items.values.firstOrNull { it.app == identity.app && it.handle.equals(identity.handle, ignoreCase = true) && it.handle.isNotBlank() }
         val saved = if (same != null) identity.copy(id = same.id, createdAtMs = same.createdAtMs, updatedAtMs = now, trashedAtMs = null)
             else identity.copy(createdAtMs = now, updatedAtMs = now)
-        items[saved.id] = saved
-        return saved
+        return touch(saved.copy(boundDevice = saved.boundDevice ?: me.ifEmpty { null }.takeIf { saved.bound },
+            boundDeviceName = saved.boundDeviceName ?: myName.ifEmpty { null }.takeIf { saved.bound }))
     }
 
     fun bind(id: String, profileId: String, label: String?, now: Long): SavedIdentity? {
         require(validProfile(profileId)) { "Not a Cyclone profile." }
         val current = items[id]?.takeIf { !it.trashed } ?: return null
-        return current.copy(profileId = profileId, profileLabel = label?.take(40), wasProfileLabel = null, updatedAtMs = now).also { items[id] = it }
+        return touch(current.copy(profileId = profileId, profileLabel = label?.take(40), wasProfileLabel = null, updatedAtMs = now,
+            boundDevice = me.ifEmpty { null }, boundDeviceName = myName.ifEmpty { null }))
     }
 
     fun unbind(id: String, now: Long): SavedIdentity? {
         val current = items[id] ?: return null
         if (!current.bound) return current
-        return current.copy(profileId = null, profileLabel = null, wasProfileLabel = current.profileLabel, updatedAtMs = now).also { items[id] = it }
+        return touch(current.copy(profileId = null, profileLabel = null, wasProfileLabel = current.profileLabel, updatedAtMs = now,
+            boundDevice = null, boundDeviceName = null))
     }
 
-    fun moveToTrash(id: String, now: Long): SavedIdentity? =
-        items[id]?.copy(trashedAtMs = now, updatedAtMs = now)?.also { items[id] = it }
+    fun moveToTrash(id: String, now: Long): SavedIdentity? = items[id]?.let { touch(it.copy(trashedAtMs = now, updatedAtMs = now)) }
 
-    fun restore(id: String, now: Long): SavedIdentity? =
-        items[id]?.takeIf { it.trashed }?.copy(trashedAtMs = null, updatedAtMs = now)?.also { items[id] = it }
+    fun restore(id: String, now: Long): SavedIdentity? = items[id]?.takeIf { it.trashed }?.let { touch(it.copy(trashedAtMs = null, updatedAtMs = now)) }
 
-    /** Delete forever: only this phone's copy. */
-    fun purge(id: String): Boolean = items[id]?.takeIf { it.trashed }?.let { items.remove(id); true } ?: false
+    /** Delete forever: Cyclone's copy, on every phone in the hive. The real account stays. */
+    fun purge(id: String, now: Long = System.currentTimeMillis()): Boolean = items[id]?.takeIf { it.trashed }?.let { forget(id, now); true } ?: false
+
+    private fun forget(id: String, now: Long) {
+        items.remove(id)
+        goneAt[id] = now
+        pendingIds += id
+        while (goneAt.size > MAX_GONE) goneAt.remove(goneAt.minByOrNull { it.value }!!.key)
+    }
 
     /** Purges what has been in the trash for [TRASH_DAYS] days. Returns how many went. */
     fun expire(now: Long): Int {
         val gone = items.values.filter { (it.purgeAtMs() ?: Long.MAX_VALUE) <= now }.map { it.id }
-        gone.forEach(items::remove)
+        gone.forEach { forget(it, now) }
         return gone.size
+    }
+
+    // ------------------------------------------------------------------ the hive (run 2b)
+
+    /** Joined the hive: everything here goes to it once. */
+    fun markAllPending() {
+        pendingIds += items.keys
+        pendingIds += goneAt.keys
+    }
+
+    /** The hive kept [id] as of [at]: it leaves the outbox unless it changed again since. */
+    fun acked(id: String, at: Long) {
+        val now = items[id]?.updatedAtMs ?: goneAt[id]
+        if (now == at) pendingIds -= id
+    }
+
+    /** The version this phone pushes for [id]: stamped with this phone when it was made before joining. */
+    fun outgoing(id: String): SavedIdentity? {
+        val identity = items[id] ?: return null
+        if (identity.updatedBy.isNotEmpty() || me.isEmpty()) return identity
+        val bound = identity.bound && identity.boundDevice == null
+        return identity.copy(updatedBy = me, boundDevice = if (bound) me else identity.boundDevice,
+            boundDeviceName = if (bound) myName.ifEmpty { null } else identity.boundDeviceName).also { items[id] = it }
+    }
+
+    /** Another phone or Glass wrote [remote]. Kept when it is newer; returns whether it was. */
+    fun applyRemote(remote: SavedIdentity): Boolean {
+        if (remote.id in goneAt) return false
+        val local = items[remote.id]
+        if (local != null && !newer(remote, local)) return false
+        items[remote.id] = remote
+        pendingIds -= remote.id  // an older edit made here lost to it
+        return true
+    }
+
+    /** Another phone or Glass deleted [id] forever. */
+    fun applyGone(id: String, at: Long) {
+        items.remove(id)
+        pendingIds -= id
+        goneAt[id] = maxOf(at, goneAt[id] ?: 0)
+    }
+
+    /**
+     * The phone left the hive: what came from other phones goes. What is bound to this phone's profiles stays, and
+     * so does anything the hive hasn't kept yet. Returns how many went.
+     */
+    fun leaveHive(): Int {
+        val drop = items.values.filter { !it.boundHere(me) && it.id !in pendingIds }.map { it.id }
+        drop.forEach(items::remove)
+        return drop.size
     }
 
     /**
@@ -159,8 +247,10 @@ class IdentityBook(entries: List<SavedIdentity> = emptyList()) {
         var changed = 0
         for (identity in items.values.toList()) {
             val profile = identity.profileId ?: continue
+            if (!identity.boundHere(me)) continue  // another phone's profile
             if (profile != MAIN && profile !in present) {
-                items[identity.id] = identity.copy(profileId = null, profileLabel = null, wasProfileLabel = identity.profileLabel, updatedAtMs = now)
+                touch(identity.copy(profileId = null, profileLabel = null, wasProfileLabel = identity.profileLabel, updatedAtMs = now,
+                    boundDevice = null, boundDeviceName = null))
                 changed++
             }
         }
@@ -168,19 +258,28 @@ class IdentityBook(entries: List<SavedIdentity> = emptyList()) {
     }
 
     fun toJson(): JSONObject = JSONObject().put("v", 1).put("identities", JSONArray(all().map { it.toJson() }))
+        .put("pending", JSONArray(pendingIds.sorted()))
+        .put("gone", JSONObject().apply { goneAt.forEach { (id, at) -> put(id, at) } })
 
     companion object {
         const val TRASH_DAYS = 30
         const val TRASH_MS = TRASH_DAYS * 24L * 60 * 60 * 1000
         const val MAIN = "main"
+        const val MAX_GONE = 2_000
         private val PROFILE = Regex("^(main|Cyclone_[a-f0-9]{16})$")
 
         fun validProfile(id: String): Boolean = PROFILE.matches(id)
 
+        /** The newest version wins: the later time, then the writer's id as the tie-break (as the PC and Glass order them). */
+        fun newer(a: SavedIdentity, b: SavedIdentity): Boolean =
+            a.updatedAtMs > b.updatedAtMs || (a.updatedAtMs == b.updatedAtMs && a.updatedBy > b.updatedBy)
+
         fun fromJson(json: JSONObject?): IdentityBook {
             if (json == null || json.optInt("v") != 1) return IdentityBook()
             val list = json.optJSONArray("identities") ?: JSONArray()
-            return IdentityBook((0 until list.length()).mapNotNull { list.optJSONObject(it)?.let(SavedIdentity::fromJson) })
+            val pending = json.optJSONArray("pending")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+            val gone = json.optJSONObject("gone")?.let { g -> g.keys().asSequence().associateWith { g.optLong(it) } }.orEmpty()
+            return IdentityBook((0 until list.length()).mapNotNull { list.optJSONObject(it)?.let(SavedIdentity::fromJson) }, pending, gone)
         }
     }
 }

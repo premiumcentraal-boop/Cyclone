@@ -90,6 +90,25 @@ class HiveGuard(unittest.TestCase):
             if path.startswith(("mind/", "agent/", "ai/")):
                 self.assertNotIn("HiveKeyring", text, path)
 
+    def test_hive_items_are_bound_the_same_way_on_the_phone_and_in_the_browser(self):
+        """Run 2b: the AAD binds id, kind, key version, time, writer and tombstone, identically on both sides."""
+        kotlin = (IDENTITY / "HiveSync.kt").read_text(encoding="utf-8")
+        glass = (ROOT / "apps/glass/src/services/hiveItems.ts").read_text(encoding="utf-8")
+        self.assertIn('"cyclone-hive-item/v1\\n$itemId\\n$kind\\n$keyVersion\\n$at\\n$by\\n${if (gone) 1 else 0}"', kotlin)
+        self.assertIn("`cyclone-hive-item/v1\\n${itemId}\\n${kind}\\n${keyVersion}\\n${at}\\n${by}\\n${gone ? 1 : 0}`", glass)
+        self.assertNotRegex(kotlin, r"\bLog\.[a-z]\(|println\(")
+        self.assertNotRegex(glass, r"localStorage|sessionStorage|indexedDB|console\.")
+        for path, text in sources().items():
+            if path.startswith(("mind/", "agent/", "ai/")):
+                self.assertNotIn("HiveSync", text, path)
+
+    def test_the_pc_keeps_hive_items_as_ciphertext_only(self):
+        hive = (GATEWAY / "command/hive.py").read_text(encoding="utf-8")
+        schema = hive[hive.index("HIVE_SCHEMA"):hive.index('"""', hive.index("HIVE_SCHEMA") + 16)]
+        self.assertIn("hive_item", schema)
+        for word in ("handle", "email", "app ", "profile", "card"):
+            self.assertNotIn(word, schema.lower(), word)
+
     def test_the_browser_seals_the_hive_key_to_a_recomputed_fingerprint(self):
         glass = (ROOT / "apps/glass/src/services/hive.ts").read_text(encoding="utf-8")
         self.assertIn("(await fingerprint(publicKey)) !== phone.fingerprint", glass)

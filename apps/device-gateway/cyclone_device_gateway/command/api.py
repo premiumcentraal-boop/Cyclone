@@ -258,6 +258,19 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def hive_remove(device_id: str):
         return call(lambda: cc().hive.remove(device_id))
 
+    # Run 2b: hive items, encrypted in the browser or on a phone with the hive key. The PC keeps ciphertext only.
+    @router.get("/v1/cc/hive/items", dependencies=[Depends(auth)])
+    def hive_items():
+        return call(lambda: cc().hive.items())
+
+    @router.post("/v1/cc/hive/items", dependencies=[Depends(auth)])
+    def hive_put_item(body: dict[str, Any]):
+        return call(lambda: cc().hive.put_item(body_of(body)))
+
+    @router.get("/v1/cc/hive/items/{item_id}/history", dependencies=[Depends(auth)])
+    def hive_item_history(item_id: str):
+        return call(lambda: cc().hive.history(item_id))
+
     # Plan 33 §10–11 (roadmap run 14): fleet health, quarantine and alerts. Releasing a phone is the owner's act.
     @router.get("/v1/cc/health", dependencies=[Depends(auth)])
     def health():

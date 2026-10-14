@@ -94,6 +94,9 @@ fun AccountsSettingsPanel(modifier: Modifier = Modifier) {
             FilterChip(filter == IdentityBook.MAIN, { filter = IdentityBook.MAIN }, { Text("Main") })
             labels.forEach { (id, label) -> FilterChip(filter == id, { filter = id }, { Text(label) }) }
             FilterChip(filter == "unbound", { filter = "unbound" }, { Text("Not bound") })
+            if (book.active().any { it.bound && !it.boundHere(book.me) }) {
+                FilterChip(filter == "elsewhere", { filter = "elsewhere" }, { Text("Other phones") })
+            }
             FilterChip(filter == "trash", { filter = "trash" }, { Text("Trash") })
         }
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search accounts") })
@@ -112,7 +115,8 @@ fun AccountsSettingsPanel(modifier: Modifier = Modifier) {
             AccountCard(
                 identity = identity,
                 appLabel = AccountsPresenter.appLabel(context, identity.app),
-                badge = AccountsPresenter.badge(identity, labels),
+                badge = AccountsPresenter.badge(identity, labels, book.me),
+                here = !identity.bound || identity.boundHere(book.me),
                 revealed = revealed == identity.id,
                 profiles = listOf(IdentityBook.MAIN to "Main") + labels.toList(),
                 busy = busy,
@@ -154,8 +158,8 @@ fun AccountsSettingsPanel(modifier: Modifier = Modifier) {
                     tick++
                 },
                 onPurge = {
-                    runCatching { IdentityVault.change(context) { b, _ -> b.purge(identity.id) } }
-                    notice = "Deleted from this phone for good. The real account is untouched."
+                    runCatching { IdentityVault.change(context) { b, now -> b.purge(identity.id, now) } }
+                    notice = "Deleted for good, on every phone in the hive. The real account is untouched."
                     tick++
                 },
             )
@@ -169,6 +173,8 @@ private fun AccountCard(
     identity: SavedIdentity,
     appLabel: String,
     badge: String,
+    /** Bound to a profile on this phone (or not bound): Open works here. */
+    here: Boolean,
     revealed: Boolean,
     profiles: List<Pair<String, String>>,
     busy: Boolean,
@@ -194,7 +200,7 @@ private fun AccountCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            CycloneStatusPill(badge, positive = identity.bound)
+            CycloneStatusPill(badge, positive = identity.bound && here)
         }
         if (revealed) {
             Column(verticalArrangement = Arrangement.spacedBy(CycloneSpacing.Small)) {
@@ -212,13 +218,13 @@ private fun AccountCard(
                     Text(if (confirmPurge) "Delete for good?" else "Delete forever")
                 }
             } else {
-                TextButton(onClick = onOpen, enabled = !busy && identity.bound) { Text("Open") }
+                TextButton(onClick = onOpen, enabled = !busy && identity.bound && here) { Text("Open") }
                 TextButton(onClick = onDetails) { Text(if (revealed) "Hide" else "Details") }
                 if (revealed && identity.password.isNotEmpty()) TextButton(onClick = onCopy) { Text("Copy password") }
                 Column {
                     TextButton(onClick = { binding = true }) { Text(if (identity.bound) "Move to profile" else "Bind to profile") }
                     DropdownMenu(expanded = binding, onDismissRequest = { binding = false }) {
-                        profiles.filter { it.first != identity.profileId }.forEach { (id, label) ->
+                        profiles.filter { !here || it.first != identity.profileId }.forEach { (id, label) ->
                             DropdownMenuItem(text = { Text(label) }, onClick = { binding = false; onBind(id, label) })
                         }
                     }
@@ -235,8 +241,9 @@ internal object AccountsPresenter {
         val base = when (filter) {
             "trash" -> book.trash()
             "unbound" -> book.active().filter { !it.bound }
+            "elsewhere" -> book.active().filter { it.bound && !it.boundHere(book.me) }
             "all" -> book.active()
-            else -> book.active().filter { it.profileId == filter }
+            else -> book.active().filter { it.profileId == filter && it.boundHere(book.me) }
         }
         val q = query.trim().lowercase()
         return if (q.isEmpty()) base else base.filter { i ->
@@ -244,8 +251,13 @@ internal object AccountsPresenter {
         }
     }
 
-    /** "Food", "Main", or "Not bound (was Food)". A profile renamed since binding shows its current name. */
-    fun badge(identity: SavedIdentity, labels: Map<String, String>): String = when {
+    /**
+     * "Food", "Main", "Food on Galaxy S24" (bound on another phone in the hive) or "Not bound (was Food)". A profile
+     * on this phone renamed since binding shows its current name.
+     */
+    fun badge(identity: SavedIdentity, labels: Map<String, String>, me: String = ""): String = when {
+        identity.bound && !identity.boundHere(me) ->
+            "${if (identity.profileId == IdentityBook.MAIN) "Main" else identity.profileLabel ?: "A profile"} on ${identity.boundDeviceName ?: "another phone"}"
         identity.profileId == IdentityBook.MAIN -> "Main"
         identity.profileId != null -> labels[identity.profileId] ?: identity.profileLabel ?: "A profile"
         identity.wasProfileLabel != null -> "Not bound (was ${identity.wasProfileLabel})"
@@ -273,6 +285,7 @@ internal object AccountsPresenter {
     fun open(context: Context, identity: SavedIdentity, profiles: List<com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord>,
              onStep: (String) -> Unit): String = runCatching {
         val target = identity.profileId ?: return "Bind it to a profile first."
+        if (!identity.boundHere(IdentityVault.book(context).me)) return "It's bound to a profile on ${identity.boundDeviceName ?: "another phone"}."
         val here = IdentitySaver.currentProfile(context).first
         if (target == here) {
             val launch = context.packageManager.getLaunchIntentForPackage(identity.app) ?: return "That app isn't installed in this profile."

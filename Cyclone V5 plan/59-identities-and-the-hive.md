@@ -158,7 +158,7 @@ Glass is closed. The hive has its own symmetric key instead:
 
 | Run | What it delivers |
 |---|---|
-| **2a. Joining** | Glass → Hive: every phone, whether it is in the hive, its last sync, own or rented. **Add to hive** (seals the hive key, Glass unlocked once) and **Remove from hive** (wipe on reconnect, new key). The gateway keeps members and items, ciphertext only. New phone ops: `hive.join`, `hive.pull`, `hive.push`, `hive.leave` |
+| **2a. Joining** | Glass → Hive: every phone, whether it is in the hive, its last sync, own or rented. **Add to hive** (seals the hive key, Glass unlocked once) and **Remove from hive** (wipe on reconnect, new key). The gateway keeps members and items, ciphertext only. New phone ops: `hive.join`, `hive.leave`; run 2b adds `hive.sync` (one op does both pull and push) |
 | **2b. Accounts sync** | A created account is pushed at once, encrypted with the hive key. Every phone pulls when connected, and offline phones catch up. Edits, binding, trash and restore sync. The newest version wins and older versions are kept in history. Glass Identities reads the hive. The vault identity card from build 1a is folded into the hive item |
 | **2c. Using accounts on the phone** | vault_fill can use the phone's own saved account, so no PC is needed. In the bound profile, Main hands the login to that profile's Cyclone, sealed, for that task only. **Anywhere else** (another profile or phone), the agent must ask through a **confirmation card**: the account, its binding, where the agent wants to use it, and the agent's reason. Only after a yes is it handed over, for that task. The Accounts page shows per account where it is used ("Used by Food tasks" / "Not used on this phone yet") |
 | **2d. Skills sync** | A skill becomes **verified** after its second successful run (decision above), then is pushed at once and installed on every phone. App maps and manuals stay per phone, because they depend on the app version. Memories stay local (decision 9) |
@@ -184,6 +184,60 @@ Glass is closed. The hive has its own symmetric key instead:
 - **Glass:** Vault → **Hive** card, while the vault is unlocked. It has Start the hive, Add to hive and Remove from
   hive. It replaces the key by itself after a phone leaves, and seals the current key to every member that lacks it.
 - **Guard:** `HiveGuard` in `scripts/ci/tests/test_identity_guard.py`.
+- **Physical device:** UNVERIFIED.
+
+### 3.2.2 Run 2b as built (not yet released)
+
+- **The item.** Each saved account is one hive item `{itemId, kind, keyVersion, at, by, gone, iv, ct}`:
+  - it is encrypted with the hive key (AES-256-GCM) on the phone or in the browser that wrote it;
+  - its AAD is `cyclone-hive-item/v1` followed by the id, kind, key version, time, writer and tombstone flag, one per
+    line, built the same way in `HiveSync.kt` and `hiveItems.ts`;
+  - so the PC can't move a version to another item, or reorder versions, without the open failing;
+  - the body is the account as the phone keeps it: card, password, the binding with the phone it is on
+    (`boundDevice`, `boundDeviceName`), trash, and who wrote it.
+- **The newest version wins:** the later `at`, then `by`. A phone also checks that what an item claims (time, writer)
+  is what is inside it.
+- **Gateway (`HiveStore`):**
+  - keeps the newest version of each item, up to 10 older versions (`hive_item_history`), and a sequence number per
+    change;
+  - Delete forever is an encrypted tombstone (`gone`): the history goes, and nothing comes back after it;
+  - a phone may write only as itself, under a key version it holds;
+  - Glass writes as `glass`, or keeps the writer only when it re-encrypts the same version under a newer key;
+  - `public()` now carries every wrapped key version, the item count and how many are still under an older key.
+- **Sync (`hive.sync`, the job loop):**
+  - every reachable member is synced every 15 s, and any change syncs every member on the next tick (5 s);
+  - one call hands the phone up to 20 items new to it, under a key it holds;
+  - it never sends a phone its own writes;
+  - it acknowledges what the phone pushed last time and takes its outbox (up to 20);
+  - an offline phone catches up from its cursor;
+  - an item under a key the phone doesn't hold yet waits for it;
+  - one under a key from before the phone joined is sent again once Glass re-encrypts it.
+- **Phone (Main only):**
+  - `IdentityBook` stamps every change with this phone's hive id and queues it (`pending`, kept in the encrypted book);
+  - a phone's roster never unbinds an account bound on another phone;
+  - Delete forever and the 30-day expiry leave tombstones;
+  - joining queues every account once;
+  - leaving drops the accounts that came from other phones, keeping what is bound here and anything not yet pushed;
+  - `HiveSync` applies items and builds the outbox. The Accounts page shows "Food on Galaxy" for an account bound on
+    another phone; Open works only for this phone's profiles, and there is an **Other phones** filter.
+- **Glass:**
+  - **Vault → Hive accounts**, while the vault is unlocked:
+    - lists every hive account;
+    - shows details for 30 s;
+    - Bind / Move to a profile on any member phone, or Not bound;
+    - Delete, Restore, Delete forever;
+    - **Earlier versions** with "Use this version";
+    - **Add from the vault**, which folds the build-1a identity cards in. It matches the PC's identity record for the
+      app and handle, and skips accounts the hive already has.
+  - After a key change, the Hive card re-encrypts every item still under an older key.
+- **Routes:** `GET/POST /v1/cc/hive/items`, `GET /v1/cc/hive/items/{id}/history`.
+- **Guard:** `HiveGuard` checks three things:
+  - the two AAD builders match;
+  - the item tables hold no account words;
+  - the Mind and agent code never touch `HiveSync`.
+- **Not in 2b:**
+  - linking the phone's copy to the PC's identity record by account id (2c, with the login hand-over);
+  - the Glass Identities tab still reads the PC's binding records; the hive copy is under Vault.
 - **Physical device:** UNVERIFIED.
 
 ### 3.3 Rules that hold through every run

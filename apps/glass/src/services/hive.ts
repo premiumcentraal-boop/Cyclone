@@ -30,6 +30,11 @@ export interface HiveState {
   exists: boolean;
   keyVersion: number;
   wrappedKey: Sealed | null;
+  /** Every key version (run 2b), so items written before a key change still open and can be re-encrypted. */
+  wrappedKeys: Array<{ version: number; wrapped: Sealed }>;
+  /** How many items the hive holds, and how many are still under an older key. */
+  items: number;
+  staleItems: number;
   rotationNeeded: boolean;
   needsKey: string[];
   members: HiveMember[];
@@ -49,6 +54,14 @@ export function parseHive(raw: unknown): HiveState {
     exists: r.exists === true,
     keyVersion: num(r.keyVersion) ?? 0,
     wrappedKey: str(wrapped.iv) && str(wrapped.ct) ? { iv: str(wrapped.iv)!, ct: str(wrapped.ct)! } : null,
+    wrappedKeys: (Array.isArray(r.wrappedKeys) ? r.wrappedKeys : []).flatMap((k) => {
+      const o = obj(k);
+      const w = obj(o.wrapped);
+      const version = num(o.version);
+      return version && str(w.iv) && str(w.ct) ? [{ version, wrapped: { iv: str(w.iv)!, ct: str(w.ct)! } }] : [];
+    }),
+    items: num(r.items) ?? 0,
+    staleItems: num(r.staleItems) ?? 0,
     rotationNeeded: r.rotationNeeded === true,
     needsKey: (Array.isArray(r.needsKey) ? r.needsKey : []).filter((d): d is string => typeof d === "string"),
     members: (Array.isArray(r.members) ? r.members : []).flatMap((m): HiveMember[] => {

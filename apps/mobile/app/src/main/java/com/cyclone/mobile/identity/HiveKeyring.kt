@@ -29,6 +29,7 @@ object HiveKeyring {
     const val PREFS = "cyclone_hive_v1"
     const val INFO = "cyclone-hive-key/v1"
     private const val KEYS = "keys"
+    private const val ME = "me"
     private const val KEY_ALIAS = "cyclone.hive.aes.v1"
     private const val AAD = "cyclone-hive/v1/local"
     private val JOIN_ID = Regex("^hj_[A-Za-z0-9_-]{16,40}$")
@@ -76,6 +77,9 @@ object HiveKeyring {
         try {
             keys[version] = key.copyOf()
             store(context, keys)
+            // The PC's id for this phone, as the owner's browser bound it: stamped on what this phone writes to the hive.
+            val me = JSONObject(args.optString("aad")).optString("deviceId")
+            check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(ME, me).commit()) { "The hive key couldn't be saved." }
         } finally {
             key.fill(0)
             keys.values.forEach { it.fill(0) }
@@ -86,6 +90,24 @@ object HiveKeyring {
     fun leave(context: Context): JSONObject = synchronized(lock) {
         check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().commit()) { "The hive key couldn't be wiped." }
         JSONObject().put("left", true)
+    }
+
+    /** This phone's id in the hive (the PC's name for it), or "" before it joined. */
+    fun me(context: Context): String = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(ME, "").orEmpty()
+
+    /**
+     * Every hive key version this phone holds, for [block] only; the bytes are wiped after. Throws [Rejected] NO_KEY
+     * when it holds none.
+     */
+    fun <T> withKeys(context: Context, block: (Map<Int, ByteArray>) -> T): T = synchronized(lock) {
+        if (!IdentityVault.isMain(context)) throw Rejected("NOT_MAIN")
+        val keys = load(context)
+        try {
+            if (keys.isEmpty()) throw Rejected("NO_KEY")
+            block(keys)
+        } finally {
+            keys.values.forEach { it.fill(0) }
+        }
     }
 
     /** The newest hive key version this phone holds, or 0. */

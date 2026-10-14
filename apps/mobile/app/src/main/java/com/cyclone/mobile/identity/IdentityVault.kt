@@ -51,7 +51,13 @@ object IdentityVault {
         out
     }
 
-    private fun load(context: Context): IdentityBook {
+    /** The book, stamped with this phone's hive id and name so every change here says who made it. */
+    private fun load(context: Context): IdentityBook = loadBox(context).also { book ->
+        book.me = runCatching { HiveKeyring.me(context) }.getOrDefault("")
+        book.myName = android.os.Build.MODEL.orEmpty().take(60)
+    }
+
+    private fun loadBox(context: Context): IdentityBook {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(BOOK, null) ?: return IdentityBook()
         return runCatching {
             val box = JSONObject(raw)

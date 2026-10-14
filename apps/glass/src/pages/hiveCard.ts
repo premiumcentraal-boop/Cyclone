@@ -6,6 +6,8 @@
  * - **Add to hive:** seals the hive key to that phone's trusted device key. The PC relays it when the phone is reachable.
  * - **Remove from hive:** the phone wipes its hive key when it next connects. This tab then makes a new hive key and
  *   seals it to the phones that stay; that happens by itself as soon as the hive needs it.
+ * - **After a key change** (run 2b) it re-encrypts every item still under an older key, so a phone that joins later
+ *   can read them.
  */
 import type { GlassContext } from "../app.js";
 import { actionButton, card, chip, loadingState } from "../ui/components.js";
@@ -13,6 +15,7 @@ import { el, setChildren } from "../ui/dom.js";
 import { relativeTime } from "../ui/format.js";
 import { deliveryApi, type Phone } from "../services/delivery.js";
 import { hiveApi, newHiveKey, openHiveKey, sealHiveKey, type HiveMember, type HiveState } from "../services/hive.js";
+import { hiveItemsApi, openHiveKeys, openItem, sealItem, wipe } from "../services/hiveItems.js";
 
 export interface HiveCard {
   element: HTMLElement;
@@ -50,6 +53,22 @@ export function createHiveCard(ctx: GlassContext, vk: () => CryptoKey | null, sa
         made.raw.fill(0);
         state = await hiveApi.putKey(ctx.client, state.keyVersion + 1, made.wrapped);
         say("A phone left the hive, so it has a new key. Sending it to the phones that stay.");
+      }
+      if (state.staleItems > 0 && !state.rotationNeeded) {
+        // Run 2b: items written before the key changed are re-encrypted under the new key, so a phone that joins now
+        // can read them. Same version (time and writer), newer key.
+        const keys = await openHiveKeys(key, state);
+        try {
+          const current = keys.get(state.keyVersion)!;
+          for (const item of await hiveItemsApi.list(ctx.client)) {
+            if (item.keyVersion >= state.keyVersion) continue;
+            const body = await openItem(keys, item);
+            await hiveItemsApi.put(ctx.client, await sealItem(current, state.keyVersion, { itemId: item.itemId, at: item.at, by: item.by, gone: item.gone }, body));
+          }
+        } finally {
+          wipe(keys);
+        }
+        state = await hiveApi.get(ctx.client);
       }
       if (state.needsKey.length) {
         const raw = await openHiveKey(key, state);
@@ -103,7 +122,7 @@ export function createHiveCard(ctx: GlassContext, vk: () => CryptoKey | null, sa
       parts.push(start);
       return setChildren(element, ...parts);
     }
-    parts.push(el("p", "cc-sub", `Hive key version ${state.keyVersion}`));
+    parts.push(el("p", "cc-sub", `Hive key version ${state.keyVersion} · ${state.items} ${state.items === 1 ? "account" : "accounts"}`));
     const members = new Map(state.members.map((m) => [m.deviceId, m]));
     const ids = [...new Set([...phones.map((p) => p.deviceId), ...state.members.filter((m) => m.state !== "left").map((m) => m.deviceId)])];
     for (const id of ids) {
