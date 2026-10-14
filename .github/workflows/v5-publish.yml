@@ -5,7 +5,7 @@ name: Publish V5 phone, Glass and PC developer alpha (rotated release key)
 # version, and publishes. The retired Cyclone One desktop window is not built.
 on:
   push:
-    branches: ['claude/cyclone-v5-handoff-review-9qrs40']
+    branches: ['claude/cyclone-v5-handoff-review-9qrs40', 'codex/profile-inventory-alpha128']
     paths: ['release/version.toml']
   workflow_dispatch:
 permissions:
