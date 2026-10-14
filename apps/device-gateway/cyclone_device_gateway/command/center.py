@@ -202,6 +202,9 @@ class CommandCenter:
         # Roadmap run 16: routine triggers (after another routine, a secret link), approval timeouts, batch answers.
         from .automation import AutomationStore
         self.automation = AutomationStore(self)
+        # Plan 59 (build 1): identities bound to a Cyclone profile, with a 30-day trash.
+        from .identities import IdentityStore
+        self.identities = IdentityStore(self)
         self._task_listener = None
         self._wake = threading.Event()
         self._tick_done = threading.Condition()
@@ -1023,6 +1026,7 @@ class CommandCenter:
         with self._lock:
             self._fire_routines()
             self.automation.sweep()
+            self.identities.sweep()
             ready = self._ready_devices()
             self._follow_runs()
             self._dispatch(ready)

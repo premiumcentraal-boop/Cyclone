@@ -41,6 +41,7 @@ import { createNumbersView, type NumbersView } from "./numbersView.js";
 import { TASK_GROUPS, renderRows, taskRow } from "../workspace/views.js";
 import { createFleetView, type FleetView } from "./fleetView.js";
 import { createHealthView, type HealthView } from "./healthView.js";
+import { createIdentitiesView, type IdentitiesView } from "./identitiesView.js";
 
 const POLL_MS = 5_000;
 const TABS: Array<{ id: CommandTab; label: string }> = [
@@ -208,6 +209,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
   let numbersView: NumbersView | null = null;
   let healthView: HealthView | null = null;
   let timeoutsBox: HTMLElement | null = null;
+  let identitiesBox: IdentitiesView | null = null;
   let accountsBrowser: AccountsView | null = null;
   const accountsHost = el("div", "ac-all");
 
@@ -241,7 +243,8 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     // Plan 43 (T5 + T6): phone → apps → accounts manages itself; the poll only redraws the list of all accounts.
     if (tab === "accounts") {
       accountsBrowser ??= createAccountsView(ctx, () => data.accounts, say);
-      if (body.firstChild !== accountsBrowser.element) setChildren(body, accountsBrowser.element, accountsHost);
+      identitiesBox ??= createIdentitiesView(ctx, say);
+      if (body.firstChild !== identitiesBox.element) setChildren(body, identitiesBox.element, accountsBrowser.element, accountsHost);
       if (!loaded) setChildren(accountsHost, loadingState("Loading accounts…"));
       else if (error) setChildren(accountsHost, errorState("The Command Center is not reachable", error, () => void load()));
       else {

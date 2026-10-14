@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS signup_starter (
   id TEXT PRIMARY KEY, table_id TEXT NOT NULL, page_id TEXT NOT NULL, map TEXT NOT NULL);
 """
 
+#: Plan 59: the sign-up values that make up an identity card (kept encrypted in the vault, never in plain metadata).
+IDENTITY_FIELDS = ("first_name", "last_name", "full_name", "birthday", "username", "email", "phone")
 RECIPE = "signup_map:"
 RUN_RECIPE = "signup_run:"
 BASES = {"mine": "the owner's own", "company": "the owner's company's", "client": "a client's (the owner manages it)"}
@@ -250,7 +252,9 @@ class SignupStore:
             if vault and not self._c._db.execute("SELECT 1 FROM vault_item WHERE id = ? AND account_id = ?", (vault, account_id)).fetchone():
                 vault = None
             out.append({"rowId": row["id"], "title": handle, "accountId": account_id, "vaultItemId": vault,
-                        "username": values.get("username") or values.get("email") or handle, "deviceId": self._device_of(sheet, row)})
+                        "username": values.get("username") or values.get("email") or handle, "deviceId": self._device_of(sheet, row),
+                        # Plan 59: the identity details, which Glass encrypts into the vault next to the new password.
+                        "identity": {k: values[k] for k in IDENTITY_FIELDS if values.get(k)}})
         return {"tableId": table_id, "app": sheet["app"], "package": sheet["package"], "rows": out}
 
     def create(self, body: Any) -> dict[str, Any]:
@@ -291,6 +295,7 @@ class SignupStore:
                     " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (task["id"], table_id, row["id"], device, sheet["package"], item["accountId"], item["vaultItemId"], "queued", None, 0, now, now))
                 self._c._audit("owner", "signup.create", task["id"], {"table": table_id, "row": row["id"], "device": device})
+                self._c.identities.made_by_signup(item["accountId"], device)
             self._set_row(sheet, row["id"], "Queued", "Waiting for the phone.")
             started.append({"rowId": row["id"], "taskId": task["id"]})
         return {"started": started, "errors": errors}
@@ -474,6 +479,8 @@ class SignupStore:
         return " · ".join(parts)[:300] or "Creating."
 
     def _created(self, sheet: dict[str, Any], run: Any, setup: dict[str, Any] | None) -> None:
+        # Plan 59: the new identity belongs to the profile the phone made it in.
+        self._c.identities.created_in(run["account_id"], run["device_id"], (setup or {}).get("profile"))
         handle = (setup or {}).get("handle")
         if handle:
             try:

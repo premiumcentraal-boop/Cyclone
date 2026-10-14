@@ -1573,8 +1573,15 @@ SETUP_STATES = frozenset({"filling", "verification", "code", "created", "failed"
 
 def _validate_setup(setup: Any) -> None:
     """Plan 43 T7: where an Account Setup run is: its page of the map, a page that changed, and the handle once made."""
-    if not isinstance(setup, dict) or set(setup) != {"state", "page", "pages", "drift", "handle", "note"} or setup["state"] not in SETUP_STATES:
+    keys = {"state", "page", "pages", "drift", "handle", "note"}
+    # Plan 59: a created account names the Cyclone profile it was made in (id and label only).
+    if not isinstance(setup, dict) or set(setup) - {"profile"} != keys or setup["state"] not in SETUP_STATES:
         raise _bad_cc("setup")
+    if "profile" in setup:
+        profile = setup["profile"]
+        if (not isinstance(profile, dict) or set(profile) != {"id", "label"} or not PROFILE_ID.match(str(profile["id"]))
+                or not _short_text(profile["label"], 40, nullable=True)):
+            raise _bad_cc("setup profile")
     if not _is_int(setup["pages"]) or not 0 <= setup["pages"] <= 15:
         raise _bad_cc("setup pages")
     for key in ("page", "drift"):

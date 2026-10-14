@@ -237,3 +237,11 @@
 .hl-notify-select { min-width: min(100%, 240px); }
 .hl-rates { overflow-x: auto; }
 .hl-week { display: grid; gap: var(--space-3); }
+
+/* Plan 59: identities with their profile badge, and the identity card in the vault. */
+.id-card { display: grid; gap: var(--space-3); margin-bottom: var(--space-4); }
+.id-table td { vertical-align: middle; }
+.id-bind { min-width: 160px; }
+.vault-identity { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--space-3); margin: var(--space-2) 0 0; font-size: var(--text-sm); }
+.vault-identity dt { color: var(--text-muted); }
+.vault-identity dd { margin: 0; overflow-wrap: anywhere; }

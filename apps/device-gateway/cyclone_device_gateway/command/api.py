@@ -214,6 +214,32 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def phone_untrust(device_id: str):
         return call(lambda: cc().delivery.untrust(device_id))
 
+    # Plan 59 (build 1): identities bound to a Cyclone profile, and their 30-day trash. Values stay in the vault (ciphertext);
+    # these routes carry ids, labels and bindings only. Deleting never touches the real account in the app.
+    @router.get("/v1/cc/identities", dependencies=[Depends(auth)])
+    def identities(trash: bool = Query(default=False)):
+        return call(lambda: {"identities": cc().identities.list(trash=trash), "trashDays": 30})
+
+    @router.post("/v1/cc/identities/{account_id}/bind", dependencies=[Depends(auth)])
+    def identity_bind(account_id: str, body: dict[str, Any]):
+        return call(lambda: cc().identities.bind(account_id, body_of(body)))
+
+    @router.post("/v1/cc/identities/{account_id}/unbind", dependencies=[Depends(auth)])
+    def identity_unbind(account_id: str):
+        return call(lambda: cc().identities.unbind(account_id))
+
+    @router.post("/v1/cc/identities/{account_id}/trash", dependencies=[Depends(auth)])
+    def identity_trash(account_id: str):
+        return call(lambda: cc().identities.trash(account_id))
+
+    @router.post("/v1/cc/identities/{account_id}/restore", dependencies=[Depends(auth)])
+    def identity_restore(account_id: str):
+        return call(lambda: cc().identities.restore(account_id))
+
+    @router.post("/v1/cc/identities/{account_id}/purge", dependencies=[Depends(auth)])
+    def identity_purge(account_id: str):
+        return call(lambda: cc().identities.purge(account_id))
+
     # Plan 33 §10–11 (roadmap run 14): fleet health, quarantine and alerts. Releasing a phone is the owner's act.
     @router.get("/v1/cc/health", dependencies=[Depends(auth)])
     def health():
