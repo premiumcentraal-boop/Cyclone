@@ -392,6 +392,7 @@ export class GlassApp {
       { label: "Results", hint: "Command Center", route: { name: "command", tab: "results" } as Route },
       { label: "Accounts", hint: "Command Center", route: { name: "command", tab: "accounts" } as Route },
       { label: "Fleet", hint: "Command Center", route: { name: "command", tab: "fleet" } as Route, keywords: "phones overview" },
+      { label: "Health", hint: "Command Center", route: { name: "command", tab: "health" } as Route, keywords: "alerts quarantine battery offline" },
       { label: "Settings", route: { name: "settings" } as Route },
       { label: "Remote MCP", route: { name: "remote" } as Route },
       { label: "ChatGPT Attach", route: { name: "attach" } as Route },

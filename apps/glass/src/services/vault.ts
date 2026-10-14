@@ -53,6 +53,34 @@ export interface ItemFields {
   totp: string;
   /** The account the item was saved for; checked against the record's plain accountId when it opens. */
   accountId: string | null;
+  /** Plan 59: the identity card that goes with this login (names, birthday, email, phone). Encrypted like every field. */
+  identity?: IdentityCard;
+}
+/** Plan 59: an account's identity details, as the sign-up template holds them. Never plain metadata. */
+export interface IdentityCard {
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  birthday?: string;
+  username?: string;
+  email?: string;
+  phone?: string;
+}
+export const IDENTITY_LABELS: Array<[keyof IdentityCard, string]> = [
+  ["fullName", "Full name"], ["firstName", "First name"], ["lastName", "Last name"], ["birthday", "Birthday"],
+  ["username", "Username"], ["email", "Email"], ["phone", "Phone number"],
+];
+/** A sign-up row's values (first_name, …) as an identity card; empty values are left out. */
+export function identityFromSignup(values: Record<string, string>): IdentityCard | undefined {
+  const map: Record<string, keyof IdentityCard> = {
+    first_name: "firstName", last_name: "lastName", full_name: "fullName", birthday: "birthday", username: "username", email: "email", phone: "phone",
+  };
+  const card: IdentityCard = {};
+  for (const [key, value] of Object.entries(values)) {
+    const field = map[key];
+    if (field && typeof value === "string" && value.trim()) card[field] = value.trim().slice(0, 200);
+  }
+  return Object.keys(card).length ? card : undefined;
 }
 export interface OpenItem extends ItemFields {
   id: string;

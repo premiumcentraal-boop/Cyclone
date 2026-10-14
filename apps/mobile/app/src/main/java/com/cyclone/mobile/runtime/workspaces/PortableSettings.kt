@@ -71,6 +71,7 @@ object PortableSettings {
         // Never.
         never("cyclone_ai_secrets", "The OpenRouter key (sealed at setup instead)"),
         never("cyclone_vault_secrets_v1", "The vault"),
+        never("cyclone_identities_v1", "Saved accounts (plan 59): kept in Main only"),
         never("cyclone_codes", "Codes"),
         never("cyclone_sealed_leases", "Sealed leases"),
         never("cyclone_gateway_trust_v33", "PC pairing"),

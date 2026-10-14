@@ -27,9 +27,17 @@ class CommandCenterGuard(unittest.TestCase):
         open_routes = [line for line in routes if "dependencies=[Depends(auth)]" not in line]
         # C3: the OAuth redirect from the sign-in page cannot carry the bearer. It is the one exception, it only finishes a
         # sign-in Glass started (single-use state + PKCE verifier kept by the gateway), and it reflects nothing but a name.
-        assert open_routes == ['@router.get("/v1/cc/connections/oauth/callback", response_class=HTMLResponse)'], f"unauthenticated Command Center route: {open_routes}"
+        # Roadmap run 16: a webhook routine's link is its own credential (a 256-bit token; only its hash is kept), called by
+        # programs that cannot hold the gateway bearer. It takes no body, so it can start the routine's own goal and nothing else.
+        assert open_routes == ['@router.post("/v1/hooks/{token}")',
+                               '@router.get("/v1/cc/connections/oauth/callback", response_class=HTMLResponse)'], f"unauthenticated Command Center route: {open_routes}"
         callback = api[api.index("def create_oauth_callback_router"):]
         assert "finish_sign_in(state, code" in callback and "html.escape" in callback
+        hook = api[api.index('@router.post("/v1/hooks/{token}")'):]
+        hook = hook[:hook.index("@router.", 10)]
+        assert "def routine_hook(token: str):" in hook and "fire_hook(token)" in hook, "the link route takes the token only, never a body"
+        automation = (COMMAND / "automation.py").read_text(encoding="utf-8")
+        assert "token_hash" in automation and "secrets.token_urlsafe(32)" in automation, "only a hash of a link's token is kept"
 
     def test_agent_mcp_servers_never_reach_the_command_center(self):
         for folder in MCP_DIRS:
@@ -39,6 +47,7 @@ class CommandCenterGuard(unittest.TestCase):
                 text = path.read_text(encoding="utf-8", errors="ignore")
                 assert "/v1/cc/" not in text, f"{path}: agent MCP must not call Command Center routes (approvals stay human)"
                 assert "cc.answer" not in text, f"{path}: agent MCP must not answer Owner Moments"
+                assert "/v1/hooks/" not in text, f"{path}: agent MCP must not start routines through their links"
 
     def test_glass_never_asks_for_a_password(self):
         for name in ("pages/commandPage.ts", "services/command.ts"):

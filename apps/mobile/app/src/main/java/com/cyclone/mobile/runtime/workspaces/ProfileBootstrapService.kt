@@ -66,6 +66,15 @@ class ProfileBootstrapService : Service() {
             }
             return START_NOT_STICKY
         }
+        // Plan 59: an account another profile made, for Main to keep.
+        if (intent?.action == ProfileBootstrapRuntime.IDENTITY_ACTION) {
+            val nonce = intent.getStringExtra("nonce").orEmpty()
+            if (!Regex("[a-f0-9]{32}").matches(nonce)) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId); return START_NOT_STICKY }
+            repairScope.launch {
+                try { takeInIdentity(nonce) } finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
+            }
+            return START_NOT_STICKY
+        }
         if (intent?.action == ProfileBootstrapRuntime.CARRY_ACTION) {
             if (carryJob?.isActive != true) carryJob = repairScope.launch {
                 try { takeInCarry() } finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
@@ -158,6 +167,31 @@ class ProfileBootstrapService : Service() {
             input.delete()
             // Never log the bundle or what failed inside it.
             result.writeText(JSONObject().put("nonce", nonce).put("user", ProfileSetupRuntime.currentUserId()).put("ok", false).toString())
+        }
+    }
+
+    /**
+     * Plan 59: takes in one account another profile handed to Main. It opens only with this profile's Keystore key and
+     * only for this nonce and user, and is kept in the encrypted accounts book. The answer says ok or not, nothing else.
+     */
+    private fun takeInIdentity(nonce: String) {
+        val folder = createDeviceProtectedStorageContext().filesDir
+        val input = File(folder, "identity-inbox-$nonce.json")
+        val result = File(folder, "identity-result-$nonce.json")
+        val me = ProfileSetupRuntime.currentUserId()
+        try {
+            val envelope = JSONObject(input.readText())
+            input.delete()
+            check(envelope.getString("nonce") == nonce && envelope.getInt("target") == me && envelope.getInt("source") != me) { "Identity mismatch" }
+            val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val plain = ProfileTransferCipher.open(store.getKey(ALIAS, null) as java.security.PrivateKey, envelope.getJSONObject("bundle"),
+                ProfileBootstrapRuntime.identityContext(me, nonce))
+            try { com.cyclone.mobile.identity.IdentitySaver.takeIn(this, JSONObject(String(plain, Charsets.UTF_8))) } finally { plain.fill(0) }
+            result.writeText(JSONObject().put("nonce", nonce).put("ok", true).toString())
+        } catch (_: Exception) {
+            input.delete()
+            // Never log the account or what failed inside it.
+            result.writeText(JSONObject().put("nonce", nonce).put("ok", false).toString())
         }
     }
 

@@ -66,6 +66,8 @@ class PhoneMindToolbox(
     /** Plan 43 (T7): an Account Setup run, and where its progress goes (the PC's row shows it). */
     private val setup: com.cyclone.mobile.mind.signup.AccountSetupPlan? = null,
     private val setupProgress: ((com.cyclone.mobile.mind.signup.AccountSetupProgress) -> Unit)? = null,
+    /** Plan 59: saves the created account to Accounts (handle → the profile it was bound to, and where it went). */
+    private val saveIdentity: ((String?) -> Pair<Pair<String, String>?, String>)? = null,
     /**
      * Plan 48 run 4: Cyclone Ports through the owner's PC. With it the Mind gets `port_send` and `port_wait`; null (no PC
      * connected) keeps the toolbox exactly as before.
@@ -700,10 +702,13 @@ class PhoneMindToolbox(
         val created = arguments.optBoolean("created")
         val handle = arguments.optString("handle").trim().take(100).takeIf { it.isNotBlank() }
         val why = arguments.optString("why").replace(Regex("\\s+"), " ").trim().take(200)
+        // Plan 59: the account is saved to Accounts at once, bound to this profile, before anything else can happen.
+        val saved = if (created) runCatching { saveIdentity?.invoke(handle) }.getOrNull() else null
         reportSetup(setupState.copy(
             state = if (created) com.cyclone.mobile.mind.signup.AccountSetupProgress.CREATED else com.cyclone.mobile.mind.signup.AccountSetupProgress.FAILED,
-            handle = if (created) handle else null, note = if (created) "Created${handle?.let { " as $it" }.orEmpty()}." else why.ifBlank { "Not created." }))
-        return MindToolResult(if (created) "Recorded: the account exists${handle?.let { " as $it" }.orEmpty()}. Finish the mission now."
+            handle = if (created) handle else null, note = if (created) "Created${handle?.let { " as $it" }.orEmpty()}." else why.ifBlank { "Not created." },
+            profile = saved?.first))
+        return MindToolResult(if (created) "Recorded: the account exists${handle?.let { " as $it" }.orEmpty()}. ${saved?.second.orEmpty()} Finish the mission now."
             else "Recorded: the account was not created. Finish the mission now and say why.", "setup done")
     }
 

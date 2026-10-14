@@ -129,10 +129,28 @@ object GatewayRuntime {
         val root = fleetRoot()
         val camera = context.checkSelfPermission(android.Manifest.permission.CAMERA) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
+        // Roadmap run 14: heat, free storage and whether Android may stop Cyclone, for the PC's fleet health.
+        val power = context.getSystemService(android.os.PowerManager::class.java)
+        val temperature = runCatching {
+            context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+                ?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+        }.getOrNull()?.let(FleetHealthFacts::temperatureC)
+        val thermal = runCatching { power?.currentThermalStatus }.getOrNull()?.let(FleetHealthFacts::thermal)
+        val freeMb = runCatching { android.os.StatFs(android.os.Environment.getDataDirectory().path).availableBytes }
+            .getOrNull()?.let(FleetHealthFacts::freeMb)
+        val unrestricted = runCatching { power?.isIgnoringBatteryOptimizations(context.packageName) }.getOrNull()
+        val notifications = runCatching {
+            context.getSystemService(android.app.NotificationManager::class.java)?.areNotificationsEnabled()
+        }.getOrNull()
         return JSONObject()
             .put("version", 1)
             .put("batteryPercent", percent ?: JSONObject.NULL)
             .put("charging", charging)
+            .put("temperatureC", temperature ?: JSONObject.NULL)
+            .put("thermal", thermal ?: JSONObject.NULL)
+            .put("freeStorageMb", freeMb ?: JSONObject.NULL)
+            .put("batteryUnrestricted", unrestricted ?: JSONObject.NULL)
+            .put("background", fleetBackground(context) ?: JSONObject.NULL)
             .put("network", network)
             .put("os", "Android ${android.os.Build.VERSION.RELEASE}")
             .put("model", android.os.Build.MODEL)
@@ -143,7 +161,19 @@ object GatewayRuntime {
                 .put("signals", JSONArray(root.signals)))
             .put("permissions", JSONObject()
                 .put("accessibility", DeviceState.accessibilityConnected)
-                .put("camera", camera))
+                .put("camera", camera)
+                .put("notifications", notifications ?: false))
+    }
+
+    @Volatile private var fleetBackgroundCache: Pair<Long, Boolean?>? = null
+
+    /** Whether missions can run behind the owner's screen (plan 26 §6), looked at once a minute for the status poll. */
+    private fun fleetBackground(context: Context): Boolean? {
+        val now = android.os.SystemClock.elapsedRealtime()
+        fleetBackgroundCache?.let { (at, ready) -> if (now - at < 60_000L) return ready }
+        val ready = runCatching { com.cyclone.mobile.runtime.plane.MissionPlanes.blocker(context) == null }.getOrNull()
+        fleetBackgroundCache = now to ready
+        return ready
     }
 
     @Volatile private var fleetRootCache: Pair<Long, FleetRootSignals.Result>? = null
@@ -490,7 +520,7 @@ internal object GatewayDispatcher {
             GatewayV5LabAdapter.install(context)
             GatewayV5LabAdapter.dispatch(request.op, request.args)
         }
-        "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media" -> {
+        "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert" -> {
             GatewayV5CommandAdapter.install(context)
             GatewayV5CommandAdapter.dispatch(request.op, request.args)
         }

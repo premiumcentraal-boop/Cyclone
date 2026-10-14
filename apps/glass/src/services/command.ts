@@ -10,7 +10,16 @@ export type TwoFactor = "none" | "totp" | "passkey" | "sms" | "email" | "app";
 export type TaskStatus = "scheduled" | "making" | "waiting_device" | "running" | "needs_you" | "succeeded" | "failed" | "cancelled";
 export type RunStatus = "running" | "succeeded" | "failed" | "cancelled";
 export type ApprovalKind = "question" | "values" | "approval" | "secret" | "handover" | "spend" | "login";
-export type Schedule = { kind: "daily"; time: string; days: number[] } | { kind: "every"; minutes: number };
+export type Schedule =
+  | { kind: "daily"; time: string; days: number[] }
+  | { kind: "every"; minutes: number }
+  /** Roadmap run 16: a day of the month (-1 = the last day). */
+  | { kind: "monthly"; time: string; day: number }
+  /** Roadmap run 16: the first..fourth (1..4) or last (-1) weekday (1 = Monday) of the month. */
+  | { kind: "nth"; time: string; weekday: number; nth: number }
+  /** Roadmap run 16 triggers: when another routine's run ends, or when the routine's own secret link is called. */
+  | { kind: "after"; routineId: string; on: "succeeded" | "failed" | "finished" }
+  | { kind: "webhook" };
 
 export interface CcAccount {
   id: string;
@@ -216,6 +225,11 @@ export interface CcRoutine {
   /** How many next runs get their password sealed ahead (pre-authorised leases), and those runs. */
   preauth: number;
   prepared: Array<{ dueAt: number; taskId: string; deviceId: string; ready: boolean }>;
+  /** Roadmap run 16: "after" or "webhook" when a trigger starts it (no time of its own), else null. */
+  trigger: "after" | "webhook" | null;
+  hasLink: boolean;
+  /** A webhook routine's secret link token, only in the answer that made it (it is never shown again). */
+  hookToken: string | null;
 }
 
 export interface CcApproval {
@@ -233,8 +247,10 @@ export interface CcApproval {
   fields: Array<{ label: string; kind: string }>;
   approvableHere: boolean;
   answerHere: boolean;
-  state: "open" | "answered" | "withdrawn";
+  state: "open" | "answered" | "withdrawn" | "expired";
   createdAt: number;
+  /** Roadmap run 16: when an open approval stops waiting (the run stops; it is never approved by itself). */
+  expiresAt: number | null;
 }
 
 export interface CcOverview {
@@ -246,6 +262,9 @@ export interface CcOverview {
   approvals: number;
   succeeded24h: number;
   failed24h: number;
+  /** Roadmap run 14: fleet alerts that need the owner (not yet seen), and phones in quarantine. */
+  alerts: number;
+  quarantined: number;
 }
 
 const str = (value: unknown, fallback = ""): string => (typeof value === "string" ? value : fallback);
@@ -406,12 +425,32 @@ export function parseTask(raw: unknown): CcTask {
   };
 }
 
+export function parseSchedule(s: Record<string, unknown>): Schedule {
+  switch (s.kind) {
+    case "every":
+      return { kind: "every", minutes: num(s.minutes, 60) };
+    case "monthly":
+      return { kind: "monthly", time: str(s.time, "09:00"), day: num(s.day, 1) };
+    case "nth":
+      return { kind: "nth", time: str(s.time, "09:00"), weekday: num(s.weekday, 1), nth: num(s.nth, 1) };
+    case "after":
+      return { kind: "after", routineId: str(s.routineId), on: oneOf(s.on, ["succeeded", "failed", "finished"] as const, "succeeded") };
+    case "webhook":
+      return { kind: "webhook" };
+    default:
+      return { kind: "daily", time: str(s.time, "09:00"), days: list(s.days).filter((d): d is number => typeof d === "number") };
+  }
+}
+
+/** The address a webhook routine's link is called at, on this gateway. */
+export function hookUrl(baseUrl: string, token: string): string {
+  return `${baseUrl.replace(/\/$/, "")}/v1/hooks/${token}`;
+}
+
 export function parseRoutine(raw: unknown): CcRoutine {
   const r = (raw ?? {}) as Record<string, unknown>;
   const s = (r.schedule ?? {}) as Record<string, unknown>;
-  const schedule: Schedule = s.kind === "every"
-    ? { kind: "every", minutes: num(s.minutes, 60) }
-    : { kind: "daily", time: str(s.time, "09:00"), days: list(s.days).filter((d): d is number => typeof d === "number") };
+  const schedule = parseSchedule(s);
   return {
     id: str(r.id),
     title: str(r.title),
@@ -432,6 +471,9 @@ export function parseRoutine(raw: unknown): CcRoutine {
       const x = obj(p);
       return { dueAt: num(x.dueAt), taskId: str(x.taskId), deviceId: str(x.deviceId), ready: x.ready === true };
     }),
+    trigger: r.trigger === "after" || r.trigger === "webhook" ? r.trigger : null,
+    hasLink: r.hasLink === true,
+    hookToken: typeof r.hookToken === "string" && /^[A-Za-z0-9_-]{40,60}$/.test(r.hookToken) ? r.hookToken : null,
   };
 }
 
@@ -452,8 +494,9 @@ export function parseApproval(raw: unknown): CcApproval {
     fields: list(r.fields).map((f) => ({ label: str((f as Record<string, unknown>)?.label), kind: str((f as Record<string, unknown>)?.kind) })),
     approvableHere: r.approvableHere === true,
     answerHere: r.answerHere === true,
-    state: oneOf(r.state, ["open", "answered", "withdrawn"] as const, "open"),
+    state: oneOf(r.state, ["open", "answered", "withdrawn", "expired"] as const, "open"),
     createdAt: num(r.createdAt),
+    expiresAt: optNum(r.expiresAt),
   };
 }
 
@@ -468,6 +511,7 @@ export const command = {
     return {
       accounts: num(r?.accounts), openTasks: num(r?.openTasks), running: num(r?.running), routines: num(r?.routines),
       routinesPaused: num(r?.routinesPaused), approvals: num(r?.approvals), succeeded24h: num(r?.succeeded24h), failed24h: num(r?.failed24h),
+      alerts: num(r?.alerts), quarantined: num(r?.quarantined),
     };
   },
   accounts: async (client: GatewayClient) =>
@@ -486,6 +530,13 @@ export const command = {
   runRoutine: (client: GatewayClient, id: string) => client.post(`/v1/cc/routines/${encodeURIComponent(id)}/run`),
   deleteRoutine: (client: GatewayClient, id: string) => client.post(`/v1/cc/routines/${encodeURIComponent(id)}/delete`),
   pauseAll: (client: GatewayClient, paused: boolean) => client.post("/v1/cc/routines/pause-all", { paused }),
+  newLink: async (client: GatewayClient, id: string) => parseRoutine(await client.post(`/v1/cc/routines/${encodeURIComponent(id)}/link`)),
+  answerBatch: (client: GatewayClient, ids: string[], action: "approve" | "decline") =>
+    client.post<{ answered?: Array<{ id: string; handled: boolean; detail: string }> }>("/v1/cc/approvals/batch", { ids, action }),
+  timeouts: async (client: GatewayClient): Promise<ApprovalTimeouts> =>
+    parseTimeouts((await client.get<{ timeouts?: unknown }>("/v1/cc/approvals/timeouts"))?.timeouts),
+  setTimeouts: async (client: GatewayClient, change: Partial<ApprovalTimeouts>): Promise<ApprovalTimeouts> =>
+    parseTimeouts((await client.put<{ timeouts?: unknown }>("/v1/cc/approvals/timeouts", change))?.timeouts),
   results: async (client: GatewayClient) =>
     list((await client.get<{ results?: unknown }>("/v1/cc/results"))?.results).map(parseResult),
   approvals: async (client: GatewayClient) =>
@@ -570,6 +621,27 @@ export function twofaLabel(twofa: TwoFactor): string {
 }
 
 export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+/** Roadmap run 16: how long each kind of approval waits before the run stops (minutes; 0 = no limit). */
+export const TIMEOUT_KINDS = [
+  ["send", "Sending a message"], ["pay", "A payment"], ["delete", "Deleting"], ["post", "Posting"], ["publish", "Publishing"],
+  ["approval", "Other approvals"], ["question", "A question"], ["values", "Details to fill in"], ["spend", "Using a connection"],
+] as const;
+export type TimeoutKind = (typeof TIMEOUT_KINDS)[number][0];
+export type ApprovalTimeouts = Record<TimeoutKind, number>;
+
+export function parseTimeouts(raw: unknown): ApprovalTimeouts {
+  const r = obj(raw);
+  return Object.fromEntries(TIMEOUT_KINDS.map(([k]) => [k, num(r[k])])) as ApprovalTimeouts;
+}
+
+/** Approvals that may be answered together: same kind and gate (or the same connection tool), each shown here. */
+export function batchKey(a: CcApproval): string | null {
+  if (!a.answerHere || a.state !== "open") return null;
+  if (a.kind === "spend" && a.spend) return `spend:${a.spend.connection}:${a.spend.tool}`;
+  if (a.kind === "approval" && a.approvableHere) return `approval:${a.gate ?? ""}`;
+  return null;
+}
 
 /** A recipe's goal with its inputs filled in: `{name}` placeholders are replaced by the owner's values. */
 export function fillRecipe(goal: string, inputs: Record<string, string>): string {

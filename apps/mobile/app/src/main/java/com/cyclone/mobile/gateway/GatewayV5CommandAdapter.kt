@@ -87,6 +87,7 @@ internal object GatewayV5CommandAdapter {
         "cc.answer" -> answer(args)
         "cc.key" -> key(args)
         "cc.media" -> CommandMedia.receive(args)
+        "cc.alert" -> FleetAlerts.receive(app(), args)
         else -> throw GatewayProtocolException("UNKNOWN_OPERATION", "Unsupported Command Center operation: $op")
     }
 

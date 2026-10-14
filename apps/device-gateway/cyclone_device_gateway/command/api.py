@@ -110,6 +110,20 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def update_routine(routine_id: str, body: dict[str, Any]):
         return call(lambda: cc().update_routine(routine_id, body_of(body)))
 
+    # Roadmap run 16: a webhook routine's secret link, made again (the old one stops working). Shown once.
+    @router.post("/v1/cc/routines/{routine_id}/link", dependencies=[Depends(auth)])
+    def routine_link(routine_id: str):
+        return call(lambda: cc().new_hook(routine_id))
+
+    # Roadmap run 16: a webhook routine's secret link. The link is its own credential (only its hash is kept); the
+    # request body is never read, so a caller can start the routine's own goal and nothing else.
+    @router.post("/v1/hooks/{token}")
+    def routine_hook(token: str):
+        try:
+            return cc().automation.fire_hook(token)
+        except CommandError as exc:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": str(exc)}) from exc
+
     @router.post("/v1/cc/routines/{routine_id}/run", dependencies=[Depends(auth)])
     def run_routine(routine_id: str):
         return call(lambda: cc().run_routine_now(routine_id))
@@ -123,8 +137,21 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
         return call(lambda: {"results": cc().results(limit)})
 
     @router.get("/v1/cc/approvals", dependencies=[Depends(auth)])
-    def approvals(state: str = Query(default="open", pattern=r"^(open|answered|withdrawn|all)$")):
+    def approvals(state: str = Query(default="open", pattern=r"^(open|answered|withdrawn|expired|all)$")):
         return call(lambda: {"approvals": cc().list_approvals(state=state)})
+
+    # Roadmap run 16: "Approve all 3" for approvals of one kind, each still answered for its own request id.
+    @router.post("/v1/cc/approvals/batch", dependencies=[Depends(auth)])
+    def approvals_batch(body: dict[str, Any]):
+        return call(lambda: cc().automation.answer_batch(body_of(body)))
+
+    @router.get("/v1/cc/approvals/timeouts", dependencies=[Depends(auth)])
+    def approval_timeouts():
+        return call(lambda: {"timeouts": cc().automation.timeouts()})
+
+    @router.put("/v1/cc/approvals/timeouts", dependencies=[Depends(auth)])
+    def approval_timeouts_set(body: dict[str, Any]):
+        return call(lambda: {"timeouts": cc().automation.set_timeouts(body_of(body))})
 
     @router.post("/v1/cc/approvals/{approval_id}/answer", dependencies=[Depends(auth)])
     def answer(approval_id: str, body: dict[str, Any]):
@@ -186,6 +213,61 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     @router.post("/v1/cc/phones/{device_id}/untrust", dependencies=[Depends(auth)])
     def phone_untrust(device_id: str):
         return call(lambda: cc().delivery.untrust(device_id))
+
+    # Plan 59 (build 1): identities bound to a Cyclone profile, and their 30-day trash. Values stay in the vault (ciphertext);
+    # these routes carry ids, labels and bindings only. Deleting never touches the real account in the app.
+    @router.get("/v1/cc/identities", dependencies=[Depends(auth)])
+    def identities(trash: bool = Query(default=False)):
+        return call(lambda: {"identities": cc().identities.list(trash=trash), "trashDays": 30})
+
+    @router.post("/v1/cc/identities/{account_id}/bind", dependencies=[Depends(auth)])
+    def identity_bind(account_id: str, body: dict[str, Any]):
+        return call(lambda: cc().identities.bind(account_id, body_of(body)))
+
+    @router.post("/v1/cc/identities/{account_id}/unbind", dependencies=[Depends(auth)])
+    def identity_unbind(account_id: str):
+        return call(lambda: cc().identities.unbind(account_id))
+
+    @router.post("/v1/cc/identities/{account_id}/trash", dependencies=[Depends(auth)])
+    def identity_trash(account_id: str):
+        return call(lambda: cc().identities.trash(account_id))
+
+    @router.post("/v1/cc/identities/{account_id}/restore", dependencies=[Depends(auth)])
+    def identity_restore(account_id: str):
+        return call(lambda: cc().identities.restore(account_id))
+
+    @router.post("/v1/cc/identities/{account_id}/purge", dependencies=[Depends(auth)])
+    def identity_purge(account_id: str):
+        return call(lambda: cc().identities.purge(account_id))
+
+    # Plan 33 §10–11 (roadmap run 14): fleet health, quarantine and alerts. Releasing a phone is the owner's act.
+    @router.get("/v1/cc/health", dependencies=[Depends(auth)])
+    def health():
+        return call(lambda: cc().health.public())
+
+    @router.post("/v1/cc/health/phones/{device_id}/release", dependencies=[Depends(auth)])
+    def health_release(device_id: str):
+        return call(lambda: cc().health.release(device_id))
+
+    @router.post("/v1/cc/health/phones/{device_id}/quarantine", dependencies=[Depends(auth)])
+    def health_quarantine(device_id: str):
+        return call(lambda: cc().health.quarantine(device_id))
+
+    @router.post("/v1/cc/health/phones/{device_id}/forget", dependencies=[Depends(auth)])
+    def health_forget(device_id: str):
+        return call(lambda: cc().health.forget(device_id))
+
+    @router.post("/v1/cc/health/alerts/{alert_id}/seen", dependencies=[Depends(auth)])
+    def health_seen(alert_id: str):
+        return call(lambda: cc().health.seen(alert_id))
+
+    @router.put("/v1/cc/health/settings", dependencies=[Depends(auth)])
+    def health_settings(body: dict[str, Any]):
+        return call(lambda: cc().health.set_settings(body_of(body)))
+
+    @router.post("/v1/cc/health/test-alert", dependencies=[Depends(auth)])
+    def health_test_alert():
+        return call(lambda: cc().health.test_notify())
 
     @router.get("/v1/cc/leases", dependencies=[Depends(auth)])
     def leases(limit: int = Query(default=200, ge=1, le=1000)):

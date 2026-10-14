@@ -133,6 +133,8 @@ export interface PreparedRow {
   vaultItemId: string | null;
   username: string;
   deviceId: string;
+  /** Plan 59: the row's identity details (first_name, …), kept encrypted in the vault with the new password. */
+  identity: Record<string, string>;
   error: string | null;
 }
 export interface Prepared { tableId: string; app: string; packageName: string; rows: PreparedRow[] }
@@ -146,6 +148,7 @@ export function parsePrepared(raw: unknown): Prepared {
       return {
         rowId: str(q.rowId), title: str(q.title) || "Account", accountId: str(q.accountId) || null, vaultItemId: str(q.vaultItemId) || null,
         username: str(q.username), deviceId: str(q.deviceId), error: typeof q.error === "string" && q.error ? q.error : null,
+        identity: Object.fromEntries(Object.entries(obj(q.identity)).filter((e): e is [string, string] => typeof e[1] === "string")),
       };
     }),
   };

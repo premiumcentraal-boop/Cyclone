@@ -8,7 +8,7 @@
 import type { GlassContext } from "../app.js";
 import type { CcAccount } from "../services/command.js";
 import {
-  ITEM_KINDS, MIN_PASSPHRASE, VaultLockedError, backupFile, createVault, decryptItem, emptyFields, encryptItem,
+  IDENTITY_LABELS, ITEM_KINDS, MIN_PASSPHRASE, VaultLockedError, backupFile, createVault, decryptItem, emptyFields, encryptItem,
   generatePassword, health, newItemId, newRecoveryKey, rewrapPassphrase, strength, totpCode, unlock, vaultApi,
   type ItemFields, type ItemKind, type OpenItem, type Unlocker, type VaultRecord, type VaultState,
 } from "../services/vault.js";
@@ -334,6 +334,17 @@ export function createVaultView(ctx: GlassContext, accounts: () => CcAccount[], 
       const tr = el("tr");
       const name = el("td");
       name.append(el("span", undefined, item.label || "(no name)"), el("span", "cc-sub", item.username || item.url));
+      // Plan 59: an account's identity card shows with its password, behind the same check and for the same 30 seconds.
+      if (item.identity) {
+        if (revealed.has(item.id)) {
+          const card = el("dl", "vault-identity");
+          for (const [key, label] of IDENTITY_LABELS) {
+            const value = item.identity[key];
+            if (value) card.append(el("dt", undefined, label), el("dd", undefined, value));
+          }
+          name.append(card);
+        } else name.append(el("span", "cc-sub", "Identity card saved"));
+      }
       const secretCell = el("td", "vault-secret");
       secretCell.append(el("span", "vault-mask", revealed.has(item.id) ? item.secret || "—" : item.secret ? "••••••••••" : "—"));
       const healthCell = el("td");
@@ -461,6 +472,8 @@ export function createVaultView(ctx: GlassContext, accounts: () => CcAccount[], 
       const fields: ItemFields = {
         ...emptyFields(), label: String(label.value ?? ""), username: String(username.value ?? ""), secret: String(secret.value ?? ""),
         url: String(url.value ?? ""), totp: String(totp.value ?? ""), notes: String(notes.value ?? ""), accountId: String(account.value || "") || null,
+        // Plan 59: editing a login keeps its identity card.
+        identity: item?.identity,
       };
       if (!fields.label.trim()) return say("Give the item a name.", "error");
       try {

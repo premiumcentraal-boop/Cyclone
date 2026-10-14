@@ -1475,7 +1475,10 @@ def _validate_connectors_list(value: dict[str, Any]) -> None:
                 raise bad("entry")
 
 
-CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media"})
+CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert"})
+#: Roadmap run 14: a fleet alert shown as a notification on the owner's phone. Plain words only, no action.
+CC_ALERT_ID = re.compile(r"^alr_[A-Za-z0-9_-]{6,40}$")
+CC_ALERT_LEVELS = frozenset({"critical", "warning", "info"})
 CC_MEDIA_MIME = re.compile(r"^(video|image|audio)/[a-z0-9.+-]{1,60}$")
 CC_MEDIA_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 CC_MEDIA_MAX = 500 * 1024 * 1024
@@ -1517,6 +1520,10 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
             raise _bad_cc("media")
         if value["received"] > args.get("size", 0) or not _short_text(value["name"], 100, nullable=True) or not _short_text(value["folder"], 60, nullable=True):
             raise _bad_cc("media facts")
+        return
+    if op == "cc.alert":
+        if set(value) != {"shown"} or not isinstance(value["shown"], bool):
+            raise _bad_cc("alert")
         return
     if op == "cc.answer":
         if set(value) != {"handled", "detail"} or not isinstance(value["handled"], bool) or not _short_text(value["detail"], 200):
@@ -1566,8 +1573,15 @@ SETUP_STATES = frozenset({"filling", "verification", "code", "created", "failed"
 
 def _validate_setup(setup: Any) -> None:
     """Plan 43 T7: where an Account Setup run is: its page of the map, a page that changed, and the handle once made."""
-    if not isinstance(setup, dict) or set(setup) != {"state", "page", "pages", "drift", "handle", "note"} or setup["state"] not in SETUP_STATES:
+    keys = {"state", "page", "pages", "drift", "handle", "note"}
+    # Plan 59: a created account names the Cyclone profile it was made in (id and label only).
+    if not isinstance(setup, dict) or set(setup) - {"profile"} != keys or setup["state"] not in SETUP_STATES:
         raise _bad_cc("setup")
+    if "profile" in setup:
+        profile = setup["profile"]
+        if (not isinstance(profile, dict) or set(profile) != {"id", "label"} or not PROFILE_ID.match(str(profile["id"]))
+                or not _short_text(profile["label"], 40, nullable=True)):
+            raise _bad_cc("setup profile")
     if not _is_int(setup["pages"]) or not 0 <= setup["pages"] <= 15:
         raise _bad_cc("setup pages")
     for key in ("page", "drift"):
@@ -2267,6 +2281,15 @@ class V5ContractService:
         args = {"taskId": item_id, "name": name, "mime": mime, "size": size, "sha256": sha256, "offset": offset,
                 "data": base64.b64encode(data).decode()}
         return self._call(device_id, "ports.file", args, checked=True)
+
+    def cc_alert(self, device_id: str, *, alert_id: str, level: str, title: str, text: str) -> dict[str, Any]:
+        """Roadmap run 14: show one fleet alert as a notification on the owner's phone. Words only: it opens Cyclone
+        when tapped and carries no action, approval or command."""
+        if (not isinstance(alert_id, str) or not CC_ALERT_ID.match(alert_id) or level not in CC_ALERT_LEVELS
+                or not isinstance(title, str) or not 0 < len(title.strip()) <= 120 or not isinstance(text, str) or len(text) > 400
+                or INLINE_SECRET.search(f"{title} {text}")):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "An alert is {alertId, level, title, text} in plain words.")
+        return self._call(device_id, "cc.alert", {"alertId": alert_id, "level": level, "title": title.strip(), "text": text.strip()})
 
     def cc_key(self, device_id: str) -> dict[str, Any]:
         """Plan 33 (C2): the phone's device key (public half and fingerprint) for sealed delivery."""

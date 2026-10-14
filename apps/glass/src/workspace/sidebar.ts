@@ -11,7 +11,7 @@ import { icon, type IconName } from "../ui/icons.js";
 import { workspaceBus } from "./directory.js";
 import { openQuickFind } from "./quickFind.js";
 
-const DATABASES: Array<{ tab: "tasks" | "routines" | "results" | "accounts" | "connections" | "ports" | "vault"; label: string; icon: IconName }> = [
+const DATABASES: Array<{ tab: "tasks" | "routines" | "results" | "accounts" | "connections" | "ports" | "vault" | "health"; label: string; icon: IconName }> = [
   { tab: "tasks", label: "Tasks", icon: "runs" },
   { tab: "routines", label: "Routines", icon: "clock" },
   { tab: "results", label: "Results", icon: "star" },
@@ -19,6 +19,7 @@ const DATABASES: Array<{ tab: "tasks" | "routines" | "results" | "accounts" | "c
   { tab: "connections", label: "Connections", icon: "plug" },
   { tab: "ports", label: "Ports", icon: "port" },
   { tab: "vault", label: "Vault", icon: "lock" },
+  { tab: "health", label: "Health", icon: "pulse" },
 ];
 const REFRESH_MS = 15_000;
 

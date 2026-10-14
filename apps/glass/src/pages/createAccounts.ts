@@ -10,7 +10,7 @@
 import type { GlassContext } from "../app.js";
 import { deliveryApi, sealForTask } from "../services/delivery.js";
 import { signupApi, type Prepared } from "../services/signup.js";
-import { decryptItem, emptyFields, encryptItem, generatePassword, newItemId, unlock, vaultApi, type OpenItem } from "../services/vault.js";
+import { decryptItem, emptyFields, encryptItem, generatePassword, identityFromSignup, newItemId, unlock, vaultApi, type OpenItem } from "../services/vault.js";
 import { el, setChildren } from "../ui/dom.js";
 import { actionButton } from "../ui/components.js";
 
@@ -125,7 +125,9 @@ export function createAccountsPanel(ctx: GlassContext, tableId: string, say: (te
         items.set(row.rowId, await decryptItem(vk, earlier));
         continue;
       }
-      const fields = { ...emptyFields(), label: `${prepared.app} · ${row.title}`, username: row.username, secret: generatePassword(20), accountId: row.accountId };
+      // Plan 59: the identity card is saved, encrypted, with the password at this moment, before the phone does anything.
+      const fields = { ...emptyFields(), label: `${prepared.app} · ${row.title}`, username: row.username, secret: generatePassword(20), accountId: row.accountId,
+        identity: identityFromSignup(row.identity) };
       const saved = await vaultApi.put(ctx.client, await encryptItem(vk, { id: newItemId(), kind: "login", version: 1 }, fields));
       fields.secret = "";
       items.set(row.rowId, await decryptItem(vk, saved));
