@@ -162,6 +162,24 @@ object MindMissions {
         ))
     }
 
+    /**
+     * Plan 59: Account Setup created an account. It is saved to Accounts at once, bound to this profile (handed to Main
+     * when this isn't Main), with the row's details and the password the run filled. Returns the profile and a line
+     * for the Mind.
+     */
+    private fun saveCreatedAccount(context: Context, missionId: String, plan: com.cyclone.mobile.mind.signup.AccountSetupPlan,
+                                   handle: String?): Pair<Pair<String, String>?, String> {
+        val profile = com.cyclone.mobile.identity.IdentitySaver.currentProfile(context)
+        val saved = com.cyclone.mobile.identity.IdentitySaver.accountCreated(context, plan.map.packageName, handle, plan.values,
+            com.cyclone.mobile.secrets.SealedDelivery.takeKeptPassword(missionId))
+        val line = when (saved) {
+            com.cyclone.mobile.identity.IdentitySaver.Saved.IN_MAIN, com.cyclone.mobile.identity.IdentitySaver.Saved.HANDED_TO_MAIN ->
+                "It is saved in Accounts, bound to ${profile.second}."
+            com.cyclone.mobile.identity.IdentitySaver.Saved.PC_ONLY -> "It is kept in the owner's vault on the PC."
+        }
+        return profile to line
+    }
+
     /** A new task can start now (in front or behind). */
     fun canAccept(context: Context, goal: String = ""): Boolean = admission(context, goal) !is Crew.Admit.Queue
 
@@ -700,6 +718,8 @@ object MindMissions {
             val fast = com.cyclone.mobile.mind.pilot.FastMode.decider(context, fastSettings)
                 ?.let { com.cyclone.mobile.mind.pilot.PilotSetup(it, fastSettings.pilot(), fastSettings.activeModel,
                     com.cyclone.mobile.mind.pilot.MindPilotAdvisor(primary)) }
+            // Plan 59: an Account Setup run keeps its password (memory only) for the moment the account is created.
+            if (run.setup != null) com.cyclone.mobile.secrets.SealedDelivery.keepPasswordFor(run.id)
             val toolbox = PhoneMindToolbox(environment, owner, device, run.mission.goal, { run.stopRequested }, memory = memory, missionId = run.id,
                 marker = if (variant?.marks == false) null else AndroidMindImageMarker, trail = trail,
                 learned = if (useMap) learnedHints(context) else null,
@@ -712,6 +732,7 @@ object MindMissions {
                 signup = run.signup?.let { pkg -> com.cyclone.mobile.mind.signup.SignupRecorder(pkg, appLabel(context, pkg), appVersion(context, pkg)) { System.currentTimeMillis() } },
                 saveSignup = { map -> com.cyclone.mobile.mind.signup.SignupMapStore.save(context, map) },
                 setup = run.setup, setupProgress = { progress -> com.cyclone.mobile.mind.signup.AccountSetupProgress.set(run.id, progress) },
+                saveIdentity = run.setup?.let { plan -> { handle: String? -> saveCreatedAccount(context, run.id, plan, handle) } },
                 // Plan 48 run 4: Cyclone Ports only while the owner's PC is polling this phone; never in a Lab mission.
                 ports = portsLink(run.id, run.mission.lab == null),
                 portPhoto = com.cyclone.mobile.mind.MindPortPhoto.fromDataUrl(attachment?.imageDataUrl),

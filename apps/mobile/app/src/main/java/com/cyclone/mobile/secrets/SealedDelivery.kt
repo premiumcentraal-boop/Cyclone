@@ -201,6 +201,18 @@ internal object SealedDelivery {
      * The delivered value for [slot], once, as a one-shot lease; only on the app or site it was sealed for. A one-time
      * code slot turns its seed into the current code here. Null when nothing (valid) waits.
      */
+    private val keepFor = mutableSetOf<String>()
+    private val kept = mutableMapOf<String, CharArray>()
+
+    /**
+     * Plan 59: an Account Setup run keeps a copy of its password when vault_fill takes it, in memory only, so the new
+     * account can be saved to Accounts when it is created ([takeKeptPassword]). Wiped when the run finishes.
+     */
+    fun keepPasswordFor(missionId: String) = synchronized(lock) { keepFor.add(missionId); Unit }
+
+    /** The kept password of [missionId], once; the caller wipes it. */
+    fun takeKeptPassword(missionId: String): CharArray? = synchronized(lock) { kept.remove(missionId) }
+
     fun take(missionId: String, slot: String, currentPlace: String): Taken? = synchronized(lock) {
         val slots = held[missionId] ?: return null
         val entry = slots[slot] ?: return null
@@ -220,6 +232,10 @@ internal object SealedDelivery {
                 return null
             }
         } else entry.value
+        if (slot == "password" && missionId in keepFor) {
+            kept.remove(missionId)?.fill('\u0000')
+            kept[missionId] = value.copyOf()
+        }
         Taken(entry.leaseId, OneShotSecretLease(value))
     }
 
@@ -227,6 +243,8 @@ internal object SealedDelivery {
 
     /** A mission ended: anything unused is wiped and reported unused. */
     fun finish(missionId: String) = synchronized(lock) {
+        keepFor.remove(missionId)
+        kept.remove(missionId)?.fill('\u0000')
         held.remove(missionId)?.values?.forEach {
             it.value.fill('\u0000')
             outcomes[it.leaseId] = "unused"

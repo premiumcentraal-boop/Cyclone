@@ -90,6 +90,46 @@ below. Builds 1–3 ship through the fast lane. Each says what is UNVERIFIED on 
    - the trash expiry;
    - profile-deletion survival.
 
+### 2.1 As built (1a + 1b, not yet released)
+
+**1a (PC):**
+- `command/identities.py` stores bindings (phone, profile id and label), an origin and the trash time. It holds no
+  values.
+- Account Setup binds the new account to the profile the phone reports in `setup.profile`.
+- A bound profile missing from its phone's roster turns the identity "Not bound (was X)".
+- The trash pauses the account, and the job loop purges after 30 days. A purge removes Cyclone's account row, vault
+  items and binding only.
+- Glass:
+  - Create accounts writes the row's identity card into the vault login, encrypted, the moment the password is made;
+  - the vault shows the card with the password behind the same check;
+  - Accounts → Identities shows profile badges, Bind / Change profile, Switch phone and the trash.
+
+**1b (phone):**
+- `identity/`:
+  - `IdentityBook`, the pure core;
+  - `IdentityVault`, one AES-GCM Keystore box in Main, with its prefs classified NEVER;
+  - `IdentitySaver`, which saves an account when Account Setup reports it created.
+- **The password a created account gets:** SealedDelivery keeps a copy, in memory only, when vault_fill takes it in
+  an Account Setup run. It is wiped when the run finishes.
+- **An account created in another profile** is sealed for Main's Keystore key and handed over through
+  `ProfileBootstrapRuntime.handIdentityToMain`. These are fixed root steps, with the same cipher as a carry, bound to
+  Main and a nonce. Main's `ProfileBootstrapService` (`IDENTITY_ACTION`) takes it in.
+- **Settings → Profiles → Accounts** (in Main):
+  - filters by profile, Not bound and Trash, plus a search;
+  - **Open** uses the owner's staged switch, then `launchAppIn` opens the app;
+  - **Details** show after BiometricPrompt (strong biometric or device credential), for 30 s, with Copy password
+    (marked sensitive, cleared after 30 s);
+  - Bind / Move to profile, and Delete, Restore and Delete forever.
+- Guard: `scripts/ci/tests/test_identity_guard.py`.
+
+**Moved to Build 2** (they are syncing, which is the hive's job):
+- **Keep on <phone · profile>** from Glass;
+- edits and deletes kept in step between the PC and phones;
+- using a phone-held account inside a task while the PC is off;
+- linking the phone's copy to the PC's identity record.
+
+Until then, tasks still get passwords through sealed delivery from the PC, as before.
+
 ## 3. Build 2: the hive (every phone)
 
 - The PC's copy is the hive. Each phone syncs with it whenever it is connected: identities (sealed to that phone's

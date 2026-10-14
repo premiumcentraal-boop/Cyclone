@@ -184,6 +184,8 @@ internal fun CycloneSettingsPage426(
                 ),
                 "Profiles" to listOf(
                     Settings426Row("Profile engine", "Profiles", Icons.Rounded.Layers, "Manage"),
+                    // Plan 59: every account this phone keeps, with the profile it belongs to.
+                    Settings426Row("Accounts", "Accounts", Icons.Rounded.Person, "Saved"),
                 ),
                 "Knowledge" to listOf(
                     Settings426Row("App Maps", "App Maps", Icons.Rounded.Layers, "On device"),
@@ -404,6 +406,7 @@ internal fun CycloneSettingsPage426(
             "Profile engine" -> item { Settings426Surface { RootFeaturesCard() } }
             "App Maps" -> item { AppMapsSettingsSection(context, refreshTick) }
             "Vault" -> item { VaultSettingsPanel() }
+            "Accounts" -> item { AccountsSettingsPanel() }
             "Storage" -> item {
                 Settings426Surface {
                     Settings426InfoRow(

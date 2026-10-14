@@ -14,6 +14,9 @@ INFRASTRUCTURE_PERMISSIONS = {
     "com.cyclone.mobile.permission.CONNECTOR_HOST",
     "com.cyclone.mobile.permission.WAKE_CONNECTOR",
     "android.permission.INTERNET",
+    # Plan 59: normal install-time permission, no runtime dialog. It only lets Cyclone ask the phone's own lock
+    # (fingerprint, face or PIN) before a saved account's details show; it reads nothing.
+    "android.permission.USE_BIOMETRIC",
     "android.permission.RECEIVE_BOOT_COMPLETED",
     "android.permission.WAKE_LOCK",
     "android.permission.KILL_BACKGROUND_PROCESSES",

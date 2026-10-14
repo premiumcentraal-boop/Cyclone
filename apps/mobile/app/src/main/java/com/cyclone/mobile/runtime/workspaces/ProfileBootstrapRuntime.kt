@@ -21,6 +21,11 @@ internal object ProfileBootstrapRuntime {
     const val CARRY_ACTION = "com.cyclone.PROFILE_CARRY"
     const val HELLO_ACTION = "com.cyclone.PROFILE_HELLO"
     const val ROOT_CHECK_ACTION = "com.cyclone.PROFILE_ROOT_CHECK"
+    /** Plan 59: Main's Cyclone takes in an account another profile made (IdentitySaver). */
+    const val IDENTITY_ACTION = "com.cyclone.PROFILE_IDENTITY"
+
+    /** The associated data an identity handoff is sealed with: Main's user and this handoff's nonce. */
+    fun identityContext(target: Int, nonce: String): String = "cyclone-identity/v1/$target/$nonce"
 
     fun prepare(context: Context, target: Int, profile: String) = prepareInternal(context, target, profile, false)
 
@@ -52,6 +57,46 @@ internal object ProfileBootstrapRuntime {
                 CarryReport.fromJson(ack.getJSONObject("report"))
             } else null
         }
+    }
+
+    /**
+     * Plan 59: hands one account this profile just made to the Main profile's Cyclone, where accounts are kept (so a
+     * deleted profile can't take it along). Sealed for Main's Keystore key and bound to Main and this nonce, like a
+     * carry; the root steps are fixed and carry no account data. Only [com.cyclone.mobile.identity.IdentitySaver] calls this.
+     */
+    fun handIdentityToMain(context: Context, identity: JSONObject) {
+        require(context.packageName == PKG)
+        val source = ProfileSetupRuntime.currentUserId()
+        val target = ProfileSetupRuntime.profileAUserId()
+        require(target >= 0 && target != source)
+        check(run("/system/bin/am", "get-started-user-state", "$target").contains("RUNNING_UNLOCKED")) { "The main profile is locked." }
+        val targetUid = packageUid(target, PKG)
+        val folder = "/data/user_de/$target/$PKG/files"
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
+        val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
+        val nonce = UUID.randomUUID().toString().replace("-", "")
+        val plain = identity.toString().toByteArray(Charsets.UTF_8)
+        val sealed = try { ProfileTransferCipher.seal(publicKey, plain, identityContext(target, nonce)) } finally { plain.fill(0) }
+        val envelope = JSONObject().put("source", source).put("target", target).put("nonce", nonce).put("bundle", sealed)
+        writePrivate("$folder/identity-inbox-$nonce.json", targetUid, envelope.toString())
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE, "-a", IDENTITY_ACTION, "--es", "nonce", nonce)
+        poll(tries = 75) {
+            val ack = runCatching { JSONObject(run("/system/bin/cat", "$folder/identity-result-$nonce.json")) }.getOrNull()
+            if (ack?.optString("nonce") == nonce) { check(ack.optBoolean("ok")) { "Main's Cyclone couldn't keep the account." }; true } else null
+        }
+        runCatching { run("/system/bin/rm", "-f", "$folder/identity-result-$nonce.json") }
+    }
+
+    /**
+     * Plan 59: opens [pkg] in Android user [user] (a Cyclone profile the owner just switched to from the Accounts page).
+     * The package is checked; the launcher activity is resolved by Android, never named by a caller.
+     */
+    fun launchAppIn(user: Int, pkg: String) {
+        require(user >= 0 && com.cyclone.mobile.identity.SavedIdentity.validApp(pkg))
+        val resolved = run("/system/bin/cmd", "package", "resolve-activity", "--brief", "--user", "$user",
+            "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", pkg).lines().map { it.trim() }.lastOrNull { it.contains('/') }
+        check(resolved != null && resolved.startsWith("$pkg/") && Regex("[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+").matches(resolved)) { "That app isn't installed in the profile." }
+        run("/system/bin/am", "start", "--user", "$user", "-n", resolved)
     }
 
     fun requestRepair(context: Context) {
@@ -310,7 +355,7 @@ internal object ProfileBootstrapRuntime {
     private fun run(vararg args: String): String = execute(args.joinToString(" ", transform = ::quote))
 
     private fun writePrivate(path: String, uid: Int, data: String) {
-        require(path.matches(Regex("/data/user_de/[0-9]+/com\\.cyclone\\.mobile/files/(profile-bootstrap|carry-inbox)\\.json")))
+        require(path.matches(Regex("/data/user_de/[0-9]+/com\\.cyclone\\.mobile/files/(profile-bootstrap|carry-inbox|identity-inbox-[a-f0-9]{32})\\.json")))
         execute("umask 077; cat > ${quote(path)} && chown $uid:$uid ${quote(path)} && restorecon ${quote(path)}", data)
     }
 

@@ -83,9 +83,12 @@ data class AccountSetupProgress(
     val drift: Int? = null,
     val handle: String? = null,
     val note: String = "",
+    /** Plan 59: the Cyclone profile a created account was made in (id, label), so the PC binds it there. */
+    val profile: Pair<String, String>? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().put("state", state).put("page", page ?: JSONObject.NULL).put("pages", pages)
         .put("drift", drift ?: JSONObject.NULL).put("handle", handle ?: JSONObject.NULL).put("note", note.take(200))
+        .apply { profile?.let { (id, label) -> put("profile", JSONObject().put("id", id).put("label", label.take(40))) } }
 
     companion object {
         const val FILLING = "filling"
