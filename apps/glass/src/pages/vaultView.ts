@@ -15,6 +15,7 @@ import {
 import { parseExport, type ImportResult } from "../services/vaultImport.js";
 import { deliveryApi, leaseStateLabel, placeLabel, sealForTask, type Lease, type PendingLease, type Phone } from "../services/delivery.js";
 import { fingerprint } from "../services/hpke.js";
+import { createHiveCard } from "./hiveCard.js";
 import { fromB64 } from "../services/vault.js";
 import { copyText } from "../ui/clipboard.js";
 import { actionButton, card, chip, emptyState, errorState, loadingState } from "../ui/components.js";
@@ -317,7 +318,7 @@ export function createVaultView(ctx: GlassContext, accounts: () => CcAccount[], 
     list.append(itemsTable());
     wrap.append(bar, summary);
     if (editing) wrap.append(editor(editing === "new" ? null : editing));
-    wrap.append(list, deliveryCard(), phonesCard(), importCard(), settingsCard());
+    wrap.append(list, deliveryCard(), phonesCard(), createHiveCard(ctx, () => vk, say).element, importCard(), settingsCard());
     return wrap;
   }
 

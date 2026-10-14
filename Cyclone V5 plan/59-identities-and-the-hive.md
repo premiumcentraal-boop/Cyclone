@@ -164,6 +164,28 @@ Glass is closed. The hive has its own symmetric key instead:
 | **2d. Skills sync** | A skill becomes **verified** after its second successful run (decision above), then is pushed at once and installed on every phone. App maps and manuals stay per phone, because they depend on the app version. Memories stay local (decision 9) |
 | **2e. Rented phones** | A rented phone joins with full access. When the VMOS lease expires or the phone is released, it is removed from the hive automatically and the key is replaced. What it made was already pushed when it was made |
 
+### 3.2.1 Run 2a as built (not yet released)
+
+- **Gateway:** `command/hive.py` (`HiveStore`) keeps three tables:
+  - `hive_key`: versions, each wrapped by the vault key;
+  - `hive_member`: own or rented, and joining / member / leaving / left;
+  - `hive_envelope`: the hive key sealed to one phone, relayed by the job loop once that phone is reachable, retried
+    every 30 s, and kept 7 days.
+
+  An envelope is accepted only when it is bound to the phone's **trusted** device key, its id, the current key version,
+  and a future time. A key version may only go up by one. After a phone is removed, it gets `hive.leave`,
+  `rotationNeeded` turns on, and `needsKey` lists the members still on an older key.
+- **Routes:** `GET /v1/cc/hive`, `POST /v1/cc/hive/key`, `POST /v1/cc/hive/members/{id}/add|remove`.
+- **Phone ops:** `hive.join` and `hive.leave`, handled by `identity/HiveKeyring.kt`.
+  - The keyring opens the HPKE envelope (`cyclone-hive-key/v1`) only for this phone's device key, this join id, a
+    version no older than the one it has, and a time not yet passed.
+  - It keeps every version wrapped by its own Keystore AES key, in Main only (`cyclone_hive_v1`, NEVER carried).
+  - `hive.leave` wipes all of it.
+- **Glass:** Vault → **Hive** card, while the vault is unlocked. It has Start the hive, Add to hive and Remove from
+  hive. It replaces the key by itself after a phone leaves, and seals the current key to every member that lacks it.
+- **Guard:** `HiveGuard` in `scripts/ci/tests/test_identity_guard.py`.
+- **Physical device:** UNVERIFIED.
+
 ### 3.3 Rules that hold through every run
 
 - The PC never holds a hive value in the clear. A CI guard checks the hive tables and routes, as it does for the Vault.

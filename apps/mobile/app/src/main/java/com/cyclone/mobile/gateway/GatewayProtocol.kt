@@ -167,6 +167,9 @@ internal object GatewayProtocol {
         "cc.media",
         // Roadmap run 14: a fleet alert from the PC, shown as a plain notification (no action rides along).
         "cc.alert",
+        // Plan 59 (build 2): the hive key sealed to this phone, and leaving the hive.
+        "hive.join",
+        "hive.leave",
         // Cyclone Ports (plan 48 run 4): the PC's Port Hub collects what runs send and answers their waits.
         "ports.poll",
         "ports.blob",

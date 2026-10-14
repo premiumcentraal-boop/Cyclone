@@ -88,6 +88,8 @@ internal object GatewayV5CommandAdapter {
         "cc.key" -> key(args)
         "cc.media" -> CommandMedia.receive(args)
         "cc.alert" -> FleetAlerts.receive(app(), args)
+        "hive.join" -> hive { com.cyclone.mobile.identity.HiveKeyring.join(app(), args) }
+        "hive.leave" -> hive { com.cyclone.mobile.identity.HiveKeyring.leave(app()) }
         else -> throw GatewayProtocolException("UNKNOWN_OPERATION", "Unsupported Command Center operation: $op")
     }
 
@@ -262,6 +264,12 @@ internal object GatewayV5CommandAdapter {
     }
 
     private fun invalid(message: String) = GatewayProtocolException("INVALID_REQUEST", message)
+
+    /** Plan 59: the hive key is kept in Main; a refused envelope says only that it was refused. */
+    private fun hive(block: () -> JSONObject): JSONObject = try { block() } catch (rejected: com.cyclone.mobile.identity.HiveKeyring.Rejected) {
+        if (rejected.code == "NOT_MAIN") throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Open the Main profile: the hive key is kept there.")
+        throw GatewayProtocolException("SEALED_REJECTED", rejected.code)
+    }
 
     private fun requireOnly(args: JSONObject, allowed: Set<String>) {
         if (args.keys().asSequence().any { it !in allowed }) throw invalid("Unexpected Command Center field.")

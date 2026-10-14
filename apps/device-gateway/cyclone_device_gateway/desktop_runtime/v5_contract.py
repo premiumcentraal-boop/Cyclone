@@ -1475,7 +1475,9 @@ def _validate_connectors_list(value: dict[str, Any]) -> None:
                 raise bad("entry")
 
 
-CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert"})
+CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert", "hive.join", "hive.leave"})
+#: Plan 59 (build 2): the hive key sealed to a phone, and a phone leaving the hive.
+HIVE_JOIN_ID = re.compile(r"^hj_[A-Za-z0-9_-]{16,40}$")
 #: Roadmap run 14: a fleet alert shown as a notification on the owner's phone. Plain words only, no action.
 CC_ALERT_ID = re.compile(r"^alr_[A-Za-z0-9_-]{6,40}$")
 CC_ALERT_LEVELS = frozenset({"critical", "warning", "info"})
@@ -1520,6 +1522,14 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
             raise _bad_cc("media")
         if value["received"] > args.get("size", 0) or not _short_text(value["name"], 100, nullable=True) or not _short_text(value["folder"], 60, nullable=True):
             raise _bad_cc("media facts")
+        return
+    if op == "hive.join":
+        if set(value) != {"joined", "version"} or value["joined"] is not True or not _is_int(value["version"]) or value["version"] != args.get("version"):
+            raise _bad_cc("hive join")
+        return
+    if op == "hive.leave":
+        if set(value) != {"left"} or value["left"] is not True:
+            raise _bad_cc("hive leave")
         return
     if op == "cc.alert":
         if set(value) != {"shown"} or not isinstance(value["shown"], bool):
@@ -2290,6 +2300,20 @@ class V5ContractService:
                 or INLINE_SECRET.search(f"{title} {text}")):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "An alert is {alertId, level, title, text} in plain words.")
         return self._call(device_id, "cc.alert", {"alertId": alert_id, "level": level, "title": title.strip(), "text": text.strip()})
+
+    def hive_join(self, device_id: str, *, join_id: str, version: int, enc: str, ct: str, aad: str) -> dict[str, Any]:
+        """Plan 59: relay the hive key, sealed in the owner's browser to this phone's device key. Opaque bytes here."""
+        if (not isinstance(join_id, str) or not HIVE_JOIN_ID.match(join_id) or type(version) is not int or version < 1
+                or not isinstance(enc, str) or not _B64.match(enc) or not isinstance(ct, str) or not _B64.match(ct)
+                or not isinstance(aad, str) or len(aad) > 600):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A hive key envelope is {joinId, version, enc, ct, aad}.")
+        args = {"joinId": join_id, "version": version, "enc": enc, "ct": ct, "aad": aad}
+        reject_secret_payload({"joinId": join_id, "version": version, "aad": aad})
+        return self._call(device_id, "hive.join", args, checked=True)
+
+    def hive_leave(self, device_id: str) -> dict[str, Any]:
+        """Plan 59: this phone left the hive; it wipes its hive key."""
+        return self._call(device_id, "hive.leave", {})
 
     def cc_key(self, device_id: str) -> dict[str, Any]:
         """Plan 33 (C2): the phone's device key (public half and fingerprint) for sealed delivery."""

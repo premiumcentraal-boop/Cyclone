@@ -205,6 +205,9 @@ class CommandCenter:
         # Plan 59 (build 1): identities bound to a Cyclone profile, with a 30-day trash.
         from .identities import IdentityStore
         self.identities = IdentityStore(self)
+        # Plan 59 (build 2, run 2a): the hive's members and its key (wrapped and sealed in the browser; ciphertext only).
+        from .hive import HiveStore
+        self.hive = HiveStore(self)
         self._task_listener = None
         self._wake = threading.Event()
         self._tick_done = threading.Condition()
@@ -1030,6 +1033,7 @@ class CommandCenter:
             ready = self._ready_devices()
             self._follow_runs()
             self._dispatch(ready)
+            self.hive.sweep(set(ready))
             self.signup.sync()
             self.buttons.sync()
 

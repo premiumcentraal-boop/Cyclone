@@ -66,5 +66,35 @@ class IdentityGuard(unittest.TestCase):
         self.assertNotRegex(identities, r"\bprint\(|logging\.")
 
 
+
+class HiveGuard(unittest.TestCase):
+    """Plan 59 build 2: the PC relays the hive key and never holds it in the clear."""
+
+    def test_the_pc_has_no_way_to_open_the_hive(self):
+        hive = (GATEWAY / "command/hive.py").read_text(encoding="utf-8")
+        for word in ("cryptography", "AESGCM", "decrypt(", "private_key", "exchange("):
+            self.assertNotIn(word, hive, word)
+        schema = hive[hive.index("HIVE_SCHEMA"):hive.index('"""', hive.index("HIVE_SCHEMA") + 16)]
+        for word in ("plain", "secret", "password", "raw_key"):
+            self.assertNotIn(word, schema.lower(), word)
+        self.assertNotRegex(hive, r"\bprint\(|logging\.")
+
+    def test_the_phone_keeps_the_hive_key_in_main_and_never_carries_it(self):
+        keyring = (IDENTITY / "HiveKeyring.kt").read_text(encoding="utf-8")
+        self.assertIn("IdentityVault.isMain(context)", keyring)
+        self.assertIn('bound.optString("deviceKey") != ownFingerprint()', keyring)
+        self.assertNotRegex(keyring, r"\bLog\.[a-z]\(")
+        portable = (MOBILE / "runtime/workspaces/PortableSettings.kt").read_text(encoding="utf-8")
+        self.assertIn('never("cyclone_hive_v1"', portable)
+        for path, text in sources().items():
+            if path.startswith(("mind/", "agent/", "ai/")):
+                self.assertNotIn("HiveKeyring", text, path)
+
+    def test_the_browser_seals_the_hive_key_to_a_recomputed_fingerprint(self):
+        glass = (ROOT / "apps/glass/src/services/hive.ts").read_text(encoding="utf-8")
+        self.assertIn("(await fingerprint(publicKey)) !== phone.fingerprint", glass)
+        self.assertIn('HIVE_INFO = "cyclone-hive-key/v1"', glass)
+
+
 if __name__ == "__main__":
     unittest.main()
