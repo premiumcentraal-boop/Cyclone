@@ -43,7 +43,17 @@ internal object ProfileBootstrapRuntime {
         val folder = "/data/user_de/$target/$PKG/files"
         run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/carry-inbox.json", "$folder/carry-result.json")
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
+        val publicKey = poll(tries = 150) {
+            val key = runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull()
+            if (key == null) {
+                val failure = ProfileBootstrapAcknowledgement.parse(runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-result.json") }.getOrNull())
+                if (failure != null && failure.user == target && failure.nonce.isBlank() && !failure.ok) {
+                    recordAcknowledgement(failure, "ACK_FAILED")
+                    throw ProfileBootstrapAcknowledgement.Failed(failure)
+                }
+            }
+            key
+        }
         val nonce = UUID.randomUUID().toString()
         val plain = ProfileCarry.pack(context).toString().toByteArray(Charsets.UTF_8)
         val sealed = try { ProfileTransferCipher.seal(publicKey, plain, CarryRules.cipherContext(target, nonce)) } finally { plain.fill(0) }
@@ -204,10 +214,9 @@ internal object ProfileBootstrapRuntime {
         }
         writePrivate("$folder/profile-bootstrap.json", targetUid, payload.toString())
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        poll {
-            val ack = runCatching { JSONObject(run("/system/bin/cat", "$folder/profile-bootstrap-result.json")) }.getOrNull()
-            if (ack?.optString("nonce") == nonce && ack.optInt("user") == target && ack.optBoolean("ok")) "ready" else null
-        }
+        ProfileBootstrapAcknowledgement.await(target, nonce,
+            read = { run("/system/bin/cat", "$folder/profile-bootstrap-result.json") },
+            observe = ::recordAcknowledgement)
         // Plan 57 P1: prove root from the target's own Cyclone, whatever the root manager. When it can't be set by
         // command (KernelSU, APatch, or a Magisk grant missing), the owner is told the one step to do by hand.
         val label = runCatching { ProfileRegistryStore.records(context).firstOrNull { it.id == profile }?.label }.getOrNull() ?: "this profile"
@@ -352,6 +361,10 @@ internal object ProfileBootstrapRuntime {
     }
 
     private fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
+    private fun recordAcknowledgement(reply: ProfileBootstrapAcknowledgement.Reply?, verdict: String) {
+        runCatching { ProfileStepJournal.record("BOOTSTRAP_ACK", "collect-result", if (verdict == "ACK_COMPLETED") 0 else 1,
+            0, reply?.summary()?.toString().orEmpty(), verdict) }
+    }
     private fun run(vararg args: String): String = execute(args.joinToString(" ", transform = ::quote))
 
     private fun writePrivate(path: String, uid: Int, data: String) {
