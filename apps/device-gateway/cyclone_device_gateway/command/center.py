@@ -199,6 +199,9 @@ class CommandCenter:
         # Plan 33 §10–11 (roadmap run 14): phone health, quarantine and alerts.
         from .health import HealthStore
         self.health = HealthStore(self, **(health or {}))
+        # Roadmap run 16: routine triggers (after another routine, a secret link), approval timeouts, batch answers.
+        from .automation import AutomationStore
+        self.automation = AutomationStore(self)
         self._task_listener = None
         self._wake = threading.Event()
         self._tick_done = threading.Condition()
@@ -648,6 +651,8 @@ class CommandCenter:
         sets = ", ".join(f"{k} = ?" for k in extra)
         self._db.execute(f"UPDATE task SET status = ?, cause = ?, updated_at = ?{', ' + sets if sets else ''} WHERE id = ?",
                          (status, cause[:300], self._clock(), *extra.values(), task_id))
+        if status in ("succeeded", "failed") and hasattr(self, "automation"):
+            self.automation.task_finished(task_id, status)
         listener = getattr(self, "_task_listener", None)
         if listener is not None:
             device_id = str(extra.get("device_id") or "")
@@ -712,11 +717,13 @@ class CommandCenter:
             out["preauth"] = preauth
         return out
 
-    def _next_run(self, schedule_json: str, after_ms: int | None = None) -> int:
+    def _next_run(self, schedule_json: str, after_ms: int | None = None) -> int | None:
+        """The next time a routine runs; None for one started by a trigger."""
         schedule = json.loads(schedule_json)
         local = self._local_now()
         after = local if after_ms is None else datetime.fromtimestamp(after_ms / 1000, local.tzinfo)
-        return int(schedules.next_after(schedule, after).timestamp() * 1000)
+        due = schedules.next_after(schedule, after)
+        return None if due is None else int(due.timestamp() * 1000)
 
     def create_routine(self, body: dict[str, Any], *, actor: str = "owner") -> dict[str, Any]:
         fields = self._routine_fields(body, partial=False)
@@ -727,6 +734,10 @@ class CommandCenter:
             paused = fields.get("paused", 0)
             if fields["preauth"] and not fields["vault_item_id"]:
                 raise CommandError("Preparing runs ahead needs a vault login.")
+            schedule = json.loads(fields["schedule"])
+            if fields["preauth"] and schedules.is_trigger(schedule):
+                raise CommandError("A routine started by a trigger has no times to prepare passwords ahead for.")
+            self.automation.check_after(schedule, None)
             self._db.execute(
                 "INSERT INTO routine(id, title, goal, devices, account_id, schedule, paused, next_run_at, last_run_at, created_at, updated_at,"
                 " make, vault_item_id, preauth) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -735,7 +746,19 @@ class CommandCenter:
             self._audit(actor, "routine.create", routine_id, {"schedule": json.loads(fields["schedule"]), "vault": bool(fields["vault_item_id"]),
                                                               "preauth": fields["preauth"], "make": [st["tool"] for st in chain.plan_of(fields["make"])["steps"]] if fields["make"] else None})
             self._plan_slots(self._db.execute("SELECT * FROM routine WHERE id = ?", (routine_id,)).fetchone())
-            return self.get_routine(routine_id)
+            token = self.automation.issue_hook(routine_id) if schedule["kind"] == "webhook" else None
+            out = self.get_routine(routine_id)
+            if token:
+                out["hookToken"] = token
+            return out
+
+    def new_hook(self, routine_id: str) -> dict[str, Any]:
+        """A new secret link for a webhook routine (the old one stops working). Shown once."""
+        with self._lock:
+            routine = self.get_routine(routine_id)
+            if routine["schedule"]["kind"] != "webhook":
+                raise CommandError("Only a routine started by its link has one.")
+            return {**routine, "hookToken": self.automation.issue_hook(routine_id)}
 
     def update_routine(self, routine_id: str, body: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -747,6 +770,16 @@ class CommandCenter:
             if "goal" in fields or "make" in fields:
                 current_plan = chain.plan_of(self._db.execute("SELECT make FROM routine WHERE id = ?", (routine_id,)).fetchone()["make"])
                 self._check_goal(fields.get("goal", current["goal"]), fields["make"] if "make" in fields else (json.dumps(current_plan) if current_plan else None))
+            hook_token = None
+            if "schedule" in fields:
+                schedule = json.loads(fields["schedule"])
+                self.automation.check_after(schedule, routine_id)
+                if schedules.is_trigger(schedule) and (fields.get("preauth") or current["preauth"]):
+                    fields["preauth"] = 0
+                if schedule["kind"] == "webhook" and not self.automation.has_hook(routine_id):
+                    hook_token = self.automation.issue_hook(routine_id)
+                elif schedule["kind"] != "webhook":
+                    self.automation.drop_hook(routine_id)
             if "schedule" in fields or fields.get("paused") == 0:
                 fields["next_run_at"] = self._next_run(fields.get("schedule") or json.dumps(current["schedule"]))
             if fields:
@@ -759,13 +792,17 @@ class CommandCenter:
                 if set(fields) & {"schedule", "devices", "account_id", "vault_item_id", "preauth", "paused", "next_run_at"}:
                     self._clear_slots(routine_id, "The routine changed.")
                     self._plan_slots(self._db.execute("SELECT * FROM routine WHERE id = ?", (routine_id,)).fetchone())
-            return self.get_routine(routine_id)
+            out = self.get_routine(routine_id)
+            if hook_token:
+                out["hookToken"] = hook_token
+            return out
 
     def delete_routine(self, routine_id: str) -> dict[str, Any]:
         with self._lock:
             self.get_routine(routine_id)
             self._clear_slots(routine_id, "The routine was deleted.")
             self._db.execute("DELETE FROM routine WHERE id = ?", (routine_id,))
+            self.automation.routine_deleted(routine_id)
             self._audit("owner", "routine.delete", routine_id)
             return {"id": routine_id, "deleted": True}
 
@@ -802,7 +839,9 @@ class CommandCenter:
             "SELECT SUM(status = 'succeeded') ok, SUM(status = 'failed') bad FROM task WHERE routine_id = ?", (r["id"],)).fetchone()
         return {
             "id": r["id"], "title": r["title"], "goal": r["goal"], "deviceIds": json.loads(r["devices"]),
-            "accountId": r["account_id"], "schedule": schedule, "scheduleLabel": schedules.describe(schedule),
+            "accountId": r["account_id"], "schedule": schedule, "scheduleLabel": schedules.describe(schedule, routine_title=self._title_of(schedule)),
+            "trigger": schedule["kind"] if schedules.is_trigger(schedule) else None,
+            "hasLink": self.automation.has_hook(r["id"]) if schedule["kind"] == "webhook" else False,
             "paused": bool(r["paused"]), "nextRunAt": None if r["paused"] else r["next_run_at"], "lastRunAt": r["last_run_at"],
             "succeeded": counts["ok"] or 0, "failed": counts["bad"] or 0,
             "make": chain.public(chain.plan_of(r["make"])), "vaultItemId": r["vault_item_id"], "preauth": r["preauth"],
@@ -811,6 +850,12 @@ class CommandCenter:
                          for slot in self._db.execute("SELECT * FROM routine_slot WHERE routine_id = ? ORDER BY due_at", (r["id"],))],
         }
 
+    def _title_of(self, schedule: dict[str, Any]) -> str | None:
+        if schedule.get("kind") != "after":
+            return None
+        row = self._db.execute("SELECT title FROM routine WHERE id = ?", (schedule["routineId"],)).fetchone()
+        return row["title"] if row else None
+
     # ---------------------------------------------------------------- pre-authorised leases (C3 milestone)
 
     def _plan_slots(self, routine: sqlite3.Row) -> None:
@@ -818,13 +863,14 @@ class CommandCenter:
         Each lease is bound to its run's own task id and expires 30 minutes after the run is due; the phone accepts it
         for that task only, so it cannot be used for another run or earlier by another task."""
         devices = json.loads(routine["devices"])
-        if routine["paused"] or not routine["preauth"] or not routine["vault_item_id"] or len(devices) != 1:
+        if routine["paused"] or not routine["preauth"] or not routine["vault_item_id"] or len(devices) != 1 or routine["next_run_at"] is None:
             return
         due, times = routine["next_run_at"], []
         schedule = json.loads(routine["schedule"])
         while due is not None and len(times) < routine["preauth"]:
             times.append(due)
-            due = int(schedules.next_after(schedule, datetime.fromtimestamp(due / 1000, self._local_now().tzinfo)).timestamp() * 1000)
+            following = schedules.next_after(schedule, datetime.fromtimestamp(due / 1000, self._local_now().tzinfo))
+            due = None if following is None else int(following.timestamp() * 1000)
         now = self._clock()
         for slot in self._db.execute("SELECT * FROM routine_slot WHERE routine_id = ?", (routine["id"],)).fetchall():
             if slot["due_at"] not in times or slot["device_id"] != devices[0]:
@@ -878,7 +924,14 @@ class CommandCenter:
                 rows = self._db.execute(
                     "SELECT a.*, COALESCE(t.title, 'Connection call') AS title FROM approval a LEFT JOIN task t ON t.id = a.task_id"
                     " WHERE a.state = ? ORDER BY a.created_at", (state,)).fetchall()
-            return [self._approval_public(r) for r in rows]
+            out = []
+            for r in rows:
+                item = self._approval_public(r)
+                # Roadmap run 16: when an open approval stops waiting (the run stops; it is never approved by itself).
+                limit = self.automation.limit_of(r["kind"], r["gate"]) if r["state"] == "open" else 0
+                item["expiresAt"] = r["created_at"] + limit * 60_000 if limit else None
+                out.append(item)
+            return out
 
     @staticmethod
     def _approval_public(r: sqlite3.Row) -> dict[str, Any]:
@@ -969,6 +1022,7 @@ class CommandCenter:
         self.connections.local.sweep()
         with self._lock:
             self._fire_routines()
+            self.automation.sweep()
             ready = self._ready_devices()
             self._follow_runs()
             self._dispatch(ready)

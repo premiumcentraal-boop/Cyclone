@@ -623,6 +623,47 @@ inside the dashboard"). It is the §7 coordinator's core, in the runtime (D7); G
   It is also in the workspace sidebar and quick find.
 - **Physical device:** UNVERIFIED. These rows are in `docs/FLEET_ACCEPTANCE.md`.
 
+### 12.8 Smarter routines, as built (roadmap run 16, not yet released)
+
+- **Schedules** (`command/schedule.py`), new kinds:
+  - `monthly`: a day 1–31, or -1 for the last day. A short month runs on its last day.
+  - `nth`: the first to fourth, or last, weekday of the month, for example "First Monday of the month at 09:00".
+- **Triggers** (`command/automation.py`). A trigger never carries text to the phone: the routine's own goal runs.
+  - **`after`:** the routine runs when another routine's run succeeds, fails or finishes either way.
+    - It fires once per run of the routine before it, even when that routine runs on several phones.
+    - When it is saved, chains are checked: a routine can't follow itself and a chain is at most 5 deep.
+    - Deleting the routine at the head of the chain pauses its followers.
+  - **`webhook`:** a secret link, `POST /v1/hooks/{token}`.
+    - The token is 256-bit and shown once; only its hash is kept. "New link" replaces it.
+    - The link fires at most once a minute, and the request body is never read.
+    - It is the second route without the gateway bearer. The CI guard names it, and the agent MCP servers may not
+      call it.
+  - Routines started by a trigger have no times, so they can't seal passwords ahead.
+  - **Not built:** triggers on a phone notification or an email. They need the phone's notification listener and a
+    mail connection.
+- **Approval timeouts:** a limit per kind (`GET/PUT /v1/cc/approvals/timeouts`).
+  - Defaults: 1 hour for send, pay, delete, post and publish; 24 hours for other approvals, questions, details and
+    connection calls. 0 means no limit.
+  - When the limit passes, the run is **stopped without approving**:
+    - the approval is marked `expired`;
+    - the phone gets `cc.answer stop` through Task Kit;
+    - the task ends `cancelled` with the reason, so it isn't counted as a failure.
+
+    A connection call that waited too long is declined. Open approvals show `expiresAt`.
+  - Plan §6 said "pauses". A stop frees the phone and the account lock, and nothing is lost: the routine runs again
+    next time.
+- **Batch answers** (`POST /v1/cc/approvals/batch`):
+  - 2 to 10 approvals, all of the same kind and gate (or the same connection tool), each approvable here and fully
+    shown.
+  - Each one is still answered on its own, for its own request id. One the phone refuses stays open.
+  - Glass shows "Approve all N", which asks once more before it acts.
+- **Glass:**
+  - the routine form has Monthly (a day, or a weekday of the month), After a routine, and From a link;
+  - the link is shown once, in the notice;
+  - routine rows show "When called" or "After its routine", and a webhook routine has a New link button;
+  - the Approvals tab adds the batch bar and a "How long approvals wait" card.
+- **Physical device:** UNVERIFIED.
+
 ## 13. Open decisions for the owner
 
 1. **Pre-authorised routine leases** (routines log in while you're away), yes or no? Yes is convenient; no means every

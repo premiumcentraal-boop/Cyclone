@@ -18,6 +18,9 @@ import {
   twofaLabel,
   type CcAccount,
   type CcApproval,
+  batchKey,
+  hookUrl,
+  TIMEOUT_KINDS,
   type CcOverview,
   type CcResult,
   type CcRoutine,
@@ -204,6 +207,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
   let connectionsView: ConnectionsView | null = null;
   let numbersView: NumbersView | null = null;
   let healthView: HealthView | null = null;
+  let timeoutsBox: HTMLElement | null = null;
   let accountsBrowser: AccountsView | null = null;
   const accountsHost = el("div", "ac-all");
 
@@ -254,7 +258,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       setChildren(body, errorState("The Command Center is not reachable", error, () => void load()));
       return;
     }
-    if (tab === "approvals") setChildren(body, approvalsView());
+    if (tab === "approvals") setChildren(body, approvalsView(), (timeoutsBox ??= timeoutsCard()));
     else if (tab === "tasks") setChildren(body, tasksView());
     else if (tab === "routines") setChildren(body, routinesView());
     else if (tab === "results") setChildren(body, resultsView());
@@ -276,8 +280,61 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       return emptyState({ icon: "bell", title: "Nothing needs you", body: "When a phone asks a question or wants your approval, it shows up here and on the phone." });
     }
     const wrap = el("div", "cc-approvals");
+    // Roadmap run 16: "Approve all N" for approvals of one kind, each fully shown below and answered for its own request.
+    const groups = new Map<string, CcApproval[]>();
+    for (const a of data.approvals) {
+      const key = batchKey(a);
+      if (key) groups.set(key, [...(groups.get(key) ?? []), a]);
+    }
+    for (const [key, items] of groups) {
+      if (items.length < 2) continue;
+      const spend = key.startsWith("spend:");
+      const label = spend ? `${items.length} calls to ${items[0].spend?.tool ?? "a connection"}` : `${items.length} ${items[0].gate ?? "approval"} approvals`;
+      const bar = card("cc-approval cc-batch");
+      const approve = actionButton(`Approve all ${items.length}`, { variant: "primary" });
+      approve.addEventListener("click", () => {
+        if (approve.dataset.confirm !== "1") {
+          approve.dataset.confirm = "1";
+          approve.replaceChildren(el("span", "btn-label", `Yes, approve these ${items.length} as shown below`));
+          return;
+        }
+        void act("Approving all", async () => {
+          const out = await command.answerBatch(ctx.client, items.map((i) => i.id), "approve");
+          const missed = (out?.answered ?? []).filter((r) => !r.handled).length;
+          if (missed) throw new Error(`${missed} of ${items.length} weren't taken by the phone; they stay here.`);
+        });
+      });
+      const decline = actionButton(`Decline all ${items.length}`, { variant: "ghost" });
+      decline.addEventListener("click", () => void act("Declining all", () => command.answerBatch(ctx.client, items.map((i) => i.id), "decline")));
+      const row = el("div", "cc-actions");
+      row.append(approve, decline);
+      bar.append(el("strong", undefined, label), el("p", "cc-hint", "Read each one below first: every one is approved exactly as it is shown."), row);
+      wrap.append(bar);
+    }
     for (const approval of data.approvals) wrap.append(approvalCard(approval));
     return wrap;
+  }
+
+  /** Roadmap run 16: how long each kind of approval waits before its run stops (it is never approved by itself). */
+  function timeoutsCard(): HTMLElement {
+    const box = card("cc-card cc-timeouts");
+    box.append(el("h3", "card-title", "How long approvals wait"),
+      el("p", "cc-hint", "When nobody answers in time, the run stops without approving. It never goes ahead by itself."));
+    const grid = el("div", "cc-grid");
+    box.append(grid);
+    const choices: Array<[string, string]> = [["0", "No limit"], ["15", "15 minutes"], ["60", "1 hour"], ["240", "4 hours"], ["1440", "1 day"], ["4320", "3 days"], ["10080", "7 days"]];
+    void command.timeouts(ctx.client).then((limits) => {
+      for (const [k, label] of TIMEOUT_KINDS) {
+        const pick = el("select", "cc-input");
+        pick.setAttribute("aria-label", label);
+        const current = String(limits[k]);
+        for (const [v, text] of choices.some(([v]) => v === current) ? choices : [...choices, [current, `${current} minutes`] as [string, string]]) pick.append(option(v, text));
+        pick.value = current;
+        pick.addEventListener("change", () => void act("Saved", () => command.setTimeouts(ctx.client, { [k]: Number(pick.value) })));
+        grid.append(labelled(label, pick));
+      }
+    }).catch((err: Error) => box.append(el("p", "cc-hint", err.message || "The limits couldn't be read.")));
+    return box;
   }
 
   function approvalCard(a: CcApproval): HTMLElement {
@@ -554,7 +611,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       return input;
     });
     if (!devices.length) phones.append(el("span", "muted", "No phone connected: the routine runs on any ready phone."));
-    let kind: Schedule["kind"] = "daily";
+    let kind: "daily" | "every" | "monthly" | "after" | "webhook" = "daily";
     const when = el("div", "cc-when");
     const time = el("input", "cc-input");
     time.type = "time";
@@ -574,13 +631,44 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     minutes.min = "15";
     minutes.value = "60";
     minutes.setAttribute("aria-label", "Minutes");
+    // Roadmap run 16: a day of the month, the first..last weekday of the month, after another routine, or a link.
+    const select = (label: string, items: Array<[string, string]>, value: string): HTMLSelectElement => {
+      const node = el("select", "cc-input");
+      node.setAttribute("aria-label", label);
+      for (const [v, text] of items) node.append(option(v, text));
+      node.value = value;
+      return node;
+    };
+    const monthPattern = select("Which day", [["day", "A day of the month"], ["nth", "A weekday of the month"]], "day");
+    const monthDay = select("Day of the month", [...Array.from({ length: 31 }, (_, i) => [String(i + 1), String(i + 1)] as [string, string]), ["-1", "The last day"]], "1");
+    const nth = select("Which one", [["1", "First"], ["2", "Second"], ["3", "Third"], ["4", "Fourth"], ["-1", "Last"]], "1");
+    const weekday = select("Weekday", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((d, i) => [String(i + 1), d] as [string, string]), "1");
+    const follows = select("After routine", data.routines.map((r) => [r.id, r.title] as [string, string]), data.routines[0]?.id ?? "");
+    const on = select("When it", [["succeeded", "succeeds"], ["failed", "fails"], ["finished", "finishes either way"]], "succeeded");
+    monthPattern.addEventListener("change", () => drawWhen());
     const drawWhen = () => {
       const dayRow = el("div", "cc-checks");
       dayRow.append(...days.map((d) => d.label));
       if (kind === "daily") setChildren(when, labelled("Time", time), dayRow);
-      else setChildren(when, labelled("Every (minutes, 15 or more)", minutes));
+      else if (kind === "monthly") {
+        setChildren(when, labelled("On", monthPattern),
+          ...(monthPattern.value === "day" ? [labelled("Day", monthDay)] : [labelled("Which", nth), labelled("Weekday", weekday)]),
+          labelled("Time", time));
+      } else if (kind === "after") {
+        // The routines list may have loaded after the form was made: offer the current ones, keeping the pick.
+        const picked = follows.value;
+        follows.replaceChildren(...data.routines.map((r) => option(r.id, r.title)));
+        if (data.routines.some((r) => r.id === picked)) follows.value = picked;
+        setChildren(when, data.routines.length
+          ? group(labelled("After", follows), labelled("When it", on))
+          : el("p", "cc-hint", "Make the routine to follow first; this one then runs each time that one ends."));
+      } else if (kind === "webhook") {
+        setChildren(when, el("p", "cc-hint", "Cyclone makes a secret link for this routine. Calling it (a POST from a program on this PC) runs "
+          + "the routine's own goal; nothing sent to the link reaches the phone. The link is shown once, at most once a minute."));
+      } else setChildren(when, labelled("Every (minutes, 15 or more)", minutes));
     };
-    const kinds = segmented<Schedule["kind"]>([{ id: "daily", label: "At a time" }, { id: "every", label: "Every few minutes" }], kind, (id) => {
+    const kinds = segmented<"daily" | "every" | "monthly" | "after" | "webhook">([{ id: "daily", label: "At a time" }, { id: "every", label: "Every few minutes" },
+      { id: "monthly", label: "Monthly" }, { id: "after", label: "After a routine" }, { id: "webhook", label: "From a link" }], "daily", (id) => {
       kind = id;
       kinds.set(id);
       drawWhen();
@@ -620,10 +708,16 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       }
       if (!name || (!text && maker.then() !== "keep")) return say("A routine needs a title and a goal.", "error");
       if (looksSecret(text)) return say("Leave passwords and codes out. The phone asks for them.", "error");
+      const at = String(time.value || "09:00");
       const schedule: Schedule = kind === "daily"
-        ? { kind: "daily", time: String(time.value || "09:00"), days: days.filter((d) => d.input.checked).map((d) => Number(d.input.value)) }
-        : { kind: "every", minutes: Math.round(Number(minutes.value)) };
+        ? { kind: "daily", time: at, days: days.filter((d) => d.input.checked).map((d) => Number(d.input.value)) }
+        : kind === "monthly"
+          ? (monthPattern.value === "day" ? { kind: "monthly", time: at, day: Number(monthDay.value) }
+            : { kind: "nth", time: at, weekday: Number(weekday.value), nth: Number(nth.value) })
+          : kind === "after" ? { kind: "after", routineId: follows.value, on: on.value as "succeeded" | "failed" | "finished" }
+            : kind === "webhook" ? { kind: "webhook" } : { kind: "every", minutes: Math.round(Number(minutes.value)) };
       if (schedule.kind === "daily" && !schedule.days.length) return say("Pick at least one day.", "error");
+      if (schedule.kind === "after" && !schedule.routineId) return say("Pick the routine this one runs after.", "error");
       const body: Record<string, unknown> = {
         title: name, goal: text || (plan ? planTitle(plan) : ""), schedule, deviceIds: boxes.filter((b) => b.checked).map((b) => String(b.value)),
       };
@@ -632,9 +726,13 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       if (vaultPick.value) {
         if ((body.deviceIds as string[]).length !== 1) return say("A routine that signs in with the vault runs on one chosen phone.", "error");
         body.vaultItemId = vaultPick.value;
-        body.preauth = Number(ahead.value);
+        body.preauth = kind === "after" || kind === "webhook" ? 0 : Number(ahead.value);
       }
-      void act("Creating the routine", () => command.saveRoutine(ctx.client, body)).then((ok) => {
+      let made: CcRoutine | null = null;
+      void act("Creating the routine", async () => {
+        made = await command.saveRoutine(ctx.client, body);
+      }).then((ok) => {
+        if (ok && made?.hookToken) showLink(made.title, made.hookToken);
         if (ok) {
           goal.value = "";
           title.input.value = "";
@@ -648,6 +746,11 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
     box.append(grid, el("p", "cc-hint", "Sealed ahead, each run's password opens only on its phone, for that run, until 30 minutes after it is due. The vault must be unlocked in Glass once to seal them."),
       maker.element, labelled("Goal", goal), labelled("Phones (one task each; none = any ready phone)", phones), labelled("When", group(kinds.element, when)), actions);
     return box;
+  }
+
+  /** A webhook routine's link, shown once in the notice line (it is never shown again; make a new one to see one). */
+  function showLink(title: string, token: string): void {
+    say(`${title}: its link is ${hookUrl(ctx.client.baseUrl || globalThis.location?.origin || "", token)} — copy it now; it is shown only once.`);
   }
 
   function routinesView(): HTMLElement {
@@ -671,6 +774,18 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       const remove = actionButton("Delete", { variant: "ghost" });
       remove.addEventListener("click", () => void act("Deleting", () => command.deleteRoutine(ctx.client, r.id)));
       actions.append(run, pause, remove);
+      if (r.trigger === "webhook") {
+        const link = actionButton("New link", { variant: "ghost" });
+        link.addEventListener("click", () => {
+          let made: CcRoutine | null = null;
+          void act("Making a new link", async () => {
+            made = await command.newLink(ctx.client, r.id);
+          }).then((ok) => {
+            if (ok && made?.hookToken) showLink(r.title, made.hookToken);
+          });
+        });
+        actions.append(link);
+      }
       const row = el("tr");
       row.setAttribute("data-mgr-target", `routine:${r.id}`);
       row.append(
@@ -679,7 +794,8 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
         cell(r.scheduleLabel),
         cell(r.deviceIds.length ? r.deviceIds.map((d) => deviceName(d)).join(", ") : "Any ready phone"),
         cell(accountName(r.accountId)),
-        r.paused ? chipCell("Paused", "neutral") : cell(r.nextRunAt ? new Date(r.nextRunAt).toLocaleString() : "—"),
+        r.paused ? chipCell("Paused", "neutral") : r.trigger ? chipCell(r.trigger === "webhook" ? "When called" : "After its routine", "accent")
+          : cell(r.nextRunAt ? new Date(r.nextRunAt).toLocaleString() : "—"),
         cell(`${r.succeeded} done · ${r.failed} failed`),
         actions,
       );

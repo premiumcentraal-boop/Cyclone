@@ -110,6 +110,20 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def update_routine(routine_id: str, body: dict[str, Any]):
         return call(lambda: cc().update_routine(routine_id, body_of(body)))
 
+    # Roadmap run 16: a webhook routine's secret link, made again (the old one stops working). Shown once.
+    @router.post("/v1/cc/routines/{routine_id}/link", dependencies=[Depends(auth)])
+    def routine_link(routine_id: str):
+        return call(lambda: cc().new_hook(routine_id))
+
+    # Roadmap run 16: a webhook routine's secret link. The link is its own credential (only its hash is kept); the
+    # request body is never read, so a caller can start the routine's own goal and nothing else.
+    @router.post("/v1/hooks/{token}")
+    def routine_hook(token: str):
+        try:
+            return cc().automation.fire_hook(token)
+        except CommandError as exc:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": str(exc)}) from exc
+
     @router.post("/v1/cc/routines/{routine_id}/run", dependencies=[Depends(auth)])
     def run_routine(routine_id: str):
         return call(lambda: cc().run_routine_now(routine_id))
@@ -123,8 +137,21 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
         return call(lambda: {"results": cc().results(limit)})
 
     @router.get("/v1/cc/approvals", dependencies=[Depends(auth)])
-    def approvals(state: str = Query(default="open", pattern=r"^(open|answered|withdrawn|all)$")):
+    def approvals(state: str = Query(default="open", pattern=r"^(open|answered|withdrawn|expired|all)$")):
         return call(lambda: {"approvals": cc().list_approvals(state=state)})
+
+    # Roadmap run 16: "Approve all 3" for approvals of one kind, each still answered for its own request id.
+    @router.post("/v1/cc/approvals/batch", dependencies=[Depends(auth)])
+    def approvals_batch(body: dict[str, Any]):
+        return call(lambda: cc().automation.answer_batch(body_of(body)))
+
+    @router.get("/v1/cc/approvals/timeouts", dependencies=[Depends(auth)])
+    def approval_timeouts():
+        return call(lambda: {"timeouts": cc().automation.timeouts()})
+
+    @router.put("/v1/cc/approvals/timeouts", dependencies=[Depends(auth)])
+    def approval_timeouts_set(body: dict[str, Any]):
+        return call(lambda: {"timeouts": cc().automation.set_timeouts(body_of(body))})
 
     @router.post("/v1/cc/approvals/{approval_id}/answer", dependencies=[Depends(auth)])
     def answer(approval_id: str, body: dict[str, Any]):
