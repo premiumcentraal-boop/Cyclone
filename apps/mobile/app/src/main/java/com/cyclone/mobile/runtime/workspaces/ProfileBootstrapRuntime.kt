@@ -236,7 +236,8 @@ internal object ProfileBootstrapRuntime {
         run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/profile-bootstrap-result.json", "$folder/profile-bootstrap.json")
         mirrorGrants(context, target)
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
+        // The receiver was cold-started immediately before this wait; allow the established 30-second budget.
+        val publicKey = poll(tries = 150) { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
         val nonce = UUID.randomUUID().toString()
         val preferences = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).all
         val ai = JSONObject()
@@ -418,7 +419,7 @@ internal object ProfileBootstrapRuntime {
 
     private fun execute(command: String, input: String? = null, keepOutput: Boolean = true): String {
         val startedAt = System.currentTimeMillis()
-        val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
+        val process = ProcessBuilder("su", "--mount-master", "-c", command).redirectErrorStream(true).start()
         val output = StringBuilder()
         val reader = Thread {
             runCatching { process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line ->
