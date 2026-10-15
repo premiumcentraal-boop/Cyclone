@@ -85,6 +85,11 @@ object GlassLight {
 @Composable
 fun FollowPhoneLight() {
     val context = LocalContext.current
+    // Alpha.134: Lite keeps the light still (no gravity sensor, no glass clock, no redraw while the phone moves).
+    if (com.cyclone.mobile.ui.overlay.OverlayLite.active) {
+        DisposableEffect(Unit) { GlassLight.rest(); onDispose { } }
+        return
+    }
     DisposableEffect(Unit) {
         val still = runCatching {
             Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
@@ -214,7 +219,8 @@ fun Modifier.tiltGlass(
     val band = min(30.dp.toPx(), h * 0.46f)
     val xs = ArrayList<Float>(); val ys = ArrayList<Float>(); val falls = ArrayList<Float>()
     val rooms = ArrayList<Float>()
-    if (dots && w > 0f && h > 0f) {
+    // Alpha.134: Lite draws no halftone dots (thousands of points re-evaluated on every light change).
+    if (dots && !com.cyclone.mobile.ui.overlay.OverlayLite.active && w > 0f && h > 0f) {
         // The dots sit in rows that follow the panel's own outline: each row is the continuous outline set in a
         // little further, sampled at even steps along its length. Straight edges get straight rows, and in the
         // corners every row bends with the curve, so the corners fill evenly instead of breaking a grid apart.

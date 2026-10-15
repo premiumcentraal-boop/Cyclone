@@ -8,6 +8,7 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -43,15 +44,17 @@ object OverlayMotion {
     fun swap(): ContentTransform = ContentTransform(
         fadeIn(tween(SWAP_IN_MS)), fadeOut(tween(SWAP_OUT_MS, delayMillis = SWAP_IN_MS - SWAP_OUT_MS / 2)),
         targetContentZIndex = 1f,
-        sizeTransform = SizeTransform(clip = false) { _, _ -> size },
+        // Alpha.134: in Lite the size snaps, so the overlay's window resizes once instead of on every frame of the
+        // swap; the crossfade (drawn, no layout) stays.
+        sizeTransform = SizeTransform(clip = false) { _, _ -> if (OverlayLite.active) snap() else size },
     )
 
     internal const val SWAP_IN_MS = 160
     internal const val SWAP_OUT_MS = 120
 
-    /** A part of a card unfolding below what is already there. */
-    fun unfold(): EnterTransition = fadeIn(fade) + expandVertically(size, expandFrom = Alignment.Top)
+    /** A part of a card unfolding below what is already there. Lite fades it in at its full size (no per-frame resize). */
+    fun unfold(): EnterTransition = if (OverlayLite.active) fadeIn(fade) else fadeIn(fade) + expandVertically(size, expandFrom = Alignment.Top)
 
     /** And folding back up. */
-    fun fold(): ExitTransition = fadeOut(fade) + shrinkVertically(size, shrinkTowards = Alignment.Top)
+    fun fold(): ExitTransition = if (OverlayLite.active) fadeOut(fade) else fadeOut(fade) + shrinkVertically(size, shrinkTowards = Alignment.Top)
 }

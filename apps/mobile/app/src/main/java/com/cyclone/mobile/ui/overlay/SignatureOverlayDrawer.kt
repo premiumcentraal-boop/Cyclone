@@ -99,7 +99,9 @@ internal fun SignatureOverlayDrawer(
             }
         }
         scope.launch {
-            animate(reveal, target, animationSpec = OverlayMotion.float) { value, _ ->
+            // Alpha.134: Lite opens and folds the upper card at once (one window resize, not one per frame).
+            if (OverlayLite.active) reveal = target.coerceIn(0f, 1f)
+            else animate(reveal, target, animationSpec = OverlayMotion.float) { value, _ ->
                 reveal = value.coerceIn(0f, 1f)
             }
             after()

@@ -8,9 +8,13 @@ consistent smoothly feeling overlay for the lite version."
 not: it has one look for every phone. This plan gives the overlay a Lite mode, and a new engine underneath that Full
 can reuse later.
 
-**Status.** Design only. Nothing below is built. All numbers are estimates from reading the alpha.133 code and from
-Android's own documentation and source (cited in §8). Step L0 measures them on the owner's phone before anything else
-changes.
+**Status.**
+- **Built in alpha.134:** L1 (the constant work, both modes) and L2 (the Lite skin). See §9.
+- **Deferred:** L3, the one-window stage, after the constraints review in §9. The window structure stays as it is.
+- **Not yet built:** L0 (measuring) and L4 (R8 and the Baseline Profile).
+
+All numbers are estimates from reading the alpha.133 code and from Android's own documentation and source (cited in
+§8).
 
 ---
 
@@ -319,3 +323,85 @@ These are estimates. Each row says how it was reached. L0 measures the real valu
 - NN/g response-time limits: <https://www.nngroup.com/articles/response-times-3-important-limits/>
 - RAIL: <https://web.dev/articles/rail>
 - R8 case studies on the Android Developers Blog (Reddit, Monzo).
+
+
+---
+
+## 9. Constraints review and what alpha.134 builds (2026-10-15)
+
+The owner asked to make sure the new overlay doesn't undo two earlier decisions:
+- the agent must never have part of its screen hidden by the overlay;
+- the Glass live view must keep its black-bar fix.
+
+The full review traced every rule the overlay's windows encode.
+
+### 9.1 The rules the overlay must keep
+
+| Rule | Why (history) | Where enforced |
+|---|---|---|
+| **Every Cyclone window is `TYPE_ACCESSIBILITY_OVERLAY` (type 4).** | The agent's reads drop Cyclone's windows by type, never by size or flags: the window list, sibling collection, foreground root, observation events, the capture-boundary signature, background-display reads, TouchFirst's "covered" check and target revalidation. So nothing in the agent's view counts the overlay as covering the app, at any size. AOSP also keeps type 4 out of interactive-region math, and treats type 4 as a trusted overlay that sets no obscured flags on host touches. | `CycloneAccessibilityService.kt:308, 509-521, 554`; `TaskSurfaceWindows.kt`; `agent/SemanticCaptureBoundary.kt:27`; `gesture/TouchFirst.kt:80-86`; `agent/tools/CurrentTargetRevalidation.kt:57`; `docs/OBSERVATION_CONTRACT.md:36-38`; tests `SemanticCaptureBoundaryTest`, `TaskSurfaceWindowsTest`, `TouchFirstTest` |
+| **Only the Secrets card is `FLAG_SECURE`** (plus the small share pill). | Android draws a secure window **black over its whole bounds** in capture. Before alpha.30 the full-width Ask window was secure, and the Glass USB mirror blacked out most of the phone. Since alpha.30 the ordinary Ask and task surface mirrors normally. A full-screen secure layer would also black out every display screenshot the agent takes. | `ai/OverlayChromeController.kt:138-148`; `docs/RELEASE_5.0.0-alpha.30.dev1.md:12-13`; `docs/design/CYCLONE_TRACE_FIELD.md:37-42`; tests `OverlayChromeWindowPolicyTest`, `TraceFieldPolicyTest` |
+| **The agent's screenshots exclude the overlay where Android allows it.** | Window capture of the host app (`takeScreenshotOfWindow`) leaves Cyclone out. The Trace Field is hidden before any full-display capture. | `ai/vision/live/LiveVisionRuntime.kt:134, 186-189`; `CycloneAccessibilityService.kt:1083-1093` |
+| **Strokes that land on the glass hide it** (alpha.131/133). | Android delivers injected gestures to touchable type-4 windows even with `FLAG_NOT_TOUCHABLE` (4.8.0). So hiding is decided from the window's real bounds. | `OverlayGesturePassthrough.kt`, `refreshRegions`, `HumanGestureDispatch` |
+| **Human touches pass through outside the panel.** | The owner keeps using their app while a task runs (4.0.1). | `OverlayAskBarPolicyTest` |
+| **A host action leaves the overlay without focus** (alpha.133 step back). | A focused Ask window can make a permission dialog unreadable, and steals Back. | `PhoneToolExecutor.kt:1210-1214`; `CycloneAccessibilityService.kt:287-288` |
+
+### 9.2 Why the one-window stage (§2.1, L3) is deferred
+
+- **It would hide on almost every swipe.** Stroke-hiding is decided from the window's bounds. A stage covering about
+  55% of the screen would hide for nearly every agent swipe, and the alpha.133 blinking comes back.
+  - Reporting only the drawn card instead needs `setTouchableRegion` to also stop **injected** strokes on the
+    transparent part. That has never been tested on a device, and if it doesn't hold, the agent's taps land on
+    Cyclone.
+- **It would black out the Glass view again.** The Secrets card inside a large stage would make the whole stage black
+  in the Glass mirror and in every display screenshot: the alpha.30 problem.
+- **Taken together:** the stage needs a device test before it can ship.
+  - Most of the gains in §3 (frames, GPU, notifications, per-action waits) don't depend on it.
+  - The per-frame window resizing it was meant to remove is removed in Lite another way: sizes snap.
+
+### 9.3 What alpha.134 builds
+
+**Both modes (Full keeps its full look):**
+- **Notifications:** the task notification is rebuilt only when what it shows changes, and at most about once a second
+  while only the words move (`NotificationPacer`). A new state, which changes the buttons, posts at once. The channel
+  is created once.
+- **Renders:** a change that changes nothing (the model's "Thinking" tick about once a second, a repeated status) costs
+  no layout pass (`OverlayChromeRuntime.mutate`). Only one blur sync waits at a time.
+- **Always-on frame sources are gone:**
+  - the screen-switch symbol sweeps only while switching, and is read while drawing;
+  - the Stop ring asks for frames only while a press is held or the first tap is armed;
+  - the island ring turns only while working;
+  - the progress light slides only when the fraction is unknown.
+- **Per action:** a window call only when a window's params really change. The step back on a window that is already
+  not focusable costs nothing. The 2-frame commit wait runs only when entering a yield that changed a window; coming
+  back never waits. The voice windows keep their own rules.
+- **Keyboard tracker:** 80 ms only while Cyclone has focus (the owner typing), 500 ms otherwise. It checks at once
+  when focus arrives.
+
+**Lite only** (Visual quality → Lite, or Auto on the slower phones it already picks Lite for):
+- no cross-window blur, including the tools sheet's full-screen blur;
+- no halftone dots, tilt light, gravity sensor or glass clock;
+- no full-screen Trace Field;
+- still spinners and rings;
+- sizes that snap (swaps, folds, the upper drawer, background glass);
+- the keyboard lift in one step.
+
+The windows, their types, flags, sizes and capture rules are **unchanged**, and the guard
+`scripts/ci/tests/test_overlay_speed_guard.py` pins that.
+
+### 9.4 Expected gain (estimates)
+
+- **Full:**
+  - About 2 fewer sources asking for every frame during a Mind task (the Stop loop and the plane sweep).
+  - No more recomposition every frame from the plane symbol.
+  - No layout pass for "Thinking" ticks.
+  - Notification rebuilds cut from about 2 per update to at most about 1 per second.
+  - The look is identical.
+- **Per action:** a window that is already not focusable (idle, background glass) pays no window call and no commit
+  wait. The expanded card pays one wait instead of two (about 33 ms saved per action at 60 Hz).
+- **Lite**, on top of the Full gains:
+  - no blur passes, so the GPU composition forced by blur is gone;
+  - no full-screen shader;
+  - no per-frame window resizes during transitions;
+  - nothing redraws while the card just sits there working, apart from real updates.
+  - That is the bulk of the §3 table, without changing a window.

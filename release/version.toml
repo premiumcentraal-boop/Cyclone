@@ -1,17 +1,15 @@
-# Cyclone V5 alpha.133 dev1: fleet health and alerts (run 14), smarter routines (run 16), saved accounts bound to a
-# Cyclone profile with a 30-day trash (plan 59 build 1), and the hive: joining, accounts sync and phones logging in
-# with their own saved accounts behind a confirmation card (plan 59 runs 2a-2c).
-# On the published alpha.132 dev1 (profile bootstrap fixes from alpha.130-132), whose fixes are merged in.
-# These features were meant for alpha.130, then alpha.131, but another session published those numbers first. The owner asked for this
-# release on 2026-10-14 ("Go"). Physical acceptance remains UNVERIFIED.
+# Cyclone V5 alpha.134 dev1: a faster overlay (plan 60). Both modes lose the overlay's constant work (notifications
+# paced, no-op renders skipped, no always-on frame loops, fewer window calls and commit waits per action); Visual
+# quality Lite also drops blur, dots, tilt light, the full-screen Trace Field and per-frame resizes. Windows, types,
+# flags and capture rules are unchanged. Phone only: PC components stay alpha.133. Physical acceptance UNVERIFIED.
 schema = 1
-product_version = "5.0.0-alpha.133.dev1"
+product_version = "5.0.0-alpha.134.dev1"
 channel = "development"
-android_version_code = 287
+android_version_code = 288
 python_version = "5.0.0-alpha.133.dev1"
 
 [components]
-mobile = "5.0.0-alpha.133.dev1"
+mobile = "5.0.0-alpha.134.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -21,11 +19,11 @@ device_gateway = "5.0.0-alpha.133.dev1"
 mcp = "5.0.0-alpha.133.dev1"
 
 [release]
-previous_mobile_version = "5.0.0-alpha.132.dev1"
+previous_mobile_version = "5.0.0-alpha.133.dev1"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha133-health-routines-accounts-hive-overlay"
+candidate_generation = "cyclone-v5-alpha134-fast-overlay"

@@ -294,16 +294,21 @@ internal fun OverlayRequestAction(
     val pauseAction by rememberUpdatedState(onPauseOrResume)
     val stopAction by rememberUpdatedState(onStop)
     var progress by remember(taskKey, working) { mutableFloatStateOf(0f) }
-    LaunchedEffect(gesture) {
-        while (working) {
+    // Alpha.134: the ring asks for frames only while a press is held or the first tap is armed. Before, this loop
+    // asked for every frame for the whole task, keeping the screen at its highest refresh rate.
+    var touches by remember(taskKey, working) { mutableIntStateOf(0) }
+    LaunchedEffect(gesture, touches) {
+        while (working && gesture.live(android.os.SystemClock.uptimeMillis())) {
             withFrameNanos { progress = gesture.progress(android.os.SystemClock.uptimeMillis()) }
         }
+        progress = 0f
     }
     fun accessibleTap() {
         val now = android.os.SystemClock.uptimeMillis()
         if (gesture.armed(now)) { gesture.reset(); stopAction() }
         else if (pauseState) { gesture.reset(); pauseAction() }
         else { gesture.press(now); gesture.release(now); pauseAction() }
+        touches++
     }
     val action = if (working) Modifier
         .pointerInput(gesture) {
@@ -312,6 +317,7 @@ internal fun OverlayRequestAction(
                     val wasPaused = pauseState
                     val wasArmed = gesture.armed(android.os.SystemClock.uptimeMillis())
                     gesture.press(android.os.SystemClock.uptimeMillis())
+                    touches++
                     if (!wasPaused) pauseAction()
                     val hold = launch {
                         delay(ComposerStopGesture.HOLD_MS)
@@ -327,7 +333,7 @@ internal fun OverlayRequestAction(
                                 else -> Unit
                             }
                         } else gesture.cancel()
-                    } finally { hold.cancel() }
+                    } finally { hold.cancel(); touches++ }
                 }
             })
         }
