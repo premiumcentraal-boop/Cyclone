@@ -921,9 +921,13 @@ object OverlayChromeRuntime {
 
     private fun mutate(block: (OverlayChromeMachine) -> Unit) {
         synchronized(lock) {
+            val before = machine.snapshot()
             block(machine)
             mutableActivity.value = machine.state()
-            controller?.render(machine.snapshot())
+            val after = machine.snapshot()
+            // Alpha.134: a change that changed nothing (the model's "Thinking" tick about once a second, the same
+            // status again) costs no layout pass. Other causes still re-render with render(latest).
+            if (after != before) controller?.render(after)
         }
     }
 

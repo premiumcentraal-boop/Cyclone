@@ -149,7 +149,12 @@ class HumanGestureSemanticSafetyContractTest {
         assertTrue("OverlayGesturePassthrough.active()" in applyLayout)
         // Alpha.131: GONE only while a stroke lands on Cyclone's glass; a host action otherwise only steps back.
         assertTrue("OverlayGesturePassthrough.hidden()" in applyLayout)
-        assertTrue("!hideHost && !driverIdle" in applyLayout)
+        // Alpha.134: what the owner sees never hides for a stroke. The drawn card never takes a touch; only the empty
+        // idle hotspot and the card's empty touch layer step aside.
+        assertTrue("val visible = shown && !(hideHost && compact)" in applyLayout)
+        assertTrue("OverlayChromeWindowPolicy.drawn(spec)" in applyLayout)
+        assertTrue("OverlayTouchForward.shown(visible, compact, strokeOnGlass = hideHost" in applyLayout)
+        assertTrue("shown &&" in slice(applyLayout, "haloRoot?.let", "haloParams?.let"))
         assertTrue("View.GONE" in applyLayout)
         assertTrue("IMPORTANT_FOR_ACCESSIBILITY_NO" in applyLayout)
         assertTrue("hostGestureYielded" in applyLayout)

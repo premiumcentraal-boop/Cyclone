@@ -177,12 +177,14 @@ internal fun PlaneSymbol(look: PlanePillLook) {
         PlanePillLook.WAITING -> 0.5f
         else -> 0f
     }
-    val settled by animateFloatAsState(target, tween(320, easing = FastOutSlowInEasing), label = "Plane light")
-    val moving = rememberInfiniteTransition(label = "Plane switching")
-    val sweep by moving.animateFloat(0f, 1f, infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse), label = "Plane sweep")
-    val light = if (look == PlanePillLook.SWITCHING) sweep else settled
+    val settled = animateFloatAsState(target, tween(320, easing = FastOutSlowInEasing), label = "Plane light")
+    // Alpha.134: the sweep runs only while the run is really moving between screens, and it is read when drawing, so
+    // it costs one redraw a frame instead of a recomposition a frame for every Mind task.
+    val sweep = if (look == PlanePillLook.SWITCHING) rememberInfiniteTransition(label = "Plane switching")
+        .animateFloat(0f, 1f, infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse), label = "Plane sweep") else null
     val dim = if (look == PlanePillLook.UNAVAILABLE) .38f else 1f
     Canvas(Modifier.size(width = 26.dp, height = 22.dp)) {
+        val light = sweep?.value ?: settled.value
         val w = size.width * .62f
         val h = size.height * .72f
         val back = Offset(size.width - w, 0f)

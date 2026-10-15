@@ -45,6 +45,8 @@ object GlassBlur {
     private var allowed = false
     private var thermal = 0
     private var failed = false
+    /** Alpha.134: the owner's Visual quality is Lite (the overlay keeps its smoke, never blur). */
+    private var lite = false
     private var started = false
     private var blurListener: java.util.function.Consumer<Boolean>? = null
     private var heatListener: PowerManager.OnThermalStatusChangedListener? = null
@@ -90,7 +92,10 @@ object GlassBlur {
     /** A blur window could not open: stay with smoke for this session. */
     fun failed() { failed = true; update() }
 
-    private fun update() { _on.value = decide(Build.VERSION.SDK_INT, allowed, thermal, failed) }
+    /** Visual quality Lite: smoke only. */
+    fun lite(on: Boolean) { lite = on; update() }
+
+    private fun update() { _on.value = decide(Build.VERSION.SDK_INT, allowed, thermal, failed) && !lite }
 }
 
 /** One panel that wants the app behind it blurred: where it is (window pixels) and its corner radius (px). */

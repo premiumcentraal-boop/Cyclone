@@ -99,7 +99,8 @@ private fun BackgroundTaskRibbon(task: WorkspaceTaskUi, onAsk: () -> Unit) {
 private fun HumanTakeoverRibbon(task: WorkspaceTaskUi) {
     val context = LocalContext.current
     val snapshot = TaskPresentationProjector.project(task)
-    CycloneSignatureCard(modifier = Modifier.fillMaxWidth().animateContentSize()) {
+    // Alpha.134: Lite snaps to the new size (one resize); Full eases it.
+    CycloneSignatureCard(modifier = Modifier.fillMaxWidth().then(if (OverlayLite.active) Modifier else Modifier.animateContentSize())) {
         Row(
             Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,

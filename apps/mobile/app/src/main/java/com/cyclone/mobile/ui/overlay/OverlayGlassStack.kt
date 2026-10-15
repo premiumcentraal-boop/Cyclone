@@ -192,10 +192,11 @@ internal fun PlaneRow(taskId: String, modifier: Modifier = Modifier) {
 
 @Composable
 internal fun GlassSpinner(size: Int = 14, color: Color = GlassTeal) {
-    val motion = rememberInfiniteTransition(label = "Spinner")
-    val turn by motion.animateFloat(0f, 360f, infiniteRepeatable(tween(1_600, easing = LinearEasing)), label = "Turn")
+    // Alpha.134: Lite draws the dashed ring still (the "working" chip says it); Full turns it.
+    val turn = if (!OverlayLite.active) rememberInfiniteTransition(label = "Spinner")
+        .animateFloat(0f, 360f, infiniteRepeatable(tween(1_600, easing = LinearEasing)), label = "Turn") else null
     Canvas(Modifier.size(size.dp)) {
-        rotate(turn) {
+        rotate(turn?.value ?: 0f) {
             drawCircle(color, radius = this.size.minDimension / 2f - 1.dp.toPx(),
                 style = Stroke(2.dp.toPx(), cap = StrokeCap.Round,
                     pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(1f, 3.4.dp.toPx()))))
@@ -223,12 +224,15 @@ private fun StatusChip(state: CycloneTaskVisualState) {
 /** A thin progress line with a soft glow at its end; without a known fraction a short light slides along it. */
 @Composable
 internal fun GlassProgress(fraction: Float?, modifier: Modifier = Modifier, height: Int = 3) {
-    val motion = rememberInfiniteTransition(label = "Progress")
-    val slide by motion.animateFloat(0f, 1f, infiniteRepeatable(tween(1_400, easing = LinearEasing)), label = "Slide")
+    // Alpha.134: the sliding light runs only when the fraction is unknown; a known fraction is a still line.
+    val slide = if (fraction == null && !OverlayLite.active) rememberInfiniteTransition(label = "Progress")
+        .animateFloat(0f, 1f, infiniteRepeatable(tween(1_400, easing = LinearEasing)), label = "Slide") else null
     Canvas(modifier.fillMaxWidth().height(height.dp)) {
         val r = CornerRadius(size.height / 2f)
         drawRoundRect(Color.White.copy(alpha = 0.10f), cornerRadius = r)
-        val (start, end) = if (fraction != null) 0f to fraction.coerceIn(0.02f, 1f) else (slide * 1.3f - 0.3f).coerceAtLeast(0f) to (slide * 1.3f).coerceAtMost(1f)
+        // Lite with no known fraction: a still light at the line's middle.
+        val at = slide?.value ?: if (fraction == null) 0.55f else 0f
+        val (start, end) = if (fraction != null) 0f to fraction.coerceIn(0.02f, 1f) else (at * 1.3f - 0.3f).coerceAtLeast(0f) to (at * 1.3f).coerceAtMost(1f)
         if (end <= start) return@Canvas
         drawRoundRect(
             Brush.horizontalGradient(listOf(GlassTeal.copy(alpha = 0.35f), GlassTeal), startX = size.width * start, endX = size.width * end),
@@ -659,12 +663,14 @@ internal fun WorkIsland(
 
 @Composable
 private fun RingedLogo(appPackage: String?, working: Boolean) {
-    val motion = rememberInfiniteTransition(label = "Island ring")
-    val turn by motion.animateFloat(0f, 360f, infiniteRepeatable(tween(1_400, easing = LinearEasing)), label = "Ring")
+    // Alpha.134: the ring turns (and asks for frames) only while the task works.
+    val turn = if (working && !OverlayLite.active) rememberInfiniteTransition(label = "Island ring")
+        .animateFloat(0f, 360f, infiniteRepeatable(tween(1_400, easing = LinearEasing)), label = "Ring") else null
     Box(Modifier.size(42.dp).drawBehind {
         if (!working) return@drawBehind
+        val angle = turn?.value ?: 0f
         val stroke = 2.dp.toPx()
-        rotate(turn) {
+        rotate(angle) {
             drawArc(Brush.sweepGradient(listOf(GlassTeal.copy(alpha = 0f), GlassTeal.copy(alpha = 0.35f), GlassTeal)),
                 startAngle = 0f, sweepAngle = 150f, useCenter = false, style = Stroke(stroke, cap = StrokeCap.Round),
                 topLeft = Offset(stroke / 2, stroke / 2), size = Size(size.width - stroke, size.height - stroke))

@@ -131,11 +131,15 @@ object TraceFieldRuntime {
         }
     }
 
+    /** Visual quality changed (alpha.134): the field follows it. Main thread. */
+    fun refresh() { appContext?.let(::applySettings) }
+
+
     private fun applySettings(context: Context) {
         val field = view ?: return
         val powerSave = context.getSystemService(PowerManager::class.java)?.isPowerSaveMode == true
         val chosen = TraceFieldPrefs.mode(context)
-        field.mode = if (powerSave && chosen == TraceFieldMode.FIELD) TraceFieldMode.EDGE else chosen
+        field.mode = TraceFieldPolicy.resolveMode(chosen, powerSave, com.cyclone.mobile.ui.overlay.OverlayLite.active)
         field.style = TraceFieldPrefs.style(context)
         field.reduceMotion = runCatching {
             Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f

@@ -147,6 +147,16 @@ internal object OverlayChromeWindowPolicy {
         return flags
     }
 
+    /**
+     * Alpha.134: the drawn card never takes a touch, so the agent's strokes always land on the app under it, with no
+     * flag that has to change in time. The owner's touch reaches the card through its [touchLayerFlags] window.
+     */
+    fun drawn(spec: OverlayWindowContract): OverlayWindowContract = spec.copy(notTouchable = true)
+
+    /** The empty window over the card that takes the owner's touch: never focus, never the touches around it. */
+    fun touchLayerFlags(): Int = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+
     fun withHostGesturePassthrough(flags: Int): Int =
         flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
 
@@ -188,7 +198,7 @@ class OverlayChromeController(
     private fun lockScreenBlocked() = OverlayLockScreenPolicy.blocked(screenOff, keyguard.isKeyguardLocked, power.isInteractive)
     private fun hideLockedWindows(): Boolean {
         if (!lockScreenBlocked()) return false
-        val attached = listOfNotNull(root, haloRoot, shareRoot, sheetRoot)
+        val attached = listOfNotNull(root, haloRoot, shareRoot, sheetRoot, touchLayer)
         if (attached.any { it.visibility == View.VISIBLE }) { speechRecognizer?.cancel(); voiceSession = false }
         attached.forEach { it.visibility = View.GONE }
         blurWindows.sync(emptyList(), 0, 0, visible = false)
@@ -270,6 +280,11 @@ class OverlayChromeController(
     private var shareRoot: ComposeView? = null
     private var haloRoot: ComposeView? = null
     private var haloParams: WindowManager.LayoutParams? = null
+    /** Alpha.134: the empty window over the card that takes the owner's touch (the card itself never does). */
+    private var touchLayer: com.cyclone.mobile.ui.overlay.OverlayTouchLayer? = null
+    private var touchParams: WindowManager.LayoutParams? = null
+    /** The last layout wanted the touch layer up; it comes up once the card is laid out. */
+    private var touchWanted = false
     private var sheetRoot: android.widget.FrameLayout? = null
     private var sheetCompose: ComposeView? = null
     private var sheetParams: WindowManager.LayoutParams? = null
@@ -285,6 +300,9 @@ class OverlayChromeController(
     /** A recognition session is running; a second start must not restart it (a restart ends it with an error). */
     private var voiceSession = false
     private var voiceSessionAt = 0L
+    /** The last layout pass changed a window's params or visibility (alpha.134): only then must a yield wait. */
+    private var windowsTouched = false
+
     /** The main window has been on screen at least once since it was added (alpha.131). */
     private var rootAttachedOnce = false
 
@@ -292,6 +310,7 @@ class OverlayChromeController(
     @Volatile private var hostGestureYielded = 0
 
     fun show(snapshot: OverlayChromeSnapshot) {
+        runCatching { com.cyclone.mobile.ui.v32.ask.VisualQuality.load(service) }
         onMain {
             latest = snapshot
             watchLockScreen()
@@ -323,6 +342,10 @@ class OverlayChromeController(
                 setViewTreeViewModelStoreOwner(lifecycle)
                 setViewTreeSavedStateRegistryOwner(lifecycle)
                 setContent {
+                    // Alpha.134 (plan 60): the overlay follows the owner's Visual quality; Lite drops the per-frame work.
+                    val quality by com.cyclone.mobile.ui.v32.ask.VisualQuality.resolved.collectAsState()
+                    val lite = quality == com.cyclone.mobile.ui.v32.ask.GlassQuality.LITE
+                    LaunchedEffect(lite) { com.cyclone.mobile.ui.overlay.OverlayLite.set(lite) }
                     val blurOn by com.cyclone.mobile.ui.overlay.glass.GlassBlur.on.collectAsState()
                     // Each panel fades its own smoke with its blur (rememberBlurPanel); here the windows follow the switch.
                     LaunchedEffect(blurOn) { syncBlur() }
@@ -376,8 +399,27 @@ class OverlayChromeController(
             try {
                 addWindow(halo, haloLayout)
                 addWindow(view, layout)
+                // Above the card: the owner's touch goes in here and on to the card.
+                val touch = com.cyclone.mobile.ui.overlay.OverlayTouchLayer(service) { root }.apply {
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    visibility = View.GONE
+                    // The background glass is never focused, so screen readers reach its one action here.
+                    setOnClickListener { if (glass()) onAction(OverlayUserAction.ASK_CYCLONE) }
+                }
+                val touchLayout = WindowManager.LayoutParams(
+                    1, 1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    OverlayChromeWindowPolicy.touchLayerFlags(), PixelFormat.TRANSPARENT,
+                ).apply {
+                    gravity = layout.gravity
+                    softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+                    fitInsetsTypes = 0
+                    title = "Cyclone touch"
+                }
+                touchLayer = touch
+                touchParams = touchLayout
+                addWindow(touch, touchLayout)
                 trackIme(view)
-                view.viewTreeObserver.addOnGlobalLayoutListener { if (root === view) refreshRegions() }
+                view.viewTreeObserver.addOnGlobalLayoutListener { if (root === view) { refreshRegions(); syncTouchLayer() } }
                 view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                     override fun onViewAttachedToWindow(v: View) { if (root === view) rootAttachedOnce = true }
                     override fun onViewDetachedFromWindow(v: View) = Unit
@@ -434,7 +476,7 @@ class OverlayChromeController(
                 return@onMain
             }
             if (!isCompact(snapshot)) resetIdleActivation()
-            applyLayout(snapshot)
+            applyLayout(snapshot, lockChecked = true)
         }
     }
 
@@ -444,6 +486,7 @@ class OverlayChromeController(
             if (lockReceiverRegistered) service.unregisterReceiver(lockReceiver)
             lockReceiverRegistered = false
             main.removeCallbacksAndMessages(null)
+            blurSyncPending = false
             latest = OverlayChromeSnapshot(idleChipVisible = false)
             backgroundTask = null
             windows.clear()
@@ -462,6 +505,9 @@ class OverlayChromeController(
             params = null
             haloRoot = null
             haloParams = null
+            touchLayer = null
+            touchParams = null
+            touchWanted = false
             hostGestureYielded = 0
             rootAttachedOnce = false
             resetIdleActivation()
@@ -493,6 +539,7 @@ class OverlayChromeController(
                 if (root !== view || !view.isAttachedToWindow) { animator.cancel(); return@addUpdateListener }
                 layout.y = animator.animatedValue as Int
                 runCatching { wm.updateViewLayout(view, layout) }
+                syncTouchLayer()
             }
             start()
         }
@@ -524,10 +571,14 @@ class OverlayChromeController(
         }
     }
 
-    private fun applyLayout(snapshot: OverlayChromeSnapshot) {
-        if (hideLockedWindows()) return
+    /** One blur sync waits at a time (alpha.134): every layout used to post its own. */
+    private var blurSyncPending = false
+    private val blurSync = Runnable { blurSyncPending = false; syncBlur() }
+
+    private fun applyLayout(snapshot: OverlayChromeSnapshot, lockChecked: Boolean = false) {
+        if (!lockChecked && hideLockedWindows()) return
         // The window may move or hide below; the blur follows once it has.
-        main.postDelayed(::syncBlur, 32)
+        if (!blurSyncPending) { blurSyncPending = true; main.postDelayed(blurSync, 32) }
         // Alpha.131: a host action only steps back (no touch, no focus, out of the accessibility tree; still on
         // screen). The windows go GONE only while a stroke lands on Cyclone's own glass.
         val yieldHost = OverlayGesturePassthrough.active()
@@ -545,9 +596,11 @@ class OverlayChromeController(
         // Driver mode (plan 32): the AI button replaces the idle bubble; everything else (task, cards) stays.
         val driverIdle = com.cyclone.mobile.voice.DriverMode.settings.value.enabled && compact && !minimizedComposer &&
             (snapshot.state == OverlayChromeState.IDLE || snapshot.launcherCollapsed) && !glass()
-        val visible = (secretVisible || !compact || snapshot.idleChipVisible || glass()) &&
-            !OverlayExternalInteraction.active.value &&
-            !hideHost && !driverIdle
+        val shown = (secretVisible || !compact || snapshot.idleChipVisible || glass()) &&
+            !OverlayExternalInteraction.active.value && !driverIdle
+        // Alpha.134: a stroke on Cyclone's glass never hides what the owner sees. The drawn card never takes a touch
+        // (only its empty touch layer steps aside); in idle the window is the empty hotspot and its halo stays.
+        val visible = shown && !(hideHost && compact)
 
         view.importantForAccessibility =
             if (yieldHost) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -571,12 +624,13 @@ class OverlayChromeController(
         val fromY = layout.y
         val changed = applyWindowContract(
             layout,
-            spec,
+            if (compact) spec else OverlayChromeWindowPolicy.drawn(spec),
             followKeyboard = secretVisible || (!compact && !glass()),
         )
         // A new height above the keyboard glides there with the keyboard instead of jumping (the window moves by y).
         val targetY = layout.y
-        if (wasShown && visible && targetY != fromY) {
+        // Alpha.134: Lite moves the card above the keyboard in one step (one window call instead of one per frame).
+        if (wasShown && visible && targetY != fromY && !com.cyclone.mobile.ui.overlay.OverlayLite.active) {
             layout.y = liftAnimator?.let { (it.animatedValue as? Int) } ?: fromY
             glideTo(view, layout, targetY)
         } else {
@@ -585,14 +639,19 @@ class OverlayChromeController(
             liftTarget = null
         }
         val yieldState = if (hideHost) 2 else if (yieldHost) 1 else 0
-        if (changed || yieldState != hostGestureYielded) {
+        // Alpha.134: a window call only when its params really changed (flags are part of them). A step back on a
+        // window that is already not focusable, the idle ball or background glass, costs no IPC at all.
+        if (changed) {
             runCatching { wm.updateViewLayout(view, layout) }
         }
+        // Hiding for a stroke (or coming back) flips every window's visibility, the halo, pill and sheet too.
+        windowsTouched = changed || wasShown != (view.visibility == View.VISIBLE) || (yieldState == 2) != (hostGestureYielded == 2)
 
         haloRoot?.let { halo ->
             halo.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            // The halo never takes a touch: it stays on screen through a stroke, only its hotspot steps aside.
             halo.visibility = if (
-                visible &&
+                shown &&
                 !secretVisible &&
                 (snapshot.state == OverlayChromeState.IDLE || snapshot.launcherCollapsed) &&
                 !glass() &&
@@ -601,12 +660,47 @@ class OverlayChromeController(
         }
         haloParams?.let { hp ->
             val haloChanged = applyWindowContract(hp, OverlayChromeWindowPolicy.halo, followKeyboard = false)
-            if (haloChanged || yieldState != hostGestureYielded) {
+            if (haloChanged) {
                 haloRoot?.let { halo -> runCatching { wm.updateViewLayout(halo, hp) } }
+                windowsTouched = true
             }
         }
         hostGestureYielded = yieldState
+        touchWanted = com.cyclone.mobile.ui.overlay.OverlayTouchForward.shown(visible, compact, strokeOnGlass = hideHost, laidOut = true)
+        touchLayer?.let { touch ->
+            // Screen readers see the card itself while it has focus; the never-focused background glass speaks here.
+            touch.importantForAccessibility = if (glass() && !yieldHost) View.IMPORTANT_FOR_ACCESSIBILITY_YES else View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            touch.contentDescription = if (glass()) "Cyclone task. Open Cyclone" else null
+        }
+        syncTouchLayer()
         refreshRegions()
+    }
+
+    /**
+     * Alpha.134: the touch layer covers exactly the card (same gravity, offset and laid-out size). It comes up once the
+     * card is laid out and leaves only for a stroke on the glass, which is invisible: it draws nothing.
+     */
+    private fun syncTouchLayer() {
+        val touch = touchLayer ?: return
+        val tp = touchParams ?: return
+        val view = root ?: return
+        val layout = params ?: return
+        val laidOut = view.isAttachedToWindow && view.visibility == View.VISIBLE && view.width > 0 && view.height > 0
+        val on = touchWanted && laidOut
+        if (on) {
+            var changed = false
+            if (tp.width != view.width) { tp.width = view.width; changed = true }
+            if (tp.height != view.height) { tp.height = view.height; changed = true }
+            if (tp.gravity != layout.gravity) { tp.gravity = layout.gravity; changed = true }
+            if (tp.x != layout.x) { tp.x = layout.x; changed = true }
+            if (tp.y != layout.y) { tp.y = layout.y; changed = true }
+            if (changed && touch.isAttachedToWindow) runCatching { wm.updateViewLayout(touch, tp) }
+        }
+        val next = if (on) View.VISIBLE else View.GONE
+        if (touch.visibility != next) {
+            touch.visibility = next
+            windowsTouched = true
+        }
     }
 
     /** Alpha.131: where Cyclone's windows are on screen, kept for a stroke deciding whether to hide them. */
@@ -614,7 +708,8 @@ class OverlayChromeController(
 
     private fun refreshRegions() {
         val margin = dp(8)
-        onScreen = listOfNotNull(root, haloRoot, shareRoot, sheetRoot).filter { it.isAttachedToWindow && it.visibility == View.VISIBLE && it.width > 0 }
+        // The halo never takes a touch, so a stroke near it needs nothing from Cyclone (its hotspot is the root).
+        onScreen = listOfNotNull(root, shareRoot, sheetRoot).filter { it.isAttachedToWindow && it.visibility == View.VISIBLE && it.width > 0 }
             .map { v ->
                 val at = IntArray(2).also(v::getLocationOnScreen)
                 intArrayOf(at[0] - margin, at[1] - margin, at[0] + v.width + margin, at[1] + v.height + margin)
@@ -639,7 +734,8 @@ class OverlayChromeController(
         }
         sheetLastPage = page
         if (sheetRoot != null || root == null || lockScreenBlocked()) return
-        val blurAvailable = runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false)
+        // Alpha.134: Lite opens the tools sheet without the full-screen blur (and its per-frame radius updates).
+        val blurAvailable = runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false) && !com.cyclone.mobile.ui.overlay.OverlayLite.active
         val maxBlurPx = com.cyclone.mobile.ui.overlay.OverlayToolsSheetPhysics.BLUR_DP * service.resources.displayMetrics.density
         val content = ComposeView(service).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -858,10 +954,15 @@ class OverlayChromeController(
                         applyLayout(latest)
                     }
                 }
-                main.postDelayed(this, 80L)
+                // Alpha.134: the tracker only needs to be quick while Cyclone has the keyboard (the owner is typing).
+                main.postDelayed(this, if (view.hasWindowFocus()) 80L else 500L)
             }
         }
         main.post(keyboardTracker)
+        // Gaining focus (the owner tapped the Ask field) checks the keyboard at once instead of on the slow beat.
+        view.viewTreeObserver.addOnWindowFocusChangeListener { focused ->
+            if (focused && root === view) { main.removeCallbacks(keyboardTracker); main.post(keyboardTracker) }
+        }
     }
 
     private fun widthFor(spec: OverlayWindowContract): Int =
@@ -890,11 +991,15 @@ class OverlayChromeController(
      */
     fun syncHostGesturePassthrough() {
         val latch = CountDownLatch(1)
+        // Alpha.134: only a yield that changed a window waits for Android to commit it. Coming back never waits (the
+        // next action doesn't depend on Cyclone's card being back), and a step back that changed nothing costs nothing.
+        val entering = OverlayGesturePassthrough.active()
         val task = Runnable {
             try {
+                windowsTouched = false
                 if (root != null) applyLayout(latest)
                 val attached = sequenceOf(root, haloRoot, shareRoot).firstOrNull { it?.isAttachedToWindow == true }
-                if (attached != null) {
+                if (attached != null && entering && windowsTouched) {
                     Choreographer.getInstance().postFrameCallback {
                         Choreographer.getInstance().postFrameCallback { latch.countDown() }
                     }
@@ -907,6 +1012,10 @@ class OverlayChromeController(
         }
         if (Looper.myLooper() == Looper.getMainLooper()) {
             task.run()
+            return
+        }
+        if (!entering) {
+            main.post(task)
             return
         }
         if (!main.post(task)) {

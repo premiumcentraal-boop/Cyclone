@@ -8,6 +8,16 @@ import com.cyclone.mobile.ui.overlay.OverlayChromeState
 enum class TracePresence { NONE, RUNNING, GATE, HANDOFF, DONE, BACKGROUND }
 
 object TraceFieldPolicy {
+    /**
+     * Alpha.134: the mode the field draws in. Battery Saver keeps the field to the edge. Lite has no full-screen field
+     * at all: it was a full-screen shader every frame of every task (plan 60).
+     */
+    fun resolveMode(chosen: TraceFieldMode, powerSave: Boolean, lite: Boolean): TraceFieldMode = when {
+        lite -> TraceFieldMode.OFF
+        powerSave && chosen == TraceFieldMode.FIELD -> TraceFieldMode.EDGE
+        else -> chosen
+    }
+
     fun presence(foreground: Boolean?, phase: TaskPhase?, chrome: OverlayChromeState): TracePresence {
         if (chrome == OverlayChromeState.GATE) return TracePresence.GATE
         if (chrome == OverlayChromeState.DONE) return TracePresence.DONE

@@ -26,5 +26,7 @@ internal class ComposerStopGesture {
     }
     fun cancel() { pressedAt = null }
     fun reset() { pressedAt = null; armedAt = null; stopped = false }
+    /** A press is held or the first tap is armed: the ring is moving and needs frames (alpha.134). */
+    fun live(now: Long): Boolean = pressedAt != null || armed(now)
     companion object { const val HOLD_MS = 2_000L; const val TAP_RETRACT_MS = 3_000L }
 }

@@ -9,10 +9,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * - **Step back** ([withHostFocus]): the windows stay visible but take no focus, and leave the
  *   accessibility tree, so the host keeps focus, Back reaches it and its tree reads clean. Every host action and its
  *   result settling runs like this.
- * - **Hide** ([withHostPassthrough], [withHostStroke]): GONE + not important. TYPE_ACCESSIBILITY_OVERLAY still
- *   receives injected gestures when it is visible, even with FLAG_NOT_TOUCHABLE, so a stroke that lands on Cyclone's
- *   glass needs the windows out of the hit tree. Only for that stroke, and only when it touches the overlay's
- *   bounds ([overlaps]); a stroke elsewhere on the screen only steps back.
+ * - **Hide** ([withHostPassthrough], [withHostStroke]): GONE + not important, only for that stroke, and only when it
+ *   touches the overlay's bounds ([overlaps]); a stroke elsewhere on the screen only steps back. 4.8.0 found strokes
+ *   landing on Cyclone because its windows were touchable and turned untouchable just before the stroke, which a busy
+ *   main thread could miss. Alpha.134: what hides now draws nothing. The card is drawn in a window that never takes a
+ *   touch (like the Trace Field and the halo, which strokes have always passed), and only its empty touch layer and
+ *   the empty idle hotspot step aside, so the owner never sees a blink.
  *
  * Overlay buttons still never click host nodes. While stepped back the glass still takes the owner's touch (Stop works);
  * it is unusable only for a stroke on it, and just after (the echo window).
@@ -69,6 +71,23 @@ object OverlayGesturePassthrough {
     const val INJECTED_ECHO_MS = 700L
 
     /**
+     * Alpha.134, the built-in check: a touch that reaches Cyclone's touch layer while it should have stepped aside is
+     * the agent's own stroke arriving before Android applied the step. It is dropped (never a Cyclone button) and
+     * counted, so a phone that behaves differently shows up as a number, not a guess.
+     */
+    private val strays = AtomicInteger(0)
+
+    fun stray(): Int = strays.incrementAndGet()
+
+    fun strayCount(): Int = strays.get()
+
+    @Volatile private var straysAtHide = 0
+    @Volatile private var strayed = false
+
+    /** Whether a touch reached the touch layer during the last stroke on the glass; reading it clears it. */
+    fun consumeStrayed(): Boolean = strayed.also { strayed = false }
+
+    /**
      * Alpha.78: Cyclone's other windows (Drive's voice panel and button) yield to an injected gesture too, so a swipe or
      * tap Cyclone makes lands on the app, never on its own glass. A follower returns once its windows let touches through.
      */
@@ -101,7 +120,7 @@ object OverlayGesturePassthrough {
         val hiding = hide && hideDepth.getAndIncrement() == 0
         if (entered || hiding) {
             enabled = true
-            if (hiding) hidden = true
+            if (hiding) { hidden = true; straysAtHide = strays.get(); strayed = false }
             applyFlags?.invoke(true)
             // Drive's voice windows have no step back of their own: they leave only for a stroke that lands on glass.
             if (hiding) followers.forEach { runCatching { it(true) } }
@@ -116,6 +135,7 @@ object OverlayGesturePassthrough {
                 // Stop works while Cyclone acts elsewhere on the screen.
                 if (unhide) {
                     hidden = false
+                    strayed = strays.get() != straysAtHide
                     lastEndedAtMs = System.nanoTime() / 1_000_000
                 }
                 if (left) enabled = false
@@ -131,6 +151,9 @@ object OverlayGesturePassthrough {
         hideDepth.set(0)
         hidden = false
         regionProviders.clear()
+        strays.set(0)
+        straysAtHide = 0
+        strayed = false
         enabled = false
         applyFlags = null
         followers.clear()
