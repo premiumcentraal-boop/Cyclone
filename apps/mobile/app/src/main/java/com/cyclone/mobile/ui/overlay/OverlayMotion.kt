@@ -33,16 +33,21 @@ object OverlayMotion {
     private val fade: FiniteAnimationSpec<Float> = spring(DAMPING, STIFFNESS)
 
     /**
-     * One surface handing over to another in the same place (Ask bar and island, composer and gate): the old one fades
-     * out quickly before the new one fades in, so their words never overlap, while the size rides the one spring.
+     * One surface handing over to another in the same place (Ask bar and island, composer and gate), while the size
+     * rides the one spring.
+     *
+     * Alpha.131: the new surface (drawn on top) fades in first and the old one stays solid until the new one is nearly
+     * there, then fades out. So the glass is never see-through mid-swap. The old order (out first, then in) left a
+     * near-empty frame the owner saw as a flicker on every tab or mode switch.
      */
     fun swap(): ContentTransform = ContentTransform(
-        fadeIn(tween(SWAP_IN_MS, delayMillis = SWAP_OUT_MS / 2)), fadeOut(tween(SWAP_OUT_MS)),
+        fadeIn(tween(SWAP_IN_MS)), fadeOut(tween(SWAP_OUT_MS, delayMillis = SWAP_IN_MS - SWAP_OUT_MS / 2)),
+        targetContentZIndex = 1f,
         sizeTransform = SizeTransform(clip = false) { _, _ -> size },
     )
 
-    private const val SWAP_OUT_MS = 90
-    private const val SWAP_IN_MS = 200
+    internal const val SWAP_IN_MS = 160
+    internal const val SWAP_OUT_MS = 120
 
     /** A part of a card unfolding below what is already there. */
     fun unfold(): EnterTransition = fadeIn(fade) + expandVertically(size, expandFrom = Alignment.Top)

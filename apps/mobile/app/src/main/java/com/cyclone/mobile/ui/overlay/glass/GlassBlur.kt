@@ -106,6 +106,12 @@ data class BlurRegion(val bounds: Rect, val cornerRadiusPx: Float)
 class BlurHost(
     private val slots: Int,
     private val schedule: (delayMs: Long, block: () -> Unit) -> Unit,
+    /**
+     * Alpha.131: a change no edge of which moves further than this (px) is a resize in place, not a move. The blur
+     * follows it at once instead of stepping aside, so a work card that gains or loses a line of text doesn't pulse
+     * dark and light on every step. 0 keeps the old rule (every change steps aside).
+     */
+    private val smallChangePx: Float = 0f,
     private val onChanged: () -> Unit,
 ) {
     private val order = ArrayList<Any>()
@@ -115,10 +121,21 @@ class BlurHost(
     private var blurred by mutableStateOf<Set<Any>>(emptySet())
 
     fun place(key: Any, region: BlurRegion) {
-        if (regions[key] == region) return
+        val before = regions[key]
+        if (before == region) return
         if (key !in order) order += key
         regions[key] = region
+        if (before != null && key !in moving && small(before, region)) {
+            onChanged()
+            return
+        }
         moved(key)
+    }
+
+    private fun small(a: BlurRegion, b: BlurRegion): Boolean {
+        if (smallChangePx <= 0f || a.cornerRadiusPx != b.cornerRadiusPx) return false
+        val edges = listOf(a.bounds.left - b.bounds.left, a.bounds.top - b.bounds.top, a.bounds.right - b.bounds.right, a.bounds.bottom - b.bounds.bottom)
+        return edges.all { kotlin.math.abs(it) <= smallChangePx }
     }
 
     fun remove(key: Any) {
@@ -164,6 +181,8 @@ class BlurHost(
     companion object {
         /** How long a panel stays still before its blur returns. */
         const val SETTLE_MS = 160L
+        /** A resize up to about two lines of card text is followed in place. */
+        const val SMALL_CHANGE_DP = 48f
     }
 }
 

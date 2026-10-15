@@ -55,4 +55,23 @@ class GlassBlurTest {
         host.jolt()
         assertEquals(listOf(null, null), host.shown())
     }
+
+    @Test fun aCardThatGainsALineKeepsItsBlurButARealMoveStepsAside() {
+        val later = ArrayList<() -> Unit>()
+        val host = BlurHost(slots = 2, schedule = { _, block -> later += block }, smallChangePx = 48f) {}
+        val card = Any()
+        host.place(card, BlurRegion(Rect(0f, 100f, 400f, 200f), 24f))
+        later.removeAt(0).invoke()
+        assertTrue(host.isBlurred(card))
+        // The status text wraps to a second line: the card is 40 px taller. The blur follows at once, no pulse.
+        host.place(card, BlurRegion(Rect(0f, 60f, 400f, 200f), 24f))
+        assertTrue(host.isBlurred(card))
+        assertEquals(Rect(0f, 60f, 400f, 200f), host.shown().single()!!.bounds)
+        assertTrue("nothing waits to settle", later.isEmpty())
+        // The card slides up out of the way: that is a move, so the blur steps aside until it settles.
+        host.place(card, BlurRegion(Rect(0f, -300f, 400f, -160f), 24f))
+        assertFalse(host.isBlurred(card))
+        later.removeAt(0).invoke()
+        assertTrue(host.isBlurred(card))
+    }
 }

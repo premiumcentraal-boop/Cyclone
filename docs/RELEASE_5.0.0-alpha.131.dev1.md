@@ -128,6 +128,26 @@ The hive is off until you start it in **Vault → Hive**, with the vault unlocke
 
 **Not built yet:** skills sync (2d), and rented phones removed automatically when the rental ends (2e).
 
+## A steady overlay
+
+The overlay and its work card no longer blink while Cyclone acts or switches.
+- **It stays on screen during actions.** Until now the whole overlay was hidden for every tap, swipe, scroll, Back and
+  Home, and stayed hidden until the screen settled: 0.35 to 1.8 seconds each time. Now a host action only makes it
+  step back:
+  - it takes no keyboard focus, so the app keeps focus and Back reaches it;
+  - it leaves the accessibility tree, so Cyclone reads the app cleanly;
+  - it still takes your touch, so Stop works while Cyclone acts.
+- **It hides only when a simulated stroke would land on the glass itself**, and only for that stroke. A tap elsewhere
+  on the screen leaves it in place.
+- **The keyboard position doesn't jump** while focus is with the app during an action.
+- **The blur behind the card no longer pulses** when the card grows or shrinks by a line of text. It follows in place
+  and steps aside only for a real move, such as appearing, sliding or the keyboard glide.
+- **Mode and tab swaps no longer show an empty frame.** The new surface fades in on top before the old one fades out.
+  This covers the Ask bar and island, composer and gate, and the check-in cards.
+- **The trace field** fades back in over 120 ms after a screen capture, instead of popping.
+- **No window re-creation.** A render right after the overlay first appears no longer tears down and re-creates every
+  window.
+
 ## Merged from the published Alpha 130
 
 - The companion provisioning lookup fails closed on malformed or ambiguous connector identities.
@@ -166,5 +186,7 @@ The hive is off until you start it in **Vault → Hive**, with the vault unlocke
 - A login filled from a saved account, the hand-over from Main to another profile (it uses root), and the confirmation
   card on the phone and in the Command Center.
 - The merged Alpha 130 bootstrap fixes on this build.
+- The steady overlay: a tap or swipe Cyclone makes near the card (the card should hide only for that stroke), Stop
+  pressed mid-action, and Back during a run.
 
 The rows to check are in `docs/FLEET_ACCEPTANCE.md`.

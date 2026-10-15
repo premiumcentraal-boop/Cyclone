@@ -217,7 +217,7 @@ object PhoneToolExecutor {
         val live = try {
             leasedValue.position(0)
             if (foreground) {
-                com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostPassthrough {
+                com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostFocus {
                     service.typeEditable(plan, leasedValue, redactObservedText = true)
                 }
             } else {
@@ -1206,10 +1206,12 @@ object PhoneToolExecutor {
         request: PhoneToolRequest,
         before: String?,
         action: () -> Boolean,
-    ): Outcome = com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostPassthrough {
+    ): Outcome = com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostFocus {
         // Keep host focus through dispatch AND result settling. Restoring Ask immediately at the
         // gesture callback can steal focus from a newly opened Android permission dialog. This also
         // lets global Back reach the host rather than Cyclone's focused composer.
+        // Alpha.131: the overlay only steps back here (no touch, no focus, out of the accessibility tree) and stays
+        // on screen. A stroke that lands on Cyclone's glass hides it for that stroke (HumanGestureDispatch).
         actionWithConfirmationYielded(service, request, before, action)
     }
 

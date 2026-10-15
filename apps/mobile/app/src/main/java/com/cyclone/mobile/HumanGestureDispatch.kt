@@ -348,7 +348,7 @@ object HumanGestureDispatch {
         fun play(): Pair<GestureDispatchOutcome, Boolean> =
             if (chained) dispatchChain(service, motion, displayId) to true
             else dispatchQueued(service, description(polylinePath(motion), motion.durationMs, displayId), motion.durationMs) to false
-        return if (displayId > 0) play() else OverlayGesturePassthrough.withHostPassthrough { play() }
+        return if (displayId > 0) play() else OverlayGesturePassthrough.withHostStroke(motionBounds(listOf(motion))) { play() }
     }
 
     /**
@@ -496,7 +496,7 @@ object HumanGestureDispatch {
                 }
             }
         }
-        return if (displayId > 0) play() else OverlayGesturePassthrough.withHostPassthrough { play() }
+        return if (displayId > 0) play() else OverlayGesturePassthrough.withHostStroke(motionBounds(gesture.strokes.map { it.motion })) { play() }
     }
 
     /**
@@ -668,9 +668,31 @@ object HumanGestureDispatch {
         displayId: Int,
     ): GestureDispatchOutcome =
         if (displayId > 0) dispatchQueued(service, gesture, durationMs)
-        else OverlayGesturePassthrough.withHostPassthrough {
+        else OverlayGesturePassthrough.withHostStroke(gestureBounds(gesture)) {
             dispatchQueued(service, gesture, durationMs)
         }
+
+    /**
+     * Alpha.131: where a stroke goes (screen pixels: left, top, right, bottom), so the overlay hides only for a stroke
+     * that lands on Cyclone's glass. Null (unknown) hides it, as before.
+     */
+    internal fun motionBounds(motions: List<MotionPlan>): FloatArray? {
+        val points = motions.flatMap { it.points }
+        if (points.isEmpty()) return null
+        return floatArrayOf(points.minOf { it.x }, points.minOf { it.y }, points.maxOf { it.x }, points.maxOf { it.y })
+    }
+
+    private fun gestureBounds(gesture: GestureDescription): FloatArray? = runCatching {
+        var out: FloatArray? = null
+        for (index in 0 until gesture.strokeCount) {
+            val r = android.graphics.RectF()
+            gesture.getStroke(index).path.computeBounds(r, true)
+            val b = out
+            out = if (b == null) floatArrayOf(r.left, r.top, r.right, r.bottom)
+                else floatArrayOf(minOf(b[0], r.left), minOf(b[1], r.top), maxOf(b[2], r.right), maxOf(b[3], r.bottom))
+        }
+        out
+    }.getOrNull()
 
     private fun dispatchQueued(
         service: CycloneAccessibilityService,

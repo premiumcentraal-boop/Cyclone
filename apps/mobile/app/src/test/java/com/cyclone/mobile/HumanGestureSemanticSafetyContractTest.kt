@@ -116,8 +116,11 @@ class HumanGestureSemanticSafetyContractTest {
             "dispatchGesture(gesture, null, null)" in dispatch,
         )
         assertTrue("gestureAwaitBudgetMs" in dispatch)
-        assertTrue("OverlayGesturePassthrough.withHostPassthrough" in dispatch)
-        assertOrdered(dispatch, "withHostPassthrough", "dispatchGesture(gesture, callback")
+        // Alpha.131: each stroke decides from where it lands whether the overlay must leave the hit tree.
+        assertTrue("OverlayGesturePassthrough.withHostStroke(gestureBounds(gesture))" in dispatch)
+        assertTrue("OverlayGesturePassthrough.withHostStroke(motionBounds(" in dispatch)
+        assertFalse("OverlayGesturePassthrough.withHostPassthrough { play() }" in dispatch)
+        assertOrdered(dispatch, "withHostStroke", "dispatchGesture(gesture, callback")
         assertOrdered(dispatch, "dispatchGesture(gesture, callback", "done.await")
         assertTrue("REASON_TIMEOUT" in dispatch)
         assertTrue("GestureDispatchOutcome(false, REASON_TIMEOUT)" in dispatch)
@@ -144,6 +147,9 @@ class HumanGestureSemanticSafetyContractTest {
         assertTrue("withHostGesturePassthrough" in flagsFor)
         val applyLayout = slice(controller, "private fun applyLayout", "private fun syncToolsSheet")
         assertTrue("OverlayGesturePassthrough.active()" in applyLayout)
+        // Alpha.131: GONE only while a stroke lands on Cyclone's glass; a host action otherwise only steps back.
+        assertTrue("OverlayGesturePassthrough.hidden()" in applyLayout)
+        assertTrue("!hideHost && !driverIdle" in applyLayout)
         assertTrue("View.GONE" in applyLayout)
         assertTrue("IMPORTANT_FOR_ACCESSIBILITY_NO" in applyLayout)
         assertTrue("hostGestureYielded" in applyLayout)
@@ -166,7 +172,7 @@ class HumanGestureSemanticSafetyContractTest {
     @Test
     fun `host actions keep overlays yielded through result verification`() {
         val wrapper = slice(executor, "private fun actionWithConfirmation(", "private fun actionWithConfirmationYielded(")
-        assertOrdered(wrapper, "OverlayGesturePassthrough.withHostPassthrough", "actionWithConfirmationYielded(service")
+        assertOrdered(wrapper, "OverlayGesturePassthrough.withHostFocus", "actionWithConfirmationYielded(service")
         val body = slice(executor, "private fun actionWithConfirmationYielded(", "private fun launchedOutcome")
         assertOrdered(body, "foregroundInputAllowed()", "if (action())")
         assertOrdered(body, "if (action())", "settleAfterMutation")
