@@ -330,7 +330,7 @@ internal object ProfileBootstrapRuntime {
 
     private fun execute(command: String, input: String? = null): String {
         val startedAt = System.currentTimeMillis()
-        val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
+        val process = ProcessBuilder("su", "--mount-master", "-c", command).redirectErrorStream(true).start()
         val output = StringBuilder()
         val reader = Thread {
             runCatching { process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line ->

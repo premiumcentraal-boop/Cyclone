@@ -38,6 +38,12 @@ def test_cold_started_bootstrap_public_key_has_thirty_second_poll_budget():
     assert "Thread.sleep(200)" in bootstrap
 
 
+def test_bootstrap_shell_uses_mount_master_for_cross_user_files():
+    bootstrap = text(WS / "ProfileBootstrapRuntime.kt")
+    execute = bootstrap.split("private fun execute(", 1)[1]
+    assert 'ProcessBuilder("su", "--mount-master", "-c", command)' in execute
+
+
 def kotlin_sources() -> dict[Path, str]:
     return {p: text(p) for p in APP.rglob("*.kt")}
 
