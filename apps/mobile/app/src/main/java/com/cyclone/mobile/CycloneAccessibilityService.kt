@@ -289,6 +289,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         if (root == null && !com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.active() &&
             DeviceState.controller == DeviceState.Controller.AGENT &&
             com.cyclone.mobile.secrets.SecretsCardRuntime.state.value?.visible != true) {
+            // Rare (an unreadable host, e.g. a permission dialog): this one still hides, to be sure the read works.
             return com.cyclone.mobile.ui.overlay.OverlayGesturePassthrough.withHostPassthrough {
                 observe(markFresh)
             }

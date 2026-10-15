@@ -257,7 +257,10 @@ internal class AndroidMindOwner(
         return MindApprovalReply(MindApproval.APPROVED, waited)
     }
 
-    override fun fillSecret(page: AgentPageCard, target: MindRef, slot: String, reason: String, timeoutMs: Long): MindSecretReply {
+    override fun fillSecret(page: AgentPageCard, target: MindRef, slot: String, reason: String, timeoutMs: Long): MindSecretReply =
+        fillSecret(page, target, slot, reason, timeoutMs, null)
+
+    override fun fillSecret(page: AgentPageCard, target: MindRef, slot: String, reason: String, timeoutMs: Long, account: String?): MindSecretReply {
         val place = PlaceResolver.resolveCurrent(page) ?: return MindSecretReply(MindSecretOutcome.UNAVAILABLE,
             detail = "Cyclone cannot identify this app or website yet (for a website, the address bar must be visible)")
         val metadata = runCatching { SecretRequestMetadata(place.id, SecretPersona.LIVE, slot, reason) }.getOrElse {
@@ -286,6 +289,10 @@ internal class AndroidMindOwner(
             return if (ok) MindSecretReply(MindSecretOutcome.FILLED, 0)
             else MindSecretReply(MindSecretOutcome.FAILED, 0, "the field did not accept the delivered value; it was used up")
         }
+        // Plan 59 run 2c: an account this phone keeps for this app.
+        if (slot in com.cyclone.mobile.identity.AccountUse.SLOTS) {
+            accountFill(place.id, fillTarget, slot, reason, account, timeoutMs)?.let { return it }
+        }
         val result = AtomicReference<SecretUseResult?>(null)
         val request = inbox.post(missionId, OwnerRequestKind.SECRET, "Fill ${target.label} for ${place.origin ?: place.id.substringAfter(':')}")
         onWaiting("Secure input: ${target.label}")
@@ -313,6 +320,63 @@ internal class AndroidMindOwner(
             SecretUseStatus.FAILED, SecretUseStatus.ALREADY_USED -> MindSecretReply(MindSecretOutcome.FAILED, waited, use.errorCode.orEmpty())
         }
     }
+
+    /** Saved accounts the owner said yes to in this task (the card asks once per account per task). */
+    private val confirmedAccounts = mutableSetOf<String>()
+
+    /**
+     * Plan 59 run 2c: fills [slot] from a saved account for the app on screen. Null when none is saved (or it has no
+     * such value): the Secrets Card then works as before. An account not bound to this profile on this phone needs
+     * the owner's yes on a confirmation card first; no answer is never a yes.
+     */
+    private fun accountFill(placeId: String, fillTarget: SecretFillTarget, slot: String, reason: String, account: String?,
+                            timeoutMs: Long): MindSecretReply? {
+        val app = placeId.substringAfter(':')
+        if (!com.cyclone.mobile.identity.SavedIdentity.validApp(app)) return null
+        val pick = com.cyclone.mobile.identity.AccountUse.pick(com.cyclone.mobile.identity.AccountUse.candidates(context, app), account)
+        val use = when (pick) {
+            com.cyclone.mobile.identity.AccountUse.Pick.None -> return null
+            is com.cyclone.mobile.identity.AccountUse.Pick.Choose -> return MindSecretReply(MindSecretOutcome.CHOOSE_ACCOUNT, detail = pick.text)
+            is com.cyclone.mobile.identity.AccountUse.Pick.Use -> pick
+        }
+        val chosen = use.candidate
+        var waited = 0L
+        if (use.confirm && chosen.id !in confirmedAccounts) {
+            val here = com.cyclone.mobile.identity.IdentitySaver.currentProfile(context).second
+            val text = com.cyclone.mobile.identity.AccountUse.confirmText(appLabel(app), chosen, here, reason)
+            val request = inbox.post(missionId, OwnerRequestKind.APPROVAL, "Cyclone wants to: $text", gate = com.cyclone.mobile.identity.AccountUse.GATE)
+            onWaiting("Approve: log in as ${chosen.handle.ifBlank { "a saved account" }}")
+            try {
+                val wait = inbox.await(request, timeoutMs, cancelled)
+                waited = wait.waitedMs
+                when (wait.response) {
+                    OwnerResponse.Approve -> confirmedAccounts += chosen.id
+                    null -> return MindSecretReply(if (wait.cancelled || cancelled()) MindSecretOutcome.DECLINED else MindSecretOutcome.TIMED_OUT, waited)
+                    else -> return MindSecretReply(MindSecretOutcome.DECLINED, waited, "the owner said no to using that account here")
+                }
+            } finally {
+                inbox.withdraw(request.id)
+                onWaiting(null)
+            }
+        }
+        val value = com.cyclone.mobile.identity.AccountUse.take(context, chosen.id, slot, confirmed = chosen.id in confirmedAccounts) ?: return null
+        val lease = com.cyclone.mobile.secrets.OneShotSecretLease(value)
+        val execution = try {
+            lease.consume { com.cyclone.mobile.secrets.PhoneToolSecretFillExecutor(context).fill(fillTarget, it) }
+        } catch (_: Exception) {
+            null
+        } finally {
+            lease.revoke()
+        }
+        DeviceState.setController(DeviceState.Controller.AGENT)
+        return if (execution?.performed == true && execution.verified) MindSecretReply(MindSecretOutcome.FILLED, waited, fromAccount = chosen.handle)
+        else MindSecretReply(MindSecretOutcome.FAILED, waited, "the field did not accept the saved value")
+    }
+
+    private fun appLabel(app: String): String = runCatching {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(app, 0)).toString()
+    }.getOrDefault(app.substringAfterLast('.').replaceFirstChar { it.uppercase() })
 
     override fun takeover(instruction: String, timeoutMs: Long): MindOwnerReply {
         val request = inbox.post(missionId, OwnerRequestKind.CONTROL, instruction)

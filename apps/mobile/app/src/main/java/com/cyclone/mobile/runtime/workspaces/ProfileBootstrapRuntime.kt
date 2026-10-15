@@ -24,6 +24,12 @@ internal object ProfileBootstrapRuntime {
     /** Plan 59: Main's Cyclone takes in an account another profile made (IdentitySaver). */
     const val IDENTITY_ACTION = "com.cyclone.PROFILE_IDENTITY"
 
+    /** Plan 59 run 2c: Main's Cyclone answers another profile's account request (AccountUse). */
+    const val ACCOUNT_ACTION = "com.cyclone.PROFILE_ACCOUNT"
+
+    /** The associated data Main's answer is sealed with: the asking user and this request's nonce. */
+    fun accountContext(asker: Int, nonce: String): String = "cyclone-account/v1/$asker/$nonce"
+
     /** The associated data an identity handoff is sealed with: Main's user and this handoff's nonce. */
     fun identityContext(target: Int, nonce: String): String = "cyclone-identity/v1/$target/$nonce"
 
@@ -43,7 +49,17 @@ internal object ProfileBootstrapRuntime {
         val folder = "/data/user_de/$target/$PKG/files"
         run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/carry-inbox.json", "$folder/carry-result.json")
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
+        val publicKey = poll(tries = 150) {
+            val key = runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull()
+            if (key == null) {
+                val failure = ProfileBootstrapAcknowledgement.parse(runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-result.json") }.getOrNull())
+                if (failure != null && failure.user == target && failure.nonce.isBlank() && !failure.ok) {
+                    recordAcknowledgement(failure, "ACK_FAILED")
+                    throw ProfileBootstrapAcknowledgement.Failed(failure)
+                }
+            }
+            key
+        }
         val nonce = UUID.randomUUID().toString()
         val plain = ProfileCarry.pack(context).toString().toByteArray(Charsets.UTF_8)
         val sealed = try { ProfileTransferCipher.seal(publicKey, plain, CarryRules.cipherContext(target, nonce)) } finally { plain.fill(0) }
@@ -85,6 +101,41 @@ internal object ProfileBootstrapRuntime {
             if (ack?.optString("nonce") == nonce) { check(ack.optBoolean("ok")) { "Main's Cyclone couldn't keep the account." }; true } else null
         }
         runCatching { run("/system/bin/rm", "-f", "$folder/identity-result-$nonce.json") }
+    }
+
+    /**
+     * Plan 59 run 2c: asks the Main profile's Cyclone for the accounts of one app, or one login value, for a task in
+     * this profile. The request carries no secret; Main's answer is sealed to this profile's Keystore key and bound to
+     * this user and nonce, and it is read once and removed. Main checks the binding itself (and that this Android user
+     * is the profile the request names). Only [com.cyclone.mobile.identity.AccountUse] calls this.
+     */
+    fun askMainForAccount(context: Context, request: JSONObject): JSONObject {
+        require(context.packageName == PKG)
+        val source = ProfileSetupRuntime.currentUserId()
+        val target = ProfileSetupRuntime.profileAUserId()
+        require(target >= 0 && target != source)
+        check(run("/system/bin/am", "get-started-user-state", "$target").contains("RUNNING_UNLOCKED")) { "The main profile is locked." }
+        val store = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val key = store.getCertificate(ProfileBootstrapService.ALIAS)?.publicKey ?: error("This profile has no transfer key yet.")
+        val privateKey = store.getKey(ProfileBootstrapService.ALIAS, null) as java.security.PrivateKey
+        val targetUid = packageUid(target, PKG)
+        val folder = "/data/user_de/$target/$PKG/files"
+        val nonce = UUID.randomUUID().toString().replace("-", "")
+        val profile = ProfileCarry.me(context).first
+        val envelope = JSONObject().put("source", source).put("target", target).put("nonce", nonce).put("profile", profile)
+            .put("replyKey", android.util.Base64.encodeToString(key.encoded, android.util.Base64.NO_WRAP)).put("request", request)
+        writePrivate("$folder/account-ask-$nonce.json", targetUid, envelope.toString())
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE, "-a", ACCOUNT_ACTION, "--es", "nonce", nonce)
+        try {
+            val reply = poll(tries = 50) {
+                runCatching { JSONObject(runQuiet("/system/bin/cat", "$folder/account-reply-$nonce.json")) }.getOrNull()?.takeIf { it.optString("nonce") == nonce }
+            }
+            check(reply.optBoolean("ok")) { reply.optString("code", "REFUSED") }
+            val plain = ProfileTransferCipher.open(privateKey, reply.getJSONObject("bundle"), accountContext(source, nonce))
+            try { return JSONObject(String(plain, Charsets.UTF_8)) } finally { plain.fill(0) }
+        } finally {
+            runCatching { run("/system/bin/rm", "-f", "$folder/account-reply-$nonce.json", "$folder/account-ask-$nonce.json") }
+        }
     }
 
     /**
@@ -185,7 +236,8 @@ internal object ProfileBootstrapRuntime {
         run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/profile-bootstrap-result.json", "$folder/profile-bootstrap.json")
         mirrorGrants(context, target)
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
+        // The receiver was cold-started immediately before this wait; allow the established 30-second budget.
+        val publicKey = poll(tries = 150) { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
         val nonce = UUID.randomUUID().toString()
         val preferences = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).all
         val ai = JSONObject()
@@ -204,10 +256,9 @@ internal object ProfileBootstrapRuntime {
         }
         writePrivate("$folder/profile-bootstrap.json", targetUid, payload.toString())
         run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
-        poll {
-            val ack = runCatching { JSONObject(run("/system/bin/cat", "$folder/profile-bootstrap-result.json")) }.getOrNull()
-            if (ack?.optString("nonce") == nonce && ack.optInt("user") == target && ack.optBoolean("ok")) "ready" else null
-        }
+        ProfileBootstrapAcknowledgement.await(target, nonce,
+            read = { run("/system/bin/cat", "$folder/profile-bootstrap-result.json") },
+            observe = ::recordAcknowledgement)
         // Plan 57 P1: prove root from the target's own Cyclone, whatever the root manager. When it can't be set by
         // command (KernelSU, APatch, or a Magisk grant missing), the owner is told the one step to do by hand.
         val label = runCatching { ProfileRegistryStore.records(context).firstOrNull { it.id == profile }?.label }.getOrNull() ?: "this profile"
@@ -352,16 +403,23 @@ internal object ProfileBootstrapRuntime {
     }
 
     private fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
+    private fun recordAcknowledgement(reply: ProfileBootstrapAcknowledgement.Reply?, verdict: String) {
+        runCatching { ProfileStepJournal.record("BOOTSTRAP_ACK", "collect-result", if (verdict == "ACK_COMPLETED") 0 else 1,
+            0, reply?.summary()?.toString().orEmpty(), verdict) }
+    }
     private fun run(vararg args: String): String = execute(args.joinToString(" ", transform = ::quote))
 
     private fun writePrivate(path: String, uid: Int, data: String) {
-        require(path.matches(Regex("/data/user_de/[0-9]+/com\\.cyclone\\.mobile/files/(profile-bootstrap|carry-inbox|identity-inbox-[a-f0-9]{32})\\.json")))
+        require(path.matches(Regex("/data/user_de/[0-9]+/com\\.cyclone\\.mobile/files/(profile-bootstrap|carry-inbox|identity-inbox-[a-f0-9]{32}|account-ask-[a-f0-9]{32})\\.json")))
         execute("umask 077; cat > ${quote(path)} && chown $uid:$uid ${quote(path)} && restorecon ${quote(path)}", data)
     }
 
-    private fun execute(command: String, input: String? = null): String {
+    /** Like [run], but the output (a sealed account answer) is never kept in the profile step journal. */
+    private fun runQuiet(vararg args: String): String = execute(args.joinToString(" ", transform = ::quote), keepOutput = false)
+
+    private fun execute(command: String, input: String? = null, keepOutput: Boolean = true): String {
         val startedAt = System.currentTimeMillis()
-        val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
+        val process = ProcessBuilder("su", "--mount-master", "-c", command).redirectErrorStream(true).start()
         val output = StringBuilder()
         val reader = Thread {
             runCatching { process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line ->
@@ -377,7 +435,7 @@ internal object ProfileBootstrapRuntime {
             val ok = finished && exit == 0 && !text.lineSequence().any { it.trim().startsWith("Error:") }
             // Plan 57 W1: the command shape and Android's answer, never the input (it can carry sealed bundles).
             runCatching {
-                ProfileStepJournal.record("BOOTSTRAP", command, exit, System.currentTimeMillis() - startedAt, text,
+                ProfileStepJournal.record("BOOTSTRAP", command, exit, System.currentTimeMillis() - startedAt, if (keepOutput) text else "(not kept)",
                     if (!finished) "TIMED_OUT" else if (ok) null else "FAILED")
             }
             check(finished) { "Profile preparation timed out. No switch was made." }

@@ -242,6 +242,18 @@ object DriverOverlay {
         private val visibility = DriverOverlayVisibility()
         private val main = android.os.Handler(android.os.Looper.getMainLooper())
         private val unfollow = OverlayGesturePassthrough.follow { yieldNow -> onMainAndWait { visibility.yielding = yieldNow; applyTouch() } }
+        /** Alpha.131: where the button and panel are, so a stroke elsewhere leaves them on screen. The dim takes no touch. */
+        private val unregion = OverlayGesturePassthrough.regions {
+            buildList {
+                if (button.isAttachedToWindow && button.visibility == View.VISIBLE) {
+                    add(intArrayOf(buttonParams.x, buttonParams.y, buttonParams.x + buttonPx, buttonParams.y + buttonPx))
+                }
+                if (panelShown && panel.isAttachedToWindow && panel.visibility == View.VISIBLE) {
+                    val at = IntArray(2).also(panel::getLocationOnScreen)
+                    add(intArrayOf(at[0], at[1], at[0] + panel.width, at[1] + panel.height))
+                }
+            }
+        }
 
         init {
             place()
@@ -318,6 +330,7 @@ object DriverOverlay {
 
         fun remove() {
             unfollow()
+            unregion()
             runCatching { wm.removeView(button) }
             if (dimShown) runCatching { wm.removeView(dim) }
             if (panelShown) runCatching { wm.removeView(panel) }

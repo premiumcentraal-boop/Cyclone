@@ -1710,9 +1710,16 @@ class PhoneMindToolbox(
         if (slot == "otp") autoCode(page, ref)?.let { return it }
         val fallback = codeNote.also { codeNote = null }
         owner.status("Waiting for the Secrets Card")
-        val reply = owner.fillSecret(page, ref, slot, reason, ownerTimeoutMs)
+        val account = arguments.optString("account").replace(Regex("[^A-Za-z0-9 ._@-]"), "").trim().take(100).ifBlank { null }
+        val reply = owner.fillSecret(page, ref, slot, reason, ownerTimeoutMs, account)
+        if (reply.outcome == MindSecretOutcome.CHOOSE_ACCOUNT) {
+            return MindToolResult.error("Several saved accounts fit this app: ${reply.detail}. Call vault_fill again with account set to the " +
+                "one this task needs. One not in this profile asks the owner first, with your reason.")
+        }
         val header = when (reply.outcome) {
-            MindSecretOutcome.FILLED -> "The owner filled ${ref.ref} \"${ref.label}\" through the Secrets Card. You never see the value."
+            MindSecretOutcome.FILLED -> reply.fromAccount?.let { "Filled ${ref.ref} \"${ref.label}\" from the saved account $it. You never see the value." }
+                ?: "The owner filled ${ref.ref} \"${ref.label}\" through the Secrets Card. You never see the value."
+            MindSecretOutcome.CHOOSE_ACCOUNT -> "Choose a saved account."
             MindSecretOutcome.DECLINED -> "The owner chose not to fill ${ref.ref}. Do not try to type it yourself."
             MindSecretOutcome.MISSING -> "No saved value exists for this field and the owner did not enter one."
             MindSecretOutcome.TIMED_OUT -> "The owner did not respond to the Secrets Card in time."
@@ -2378,8 +2385,11 @@ class PhoneMindToolbox(
                         required = listOf("label"))),
                     required = listOf("reason", "fields"))),
             MindToolSpec("vault_fill", "Have the owner fill a secret field (password, code, card) through the Secrets Card. The value never reaches you. " +
-                "For a code sent by text to this phone's own number, what=one_time_code fills it from the text by itself.",
+                "For a code sent by text to this phone's own number, what=one_time_code fills it from the text by itself. " +
+                "For a login (username, email, phone_number, password) an account this phone keeps for the app fills first; " +
+                "when several fit, name one with account. An account bound to another profile or phone asks the owner first, with your reason.",
                 objectSchema("ref" to REF, "what" to string("What the field needs.", SLOTS.keys.toList()), "reason" to string("Short reason shown to the owner, e.g. Sign in to Gmail."),
+                    "account" to string("The saved account's handle, when several fit (e.g. @brandone)."),
                     required = listOf("ref", "what"))),
             MindToolSpec("port_send", "Send something to the owner's PC on a Cyclone Port, for the plugins there (a log, a sheet, a chat). " +
                 "run.event: a stage of this run with a short note. log.line: one line of text. screen.shot: the current screen as an image. " +

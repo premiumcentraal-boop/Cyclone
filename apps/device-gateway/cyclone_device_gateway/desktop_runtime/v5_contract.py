@@ -1475,7 +1475,14 @@ def _validate_connectors_list(value: dict[str, Any]) -> None:
                 raise bad("entry")
 
 
-CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert"})
+CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert", "hive.join", "hive.leave", "hive.sync"})
+#: Plan 59 (build 2): the hive key sealed to a phone, and a phone leaving the hive.
+HIVE_JOIN_ID = re.compile(r"^hj_[A-Za-z0-9_-]{16,40}$")
+#: Run 2b: a hive item, encrypted with the hive key on the phone or in the browser; the metadata is bound into its AAD.
+HIVE_ITEM_ID = re.compile(r"^[a-z]{2,4}_[A-Za-z0-9_-]{8,64}$")
+HIVE_ITEM_KINDS = frozenset({"account"})
+HIVE_ITEM_FIELDS = frozenset({"itemId", "kind", "keyVersion", "at", "by", "gone", "iv", "ct"})
+HIVE_SYNC_MAX = 20
 #: Roadmap run 14: a fleet alert shown as a notification on the owner's phone. Plain words only, no action.
 CC_ALERT_ID = re.compile(r"^alr_[A-Za-z0-9_-]{6,40}$")
 CC_ALERT_LEVELS = frozenset({"critical", "warning", "info"})
@@ -1492,6 +1499,15 @@ CC_ANSWERS = frozenset({"approve", "decline", "reply", "fill", "stop"})
 CC_REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
 CC_STATUS_KEYS = frozenset({"missionId", "status", "live", "turns", "workingMs", "costUsd", "summary", "moment", "leases"})
 CC_MOMENT_KEYS = frozenset({"kind", "requestId", "text", "gate", "send", "choices", "fields", "approvableHere"})
+
+
+def _hive_item_shape(item: Any) -> bool:
+    """A hive item's shape only; the Command Center checks who wrote it and its key version."""
+    return (isinstance(item, dict) and set(item) == HIVE_ITEM_FIELDS and isinstance(item["itemId"], str)
+            and bool(HIVE_ITEM_ID.match(item["itemId"])) and item["kind"] in HIVE_ITEM_KINDS and _is_int(item["keyVersion"])
+            and _is_int(item["at"]) and isinstance(item["by"], str) and len(item["by"]) <= 120 and type(item["gone"]) is bool
+            and isinstance(item["iv"], str) and bool(_B64.match(item["iv"])) and len(item["iv"]) == 16
+            and isinstance(item["ct"], str) and bool(_B64.match(item["ct"])) and 24 <= len(item["ct"]) <= 22_000)
 
 
 def _bad_cc(message: str) -> DesktopRuntimeError:
@@ -1520,6 +1536,21 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
             raise _bad_cc("media")
         if value["received"] > args.get("size", 0) or not _short_text(value["name"], 100, nullable=True) or not _short_text(value["folder"], 60, nullable=True):
             raise _bad_cc("media facts")
+        return
+    if op == "hive.join":
+        if set(value) != {"joined", "version"} or value["joined"] is not True or not _is_int(value["version"]) or value["version"] != args.get("version"):
+            raise _bad_cc("hive join")
+        return
+    if op == "hive.leave":
+        if set(value) != {"left"} or value["left"] is not True:
+            raise _bad_cc("hive leave")
+        return
+    if op == "hive.sync":
+        if set(value) != {"applied", "keyVersion", "outbox"} or not _is_int(value["applied"]) or not _is_int(value["keyVersion"]):
+            raise _bad_cc("hive sync")
+        outbox = value["outbox"]
+        if not isinstance(outbox, list) or len(outbox) > HIVE_SYNC_MAX or not all(_hive_item_shape(i) for i in outbox):
+            raise _bad_cc("hive outbox")
         return
     if op == "cc.alert":
         if set(value) != {"shown"} or not isinstance(value["shown"], bool):
@@ -2290,6 +2321,31 @@ class V5ContractService:
                 or INLINE_SECRET.search(f"{title} {text}")):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "An alert is {alertId, level, title, text} in plain words.")
         return self._call(device_id, "cc.alert", {"alertId": alert_id, "level": level, "title": title.strip(), "text": text.strip()})
+
+    def hive_join(self, device_id: str, *, join_id: str, version: int, enc: str, ct: str, aad: str) -> dict[str, Any]:
+        """Plan 59: relay the hive key, sealed in the owner's browser to this phone's device key. Opaque bytes here."""
+        if (not isinstance(join_id, str) or not HIVE_JOIN_ID.match(join_id) or type(version) is not int or version < 1
+                or not isinstance(enc, str) or not _B64.match(enc) or not isinstance(ct, str) or not _B64.match(ct)
+                or not isinstance(aad, str) or len(aad) > 600):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A hive key envelope is {joinId, version, enc, ct, aad}.")
+        args = {"joinId": join_id, "version": version, "enc": enc, "ct": ct, "aad": aad}
+        reject_secret_payload({"joinId": join_id, "version": version, "aad": aad})
+        return self._call(device_id, "hive.join", args, checked=True)
+
+    def hive_leave(self, device_id: str) -> dict[str, Any]:
+        """Plan 59: this phone left the hive; it wipes its hive key."""
+        return self._call(device_id, "hive.leave", {})
+
+    def hive_sync(self, device_id: str, *, items: list[dict[str, Any]], acked: list[dict[str, Any]]) -> dict[str, Any]:
+        """Plan 59 run 2b: hand a hive member the items new to it and take its outbox. Items are ciphertext here;
+        [acked] names what it pushed earlier that the PC kept ({itemId, at})."""
+        if (not isinstance(items, list) or len(items) > HIVE_SYNC_MAX or not all(_hive_item_shape(i) for i in items)
+                or not isinstance(acked, list) or len(acked) > 200
+                or not all(isinstance(a, dict) and set(a) == {"itemId", "at"} and isinstance(a["itemId"], str)
+                           and HIVE_ITEM_ID.match(a["itemId"]) and _is_int(a["at"]) for a in acked)):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A hive sync is {items, acked}.")
+        reject_secret_payload({"items": [{k: v for k, v in i.items() if k not in ("iv", "ct")} for i in items], "acked": acked})
+        return self._call(device_id, "hive.sync", {"items": items, "acked": acked}, checked=True)
 
     def cc_key(self, device_id: str) -> dict[str, Any]:
         """Plan 33 (C2): the phone's device key (public half and fingerprint) for sealed delivery."""

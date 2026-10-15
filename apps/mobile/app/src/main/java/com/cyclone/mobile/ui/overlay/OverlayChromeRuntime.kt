@@ -197,6 +197,8 @@ object OverlayChromeRuntime {
             )
             controller = next
             OverlayGesturePassthrough.bind { next.syncHostGesturePassthrough() }
+            unregion?.invoke()
+            unregion = OverlayGesturePassthrough.regions { next.regions() }
             next.show(machine.snapshot())
             // Driver mode (plan 32): the AI button and AI mode, in their own windows next to the chrome.
             // Alpha 95: the accessibility service also attaches it on its own, so a chrome failure can't take the orb away.
@@ -223,12 +225,17 @@ object OverlayChromeRuntime {
         }
     }
 
+    /** Alpha.131: unregisters where the chrome's windows are (strokes elsewhere leave them on screen). */
+    private var unregion: (() -> Unit)? = null
+
     fun detach() {
         val context = synchronized(lock) { service }
         synchronized(lock) {
             workspaceJob?.cancel(); workspaceJob = null
             DriverOverlay.detach()
             OverlayGesturePassthrough.unbind()
+            unregion?.invoke()
+            unregion = null
             controller?.dismiss()
             controller = null
             service = null

@@ -240,6 +240,37 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def identity_purge(account_id: str):
         return call(lambda: cc().identities.purge(account_id))
 
+    # Plan 59 (build 2, run 2a): the hive. The key arrives wrapped by the vault key and sealed to each phone in the
+    # browser; these routes store and relay ciphertext only.
+    @router.get("/v1/cc/hive", dependencies=[Depends(auth)])
+    def hive():
+        return call(lambda: cc().hive.public())
+
+    @router.post("/v1/cc/hive/key", dependencies=[Depends(auth)])
+    def hive_key(body: dict[str, Any]):
+        return call(lambda: cc().hive.put_key(body_of(body)))
+
+    @router.post("/v1/cc/hive/members/{device_id}/add", dependencies=[Depends(auth)])
+    def hive_add(device_id: str, body: dict[str, Any]):
+        return call(lambda: cc().hive.add(device_id, body_of(body)))
+
+    @router.post("/v1/cc/hive/members/{device_id}/remove", dependencies=[Depends(auth)])
+    def hive_remove(device_id: str):
+        return call(lambda: cc().hive.remove(device_id))
+
+    # Run 2b: hive items, encrypted in the browser or on a phone with the hive key. The PC keeps ciphertext only.
+    @router.get("/v1/cc/hive/items", dependencies=[Depends(auth)])
+    def hive_items():
+        return call(lambda: cc().hive.items())
+
+    @router.post("/v1/cc/hive/items", dependencies=[Depends(auth)])
+    def hive_put_item(body: dict[str, Any]):
+        return call(lambda: cc().hive.put_item(body_of(body)))
+
+    @router.get("/v1/cc/hive/items/{item_id}/history", dependencies=[Depends(auth)])
+    def hive_item_history(item_id: str):
+        return call(lambda: cc().hive.history(item_id))
+
     # Plan 33 §10–11 (roadmap run 14): fleet health, quarantine and alerts. Releasing a phone is the owner's act.
     @router.get("/v1/cc/health", dependencies=[Depends(auth)])
     def health():

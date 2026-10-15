@@ -132,15 +132,161 @@ Until then, tasks still get passwords through sealed delivery from the PC, as be
 
 ## 3. Build 2: the hive (every phone)
 
-- The PC's copy is the hive. Each phone syncs with it whenever it is connected: identities (sealed to that phone's
-  device key) and verified skills.
-- New accounts and newly verified skills are pushed to the hive at once.
-- Conflicts: the newest version wins, and the older one is kept in history. Deletes go to the trash everywhere.
-- Glass shows each phone's sync state, with **Remove from the hive**, which wipes that phone's copy as soon as it
-  reconnects.
-- A rented cloud phone joins with full access. When its rental ends (the VMOS lease expires or it is released), it is
-  removed from the hive automatically.
-- Memories are not synced (decision 9).
+**Owner decisions (2026-10-14, second round):**
+- **A verified skill** is one the owner saved from a run that finished as done, and that has since run successfully at
+  least once more.
+- **Every phone gets every account.** Each phone still knows clearly whether an account is really needed there: its
+  binding, and whether a task asks for it.
+- **A cross-profile login by the agent gets a confirmation card with the reason.** This is the case where an account is
+  bound to another profile or phone. The card is an Owner Moment: the owner sees the account, where it is bound, where
+  the agent wants to use it, and the agent's own reason. Nothing logs in until the owner says yes.
+
+### 3.1 The hive key
+
+The PC's Vault is locked with a key only the owner's browser holds, so the PC can't hand a password to a phone while
+Glass is closed. The hive has its own symmetric key instead:
+- **Who holds it:** only the owner's phones and the owner's browser. Every hive item is stored on the PC encrypted with
+  it, so the PC keeps ciphertext only, as with the Vault.
+- **How a phone gets it:** when a phone joins, Glass (unlocked once) seals the hive key to that phone's device key.
+  This is the same HPKE path as sealed delivery. The phone keeps it in its Keystore.
+- **How Glass keeps it:** the hive key is kept wrapped by the Vault key, so Glass can read the hive whenever the Vault is
+  unlocked.
+- **When a phone leaves** (removed, or a rental ended), Glass makes a new hive key and re-encrypts. The phones that stay
+  receive the new key sealed to them. The phone that left can't read anything written after it left.
+
+### 3.2 The runs
+
+| Run | What it delivers |
+|---|---|
+| **2a. Joining** | Glass → Hive: every phone, whether it is in the hive, its last sync, own or rented. **Add to hive** (seals the hive key, Glass unlocked once) and **Remove from hive** (wipe on reconnect, new key). The gateway keeps members and items, ciphertext only. New phone ops: `hive.join`, `hive.leave`; run 2b adds `hive.sync` (one op does both pull and push) |
+| **2b. Accounts sync** | A created account is pushed at once, encrypted with the hive key. Every phone pulls when connected, and offline phones catch up. Edits, binding, trash and restore sync. The newest version wins and older versions are kept in history. Glass Identities reads the hive. The vault identity card from build 1a is folded into the hive item |
+| **2c. Using accounts on the phone** | vault_fill can use the phone's own saved account, so no PC is needed. In the bound profile, Main hands the login to that profile's Cyclone, sealed, for that task only. **Anywhere else** (another profile or phone), the agent must ask through a **confirmation card**: the account, its binding, where the agent wants to use it, and the agent's reason. Only after a yes is it handed over, for that task. The Accounts page shows per account where it is used ("Used by Food tasks" / "Not used on this phone yet") |
+| **2d. Skills sync** | A skill becomes **verified** after its second successful run (decision above), then is pushed at once and installed on every phone. App maps and manuals stay per phone, because they depend on the app version. Memories stay local (decision 9) |
+| **2e. Rented phones** | A rented phone joins with full access. When the VMOS lease expires or the phone is released, it is removed from the hive automatically and the key is replaced. What it made was already pushed when it was made |
+
+### 3.2.1 Run 2a as built (not yet released)
+
+- **Gateway:** `command/hive.py` (`HiveStore`) keeps three tables:
+  - `hive_key`: versions, each wrapped by the vault key;
+  - `hive_member`: own or rented, and joining / member / leaving / left;
+  - `hive_envelope`: the hive key sealed to one phone, relayed by the job loop once that phone is reachable, retried
+    every 30 s, and kept 7 days.
+
+  An envelope is accepted only when it is bound to the phone's **trusted** device key, its id, the current key version,
+  and a future time. A key version may only go up by one. After a phone is removed, it gets `hive.leave`,
+  `rotationNeeded` turns on, and `needsKey` lists the members still on an older key.
+- **Routes:** `GET /v1/cc/hive`, `POST /v1/cc/hive/key`, `POST /v1/cc/hive/members/{id}/add|remove`.
+- **Phone ops:** `hive.join` and `hive.leave`, handled by `identity/HiveKeyring.kt`.
+  - The keyring opens the HPKE envelope (`cyclone-hive-key/v1`) only for this phone's device key, this join id, a
+    version no older than the one it has, and a time not yet passed.
+  - It keeps every version wrapped by its own Keystore AES key, in Main only (`cyclone_hive_v1`, NEVER carried).
+  - `hive.leave` wipes all of it.
+- **Glass:** Vault → **Hive** card, while the vault is unlocked. It has Start the hive, Add to hive and Remove from
+  hive. It replaces the key by itself after a phone leaves, and seals the current key to every member that lacks it.
+- **Guard:** `HiveGuard` in `scripts/ci/tests/test_identity_guard.py`.
+- **Physical device:** UNVERIFIED.
+
+### 3.2.2 Run 2b as built (not yet released)
+
+- **The item.** Each saved account is one hive item `{itemId, kind, keyVersion, at, by, gone, iv, ct}`:
+  - it is encrypted with the hive key (AES-256-GCM) on the phone or in the browser that wrote it;
+  - its AAD is `cyclone-hive-item/v1` followed by the id, kind, key version, time, writer and tombstone flag, one per
+    line, built the same way in `HiveSync.kt` and `hiveItems.ts`;
+  - so the PC can't move a version to another item, or reorder versions, without the open failing;
+  - the body is the account as the phone keeps it: card, password, the binding with the phone it is on
+    (`boundDevice`, `boundDeviceName`), trash, and who wrote it.
+- **The newest version wins:** the later `at`, then `by`. A phone also checks that what an item claims (time, writer)
+  is what is inside it.
+- **Gateway (`HiveStore`):**
+  - keeps the newest version of each item, up to 10 older versions (`hive_item_history`), and a sequence number per
+    change;
+  - Delete forever is an encrypted tombstone (`gone`): the history goes, and nothing comes back after it;
+  - a phone may write only as itself, under a key version it holds;
+  - Glass writes as `glass`, or keeps the writer only when it re-encrypts the same version under a newer key;
+  - `public()` now carries every wrapped key version, the item count and how many are still under an older key.
+- **Sync (`hive.sync`, the job loop):**
+  - every reachable member is synced every 15 s, and any change syncs every member on the next tick (5 s);
+  - one call hands the phone up to 20 items new to it, under a key it holds;
+  - it never sends a phone its own writes;
+  - it acknowledges what the phone pushed last time and takes its outbox (up to 20);
+  - an offline phone catches up from its cursor;
+  - an item under a key the phone doesn't hold yet waits for it;
+  - one under a key from before the phone joined is sent again once Glass re-encrypts it.
+- **Phone (Main only):**
+  - `IdentityBook` stamps every change with this phone's hive id and queues it (`pending`, kept in the encrypted book);
+  - a phone's roster never unbinds an account bound on another phone;
+  - Delete forever and the 30-day expiry leave tombstones;
+  - joining queues every account once;
+  - leaving drops the accounts that came from other phones, keeping what is bound here and anything not yet pushed;
+  - `HiveSync` applies items and builds the outbox. The Accounts page shows "Food on Galaxy" for an account bound on
+    another phone; Open works only for this phone's profiles, and there is an **Other phones** filter.
+- **Glass:**
+  - **Vault → Hive accounts**, while the vault is unlocked:
+    - lists every hive account;
+    - shows details for 30 s;
+    - Bind / Move to a profile on any member phone, or Not bound;
+    - Delete, Restore, Delete forever;
+    - **Earlier versions** with "Use this version";
+    - **Add from the vault**, which folds the build-1a identity cards in. It matches the PC's identity record for the
+      app and handle, and skips accounts the hive already has.
+  - After a key change, the Hive card re-encrypts every item still under an older key.
+- **Routes:** `GET/POST /v1/cc/hive/items`, `GET /v1/cc/hive/items/{id}/history`.
+- **Guard:** `HiveGuard` checks three things:
+  - the two AAD builders match;
+  - the item tables hold no account words;
+  - the Mind and agent code never touch `HiveSync`.
+- **Not in 2b:**
+  - linking the phone's copy to the PC's identity record by account id (2c, with the login hand-over);
+  - the Glass Identities tab still reads the PC's binding records; the hive copy is under Vault.
+- **Physical device:** UNVERIFIED.
+
+### 3.2.3 Run 2c as built (not yet released)
+
+**Owner decisions (2026-10-15):** the confirmation card can be answered on the phone and in Command Center →
+Approvals, and it **asks every time**: a yes covers that account for that one task, with no "always allow".
+
+- **Which account (`identity/AccountUse.kt`).** At a login field (`vault_fill` with username, email, phone_number or
+  password), the phone looks up the saved accounts for the app on screen.
+  - The Mind sees handles and bindings only, never a value.
+  - A named handle (`account`) wins; else the one bound to this profile on this phone; else the only one.
+  - When several fit and none was named, the Mind is asked to name one.
+  - None saved: the Secrets Card, as before. A password the owner sealed to this task (sealed delivery) still fills
+    first.
+- **Bound to this profile on this phone:** it fills at once.
+  - In Main, it comes straight from the encrypted book.
+  - In another profile, the run asks Main through one fixed root round trip (`askMainForAccount`). The request carries
+    no secret.
+  - Main checks that the asking Android user is the Cyclone profile it names, applies the binding rule itself
+    (`AccountUse.serve`), and seals the one value to that profile's key for that nonce.
+  - The sealed answer is read once, removed, and never kept in the profile step journal (`runQuiet`).
+- **Bound anywhere else** (another profile, another phone, or not bound): a **confirmation card** first.
+  - It is an approval with gate `account`: "log in to Instagram as @shopnl in Fitness on this phone. This account is
+    bound to Food on Galaxy. Reason: …".
+  - It shows on the phone and in Command Center → Approvals ("Yes, log in for this task").
+  - It is never part of Approve all, and the Lab never approves it.
+  - No answer is never a yes; the login doesn't fill.
+  - Main refuses to hand the value over without the yes (`NEEDS_CONFIRMATION`).
+- **Where it is used:** every hand-over is recorded on this phone, per profile, in the encrypted book. The record is
+  never carried in the hive item. The phone's Accounts page shows "Used by Food tasks · 2 days ago" or "Not used on
+  this phone yet".
+- **The link to the PC's record:** a hive account carries `accountId`. Glass → Vault → Hive accounts → **Add and link
+  from the vault** links the accounts the phones made to the Command Center's record with the same app and handle.
+- **Guard:** `AccountUseGuard` in `test_identity_guard.py` checks that:
+  - only the mission port takes a value;
+  - only `AccountUse` asks Main;
+  - `serve` needs the yes for an account bound elsewhere;
+  - Main checks the asker;
+  - the answer stays out of the journal;
+  - the Lab, Approve all and the Mind's toolbox never touch it.
+- **Physical device:** UNVERIFIED. In particular, the root round trip between profiles has never run on a phone.
+
+### 3.3 Rules that hold through every run
+
+- The PC never holds a hive value in the clear. A CI guard checks the hive tables and routes, as it does for the Vault.
+- Nothing is pulled from the hive into a memory store, a log, a debug file or a backup.
+- A confirmation card never approves itself and never times out into a yes. The approval timeouts of run 16 apply:
+  no answer means the run stops.
+- Deleting is still the 30-day trash, everywhere, and never touches the real account.
 
 ## 4. Build 3: Windows Hello for the Vault
 

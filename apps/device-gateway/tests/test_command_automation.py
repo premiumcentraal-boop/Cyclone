@@ -244,6 +244,20 @@ def test_a_batch_refuses_approvals_that_must_be_answered_on_the_phone(setup):
     assert contract.answers == []
 
 
+def test_a_login_with_an_account_bound_elsewhere_is_never_batched(setup):
+    """Plan 59 run 2c: the owner answers each cross-profile login on its own, every time."""
+    center, contract, *_ = setup
+    waiting(center, contract, "phone-a", "req-a", gate="account")
+    waiting(center, contract, "phone-b", "req-b", gate="account")
+    approvals = center.list_approvals()
+    assert all(a["gate"] == "account" for a in approvals)
+    with pytest.raises(CommandError):
+        center.automation.answer_batch({"ids": [a["id"] for a in approvals], "action": "approve"})
+    assert contract.answers == []
+    out = center.answer(approvals[0]["id"], {"action": "approve"})
+    assert out["handled"] and [a[3] for a in contract.answers] == ["req-a"], "one at a time still works"
+
+
 def test_routes(setup):
     center, contract, *_ = setup
     app = FastAPI()

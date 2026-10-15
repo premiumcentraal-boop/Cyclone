@@ -520,7 +520,7 @@ internal object GatewayDispatcher {
             GatewayV5LabAdapter.install(context)
             GatewayV5LabAdapter.dispatch(request.op, request.args)
         }
-        "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert" -> {
+        "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert", "hive.join", "hive.leave", "hive.sync" -> {
             GatewayV5CommandAdapter.install(context)
             GatewayV5CommandAdapter.dispatch(request.op, request.args)
         }

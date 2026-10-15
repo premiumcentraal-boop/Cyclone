@@ -241,6 +241,7 @@ def _batch_key(row: Any) -> str | None:
     if row["kind"] == "spend":
         send = json.loads(row["send"]) if row["send"] else {}
         return f"spend:{send.get('connection')}:{send.get('tool')}"
-    if row["kind"] == "approval" and row["approvable_here"]:
+    # Plan 59 run 2c: a login with an account bound to another profile or phone is answered on its own, every time.
+    if row["kind"] == "approval" and row["approvable_here"] and row["gate"] != "account":
         return f"approval:{row['gate'] or ''}"
     return None

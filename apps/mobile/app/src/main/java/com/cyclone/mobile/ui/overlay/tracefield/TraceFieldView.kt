@@ -244,6 +244,7 @@ internal class TraceFieldView(
             if (captureHidden && pendingHidden.size > 1) return@Runnable
             captureHidden = true
             val wasVisible = visibility == VISIBLE
+            animate().cancel()
             visibility = INVISIBLE
             if (!wasVisible) {
                 flushHidden()
@@ -267,7 +268,10 @@ internal class TraceFieldView(
         post {
             if (TraceFieldCaptureGate.openHolds() > 0) return@post
             captureHidden = false
+            // Alpha.131: back over 120 ms (docs/design/CYCLONE_TRACE_FIELD.md), not in one frame after each capture.
+            alpha = 0f
             kick()
+            animate().alpha(1f).setDuration(RESTORE_EASE_MS).start()
         }
     }
 
@@ -283,6 +287,8 @@ internal class TraceFieldView(
     private fun now(): Double = SystemClock.uptimeMillis() / 1000.0
 
     companion object {
+        /** The field fades back in over this long after a capture hid it. */
+        const val RESTORE_EASE_MS = 120L
         private const val TINT = 0x804A8DFF.toInt()
         private const val HOT = 0xB3E8F4FF.toInt()
         private const val WARM = 0xB3FFC46B.toInt()

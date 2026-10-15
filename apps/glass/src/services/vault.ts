@@ -436,3 +436,7 @@ export const vaultApi = {
 export function backupFile(state: VaultState): string {
   return JSON.stringify({ cyclone: "vault-backup", savedAt: new Date().toISOString(), ...state }, null, 1);
 }
+
+/** Plan 59: wrap or open a small key (the hive key) with the vault key, bound to [aad]. */
+export const wrapWithVk = (vk: CryptoKey, raw: Uint8Array, aad: string): Promise<Sealed> => seal(vk, raw, aad);
+export const openWithVk = (vk: CryptoKey, box: Sealed, aad: string): Promise<Uint8Array> => open(vk, box, aad);

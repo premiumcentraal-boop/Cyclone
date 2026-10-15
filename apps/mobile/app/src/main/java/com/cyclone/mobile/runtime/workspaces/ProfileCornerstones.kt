@@ -83,7 +83,11 @@ object ProfileCornerstones {
 
     /** Cyclone Cloak's package here, found by its connector id (never by a guessed package name). */
     fun cloakPackage(context: Context): String? = runCatching {
-        com.cyclone.mobile.connector.ConnectorDiscovery.discover(context)
-            .firstOrNull { it.manifest?.id == CLOAK_CONNECTOR_ID && !it.idConflict }?.packageName
+        cloakPackage(com.cyclone.mobile.connector.ConnectorDiscovery.discover(context))
     }.getOrNull()
+
+    /** Provision only one unambiguous, valid connector. Existing install/enable/unlock preparation is unchanged. */
+    internal fun cloakPackage(connectors: List<com.cyclone.mobile.connector.DiscoveredConnector>): String? =
+        connectors.filter { it.manifest?.id == CLOAK_CONNECTOR_ID }.singleOrNull()
+            ?.takeIf { !it.idConflict && it.problem == null }?.packageName
 }

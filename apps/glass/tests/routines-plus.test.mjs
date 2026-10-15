@@ -35,6 +35,7 @@ test("schedules and approvals parse defensively; the link is built on this gatew
   assert.equal(hookUrl("http://127.0.0.1:8765/", TOKEN), `http://127.0.0.1:8765/v1/hooks/${TOKEN}`);
   assert.equal(batchKey(parseApproval(send("apv_1", "phone-a"))), "approval:send");
   assert.equal(batchKey(parseApproval(send("apv_2", "phone-a", { approvableHere: false }))), null);
+  assert.equal(batchKey(parseApproval(send("apv_4", "phone-a", { gate: "account" }))), null, "a cross-profile login is answered on its own");
   assert.equal(parseApproval({ ...send("apv_3", "phone-a"), state: "expired" }).state, "expired");
 });
 
