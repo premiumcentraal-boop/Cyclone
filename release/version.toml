@@ -1,5 +1,6 @@
 # Cyclone V5 alpha.131 dev1: fleet health and alerts (run 14), smarter routines (run 16), saved accounts bound to a
-# Cyclone profile with a 30-day trash (plan 59 build 1), and the hive: joining and accounts sync (plan 59 runs 2a-2b).
+# Cyclone profile with a 30-day trash (plan 59 build 1), and the hive: joining, accounts sync and phones logging in
+# with their own saved accounts behind a confirmation card (plan 59 runs 2a-2c).
 # On the published alpha.130 dev1 (companion provisioning and bootstrap acknowledgements), whose fixes are merged in.
 # These features were meant for alpha.130, but another session published that number first. The owner asked for this
 # release on 2026-10-14 ("Go"). Physical acceptance remains UNVERIFIED.

@@ -639,7 +639,8 @@ export function parseTimeouts(raw: unknown): ApprovalTimeouts {
 export function batchKey(a: CcApproval): string | null {
   if (!a.answerHere || a.state !== "open") return null;
   if (a.kind === "spend" && a.spend) return `spend:${a.spend.connection}:${a.spend.tool}`;
-  if (a.kind === "approval" && a.approvableHere) return `approval:${a.gate ?? ""}`;
+  // Plan 59 run 2c: a login with an account bound elsewhere is answered on its own, every time.
+  if (a.kind === "approval" && a.approvableHere && a.gate !== "account") return `approval:${a.gate ?? ""}`;
   return null;
 }
 

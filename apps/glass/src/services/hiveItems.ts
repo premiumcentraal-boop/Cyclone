@@ -43,6 +43,8 @@ export interface HiveAccount {
   boundDevice: string | null;
   boundDeviceName: string | null;
   updatedBy: string;
+  /** Run 2c: the Command Center's record of the same account, once linked. */
+  accountId: string | null;
 }
 
 export const TRASH_MS = 30 * 24 * 60 * 60_000;
@@ -121,7 +123,7 @@ export function accountFrom(body: Record<string, unknown>, item: HiveItem): Hive
     id, app, handle: str(body.handle) ?? "", card: pick, password: typeof body.password === "string" ? body.password : "",
     profileId: str(body.profileId), profileLabel: str(body.profileLabel), wasProfileLabel: str(body.wasProfileLabel),
     createdAtMs: num(body.createdAtMs) ?? 0, updatedAtMs: at, trashedAtMs: num(body.trashedAtMs), origin: str(body.origin) ?? "signup",
-    boundDevice: str(body.boundDevice), boundDeviceName: str(body.boundDeviceName), updatedBy: item.by,
+    boundDevice: str(body.boundDevice), boundDeviceName: str(body.boundDeviceName), updatedBy: item.by, accountId: str(body.accountId),
   };
 }
 
@@ -130,7 +132,7 @@ export function accountBody(a: HiveAccount): Record<string, unknown> {
   return {
     v: 1, id: a.id, app: a.app, handle: a.handle, card: { ...a.card }, password: a.password, profileId: a.profileId, profileLabel: a.profileLabel,
     wasProfileLabel: a.wasProfileLabel, createdAtMs: a.createdAtMs, updatedAtMs: a.updatedAtMs, trashedAtMs: a.trashedAtMs, origin: a.origin,
-    boundDevice: a.boundDevice, boundDeviceName: a.boundDeviceName, updatedBy: a.updatedBy,
+    boundDevice: a.boundDevice, boundDeviceName: a.boundDeviceName, updatedBy: a.updatedBy, accountId: a.accountId,
   };
 }
 

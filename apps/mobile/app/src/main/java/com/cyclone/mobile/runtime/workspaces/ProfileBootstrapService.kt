@@ -75,6 +75,15 @@ class ProfileBootstrapService : Service() {
             }
             return START_NOT_STICKY
         }
+        // Plan 59 run 2c: another profile asks Main for an account to log in with.
+        if (intent?.action == ProfileBootstrapRuntime.ACCOUNT_ACTION) {
+            val nonce = intent.getStringExtra("nonce").orEmpty()
+            if (!Regex("[a-f0-9]{32}").matches(nonce)) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId); return START_NOT_STICKY }
+            repairScope.launch {
+                try { answerAccount(nonce) } finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
+            }
+            return START_NOT_STICKY
+        }
         if (intent?.action == ProfileBootstrapRuntime.CARRY_ACTION) {
             if (carryJob?.isActive != true) carryJob = repairScope.launch {
                 try { takeInCarry() } finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
@@ -205,6 +214,40 @@ class ProfileBootstrapService : Service() {
         }
     }
 
+    /**
+     * Plan 59 run 2c: Main answers one account request from another profile on this phone. The asking Android user
+     * must be the Cyclone profile it names (Main's own registry decides), and Main applies the binding rule itself
+     * (AccountUse.serve). The answer is sealed to the asker's key for this nonce. Nothing is logged.
+     */
+    private fun answerAccount(nonce: String) {
+        val folder = createDeviceProtectedStorageContext().filesDir
+        val input = File(folder, "account-ask-$nonce.json")
+        val result = File(folder, "account-reply-$nonce.json")
+        val me = ProfileSetupRuntime.currentUserId()
+        var asker = -1
+        try {
+            val envelope = JSONObject(input.readText())
+            input.delete()
+            asker = envelope.getInt("source")
+            check(envelope.getString("nonce") == nonce && envelope.getInt("target") == me && asker != me) { "mismatch" }
+            check(com.cyclone.mobile.identity.IdentityVault.isMain(this)) { "not main" }
+            val record = ProfileRegistryStore.records(this).firstOrNull { it.androidUserId == asker && !it.inTrash }
+            check(record != null && record.id == envelope.getString("profile")) { "unknown profile" }
+            val answer = com.cyclone.mobile.identity.AccountUse.answer(this, envelope.getJSONObject("request"), record.id to record.label)
+            val plain = answer.toString().toByteArray(Charsets.UTF_8)
+            val sealed = try {
+                ProfileTransferCipher.seal(envelope.getString("replyKey"), plain, ProfileBootstrapRuntime.accountContext(asker, nonce))
+            } finally { plain.fill(0) }
+            result.writeText(JSONObject().put("nonce", nonce).put("ok", true).put("bundle", sealed).toString())
+        } catch (refused: com.cyclone.mobile.identity.AccountUse.Refused) {
+            input.delete()
+            result.writeText(JSONObject().put("nonce", nonce).put("ok", false).put("code", refused.code).toString())
+        } catch (_: Exception) {
+            input.delete()
+            result.writeText(JSONObject().put("nonce", nonce).put("ok", false).put("code", "REFUSED").toString())
+        }
+    }
+
     private suspend fun sayHello(nonce: String) {
         val users = getSystemService(android.os.UserManager::class.java)
         var inFront = false
@@ -251,7 +294,7 @@ class ProfileBootstrapService : Service() {
     }
 
     companion object {
-        private const val ALIAS = "cyclone.profile.bootstrap.v1"
+        internal const val ALIAS = "cyclone.profile.bootstrap.v1"
         private const val RETURN_NOTICE = 905
     }
 }

@@ -11,9 +11,15 @@ data class MindOwnerReply(val answered: Boolean, val text: String = "", val wait
 /** [change]: the owner declined a send because they want this change to the message first (Drive: "change it to …"). */
 data class MindApprovalReply(val outcome: MindApproval, val waitedMs: Long = 0, val change: String? = null)
 
-enum class MindSecretOutcome { FILLED, DECLINED, MISSING, FAILED, TIMED_OUT, UNAVAILABLE }
+enum class MindSecretOutcome {
+    FILLED, DECLINED, MISSING, FAILED, TIMED_OUT, UNAVAILABLE,
+    /** Plan 59 run 2c: several saved accounts fit; [MindSecretReply.detail] lists their handles and bindings. */
+    CHOOSE_ACCOUNT,
+}
 
-data class MindSecretReply(val outcome: MindSecretOutcome, val waitedMs: Long = 0, val detail: String = "")
+data class MindSecretReply(val outcome: MindSecretOutcome, val waitedMs: Long = 0, val detail: String = "",
+    /** Plan 59 run 2c: the saved account it was filled from (its handle), when it was. */
+    val fromAccount: String? = null)
 
 /** A value the Mind needs from the owner; [ref] is the field it belongs in, when there is one. */
 data class MindValueField(val label: String, val kind: String = "text", val choices: List<String> = emptyList(), val ref: String? = null)
@@ -55,6 +61,12 @@ interface MindOwnerPort {
     fun awaitApproval(action: String, timeoutMs: Long, send: MindSend): MindApprovalReply = awaitApproval(action, timeoutMs)
     /** Opens the Secrets Card for this field. The value goes from the owner or the Vault straight into the field. */
     fun fillSecret(page: AgentPageCard, target: MindRef, slot: String, reason: String, timeoutMs: Long): MindSecretReply
+    /**
+     * Plan 59 run 2c: the same, preferring an account this phone keeps for the app on screen ([account]: its handle,
+     * when several fit). One bound elsewhere asks the owner first, with [reason].
+     */
+    fun fillSecret(page: AgentPageCard, target: MindRef, slot: String, reason: String, timeoutMs: Long, account: String?): MindSecretReply =
+        fillSecret(page, target, slot, reason, timeoutMs)
     /** The owner took over the phone; wait until they hand it back. */
     fun awaitControl(timeoutMs: Long): MindOwnerReply
     /** Hands the phone to the owner for a step only they can do, and waits until they hand it back. */

@@ -117,6 +117,7 @@ fun AccountsSettingsPanel(modifier: Modifier = Modifier) {
                 appLabel = AccountsPresenter.appLabel(context, identity.app),
                 badge = AccountsPresenter.badge(identity, labels, book.me),
                 here = !identity.bound || identity.boundHere(book.me),
+                usedLine = AccountsPresenter.usedLine(book.uses(identity.id), labels, System.currentTimeMillis()),
                 revealed = revealed == identity.id,
                 profiles = listOf(IdentityBook.MAIN to "Main") + labels.toList(),
                 busy = busy,
@@ -175,6 +176,8 @@ private fun AccountCard(
     badge: String,
     /** Bound to a profile on this phone (or not bound): Open works here. */
     here: Boolean,
+    /** Plan 59 run 2c: "Used by Food tasks · 2 days ago" or "Not used on this phone yet". */
+    usedLine: String,
     revealed: Boolean,
     profiles: List<Pair<String, String>>,
     busy: Boolean,
@@ -195,6 +198,7 @@ private fun AccountCard(
                 AccountsPresenter.maskedEmail(identity.card.email)?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (!identity.trashed) Text(usedLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (identity.trashed) {
                     Text(AccountsPresenter.purgeLine(identity, System.currentTimeMillis()), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -262,6 +266,19 @@ internal object AccountsPresenter {
         identity.profileId != null -> labels[identity.profileId] ?: identity.profileLabel ?: "A profile"
         identity.wasProfileLabel != null -> "Not bound (was ${identity.wasProfileLabel})"
         else -> "Not bound"
+    }
+
+    /**
+     * Plan 59 run 2c: where a task on this phone really used the account. "Used by Food tasks · 2 days ago", "Used by
+     * Food and Main tasks · today", or "Not used on this phone yet".
+     */
+    fun usedLine(uses: List<com.cyclone.mobile.identity.AccountUseRecord>, labels: Map<String, String>, now: Long): String {
+        if (uses.isEmpty()) return "Not used on this phone yet"
+        val names = uses.map { if (it.profileId == IdentityBook.MAIN) "Main" else labels[it.profileId] ?: it.label }.distinct()
+        val who = if (names.size <= 2) names.joinToString(" and ") else "${names.take(2).joinToString(", ")} and ${names.size - 2} more"
+        val days = ((now - uses.maxOf { it.lastMs }).coerceAtLeast(0) / 86_400_000)
+        val ago = when (days) { 0L -> "today"; 1L -> "yesterday"; else -> "$days days ago" }
+        return "Used by $who tasks · $ago"
     }
 
     /** "b•••@gmail.com" in the list; the full address opens with the details. */

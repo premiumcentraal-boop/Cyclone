@@ -7,7 +7,8 @@
  *   **Delete forever**. Every change goes to the hive as a new version, and every phone gets it when it next syncs.
  *   Nothing here touches the real account in the app.
  * - **Earlier versions**: the PC keeps the last ten. Using one writes it back as the newest.
- * - **Add from the vault**: logins that carry an identity card (build 1a) are put in the hive, so the phones have them too.
+ * - **Add and link from the vault**: logins that carry an identity card (build 1a) are put in the hive, so the phones
+ *   have them too. Hive accounts the phones made are linked to the Command Center's record of the same account (run 2c).
  */
 import type { GlassContext } from "../app.js";
 import { actionButton, card, chip, loadingState, segmented } from "../ui/components.js";
@@ -150,13 +151,24 @@ export function createHiveAccounts(ctx: GlassContext, vk: () => CryptoKey | null
           id: newAccountId(), app: record.service, handle: record.handle, card: { ...item.identity }, password: item.secret,
           profileId: device ? record.profile!.id : null, profileLabel: device ? record.profile!.label : null, wasProfileLabel: record.wasProfile,
           createdAtMs: now, updatedAtMs: now, trashedAtMs: null, origin: record.origin, boundDevice: device,
-          boundDeviceName: device ? ctx.devices.find((d) => d.id === device)?.name ?? null : null, updatedBy: GLASS,
+          boundDeviceName: device ? ctx.devices.find((d) => d.id === device)?.name ?? null : null, updatedBy: GLASS, accountId: record.accountId,
         };
         await withKeys(async (keys, s) => { await hiveItemsApi.put(ctx.client, await sealAccount(keys.get(s.keyVersion)!, s.keyVersion, account)); });
         have.add(`${account.app}|${account.handle.toLowerCase()}`);
         added++;
       }
-      say(added ? `Added ${added} ${added === 1 ? "account" : "accounts"} from the vault to the hive.` : "Every vault identity is already in the hive.", "ok");
+      // Run 2c: a hive account the phones made is linked to the Command Center's record of it (same app and handle).
+      let linked = 0;
+      for (const a of accounts) {
+        if (a.accountId || a.trashedAtMs) continue;
+        const record = pc.find((i) => i.service === a.app && i.handle.toLowerCase() === a.handle.toLowerCase());
+        if (!record) continue;
+        const next = edited(a, { accountId: record.accountId });
+        await withKeys(async (keys, s) => { await hiveItemsApi.put(ctx.client, await sealAccount(keys.get(s.keyVersion)!, s.keyVersion, next)); });
+        linked++;
+      }
+      const parts = [added ? `added ${added} from the vault` : "", linked ? `linked ${linked} to the Command Center's records` : ""].filter(Boolean);
+      say(parts.length ? `Hive accounts: ${parts.join(", ")}.` : "Every vault identity is already in the hive and linked.", "ok");
     } catch (error) {
       say((error as Error).message || "Adding from the vault failed.", "error");
     }
@@ -272,7 +284,7 @@ export function createHiveAccounts(ctx: GlassContext, vk: () => CryptoKey | null
     }
     parts.push(el("p", "cc-hint", "Every account the phones keep, opened here with the hive key. A change here reaches every phone when it next syncs; "
       + "deleting never touches the real account."));
-    const add = actionButton("Add from the vault", { variant: "secondary" });
+    const add = actionButton("Add and link from the vault", { variant: "secondary" });
     add.addEventListener("click", () => void addFromVault());
     parts.push(tabs.element, add);
     if (unreadable) parts.push(el("p", "cc-hint", `${unreadable} ${unreadable === 1 ? "item" : "items"} couldn't be opened with this vault's hive key.`));

@@ -15,7 +15,7 @@ const phoneAccount = (over = {}) => ({
   id: "idn_" + "a".repeat(32), app: "com.instagram.android", handle: "brandone",
   card: { fullName: "Brand One", email: "hello@brand.one" }, password: "s3cret-Password!", profileId: "Cyclone_0123456789abcdef",
   profileLabel: "Food", wasProfileLabel: null, createdAtMs: 100, updatedAtMs: 100, trashedAtMs: null, origin: "signup",
-  boundDevice: "phone-a", boundDeviceName: "Pixel 8", updatedBy: "phone-a", ...over,
+  boundDevice: "phone-a", boundDeviceName: "Pixel 8", updatedBy: "phone-a", accountId: null, ...over,
 });
 
 test("items are bound to their id, time and writer, as the phones build them", async () => {
@@ -54,7 +54,8 @@ test("the card shows the phone's account and writes changes back as new versions
     "GET /v1/cc/hive/items/idn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/history": () => ({ versions: [] }),
     "GET /v1/devices/phone-a/profiles": () => ({ profiles: [{ id: "Cyclone_0123456789abcdef", label: "Food" }], current: null }),
     "GET /v1/devices/phone-b/profiles": () => ({ profiles: [{ id: "main", label: "Main" }], current: null }),
-    "GET /v1/cc/identities": () => ({ identities: [], trashDays: 30 }),
+    "GET /v1/cc/identities": () => ({ identities: [{ accountId: "acc_shop0001", service: "com.instagram.android", handle: "brandone",
+      status: "active", deviceId: "phone-a", profile: null, wasProfile: null, origin: "signup", hasPassword: true, vaultItems: 1 }], trashDays: 30 }),
   });
   const said = [];
   const ctx = { client: new GatewayClient({ token: "t", fetch: gw.fetch }), devices: [] };
@@ -65,6 +66,11 @@ test("the card shows the phone's account and writes changes back as new versions
   assert.doesNotMatch(view.element.textContent, /s3cret/, "the password shows only when asked");
   view.element.querySelectorAll("button").find((b) => b.textContent.startsWith("Details")).click();
   assert.match(view.element.textContent, /Password: s3cret-Password!/);
+  // Run 2c: link the phone's account to the Command Center's record of it.
+  view.element.querySelectorAll("button").find((b) => b.textContent.startsWith("Add and link")).click();
+  await flush(30);
+  assert.equal(accountFrom(await openItem(keys, puts.at(-1)), puts.at(-1)).accountId, "acc_shop0001");
+  assert.ok(said.some((t) => /linked 1/.test(t)));
   // Move it to Main on the Galaxy.
   const select = view.element.querySelectorAll("select")[0];
   select.value = "phone-b|main";

@@ -240,6 +240,46 @@ Glass is closed. The hive has its own symmetric key instead:
   - the Glass Identities tab still reads the PC's binding records; the hive copy is under Vault.
 - **Physical device:** UNVERIFIED.
 
+### 3.2.3 Run 2c as built (not yet released)
+
+**Owner decisions (2026-10-15):** the confirmation card can be answered on the phone and in Command Center →
+Approvals, and it **asks every time**: a yes covers that account for that one task, with no "always allow".
+
+- **Which account (`identity/AccountUse.kt`).** At a login field (`vault_fill` with username, email, phone_number or
+  password), the phone looks up the saved accounts for the app on screen.
+  - The Mind sees handles and bindings only, never a value.
+  - A named handle (`account`) wins; else the one bound to this profile on this phone; else the only one.
+  - When several fit and none was named, the Mind is asked to name one.
+  - None saved: the Secrets Card, as before. A password the owner sealed to this task (sealed delivery) still fills
+    first.
+- **Bound to this profile on this phone:** it fills at once.
+  - In Main, it comes straight from the encrypted book.
+  - In another profile, the run asks Main through one fixed root round trip (`askMainForAccount`). The request carries
+    no secret.
+  - Main checks that the asking Android user is the Cyclone profile it names, applies the binding rule itself
+    (`AccountUse.serve`), and seals the one value to that profile's key for that nonce.
+  - The sealed answer is read once, removed, and never kept in the profile step journal (`runQuiet`).
+- **Bound anywhere else** (another profile, another phone, or not bound): a **confirmation card** first.
+  - It is an approval with gate `account`: "log in to Instagram as @shopnl in Fitness on this phone. This account is
+    bound to Food on Galaxy. Reason: …".
+  - It shows on the phone and in Command Center → Approvals ("Yes, log in for this task").
+  - It is never part of Approve all, and the Lab never approves it.
+  - No answer is never a yes; the login doesn't fill.
+  - Main refuses to hand the value over without the yes (`NEEDS_CONFIRMATION`).
+- **Where it is used:** every hand-over is recorded on this phone, per profile, in the encrypted book. The record is
+  never carried in the hive item. The phone's Accounts page shows "Used by Food tasks · 2 days ago" or "Not used on
+  this phone yet".
+- **The link to the PC's record:** a hive account carries `accountId`. Glass → Vault → Hive accounts → **Add and link
+  from the vault** links the accounts the phones made to the Command Center's record with the same app and handle.
+- **Guard:** `AccountUseGuard` in `test_identity_guard.py` checks that:
+  - only the mission port takes a value;
+  - only `AccountUse` asks Main;
+  - `serve` needs the yes for an account bound elsewhere;
+  - Main checks the asker;
+  - the answer stays out of the journal;
+  - the Lab, Approve all and the Mind's toolbox never touch it.
+- **Physical device:** UNVERIFIED. In particular, the root round trip between profiles has never run on a phone.
+
 ### 3.3 Rules that hold through every run
 
 - The PC never holds a hive value in the clear. A CI guard checks the hive tables and routes, as it does for the Vault.

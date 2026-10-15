@@ -75,6 +75,8 @@ data class SavedIdentity(
     val boundDeviceName: String? = null,
     /** Who made this version: a phone's hive id or "glass" (blank: this phone, before it joined the hive). */
     val updatedBy: String = "",
+    /** Run 2c: the PC's record of the same account (Command Center account id), once Glass linked them. */
+    val accountId: String? = null,
 ) {
     val bound: Boolean get() = profileId != null
     /** Bound to a profile on this phone (or not yet stamped with a phone, which means this one). */
@@ -89,10 +91,12 @@ data class SavedIdentity(
         .put("wasProfileLabel", wasProfileLabel ?: JSONObject.NULL).put("createdAtMs", createdAtMs).put("updatedAtMs", updatedAtMs)
         .put("trashedAtMs", trashedAtMs ?: JSONObject.NULL).put("origin", origin)
         .put("boundDevice", boundDevice ?: JSONObject.NULL).put("boundDeviceName", boundDeviceName ?: JSONObject.NULL).put("updatedBy", updatedBy)
+        .put("accountId", accountId ?: JSONObject.NULL)
 
     companion object {
         const val ORIGIN_SIGNUP = "signup"
         private val ID = Regex("^idn_[a-f0-9]{32}$")
+        private val ACCOUNT_ID = Regex("^[a-z]{1,4}_[A-Za-z0-9_-]{6,40}$")
         private val APP = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_-]+)+$")
 
         fun newId(): String = "idn_" + UUID.randomUUID().toString().replace("-", "")
@@ -113,6 +117,7 @@ data class SavedIdentity(
                 boundDevice = json.optString("boundDevice").takeIf { it.isNotBlank() && !json.isNull("boundDevice") }?.take(120),
                 boundDeviceName = json.optString("boundDeviceName").takeIf { it.isNotBlank() && !json.isNull("boundDeviceName") }?.take(60),
                 updatedBy = json.optString("updatedBy").take(120),
+                accountId = json.optString("accountId").takeIf { !json.isNull("accountId") && ACCOUNT_ID.matches(it) },
             )
         }.getOrNull()
 
@@ -120,7 +125,11 @@ data class SavedIdentity(
     }
 }
 
-class IdentityBook(entries: List<SavedIdentity> = emptyList(), pending: Collection<String> = emptyList(), gone: Map<String, Long> = emptyMap()) {
+/** Run 2c: one profile on this phone used an account in a task. Kept on this phone only, never in the hive. */
+data class AccountUseRecord(val profileId: String, val label: String, val count: Int, val lastMs: Long)
+
+class IdentityBook(entries: List<SavedIdentity> = emptyList(), pending: Collection<String> = emptyList(), gone: Map<String, Long> = emptyMap(),
+                   uses: Map<String, List<AccountUseRecord>> = emptyMap()) {
     private val items = entries.associateBy { it.id }.toMutableMap()
     /** Ids changed here and not yet kept by the hive. */
     private val pendingIds = pending.toMutableSet()
@@ -129,6 +138,21 @@ class IdentityBook(entries: List<SavedIdentity> = emptyList(), pending: Collecti
     /** This phone's hive id (blank until it joins) and name: stamped on every change made here. */
     var me: String = ""
     var myName: String = ""
+
+    /** Run 2c: which profiles here used which account in a task (account id → uses, newest first). */
+    private val useLog = uses.mapValues { it.value.toMutableList() }.toMutableMap()
+
+    fun uses(id: String): List<AccountUseRecord> = useLog[id].orEmpty().sortedByDescending { it.lastMs }
+
+    /** A task in [profileId] used account [id] (a login filled from it). */
+    fun recordUse(id: String, profileId: String, label: String, now: Long) {
+        if (id !in items) return
+        val list = useLog.getOrPut(id) { mutableListOf() }
+        val old = list.firstOrNull { it.profileId == profileId }
+        list.remove(old)
+        list += AccountUseRecord(profileId, label.take(40), (old?.count ?: 0) + 1, now)
+        while (list.size > MAX_USES) list.remove(list.minByOrNull { it.lastMs })
+    }
 
     fun pending(): Set<String> = pendingIds.toSet()
     fun gone(): Map<String, Long> = goneAt.toMap()
@@ -177,6 +201,7 @@ class IdentityBook(entries: List<SavedIdentity> = emptyList(), pending: Collecti
 
     private fun forget(id: String, now: Long) {
         items.remove(id)
+        useLog.remove(id)
         goneAt[id] = now
         pendingIds += id
         while (goneAt.size > MAX_GONE) goneAt.remove(goneAt.minByOrNull { it.value }!!.key)
@@ -225,6 +250,7 @@ class IdentityBook(entries: List<SavedIdentity> = emptyList(), pending: Collecti
     /** Another phone or Glass deleted [id] forever. */
     fun applyGone(id: String, at: Long) {
         items.remove(id)
+        useLog.remove(id)
         pendingIds -= id
         goneAt[id] = maxOf(at, goneAt[id] ?: 0)
     }
@@ -260,12 +286,18 @@ class IdentityBook(entries: List<SavedIdentity> = emptyList(), pending: Collecti
     fun toJson(): JSONObject = JSONObject().put("v", 1).put("identities", JSONArray(all().map { it.toJson() }))
         .put("pending", JSONArray(pendingIds.sorted()))
         .put("gone", JSONObject().apply { goneAt.forEach { (id, at) -> put(id, at) } })
+        .put("uses", JSONObject().apply {
+            useLog.forEach { (id, list) ->
+                put(id, JSONArray(list.map { JSONObject().put("profileId", it.profileId).put("label", it.label).put("count", it.count).put("lastMs", it.lastMs) }))
+            }
+        })
 
     companion object {
         const val TRASH_DAYS = 30
         const val TRASH_MS = TRASH_DAYS * 24L * 60 * 60 * 1000
         const val MAIN = "main"
         const val MAX_GONE = 2_000
+        const val MAX_USES = 8
         private val PROFILE = Regex("^(main|Cyclone_[a-f0-9]{16})$")
 
         fun validProfile(id: String): Boolean = PROFILE.matches(id)
@@ -279,7 +311,15 @@ class IdentityBook(entries: List<SavedIdentity> = emptyList(), pending: Collecti
             val list = json.optJSONArray("identities") ?: JSONArray()
             val pending = json.optJSONArray("pending")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
             val gone = json.optJSONObject("gone")?.let { g -> g.keys().asSequence().associateWith { g.optLong(it) } }.orEmpty()
-            return IdentityBook((0 until list.length()).mapNotNull { list.optJSONObject(it)?.let(SavedIdentity::fromJson) }, pending, gone)
+            val uses = json.optJSONObject("uses")?.let { u ->
+                u.keys().asSequence().associateWith { id ->
+                    val a = u.optJSONArray(id) ?: JSONArray()
+                    (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { r ->
+                        AccountUseRecord(r.optString("profileId"), r.optString("label").take(40), r.optInt("count"), r.optLong("lastMs"))
+                    } }
+                }
+            }.orEmpty()
+            return IdentityBook((0 until list.length()).mapNotNull { list.optJSONObject(it)?.let(SavedIdentity::fromJson) }, pending, gone, uses)
         }
     }
 }

@@ -387,7 +387,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: {
       actions.append(approve, decline);
     } else if (a.kind === "approval") {
       if (a.approvableHere) {
-        const approve = actionButton(a.gate === "send" ? "Approve and send" : "Approve", { variant: "primary" });
+        const approve = actionButton(a.gate === "send" ? "Approve and send" : a.gate === "account" ? "Yes, log in for this task" : "Approve", { variant: "primary" });
         approve.addEventListener("click", () => void answer("Approving", { action: "approve" }));
         actions.append(approve);
       } else {

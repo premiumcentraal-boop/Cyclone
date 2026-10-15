@@ -111,10 +111,22 @@ The hive is off until you start it in **Vault → Hive**, with the vault unlocke
   phone, delete, restore and delete forever, go back to an earlier version, and **Add from the vault** (the identity
   cards saved in the vault).
 
-**Not built yet:**
-- Phones logging in with their own saved copy, with a confirmation card when the agent wants an account from another
-  profile or phone (2c). Until then, tasks get passwords from the PC's Vault as before.
-- Skills sync (2d). Rented phones removed automatically when the rental ends (2e).
+## Phones log in with their own saved accounts (plan 59, run 2c)
+
+- At a login screen, a task uses an account this phone keeps for that app, without the PC.
+  - The agent sees account names only, never a password. When several fit, it names one.
+- **The account belongs to this profile on this phone:** it fills at once. In a profile other than Main, Main hands
+  over that one value, sealed, for that one request.
+- **The account belongs anywhere else** (another profile, another phone, or not bound): a **confirmation card** first.
+  - It shows the account, where it's bound, where the agent wants to use it, and the agent's reason.
+  - Answer it on the phone or in Command Center → Approvals. It asks every time, is never part of Approve all, and no
+    answer is never a yes.
+- The phone's Accounts page shows where each account is really used ("Used by Food tasks · 2 days ago").
+- Glass → Vault → Hive accounts → **Add and link from the vault** also links the phones' accounts to the Command
+  Center's records.
+- With no saved account for the app, the Secrets Card and the PC's Vault work as before.
+
+**Not built yet:** skills sync (2d), and rented phones removed automatically when the rental ends (2e).
 
 ## Merged from the published Alpha 130
 
@@ -133,11 +145,11 @@ The hive is off until you start it in **Vault → Hive**, with the vault unlocke
 
 ## Validation
 
-- **Gateway:** `pytest apps/device-gateway/tests` passed (1,175, 3 skipped), including the health, routines, identities,
+- **Gateway:** `pytest apps/device-gateway/tests` passed (1,176, 3 skipped), including the health, routines, identities,
   hive and hive-sync tests.
-- **Guards:** `scripts/ci/tests` passed (351), including `test_identity_guard.py` with the hive checks.
+- **Guards:** `scripts/ci/tests` passed (355), including `test_identity_guard.py` with the hive and account-use checks.
 - **Glass:** `npm test` passed (351), as did the build, `glass_guard.py` and `test_glass_hosting.py`.
-- **Android:** `:app:testDebugUnitTest` passed on the merged tree before release.
+- **Android:** `:app:testDebugUnitTest` passed (2,681 tests, 0 failures).
 - **Release metadata:** `release_versions.py --check` is coherent.
 
 ## What is UNVERIFIED on a real phone
@@ -151,6 +163,8 @@ The hive is off until you start it in **Vault → Hive**, with the vault unlocke
 - **Open** landing in the right profile and app.
 - The fingerprint or PIN check.
 - A phone joining the hive, an account reaching a second phone, and removal wiping it.
+- A login filled from a saved account, the hand-over from Main to another profile (it uses root), and the confirmation
+  card on the phone and in the Command Center.
 - The merged Alpha 130 bootstrap fixes on this build.
 
 The rows to check are in `docs/FLEET_ACCEPTANCE.md`.
