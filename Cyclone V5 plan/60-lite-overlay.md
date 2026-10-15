@@ -405,3 +405,28 @@ The windows, their types, flags, sizes and capture rules are **unchanged**, and 
   - no per-frame window resizes during transitions;
   - nothing redraws while the card just sits there working, apart from real updates.
   - That is the bulk of the §3 table, without changing a window.
+
+## 10. No blink: the drawn card never takes a touch (2026-10-15, alpha.134)
+
+**Why strokes landed on Cyclone (4.8.0, alpha 91).** The idle ball and the Ask card were *touchable* windows that
+were switched to untouchable just before each stroke. A busy main thread (0.5 s stalls were measured) could miss
+that switch, so the stroke hit a window that was still touchable. Hiding (GONE) was the switch that looked reliable,
+and hiding is the blink. Windows that are untouchable from birth and never switch, the full-screen Trace Field, the
+halo and the blur windows, have always let every stroke through.
+
+**The design.**
+- The card window (expanded, minimized composer, background glass, Secrets and owner cards) is drawn with
+  `FLAG_NOT_TOUCHABLE` permanently (`OverlayChromeWindowPolicy.drawn`). Focus is unchanged, so typing works.
+- `OverlayTouchLayer`: an empty window over the card, of exactly its laid-out size, `NOT_FOCUSABLE`, that forwards the
+  owner's touch to the card (offset by where both are on screen, so a card mid-glide still gets the right spot).
+- For a stroke on the glass only the layer (and the empty idle hotspot) go GONE; the card and the halo stay.
+  The 2-frame commit wait stays, now invisible.
+- Built-in check: a new touch reaching the layer while it should be aside is dropped, counted
+  (`OverlayGesturePassthrough.stray`) and reported in the gesture evidence as `touchLayerStray`.
+- Screen readers: the focused card is read as before; the never-focused background glass speaks through the layer.
+
+**Cost.** One empty window, and a window update per frame for it during the keyboard glide (Full only). The owner's
+touch on the card during an agent stroke over it goes to the app (well under half a second).
+
+**UNVERIFIED on a phone:** forwarded taps, long-presses, scrolls and typing; strokes under the card landing on the app.
+

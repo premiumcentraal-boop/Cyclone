@@ -1143,6 +1143,7 @@ object PhoneToolExecutor {
             .put("durationMs", trace?.durationMs ?: JSONObject.NULL)
             .put("sessionId", "default-foreground")
             .put("displayId", 0)
+            .also { if (trace?.facts?.get(HumanGestureDispatch.TOUCH_LAYER_STRAY) == true) it.put(HumanGestureDispatch.TOUCH_LAYER_STRAY, true) }
     }
 
     private fun baseGestureEvidence(

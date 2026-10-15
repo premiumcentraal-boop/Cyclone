@@ -73,6 +73,7 @@ object HumanGestureDispatch {
     const val REASON_TIMEOUT = "gesture_timeout"
     const val REASON_CANCELLED = "gesture_cancelled"
     const val REASON_NOT_QUEUED = "not_queued"
+    const val TOUCH_LAYER_STRAY = "touchLayerStray"
     const val REASON_UNKNOWN = "gesture_unknown"
     /** Plan 52 run 6: a drag needs chained strokes (hold still, then move), and this phone dropped them. */
     const val REASON_NEEDS_CHAINS = "needs_chained_strokes"
@@ -93,7 +94,9 @@ object HumanGestureDispatch {
 
     @Synchronized
     private fun record(commandId: String?, trace: HumanGestureDispatchTrace): Boolean {
-        if (!commandId.isNullOrBlank()) traces[commandId] = trace
+        // Alpha.134, the built-in check: a stroke that reached Cyclone's touch layer is said so in the run's evidence.
+        val checked = if (OverlayGesturePassthrough.consumeStrayed()) trace.copy(facts = (trace.facts ?: emptyMap()) + (TOUCH_LAYER_STRAY to true)) else trace
+        if (!commandId.isNullOrBlank()) traces[commandId] = checked
         return trace.accepted
     }
 
