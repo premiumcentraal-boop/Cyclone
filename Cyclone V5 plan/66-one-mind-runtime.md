@@ -1,7 +1,8 @@
 # Plan 66: The One Mind runtime
 
 **Status:** design (2026-10-16). Nothing is built yet. §10 adds what JEV 1.14 and the Decisions API offer: pin the
-version now; Box for targets with no node; icon matching through images as options; one fused call per step.
+version now; Box for targets with no node; icon matching through images as options; one fused call per step. §11 keeps replanning and diverting: plan drive
+and Mind drive in one run, wake triggers, local replans, detours, and a ≥ 98% recall bar measured on today's runs.
 
 **Scope:** Flash and the Mind (`Mode.FLASH`, `Mode.MIND`, the "Cyclone Mind" missions).
 
@@ -638,3 +639,143 @@ default without a visible "served by".
 
 **R2 and later:** Box acts for easy-to-undo moves once its shadow numbers clear the bar. The third voter goes in if
 measured.
+
+## 11. Replanning and diverting: kept, and placed exactly where they are needed
+
+**The risk this section answers.** Today the Mind sees every screen, so it can change course on any turn:
+- it notices a shorter path;
+- it notices the goal is already met;
+- it notices it is in the wrong chat;
+- it takes a detour (fetching a code from email, logging in);
+- it follows an owner's steer.
+
+A ladder that only *follows* a plan would lose that. A run that can't change course fails exactly where today's
+Mind succeeds.
+
+**The rule: never worse than Classic.** Every path that the cheap rungs can't settle ends in **Mind drive**: today's
+continuous loop, turn by turn, with the full record. The new runtime adds speed and checks on top of today's
+ability. It never replaces that ability.
+
+### 11.1 Two drivers in one run: plan drive and Mind drive
+
+- **Plan drive:** the rungs walk the plan, and the Mind is consulted at triggers (§11.2). This is the cheap, fast
+  default for stretches the plan understands.
+- **Mind drive:** the Mind holds the wheel turn by turn, exactly as today: every screen, every judgement, free
+  replanning. It hands back to plan drive by writing a new plan for the rest, or for the current milestone.
+
+Both drivers share one record, one card and one ledger. Switching costs nothing but the next call.
+
+**The Mind takes the wheel by itself when:**
+- the app or screen is unknown: no map, no recipe, and it is not in the plan's knowledge;
+- the goal is open-ended (search, browse, compare, "find out…"), where the next step depends on what is read;
+- two surprises happen inside one milestone;
+- the owner steers;
+- it decides to: rung 3 can always answer "I'll drive".
+
+So exploration and messy stretches keep today's success. Only the understood stretches get cheap.
+
+### 11.2 Wake triggers: when plan drive calls the Mind
+
+Every trigger is detected by code, or by questions riding in the step's fused call (§10.4), so watching for them
+costs nothing extra.
+
+| Trigger | Detected by | The Mind gets |
+|---|---|---|
+| **Surprise:** the step's postcondition missed, or the screen isn't the expected one | code + VERIFY | "Expected X, see Y": the screen, the last events, the plan |
+| **Blocked:** login, permission, error, paywall, or a popup that won't close | VERIFY `blocked_by` + POPUP | the blocker; it can take a detour (§11.4) |
+| **Drift:** `fits_plan` low, or a step needs more than 4 moves | the STEP board + the breaker | the step's history |
+| **New information** the plan depends on: a value read, a list of results, a reply | plan steps of type *read*, marked at plan time | what was read; the Mind decides the next part |
+| **Fork:** a real choice between alternatives (two Annas, which flight) | the STEP board's `several` / disagreement | the options |
+| **Opportunity:** the screen offers a more direct way to a later milestone | a `shortcut` question in the fused call: a choice over visible controls plus "none" | the shortcut; the Mind accepts or ignores it (one short call) |
+| **Already done:** the goal's done predicate holds early | the DONE question in the fused call | early finish, checked as in §3.5 |
+| **Owner steer** (plan 38) | Task Kit | the new goal version: an immediate replan, never handled by the rungs |
+| **Checkpoint:** a milestone the Mind marked "review me" when it planned | the plan | a review call at that point |
+
+### 11.3 Plans are layered, so replanning is local
+
+A plan has **milestones**, owned by the Mind ("open Anna's chat", "attach yesterday's photo", "send"), and
+**steps** under each, owned by the rungs.
+
+**A replan rewrites only what it needs:**
+- **Step level:** the rest of the current milestone's steps, a short call with a small report;
+- **Milestone level:** the remaining milestones, when the route changes;
+- **Goal level:** everything, after a steer or when the goal turns out to be different.
+
+Completed milestones stay completed and verified. A replan never redoes them unless their postcondition no longer
+holds.
+
+**Mind runs keep strategic awareness.** In runs routed as Mind, the Mind gets a short **milestone review** at each
+milestone boundary: one call with a 3–5k report. It can change course there, even when no trigger fired. That is
+about 3–6 extra calls per run, and it is what keeps the Mind ahead of the work instead of only reacting to it.
+Flash runs skip the reviews and rely on triggers.
+
+### 11.4 Diversions and detours
+
+Some runs must leave the plan and come back: a 2FA code from email or messages, a login, a missing permission, a
+contact looked up in another app, or the owner's "and also…".
+
+**A detour is a plan pushed onto a stack:**
+1. The current milestone is paused with its state (where it was, what it expected).
+2. The detour runs on the ladder like any plan.
+3. When the detour's done predicate holds, the runtime returns to the paused milestone:
+   - first it checks the paused milestone's screen predicate again;
+   - if the screen is gone, it navigates back with the map or the Back stack;
+   - if it can't, it climbs to the Mind.
+4. Values the detour found (the code, the number) become slots for the paused milestone.
+
+The rules for detours:
+- **at most 3 detours deep;**
+- a detour can never approve anything;
+- a detour into a gated action asks the owner like any other.
+
+**Owner diversions** keep plan 38 exactly:
+- **Steer** is a new goal version and an immediate replan.
+- **Queue** and **Parallel** are separate runs, as today.
+- **Pause** holds at the next step boundary.
+
+### 11.5 Escalation never loses context
+
+When the Mind is woken, the situation report (§3.6) leads with **why it was woken**: the trigger and its evidence.
+It includes:
+- the plan with each milestone's state;
+- the last events, one line each;
+- the current screen;
+- for a surprise, the before and after screens.
+
+The full record stays available through `recall`, so the Mind can open any earlier screen or result when the report
+isn't enough. Nothing the rungs did is hidden from it. It is only summarised.
+
+### 11.6 Highest success: the checks that raise it above today
+
+Today's Mind succeeds by noticing problems eventually. This runtime notices them on the step they happen:
+
+| Failure today | Caught by |
+|---|---|
+| Wrong chat, wrong field, wrong item | the next postcondition, one step later (today: many turns later, or never) |
+| A silent no-op (a tap that did nothing) | before/after VERIFY |
+| Popups eating turns | POPUP |
+| False "done" | DONE + the code predicate |
+| Loops | the breaker, within 2–4 actions |
+| Missing the faster route | the opportunity trigger |
+| Doing work that was already done | the early done check |
+
+Where the runtime is unsure, it does what today's Mind does, with the Mind in charge. A cheap mistake costs one
+climb. It never costs a wrong action that isn't easy to undo: those still need agreement, the code gate and the
+owner.
+
+### 11.7 Measuring that replanning is kept
+
+R0 has Lab traces of today's Mind runs, so the triggers can be checked before anything acts. Every point where
+today's Mind actually changed course is a labelled example of "the Mind was needed here":
+- a `plan_update`;
+- a diversion;
+- a recovery after a failed tool;
+- a steer.
+
+**R0 replays those runs with the triggers in shadow and measures:**
+- **recall:** the share of real course changes where a trigger would have woken the Mind. **The bar is ≥ 98%.**
+  Every miss is a run that could fail, so the triggers are tuned to over-wake.
+- **precision:** how often a trigger woke the Mind for nothing. This is only a cost. It is tuned down after recall
+  holds.
+- **success parity:** the One Mind engine must match or beat Classic's success rate on the same Lab suite before it
+  becomes the default for any difficulty. Until then Classic stays the default, and One Mind is a switch.
