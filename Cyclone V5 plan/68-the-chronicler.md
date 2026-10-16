@@ -1,6 +1,7 @@
 # Plan 68: The Chronicler
 
-**Status:** design (2026-10-16). Nothing is built.
+**Status:** design (2026-10-16). Nothing is built. **§10 revises the cadence:** compaction is an economic
+decision computed from cache prices, Luna is called on demand (0–3 times a run), and code writes the record.
 
 **What it is:** a background writer, hard-coded to GPT-6 Luna, that keeps a compact, always-current history of a
 run. OneMind (plan 67), the Flash mind, Glass, handovers and resumes then never wait for a summary, and the
@@ -213,3 +214,161 @@ The same summary serves every reader, at no extra cost:
   sub-lines inside NOW, which are sealed when the milestone ends.
 - **One more model in the run.** It is on a separate path: its failure falls back to code, and it never blocks the
   hands or OneMind.
+
+## 10. Revised after the owner's review: compaction is an economic decision, not a habit
+
+The owner asked two questions:
+- does compaction really save money once **cached tokens** are counted?
+- with run length unknown, can **summarising all the time** end up costing more than it saves?
+
+Working it through says **yes, it can**. §3.1's cadence (a Luna update every 2–4 events) is withdrawn. This section
+replaces it.
+
+### 10.1 The facts that decide it
+
+**Cache prices** (OpenRouter's prompt-caching docs and published model pricing):
+- a cache **read** costs about **0.1–0.5×** the normal input price, depending on the model (Anthropic 0.1×; OpenAI
+  0.25–0.5×; others in between);
+- a cache **write** costs from **nothing to 2×** (Anthropic 1.25× for 5 minutes, 2× for 1 hour; OpenAI's newest
+  models 1.25×).
+
+**Cache life:**
+- typically about **5 minutes** without use;
+- Anthropic refreshes it on every read;
+- some providers don't;
+- a fallback to another provider starts cold.
+
+**Two more facts:**
+- **Any compaction changes the prompt's prefix,** so the next call pays full price (often the write price) on
+  everything. Compacting every step would make every call a cache miss: the most expensive way to run.
+- **OpenRouter publishes `input_cache_read` / `input_cache_write` prices per model,** and every response reports how
+  many input tokens were cached. Cyclone can know its own model's cache economics instead of guessing.
+
+### 10.2 Where the tokens actually are
+
+In OneMind's design (plan 67 §3), the frontier conversation grows **by wakes, not by steps**:
+- each wake adds a code-built briefing: the events since the last wake, about 30 tokens per event line;
+- plus OneMind's reply.
+
+For a typical 40-step Mind run with about 10 wakes:
+- the prefix grows from about 6k tokens (system, tools, goal, plan) to about 21k;
+- with Anthropic-style caching, the whole run's frontier input costs roughly **$0.08–0.12**. Most of it is cache
+  reads.
+
+**Compacting that conversation would not pay for itself.** It is already small, and almost all of it is cached.
+
+**Compaction only matters in three places:**
+1. **Long runs:** 25+ wakes, hours of work, many milestones. The prefix passes 40–60k tokens and every wake carries it.
+2. **The wheel (Mind drive):** each turn adds a whole screen (1–3k tokens). A long stretch of driving bloats quickly.
+3. **Models with poor or no caching:** every token is paid at full price on every wake.
+
+**Luna summarising every few events helps none of these by itself.** A code line per event is already compact and
+exact. A summary of 4 event lines isn't meaningfully shorter, is less exact, and is mostly never read: only wakes
+read briefings, and there are fewer wakes than updates.
+
+### 10.3 The rebase rule: computed, not guessed
+
+Compaction of OneMind's conversation, a **rebase**, is considered **only at a milestone boundary or when the cache
+is cold**, never in mid-milestone.
+
+At that moment code knows:
+- `P`: the current prefix size;
+- `R`: the size after a rebase (about 1 line per sealed milestone, OneMind's own decisions kept, old evidence
+  folded);
+- `c` and `w`: the model's cache read and write price ratios, from OpenRouter's pricing (or measured from responses'
+  cached-token counts);
+- `k`: the expected number of wakes still to come (§10.4).
+
+Without a rebase, the next `k` wakes pay `k · P · c`. With a rebase, they pay `R · w + (k − 1) · R · c`.
+
+**So a rebase pays when `k · (P − R) · c > R · (w − c)`.** Break-even is `k* = R(w − c) / ((P − R) c)`.
+
+**Worked example,** with P = 40k and R = 10k:
+
+| Cache kind | c | w | Break-even k* | Meaning |
+|---|---|---|---|---|
+| Anthropic-like | 0.1 | 1.25 | ≈ 3.8 wakes | rebase only if 4+ more wakes are likely |
+| Gemini-like | 0.25 | 1.0 | ≈ 1.0 | rebase if more than one wake is likely |
+| OpenAI-like (0.5 read) | 0.5 | 1.0 | ≈ 0.3 | rebase whenever another wake is likely |
+| No caching | 1.0 | 1.0 | 0 | always rebase once P is large |
+
+**The rules, in order:**
+1. **The cache is cold:** more than about 5 minutes since the last call (the owner was asked, a port was waiting, a
+   long crew stretch) or a provider switch. The next wake pays full price anyway, so a rebase is **free**. Rebase
+   whenever `R` is meaningfully smaller than `P`.
+2. **The quality ceiling:** a prefix over about 60k tokens, or 70% of the model's context. Rebase regardless of
+   cost. Very long prompts slow models down and blur their attention.
+3. **Otherwise the economics:** rebase only if `P ≥ 20k` (below that the absolute saving is pennies) and the
+   expected `k ≥ k*`.
+4. **Never in the last milestone.**
+
+**The asymmetry favours acting when `P` is large.** A needless rebase costs at most `R · (w − c)`, about 1¢ at
+R = 10k on a $3/M model. A missed one costs `(P − R) · c` on *every* remaining wake. So under real doubt, with a big
+`P`, the rule leans to rebasing.
+
+### 10.4 Estimating "how much is left": where a decision model helps, and where it doesn't
+
+The one uncertain number is `k`, the wakes still to come. **JEV must not do this arithmetic:** counting and maths are
+on its documented weak list. So:
+
+- **Code estimates `k` from the plan** whenever there is one: remaining milestones × wakes per milestone observed so
+  far in this run (1.5 until there is data), plus open forks and pending barriers. Most runs have a plan, so this
+  is most of the time.
+- **A decision model is asked only where the plan can't tell:**
+  - the wheel (Mind drive);
+  - an open-ended goal ("find…", "compare…");
+  - a plan that was rewritten twice.
+
+  It gets one **Score** question in the next fused call: "How much of `goal` remains, given `plan` and `recent`?",
+  with levels *nearly done* / *a quarter left* / *about half* / *most of it* / *can't tell*. It never asks for a
+  number. Code maps the level to a `k` range, and "can't tell" falls back to the asymmetric rule (rebase if
+  `P ≥ 40k`).
+- **Code checks itself afterwards.** Every rebase logs `P`, `R`, `k` estimated and `k` actual, and the real cost from
+  the responses' cached-token counts. After 20 rebases the Lab shows whether the estimates over- or under-shoot, and
+  the 1.5 prior is corrected from data.
+
+**This answers the owner's suggestion that the decision API should make the call.** It makes **the one judgement
+code can't** (how far along a fuzzy task is). Code does the money arithmetic, which is exact and needs no model.
+
+### 10.5 What the Chronicler becomes: on demand, only when its words will be read
+
+Luna is called **only** when a reader for its language exists, and the call pays for itself:
+
+| When | Why it is worth it | Calls |
+|---|---|---|
+| A rebase is predicted at the next milestone boundary | Luna writes the folded part's LEARNED / OPEN notes (about 300 tokens). It is prepared before the boundary, so the swap waits for nothing. | 1 per rebase (0 in most runs) |
+| A Flash → Mind handover | OneMind's first briefing needs the Flash run's meaning, not just its events | 1 per handover |
+| A resume after a crash or restart | Reloading meaning beats re-reading a raw journal | 1 per resume |
+| A recipe is compiled at the end of a verified run | Step descriptions and LEARNED notes for next time | 1 per new recipe |
+
+**Everything else is code:**
+- the briefing deltas (event lines);
+- the sealed milestone lines (T3);
+- the NOW line for Glass, from the plan's milestone and step names;
+- the end report, from facts and milestones.
+
+**Expected Luna calls per run: 0–3,** instead of 10–20. Most short and medium runs make **none**.
+
+**"Ready at any time" still holds:**
+- a briefing never waits, because its code part always exists;
+- Luna's parts are prepared *ahead* when code predicts they'll be needed;
+- if one isn't ready in time, the code version is used, and that is never wrong, only less concise.
+
+### 10.6 The wheel (Mind drive) and the Flash mind
+
+- **In Mind drive,** old screens fold to their one-line brief **in batches at rebases** (the existing
+  `MindConversation.compact` mechanism, now triggered by §10.3 instead of a fixed 100k-character ceiling), never one
+  at a time. Batches keep the cache stable between rebases.
+- **The Flash mind's conversation** is tiny (2–5k tokens) and short-lived. It is **never** compacted. At a handover
+  it is summarised once (§10.5).
+
+### 10.7 What changes in the build
+
+- **Run 3 becomes "the history economy".** It has:
+  - code briefings and sealed milestone lines;
+  - the rebase rule with live cache prices;
+  - the `k` estimate with its Score question;
+  - on-demand Luna with the fact guard and code fallback;
+  - logging of every rebase's predicted and actual cost.
+- **Its tests:** the break-even function against the table above; the cold-cache rule; the "never in the last
+  milestone" rule; the guard; the fallback.
