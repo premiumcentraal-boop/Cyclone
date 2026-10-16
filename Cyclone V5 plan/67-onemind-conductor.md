@@ -299,3 +299,107 @@ cache-friendly, and a fresh situation report every time is not.
 2. **Parallel Glances:** OK that the hands keep going on easy-to-undo moves while OneMind reviews, or should every
    wake stop the hands?
 3. **The Score on Glass:** show every rung and wake (full transparency), or milestones only, with detail on tap?
+
+## 14. Flash, rethought: fluency, with its own fast mind
+
+**What was missing.** §8 gave Flash "OneMind on call": a plan and the crew, with the *frontier* model consulted
+when something goes wrong. That makes Flash either rigid (it can't replan cheaply) or expensive (every hiccup
+costs a frontier call). Neither is what Flash should be.
+
+**What Flash is for.** Each difficulty gets its own character:
+- **Instant is a reflex:** one move, no thought.
+- **The Mind is deliberation:** a frontier overseer for work that needs judgement.
+- **Flash is fluency:** a short task done in one flowing motion, in about 3–10 seconds, without visible thinking.
+  "Turn on dark mode and set brightness to half." "Reply 'on my way' to Anna." "Add milk to my shopping list."
+  "Open my last Uber receipt."
+
+The owner should feel that Flash *just does it*, faster than they could themselves.
+
+### 14.1 The Flash Mind: a fast mind of its own
+
+Flash gets its own small conductor, the **Flash Mind**:
+- **The model:** a fast chat model. Default: GPT-6 Luna, about 1–2 s per call and a fraction of the frontier price.
+  It is a setting.
+- **One kept conversation** for the Flash run, with the same append-only briefings as OneMind (§3), only much
+  smaller: about 2–5k tokens for a whole run.
+
+**It does everything OneMind does, in miniature:**
+- writes the plan;
+- answers consults;
+- replans;
+- writes short texts (always DRAFT-checked, and gated sends still go to the owner).
+
+**It is woken by the same triggers** (plan 66 §11.2). A Flash Mind wake costs about 1 s and a fraction of a cent,
+so Flash can afford to replan quickly instead of failing or escalating.
+
+**Its budget:**
+- at most **3 replans**;
+- at most **2 surprises in one milestone**;
+- at most **12 steps** in total.
+
+Past any of these, the task isn't Flash-shaped, and it goes up (§14.4).
+
+### 14.2 What makes Flash unique: five speed techniques that only short tasks can use
+
+1. **The plan streams into action.** The Flash Mind writes the plan as a stream. The runtime starts step 1 as soon
+   as step 1 is parsed, about 0.5 s after the request. Planning and doing overlap.
+2. **Branching micro-plans.** Flash plans are small programs, not lists. The Flash Mind writes the likely forks into
+   the plan as conditions, for example:
+   - "if dark mode is already on → skip";
+   - "if a cookie banner → dismiss";
+   - "if two contacts match → the one with a recent chat";
+   - "if the list doesn't exist → create it".
+
+   The crew settles each condition with one Noul in the step's fused call, so foreseen forks need no wake at all.
+   This is how Flash stays flowing where a plain plan would stop and ask.
+3. **Already-done first.** Before acting, Flash asks whether the goal (or a step) already holds: dark mode already
+   on, the item already on the list. If so, it finishes at once with "Already on" (checked). No wasted moves.
+4. **Pipelined steps.** While one action settles (300 ms+), the next step's fused call is already in flight, built
+   on the expected screen, and dropped if the screen came out different. Steps chain without dead time.
+5. **One approval, at the end.** Flash tasks usually have at most one consequential move (the send). Flash does
+   everything up to it, then shows **one** approval card with the exact result ("Send 'on my way' to Anna de
+   Vries?"). The owner sees one decision, not a conversation.
+
+### 14.3 Flash is where recipes are born
+
+Flash tasks are the ones people repeat. Every verified Flash run compiles to a recipe (plan 66 §3.8), branches
+included. The second time, the plan comes from the recipe and the Flash Mind isn't called at all, unless a text
+must be written or something surprises. **Flash gets faster the more it is used**, and drops to Instant speed for
+the owner's habits.
+
+### 14.4 Going up, without starting over
+
+The Flash Mind escalates to OneMind when:
+- its budget runs out (§14.1);
+- it answers a wake with `needs_frontier`: the task needs research, real composition, or judgement it isn't sure of;
+- the run reaches a consequential move whose target is ambiguous (which recipient, which amount);
+- the goal turns out open-ended, or crosses more than 2 apps with data carried between them.
+
+**Escalation is a handover, not a restart:**
+- the Flash Mind's conversation (plan, decisions, notes) is summarised by code into OneMind's first briefing;
+- the Score carries over, with completed steps verified;
+- OneMind takes charge from there, with its standing orders.
+
+The owner sees the same card change from Flash to Mind.
+
+### 14.5 Flash in numbers (estimates; R0 and R1 measure)
+
+| A typical Flash task (4–8 steps) | Today (a Mind run) | Flash with its own mind | Flash from a recipe |
+|---|---|---|---|
+| Model calls | 6–12 frontier | 1–3 fast (plan + 0–2 wakes) | 0–1 fast |
+| Decisions calls | 0 | 4–8 fused | 2–6 fused |
+| Time to first action | 5–10 s | **≈ 0.5 s** (streamed plan) | ≈ 0.2 s |
+| Total time | 30–60 s | **≈ 3–10 s** | ≈ 2–5 s |
+| Cost | $0.30–0.80 | **≈ $0.003–0.01** | < $0.002 |
+
+### 14.6 The three difficulties, side by side
+
+| | Instant | Flash | Mind |
+|---|---|---|---|
+| Character | reflex | fluency | deliberation |
+| Who controls | nobody | the **Flash Mind** (fast model) | **OneMind** (frontier) |
+| Plan | one step | streamed branching micro-plan | milestones + steps + standing orders |
+| Replans | — | ≤ 3, about 1 s each | free, at the owner's effort |
+| Wakes | — | triggers only | triggers + glances + milestone reviews |
+| Typical model calls | 0 | 1–3 fast | 6–14 frontier |
+| Goes up to | Flash (same run) | Mind (handover) | — (takes the wheel itself) |
