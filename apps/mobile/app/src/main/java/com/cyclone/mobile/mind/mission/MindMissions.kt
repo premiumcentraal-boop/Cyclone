@@ -769,7 +769,10 @@ object MindMissions {
             val metrics = com.cyclone.mobile.mind.lab.MissionMetrics().also { run.metrics = it }
             workspace?.let { ws -> metrics.workspace = { ws.record() } }
             metrics.divert = { toolbox.planVersions.record() }
-            val listener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, MissionListener(context, trace, missions, run.id,
+            // Plan 69 checkpoint 1: the run is also written into a OneMind Score and ledger, beside it, changing nothing.
+            val recorder = com.cyclone.mobile.mind.one.ScoreRecorder(run.id,
+                if (run.flash) com.cyclone.mobile.mind.one.Difficulty.FLASH else com.cyclone.mobile.mind.one.Difficulty.MIND, run.mission.goal)
+            val listener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, recorder, MissionListener(context, trace, missions, run.id,
                 front = { run.front },
                 updateCard = { change -> card(context, run, change) },
                 onTurn = { turn -> save { it.copy(turns = turn) } }) { event -> save { it.withEvent(event) } }))
@@ -790,7 +793,7 @@ object MindMissions {
                     },
                     summary = result.summary, evidence = result.evidence.orEmpty(), turns = result.turns, workingMs = result.workingMs,
                     usage = result.usage, modelLabel = result.modelLabel, waitingFor = null,
-                    metrics = metrics.toJson(),
+                    metrics = metrics.toJson().put("onemind", runCatching { recorder.toJson() }.getOrNull() ?: org.json.JSONObject.NULL),
                 )
             }
         } catch (error: Throwable) {

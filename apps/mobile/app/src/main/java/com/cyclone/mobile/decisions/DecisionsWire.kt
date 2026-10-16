@@ -35,6 +35,12 @@ sealed interface DQuestion {
         init { require(levels.isNotEmpty()) { "a score needs levels" } }
     }
 
+    /**
+     * JEV 1.14's "Where?" (plan 66 §10.2): one target in an image, answered as a box. It always answers a box, even when
+     * the target is absent, so it is asked beside a Noul about the same target. Experimental: shadow only (plan 69 §4.5).
+     */
+    data class Box(override val instructions: String) : DQuestion
+
     companion object {
         /** A choice whose options need no guidance beyond their names. */
         fun choice(instructions: String, options: List<String>): Choice = Choice(instructions, options.associateWith { "" })
@@ -60,6 +66,13 @@ sealed interface DAnswer {
         fun margin(): Double = (probabilities[choice] ?: confidence) - (runnerUp()?.second ?: 0.0)
     }
     data class Score(val score: Double, val confidence: Double, val probabilities: Map<Int, Double>) : DAnswer
+    /** Edges as fractions of the image (0..1 from the top-left corner), and how sure the model is. */
+    data class Box(val top: Double, val bottom: Double, val left: Double, val right: Double, val confidence: Double) : DAnswer {
+        val centerX: Double get() = (left + right) / 2
+        val centerY: Double get() = (top + bottom) / 2
+        /** A box with edges in order and some size: anything else is no answer. */
+        val plausible: Boolean get() = bottom > top && right > left && (bottom - top) * (right - left) in 0.0001..0.9
+    }
     /** The model declined this question. It is not a "no": the caller treats it as no answer. */
     data object Refusal : DAnswer
 }
@@ -131,6 +144,22 @@ object DecisionsWire {
             .put("criteria", JSONObject().also { c -> q.options.forEach { (option, guidance) -> c.put(option, guidance.ifBlank { option }) } })
         is DQuestion.Score -> JSONObject().put("type", "score").put("instructions", q.instructions)
             .put("criteria", JSONArray(q.levels))
+        is DQuestion.Box -> JSONObject().put("type", "box").put("instructions", q.instructions)
+    }
+
+    /** JEV needs this header on any request with an image or a Box question (its "danger zone" opt-in). */
+    const val IMAGE_HEADER = "TypeSafe-Danger-Zone-Images"
+
+    fun needsImageHeader(state: List<DPart>, questions: Map<String, DQuestion>): Boolean =
+        state.any { it is DPart.Image } || questions.values.any { it is DQuestion.Box }
+
+    /** Whether a built [body] has an image in its state or a Box question (the HTTP layer adds [IMAGE_HEADER]). */
+    fun carriesImageOrBox(body: JSONObject): Boolean {
+        val state = body.optJSONArray("state")
+        val image = state != null && (0 until state.length()).any { state.optJSONObject(it)?.optString("type") == "image_url" }
+        val questions = body.optJSONObject("questions")
+        val box = questions != null && questions.keys().asSequence().any { questions.optJSONObject(it)?.optString("type") == "box" }
+        return image || box
     }
 
     /** The answers to [questions], or null when the body is not a decisions answer at all. */
@@ -169,6 +198,13 @@ object DecisionsWire {
                     q.levels.indices.mapNotNull { i -> p.optDouble(i.toString(), Double.NaN).takeIf { !it.isNaN() }?.let { i to it.coerceIn(0.0, 1.0) } }.toMap()
                 }.orEmpty()
                 DAnswer.Score(score, a.unit("confidence") ?: 0.0, probabilities)
+            }
+            is DQuestion.Box -> {
+                if (type != "box") return null
+                val b = a.optJSONObject("box") ?: return null
+                val edges = listOf("top", "bottom", "left", "right").map { b.optDouble(it, Double.NaN) }
+                if (edges.any { it.isNaN() || it < 0.0 || it > 1.0 }) return null
+                DAnswer.Box(edges[0], edges[1], edges[2], edges[3], a.unit("confidence") ?: 0.0)
             }
         }
     }

@@ -60,6 +60,8 @@ object DecisionsHttp {
                 .header("Authorization", "Bearer $key")
                 .header("HTTP-Referer", "https://github.com/premiumcentraal-boop/Cyclone")
                 .header("X-Title", title)
+                // JEV's opt-in for images and Box questions (plan 66 §10.2); harmless for other models.
+                .also { if (DecisionsWire.carriesImageOrBox(body)) it.header(DecisionsWire.IMAGE_HEADER, "true") }
                 .post(body.toString().toRequestBody(JSON))
                 .build()
             val client = CLIENT.newBuilder().callTimeout(deadlineMs.coerceIn(200, 30_000), TimeUnit.MILLISECONDS).build()
