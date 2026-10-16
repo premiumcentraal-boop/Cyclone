@@ -137,13 +137,14 @@ private fun DrawScope.drawDriveOrb(r: Float, swirl: Float, breath: Float, voice:
     }
 }
 
-/** Android's "remove animations" (animator duration scale 0): Drive's glass holds still. */
+/** Android's "remove animations" (animator duration scale 0), or the overlay's Lite: Live voice's glass holds still. */
 @Composable
 internal fun rememberReducedMotion(): Boolean {
     val context = LocalContext.current
-    return remember {
+    val off = remember {
         runCatching { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }.getOrDefault(false)
     }
+    return off || OverlayLite.active
 }
 
 /** Room around the button's glass for its glow and working ring. */
