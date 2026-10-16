@@ -445,7 +445,7 @@ Sources:
 
 Every feature below is mapped to where it fits in the runtime, or why it doesn't.
 
-### 10.1 Act now: pin the JEV version
+### 10.1 The JEV version (owner's decision: follow latest, see plan 67 §16)
 
 - Cyclone calls `~typesafe/jev-latest` (`Decisions.kt:42`, `FastMode.kt:50`).
 - That alias moves from 1.13 to **1.14 around 21 October 2026**.

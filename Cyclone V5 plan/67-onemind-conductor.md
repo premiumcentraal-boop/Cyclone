@@ -416,3 +416,90 @@ The owner sees the same card change from Flash to Mind.
    reasoning effort and on short briefings to stay quick.
 4. **Flash → Mind: hand over automatically.** OneMind takes the same run with the Chronicler's summary as its first
    briefing.
+
+## 16. Owner decisions (2026-10-16, rounds 2 and 3)
+
+**Cost:**
+- **No caps:** runs never pause for cost. The card and Glass show what each run spent.
+- The ledger still counts every call.
+- **The hard loop breaker stays** (plan 66 §3.7): it is what stops a runaway run now that no cap does.
+
+**Finishing and display:**
+- **Done doubt is treated as not done.** When the independent done check doubts a finish, OneMind (or the Flash
+  mind) is woken with the reason and must fix or explain it before the run finishes.
+- **Glass and the card:**
+  - milestones with their states;
+  - the Chronicler's NOW line;
+  - each OneMind wake with its reason;
+  - cost so far;
+  - every step on tap.
+
+**Recipes, JEV and vision:**
+- **Recipes start automatically** after a verified run. Any surprise falls back to planning and updates the recipe.
+- **JEV follows `~typesafe/jev-latest`.** Cyclone takes 1.14 when the alias moves. Because 1.14's calibration
+  isn't published:
+  - the engine log watches agreement and answer rates per JEV version;
+  - the golden set is re-run against 1.14 as soon as it is live.
+
+  The plan 66 §10.1 advice to pin is withdrawn by the owner's choice.
+- **Vision features (Box, icons as answer options): shadow only** until TypeSafe calls image input and Box
+  production-ready. They record where they would tap. They never tap.
+
+**Questions and rollout:**
+- **Questions to the owner: try once, then ask.** The ASK check may give OneMind one more try with a hint. Consent
+  questions always reach the owner.
+- **Rollout: a full rebuild for every difficulty, before release.** One major improvement run, allowed to take
+  several code runs. It is not staged as R0–R4 releases. It ships when all of it works and passes its tests, behind
+  the Run engine switch (Classic kept as the way back). Plan 66 §7's releases become the order of work inside the
+  build (§17).
+
+## 17. The build programme
+
+Each code run ends with the code compiling and its tests green. Nothing is released until run 7.
+
+**Run 1, the Score and the ledger:**
+- the typed run state (goal versions, milestones and steps, facts with provenance, events, barriers, standing
+  orders);
+- the ledger counting every call (including Pilot, advisor and Chronicler);
+- the hard breaker.
+
+All pure Kotlin with tests. Today's Mind loop writes its events into the Score.
+
+**Run 2, the crew:**
+- the step engine on the ladder (rungs 0–2) with one fused Decisions call per step: STEP, VERIFY, POPUP, the
+  divergence score, standing-order questions, TRIPWIRE;
+- postconditions;
+- the DONE check;
+- tools as typed plan steps;
+- vision questions in shadow.
+
+**Run 3, the Chronicler:** watermark + tail, incremental Luna updates, sealing, the fact guard, the code-digest
+fallback.
+
+**Run 4, OneMind:**
+- the kept append-only conversation;
+- briefings;
+- the four wake kinds with effort per kind;
+- standing orders compiled into the fused call;
+- barriers with parallel Glances;
+- local replans, the wheel (today's loop as Mind drive) and detours.
+
+**Run 5, Flash:**
+- the Flash mind on the owner's model;
+- streamed branching micro-plans;
+- already-done-first and pipelined steps;
+- one approval at the end;
+- automatic handover to OneMind.
+
+**Run 6, recipes and Glass:**
+- recipes compiled from verified runs and started automatically;
+- the Score on Glass and the card (milestones, NOW line, wakes, cost);
+- Instant as a one-step plan on the same runtime.
+
+**Run 7, prove and release:**
+- golden runs and Lab suites, Classic against One Mind on the same missions;
+- trigger recall (≥ 98% of Classic's course changes);
+- guards;
+- the Mobile CI build;
+- release notes and device matrix rows;
+- release behind the Run engine switch.
