@@ -1,4 +1,4 @@
-# Cyclone V5 Alpha 136: two decision engines that ask JEV and OpenAI Decisions at once
+# Cyclone V5 Alpha 136: decision engines that ask JEV and OpenAI Decisions at once, four times over
 
 Developer alpha for owner testing. It builds on alpha.135 dev1 and includes it.
 
@@ -27,6 +27,34 @@ switchable in Settings, because nothing can be live-tested.
 - **Their worst case is today's behaviour, or one rung up.** If a model is slow, wrong or down, the other decides
   under the one-answer rule, or the request goes to Flash.
 
+## Four answers, not two (plan 65)
+
+**Each model is now asked twice at the same moment**, with the question worded two ways. The second wording lists
+the options in reverse order (with "none" last), lists the screen in reverse, and puts the request after it.
+- **Position bias:** an answer that only won because it was listed first now shows up as disagreement.
+- **A model that isn't sure** answers its two wordings differently, and never acts.
+
+**Consensus** acts only when all four answers name the same action.
+
+**Sprint** acts as soon as **two** answers are sure of the same easy-to-undo action and **none** disagrees. Before,
+it acted on one.
+
+**Once every model has answered once,** the remaining answers get 300 ms, not the full 1.5 s deadline.
+
+## Replay: no call for what already worked (plan 65)
+
+**When it replays:**
+- The same words (case, accents and punctuation aside) were done the same easy-to-undo way **twice in a row**.
+- The phone verified both times.
+- Then the next time it is done at once, with **no model asked**.
+- The trace says "you asked this before and it worked".
+
+**When it doesn't:**
+- A failure, hand-up or cancel of those words forgets it.
+- It never applies to taps, writing, money or anything else that isn't easy to undo.
+- It comes after the safety rules.
+- Audits and "Learn only" skip it.
+
 ## Sight goes to OpenAI Decisions
 
 In Consensus and Sprint, Instant's follow-up questions that may need the screen go to **OpenAI Decisions** with the
@@ -46,7 +74,8 @@ agreed, and each model's median time.
 
 **The health report carries `decisions.engine`, as counts and times only:**
 - per engine: decisions, both-answered share, agreement, early acts, rungs chosen;
-- per model: answer rate, p50/p95, how often it answered first.
+- per model: answer rate, p50/p95, how often it answered first, and **self-agreement** (how often its two wordings
+  gave the same answer).
 
 **The engines measure both models on every request,** including answers that came too late to count. So the separate
 watch call isn't needed in these engines.
@@ -57,7 +86,18 @@ watch call isn't needed in these engines.
 
 ## Tests
 
-- **`EnsembleTest` (12):**
+- **Plan 65 additions:**
+  - **`EnsembleTest` grows to 17:**
+    - Sprint needs two sure answers and no dissent;
+    - the 300 ms grace;
+    - one model's two answers merge;
+    - the second wording is the same question reordered;
+    - a four-answer property test over the golden set: Instant only when all four agree, never below the most
+      careful answer, Sprint's early act always easy to undo and unopposed.
+  - **`ReplayTest` (6):** the streak, forgetting, easy-to-undo only, no model asked, an app must still be installed,
+    the rules first.
+  - **Guards:** the merge rule, Sprint's two-answer rule, and Replay's limits and place.
+- **`EnsembleTest` (the first 12):**
   - every combining rule;
   - the race with fake models:
     - Consensus waits for both;
@@ -89,5 +129,8 @@ watch call isn't needed in these engines.
 - **The board changed with the engine.** Consensus and Sprint use Triage (risk flags, difficulty, action) instead of
   Board 0. Expect a little more Flash where the two models disagree, and fewer wrong Instants, until the numbers say
   otherwise.
-- **Cost:** two decision calls per undecided Auto request, about the same as alpha.123 with Compare on: a fraction of
-  a cent.
+- **Cost:** four decision calls per undecided Auto request (two per model): still a fraction of a cent. Replay
+  removes the calls for requests that repeat.
+- **Rate limits:** four calls double the request rate. A 429 pauses that one model for two minutes, and the other
+  decides alone.
+- **Consensus can wait up to 300 ms longer** when one of a model's two answers lags. Sprint is not slower.

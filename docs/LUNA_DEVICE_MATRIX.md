@@ -72,3 +72,6 @@ Settings → Speed → Decision engine. Run each row in **Consensus**, then **Sp
 | 5.6 | "take a selfie" on a camera with an icon-only shutter | The photo is taken, or Instant hands up; never a tap outside the camera | UNVERIFIED |
 | 5.7 | 20 everyday requests, then Settings → Speed | The engine line shows decisions, "both answered", "agreed" and a median time for JEV and OpenAI Decisions | UNVERIFIED |
 | 5.8 | Switch to Classic and repeat 5.1 | Works as in alpha.123 | UNVERIFIED |
+| 5.9 | Say "get the picture thing up" three times (in Consensus) | The camera each time. The third time the trace says "you asked this before and it worked" and it opens with no wait | UNVERIFIED |
+| 5.10 | Repeat 5.9, but cancel the second run | The third run asks the models again (Replay forgot it) | UNVERIFIED |
+| 5.11 | 20 everyday requests, then the health report's `decisions.engine.lanes` | Each model shows `selfAgreement`. Four answers per decision (two per model) in the engine log | UNVERIFIED |
