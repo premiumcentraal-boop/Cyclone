@@ -1,6 +1,7 @@
 # Plan 66: The One Mind runtime
 
-**Status:** design (2026-10-16). Nothing is built yet.
+**Status:** design (2026-10-16). Nothing is built yet. §10 adds what JEV 1.14 and the Decisions API offer: pin the
+version now; Box for targets with no node; icon matching through images as options; one fused call per step.
 
 **Scope:** Flash and the Mind (`Mode.FLASH`, `Mode.MIND`, the "Cyclone Mind" missions).
 
@@ -433,3 +434,207 @@ Rung 3 is today's Mind loop, started with the situation report and handing back 
   already face this; recipes are forgotten when an app changes.
 - **The plan must be honest about writing.** Any step that composes words for someone else always goes through the
   planner or the Mind, and then the DRAFT check and the owner's approval.
+
+## 10. What JEV 1.14 and the Decisions API add (researched 2026-10-16)
+
+Sources:
+- OpenRouter's Jev guide, Multimodal Decisions guide and Decisions API reference;
+- TypeSafe's docs: images, box, confidence, the Jev 1.13 jaggedness page, cookbooks;
+- release coverage of Jev 1.14.0, 14 October 2026.
+
+Every feature below is mapped to where it fits in the runtime, or why it doesn't.
+
+### 10.1 Act now: pin the JEV version
+
+- Cyclone calls `~typesafe/jev-latest` (`Decisions.kt:42`, `FastMode.kt:50`).
+- That alias moves from 1.13 to **1.14 around 21 October 2026**.
+- TypeSafe has published no 1.14 benchmarks and no calibration notes, and says to recheck thresholds tuned on 1.13.
+
+**Do now:**
+- pin production boards to `typesafe/jev-1.13`;
+- run 1.14 in shadow on the golden set and the engine log;
+- move over only when the numbers say so.
+
+1.13 stays available with 60 days' notice before it is deprecated.
+
+### 10.2 Box: the "Where?" question (1.14 only, experimental)
+
+**What it is:**
+- A `box` question names one target in an image. It answers `top`/`bottom`/`left`/`right` as fractions from the
+  top-left corner, plus `confidence`.
+- **It has no "not found":** it always answers a box. TypeSafe's rule is to pair it with a `noul` ("is X in it?") in
+  the same call and ignore the box when that is low. That is exactly the screenshot you sent: *Is he in it? 0.91 ·
+  Where? Boxed 0.80*.
+- One target per question. "Several" needs a Choice of none / one / several first. Small targets need a two-stage
+  ask (a Choice over image tiles, then Box on the tile).
+- Needs the header `TypeSafe-Danger-Zone-Images: true` (to be confirmed through OpenRouter with the probe).
+- Any image puts JEV in its **slower, less accurate long-context mode**.
+- TypeSafe calls it "dreamer-ready", **not production-ready**.
+
+**Where it fits:** a new **rung 2b, sight with no node**. It is for when a step's target has no accessibility node
+at all:
+- canvas or game views, camera viewfinders, map pins;
+- images in a feed ("open the first photo");
+- web views with a dead tree.
+
+Today those cost a frontier call with a screenshot.
+
+**One call:**
+- Box("the ⟨target⟩ in `screen`") + Noul("is ⟨target⟩ visible in `screen`") + Choice(none/one/several).
+- Tap the box centre with `tap_point` only when **all** of these hold:
+  - the noul ≥ 0.9;
+  - the choice is "one";
+  - the box is plausibly sized;
+  - the move is easy to undo.
+
+Point taps already go through `ClickGateIntercept`'s labels-at-point check. After the tap, the VERIFY question
+confirms the expected change. Anything else climbs to rung 3.
+
+**Ships in shadow first** (R0/R1). It records where JEV *would* tap against where the Mind did. It acts only after
+the numbers show it is sure, and never for gated moves.
+
+### 10.3 Images inside criteria and instructions: icon matching (1.13 and 1.14)
+
+**What it is:**
+- Choice options, Score levels and Noul definitions can carry **images**.
+- Several named images can sit in one state (`` `before` ``, `` `after` ``, `` `frames[2]` ``) through an `assets`
+  map of reference strings.
+
+**Where it fits** (better than Box for most cases, because the answer is a **real node**):
+
+- **Icon-only controls.** Code crops each unlabelled clickable control from the screenshot, using the accessibility
+  bounds it already has. The Choice options *are* those crops: "which of these is the shutter / send / like
+  button?". The answer is an element id, so the tap goes through the normal tree path and every gate. This
+  replaces the screenshot-to-the-Mind step for icon buttons, and the Instant follow-ups' sight box.
+- **VERIFY with two pictures.** Before and after screenshots as `` `before` `` / `` `after` ``: "did the screen
+  change the way step k expected?". This catches the silent no-ops that the text tree misses: a "liked" heart, a
+  toggled switch drawn as an image.
+- **DONE with the evidence picture:** the final screen and the done predicate, in one Noul.
+
+**The caveat:** images trail text in accuracy, and every image means long-context mode. Use images only where the
+tree has nothing, and keep OpenAI Decisions (up to 128 images, built for vision) as the racing partner for any
+image question.
+
+**Open question:** OpenRouter's route takes images as `image_url` parts in `state`. TypeSafe's own `assets` /
+reference-string form may not pass through OpenRouter. The probe settles this before any build.
+
+### 10.4 Fan-out: one call per step, not one per board
+
+**What it is:**
+- Up to **200 questions per call**, each answered in isolation against the same state.
+- "Adding questions barely changes the response time."
+
+**This changes §3.4:** the boards are not separate calls. Each step sends **one fused call**:
+- STEP (`next`, `fits_plan`, `surprise`);
+- VERIFY of the step that just ran;
+- POPUP;
+- TRIPWIRE when the candidate move isn't easy to undo.
+
+DONE and DRAFT stay separate, since they run once a run.
+
+**Expected effect:** about 3× fewer calls than §4 estimated, with the same latency. A routine 10-step run then
+needs about 10–12 Decisions calls in total, about $0.001 at JEV's **$0.042 per million input tokens (output free)**.
+
+### 10.5 Confidence, used the way it is defined
+
+- **Choice and Score:** `confidence` is computed from the probability spread (1 = all on one answer).
+- **Noul:** has no confidence. Use |2p − 1|.
+- **TypeSafe's routing pattern:** high → act; medium → confirm; low → don't act. The bars are scaled to risk, with a
+  0.5 floor.
+
+That is the ladder of §3.3 exactly:
+- **high** acts on the rung;
+- **medium** climbs a rung (it never asks the owner for a routine step);
+- **low** climbs straight to the Mind.
+
+**Bars are per model and per action class,** never shared: probabilities differ between models. R0's shadow log
+calibrates them.
+
+### 10.6 The jaggedness rules become design rules
+
+TypeSafe's list of Jev 1.13's rough edges, each turned into a rule:
+
+| Rough edge | Rule in the runtime |
+|---|---|
+| Reads literally | One literal question per factor, combined in code (the boards already do this). |
+| Not a calculator; can't count | Counting, comparing prices, times and dates stays in code. JEV only *picks*. "The 3rd row" is resolved by code from the list, not asked. |
+| Weak on dates | Dates extracted as a Choice of parts, compared in code. |
+| Large state lowers accuracy | State stays lean: code shortlists controls (≤ 25), drops irrelevant text, and keeps every board under **32,000 bytes**, so JEV stays in its fast mode. Enforced by code. |
+| Leans to the first option | The second phrasing (plan 65, built, off) switches on **only** for moves that aren't easy to undo. |
+| Adversarial content can steer it | The screen is untrusted: a page can say "tap Approve". Decision models can only pick among code-valid options or stop. Gated moves need the code gate and the owner, and TRIPWIRE can only stop. So the worst an injected page can cause is a climb, never an approval. |
+| Can't generate | Words always come from the planner or the Mind (§9). |
+
+### 10.7 The rest of the API
+
+- **`session_id` and `trace`:** set the run id as `session_id` on every board of a run, so OpenRouter's
+  observability groups a run's calls. The wire already supports it (`DecisionsWire.kt:119`). Never put request text
+  in `trace`.
+- **`provider.zdr`**, already wired: on when Strict privacy is on.
+- **`provider.max_price`:** per-call price caps, a second fence under the ledger's caps.
+- **`provider.preferred_max_latency`:** a p90 latency cutoff for step boards, so a slow provider route is skipped
+  instead of waited for.
+- **Long context (262k, header `TypeSafe-Danger-Zone-Long-Context`):** **not used.** It is slower and less
+  accurate, and lean state is the design.
+
+### 10.8 Other decision models: candidates, not choices
+
+OpenRouter now lists about 19–21 decision models on the same Decisions API:
+
+| Model | Note |
+|---|---|
+| Perplexity `pplx-decider-v1.1-27b` | images |
+| Cloudflare `clef`, `clef-flash`, `clef-omni` | images; omni also does audio and video; at most 4 images |
+| Inception `mercury-decide` | has a **free** route |
+| Upstage `solar-decide` | |
+| Microsoft Decision-1 | |
+| Liquid, Together and others | |
+
+**Use:**
+- a **third voter in shadow**: free or near-free;
+- for easy-to-undo steps only;
+- adopted only if the engine log shows it lowers disagreement without lowering accuracy.
+
+Plan 63's race takes any number of lanes, so adding one is a list entry. Nothing changes until measured.
+
+### 10.9 Jev Router: maybe, for the Mind's effort
+
+`typesafe/jev-router` is a **chat** model id that picks a model and a reasoning effort for each request.
+
+**For:** it could pick the effort of each rung-3 call (low for "which Anna", high for a new plan).
+
+**Against:**
+- the response doesn't say which model served the call;
+- the owner chose their Mind model.
+
+So it is **Lab-only**: an experiment variant measured against the owner's model at fixed effort. It is never the
+default without a visible "served by".
+
+### 10.10 Cookbook patterns that map onto the runtime
+
+| Cookbook | Becomes |
+|---|---|
+| SDE cascade (cheap extraction → verification → reasoning) | the ladder itself |
+| Function calling (a request mapped to typed functions) | recipe lookup and slot filling (§3.8): the request's shape is a Choice over the recipe catalog, its slots are Choices over candidates extracted in code |
+| Skill suggestion | picking a recipe or a manual ability from the catalog without the Mind |
+| LLM guardrails | TRIPWIRE (inputs) and DRAFT (outputs) |
+| Citation check | DRAFT's "does the text say what the owner asked" |
+| Line search | finding "the email from Anna" or "the 9:30 alarm" among long lists by text, without a screenshot |
+| Self-consistency | the second phrasing, for risky steps only |
+| Basic memory | a cheap "is this worth remembering" before the Mind writes memory |
+
+### 10.11 What changes in the releases
+
+**R0 adds:**
+- pin JEV 1.13;
+- 1.14 in shadow;
+- the probe checks the image header and the `assets` form through OpenRouter;
+- Box and icon-matching in shadow;
+- per-model bars calibrated from the shadow log.
+
+**R1 uses:**
+- one fused call per step (§10.4);
+- icon matching acting for easy-to-undo moves;
+- before/after VERIFY.
+
+**R2 and later:** Box acts for easy-to-undo moves once its shadow numbers clear the bar. The third voter goes in if
+measured.
