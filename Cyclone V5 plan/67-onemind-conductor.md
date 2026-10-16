@@ -503,3 +503,147 @@ fallback.
 - the Mobile CI build;
 - release notes and device matrix rows;
 - release behind the Run engine switch.
+
+## 18. Final confidence check (2026-10-16)
+
+Plans 65–68 and the owner's twelve decisions, read as **one** system. Each part is scored on two questions: is it a
+good idea, and does it fit the rest. Where two parts pull against each other, a tweak is made here and the build
+follows the tweak.
+
+### 18.1 Scores per part
+
+| Part | Good idea | Fits | Notes |
+|---|---|---|---|
+| The Score, the ledger, the hard breaker | 97 | 97 | The foundation everything else reads. Low risk, pure code. |
+| A postcondition on every step, and the independent DONE check | 93 | 95 | The biggest reliability gain. It catches errors on the step they happen. |
+| The ladder with one fused Decisions call per step | 88 | 92 | Documented API behaviour (200 questions, parallel). State is kept under 32 KB so JEV stays fast. |
+| OneMind: append-only conversation, briefings, four wake kinds, barriers | 88 | 90 | Matches the owner's requirements exactly. The open risk is trigger recall, which §18.2 T6 measures. |
+| Standing orders compiled into watcher questions | 85 | 92 | Novel and cheap. Bounded to 8 yes/no questions or code checks. |
+| Replans, the wheel, detours ("never worse than Classic") | 92 | 95 | Today's loop survives inside the new runtime. |
+| Tools before taps; Ports and Glass as plan steps | 90 | 93 | Uses tools that already exist. |
+| The Chronicler (watermark + tail, sealing, fact guard) | 78 | 85 | Right idea. The fact guard is a text check and can't catch a wrong *description*, so T3 narrows what Luna writes. |
+| Flash with its own mind on the owner's model | 75 | 70 | **The main tension** (T1). |
+| Recipes, started automatically | 82 | 88 | Matching by request shape needs Triage slots. Misses fall back safely. |
+| No cost caps + done doubt = not done + automatic handover | 80 | 72 | Together they can loop on wakes. T2 bounds it without a cost cap. |
+| Following `jev-latest` | 70 | 80 | Thresholds can shift without notice. T4 makes the system notice. |
+| Vision shadow-only until TypeSafe is ready | 90 | 85 | Fits, once it is clear the rule is about *tapping*, not *checking* (T5). |
+| One full rebuild before release | 85 | 75 | Fits the ambition. But the ≥ 98% recall and parity bars need real runs, which only a release can collect (T6). |
+
+**Overall, before the tweaks: 84 / 100.** The architecture is sound and coherent. Four decisions interact in ways
+the plans didn't yet handle.
+
+**After the tweaks below: 91 / 100.** What keeps it from higher is not the design. It is that nothing is measured
+on Cyclone yet, and seven code runs will be built without a phone to test on.
+
+### 18.2 The tweaks
+
+**T1. Flash on the owner's model: keep the choice, protect the speed.**
+- **The tension:** the owner chose "the model I picked" for the Flash mind. That is usually a frontier model:
+  about 3–8 s a call and roughly 10× Luna's price. Flash's promise is fluency in 3–10 s. And the Flash mind and
+  OneMind become the same model, so their difference is only how much they control.
+- **The tweak:** the Flash mind uses the owner's model, but always:
+  - at **low reasoning effort**;
+  - with **streamed** output, so the plan starts acting on its first step;
+  - with the Chronicler's short briefing, never the history.
+
+  Most foreseen forks are written into the plan as branches, so they need no call.
+- **The honest numbers for Flash on a frontier model:**
+  - first action ≈ 1.5–3 s (not 0.5 s);
+  - total ≈ 5–15 s;
+  - ≈ $0.01–0.04 a run (not $0.003–0.01).
+
+  This is still 5–10× faster and 20–50× cheaper than today's Flash. §14.5 is read with these figures. If R0 shows
+  the owner's model can't start acting within 3 s, the card offers Luna for Flash as a choice, and never switches
+  silently.
+- **One implementation:** the Flash mind and OneMind are **one Conductor with two profiles**, not two engines:
+  - Flash: low effort, no glances, budget of 3 replans;
+  - Mind: the owner's effort, its own glances, standing orders.
+
+  A handover is a profile change on the same object. That is fewer code paths and fewer points of failure.
+
+**T2. No cost caps, but the system never runs away.**
+- **The tension:**
+  - no caps;
+  - "done doubt = not done" wakes the mind;
+  - an automatic handover;
+  - the mind may disagree with the check.
+
+  Together these can wake the frontier model again and again on one stubborn finish.
+- **The tweak:** limits on *wakes*, not on money:
+  - **done doubt:** at most **2** re-checks. After that the run ends as "Couldn't confirm: please check" with the
+    evidence, never as "Done";
+  - **wakes per milestone:** after **4**, OneMind must either rewrite its standing orders or take the wheel.
+    After **8**, the run asks the owner;
+  - **handovers:** at most one Flash → Mind per run;
+  - the loop breaker as planned.
+
+  Cost stays visible live on the card and Glass. The owner's "no caps" holds: nothing stops for money.
+
+**T3. The Chronicler describes; code records.**
+- **The tension:** the fact guard catches invented numbers and names, but not a wrong *description* ("the first
+  result was a newsletter" when it was the second).
+- **The tweak:** the sealed milestone lines are written **by code from typed events** (what ran, what verified,
+  which facts were found).
+
+  Luna writes only the parts that need language:
+  - **NOW:** what is happening;
+  - **OPEN:** what is unresolved;
+  - **LEARNED:** what this run taught;
+  - **FAILED / AVOIDED:** what didn't work.
+
+  Those parts are labelled in the briefing as the Chronicler's reading, so OneMind treats them as notes, not
+  record. Luna's job shrinks to what it is good at, and the record can't be paraphrased wrong.
+
+**T4. Following `jev-latest`, with eyes open.**
+- Every Decisions response names the model that served it. The engine log keys every record by that **exact
+  version**.
+- When the version changes:
+  - the Lab card says so;
+  - thresholds stay as they are for the first 50 decisions on the new version while agreement and answer rates
+    are compared with the old ones;
+  - a drop of more than 5 points flags it to the owner (one line). Cyclone never silently re-tunes.
+
+**T5. "Vision shadow-only" is about tapping, not checking.**
+- The owner's rule: Box and icon matching never **tap** until TypeSafe calls them ready. That stands.
+- **Checking** with images (before/after VERIFY, the DONE check with a screenshot) goes to **OpenAI Decisions**,
+  which is built for images. JEV's image mode is never used for checks either. Checks don't act, so they don't fall
+  under the rule.
+- Without this, "done doubt = not done" would rest on the weakest image path.
+
+**T6. One release, but one that can prove itself.**
+- **The tension:** the full rebuild ships at once. But the bars that prove it (≥ 98% trigger recall, success parity
+  with Classic) need real runs on the phone, and only a release can collect those.
+- **The tweak:** run 7 ships one release containing:
+  - the complete One Mind runtime behind the **Run engine** switch;
+  - **Classic as the default**;
+  - One Mind's crew, triggers and Chronicler running **silently beside Classic runs**, recording what they would
+    have done.
+
+  The owner can switch to One Mind at any time. The Lab then shows the recall and parity numbers from the owner's
+  own runs. One Mind becomes the default when the numbers clear the bars, or earlier at the owner's word. The build
+  stays one release; the evidence just has somewhere to come from.
+
+**T7. Recipes only replay what is safe to replay.**
+- A recipe starts only on an **exact** request-shape match, with every slot settled at high confidence.
+- Its first step's postcondition must hold, or it falls back to planning at once.
+- A recipe never carries an approval forward: every gated step asks again, every time.
+
+**T8. Build without a phone, test like there is one.**
+- Every code run adds **recorded-screen tests**: real screen trees from Lab traces, replayed through the crew, the
+  checks and the triggers, with fake models giving scripted answers. This is the same method plan 63's golden set
+  used for the engines.
+- It catches integration mistakes before CI, and before the owner's phone does.
+
+### 18.3 What stays exactly as decided
+
+- OneMind picks its reviews, with forced reviews before consequential milestones.
+- The crew keeps working during glances.
+- Flash hands over automatically.
+- No cost caps.
+- Done doubt means not done (bounded by T2).
+- Glass shows milestones, the NOW line, wakes and cost.
+- Recipes are automatic (with T7's limits).
+- JEV follows latest (with T4's watch).
+- Vision taps stay in shadow until TypeSafe is ready.
+- Questions are tried once before reaching the owner.
+- One full rebuild before release (with T6).
