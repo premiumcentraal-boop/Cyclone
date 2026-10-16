@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 /**
- * Plan 63 (alpha.135): the two decision engines, proven without a phone. The race's timing with fake models, the
+ * Plan 63 (alpha.136): the two decision engines, proven without a phone. The race's timing with fake models, the
  * combining rules one by one, and seeded property tests over the golden set: whatever the two models answer, an engine
  * never acts on something one model alone wasn't allowed to, and never ends lower than the more careful model.
  */

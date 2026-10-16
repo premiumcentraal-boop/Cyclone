@@ -13,7 +13,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /**
- * Plan 63 (alpha.135): how Cyclone decides what the grammar, the rules and the phone model don't settle. Settings →
+ * Plan 63 (alpha.136): how Cyclone decides what the grammar, the rules and the phone model don't settle. Settings →
  * Speed → Decision engine.
  */
 enum class DecisionEngine(val wire: String, val label: String) {

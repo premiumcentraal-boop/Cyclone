@@ -57,3 +57,18 @@ About a week of normal use with Compare on, then:
 - "0 below the rules" in the watch.
 
 Record the numbers here before switching.
+
+## alpha.136 · Decision engines (plan 63)
+
+Settings → Speed → Decision engine. Run each row in **Consensus**, then **Sprint**.
+
+| # | Steps | Expected | Result |
+|---|---|---|---|
+| 5.1 | "pull up the thing I take pictures with" | The camera opens. The run trace says the decision models agree (Consensus) or that one was sure first (Sprint) | UNVERIFIED |
+| 5.2 | "turn it up a bit" | Volume up. In Sprint it should feel quicker than in Consensus | UNVERIFIED |
+| 5.3 | "tap follow" on a profile | Never Instant on one model's word: Flash or the Mind, which asks before following | UNVERIFIED |
+| 5.4 | "text mom I'm late" | The Mind, which asks before sending (the rules come before the engine) | UNVERIFIED |
+| 5.5 | Airplane mode, then 5.1 | No stall: Flash or the Mind within about 2 s | UNVERIFIED |
+| 5.6 | "take a selfie" on a camera with an icon-only shutter | The photo is taken, or Instant hands up; never a tap outside the camera | UNVERIFIED |
+| 5.7 | 20 everyday requests, then Settings → Speed | The engine line shows decisions, "both answered", "agreed" and a median time for JEV and OpenAI Decisions | UNVERIFIED |
+| 5.8 | Switch to Classic and repeat 5.1 | Works as in alpha.123 | UNVERIFIED |

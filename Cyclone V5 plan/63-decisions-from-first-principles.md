@@ -1,6 +1,6 @@
 # 63 · Decisions from first principles: what a good Cyclone truly is, and how to build it
 
-Status: **Design + first build (2026-10-16).** §6's two engines are built (alpha.135, unreleased at the time of
+Status: **Design + first build (2026-10-16).** §6's two engines are built (alpha.136, unreleased at the time of
 writing); the rest is the plan. This plan consolidates plans 58 (the decision box), 61 (no trigger words) and 62 (the
 Instant Mind) into one design, worked out from the product backwards. Physical device: **UNVERIFIED**.
 
@@ -349,7 +349,7 @@ only.
 
 | Release | Adds | Why in this order |
 |---|---|---|
-| **alpha.135 (this)** | The two engines; sight to OpenAI Decisions; provider renamed; engine numbers | Provably safe now; worst case is today or one rung up; it measures both models on every request |
+| **alpha.136 (this)** | The two engines; sight to OpenAI Decisions; provider renamed; engine numbers | Provably safe now; worst case is today or one rung up; it measures both models on every request |
 | **R0 · Real numbers** (when real calls are allowed) | The probe on both models with text and images; the Lab on both; JEV box test; the routing table confirmed | Every later threshold comes from these numbers |
 | **R1 · Understand anything** (61 A + 62 L1) | The Request Graph; the on-device multilingual embedding tier (T0); the Live Phone Model; golden set v2 in 12+ languages; the vocabulary guard | Removes word lists from understanding; makes T0 instant |
 | **R2 · Ahead of you** (62 L2, L5) | The affordance cache; streaming partial decisions in Live voice; Verify with auto-undo; Screen Semantics effects (61 B) | Takes the model off the critical path; safety by effect |
