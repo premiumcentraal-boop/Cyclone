@@ -111,7 +111,7 @@ object Decisions {
         }
         val app = context.applicationContext
         return com.cyclone.mobile.mind.modes.RaceEngine(engine, com.cyclone.mobile.mind.modes.DecisionRace(lanes, ENGINE_DEADLINE_MS),
-            record = record ?: { EngineStore.save(app, it) })
+            record = record ?: { r -> EngineStore.save(app, r); Unit })
     }
 
     /**
