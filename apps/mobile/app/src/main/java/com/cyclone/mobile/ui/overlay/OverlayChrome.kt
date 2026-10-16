@@ -168,6 +168,8 @@ fun OverlayChrome(
     onRequestSubmitted: (String) -> Unit = {},
     onVoiceInput: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
+    /** Live voice from the empty Ask bar (null: the send button only sends). */
+    onLiveVoice: (() -> Unit)? = null,
     aiSettings: OverlayAiSettings = OverlayAiSettings(),
     onAiSettingsChanged: (OverlayAiSettings) -> Unit = {},
     idleVisualState: OverlayIdleVisualState = OverlayIdleVisualState(),
@@ -235,6 +237,7 @@ fun OverlayChrome(
                     onRequestSubmitted = onRequestSubmitted,
                     onVoiceInput = onVoiceInput,
                     onVoiceStop = onVoiceStop,
+                    onLiveVoice = onLiveVoice,
                     aiSettings = aiSettings,
                     onAiSettingsChanged = onAiSettingsChanged,
                 ) }
@@ -323,6 +326,7 @@ private fun ComposerPanel(
     onRequestSubmitted: (String) -> Unit,
     onVoiceInput: () -> Unit,
     onVoiceStop: () -> Unit,
+    onLiveVoice: (() -> Unit)?,
     aiSettings: OverlayAiSettings,
     onAiSettingsChanged: (OverlayAiSettings) -> Unit,
 ) {
@@ -526,6 +530,7 @@ private fun ComposerPanel(
                         onPrimary = {
                             if (!foregroundWorking && !snapshot.userPaused && snapshot.composerText.isNotBlank()) submit()
                         },
+                        onLive = onLiveVoice,
                     )
                     }
                 }

@@ -24,7 +24,7 @@ object DriveIntroScript {
     const val STILL_SCENE_MS = 4_000L
 
     val captions: List<Pair<String, String>> = listOf(
-        "Tap the orb and talk" to "Driver mode turns Cyclone into one big voice button.",
+        "Tap the orb and talk" to "Live voice turns Cyclone into one big voice button.",
         "It answers in one line" to "Cyclone says what it is doing, and tells you when it is done.",
         "Anything risky waits" to "Paying, deleting, passwords and permissions wait until you have stopped.",
     )

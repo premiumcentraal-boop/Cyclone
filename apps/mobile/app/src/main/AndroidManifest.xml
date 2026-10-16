@@ -295,7 +295,7 @@
         android:name=".voice.DriverTile"
         android:exported="true"
         android:icon="@drawable/ic_cyclone_status"
-        android:label="Cyclone Drive"
+        android:label="Cyclone Live voice"
         android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
         <intent-filter>
             <action android:name="android.service.quicksettings.action.QS_TILE" />

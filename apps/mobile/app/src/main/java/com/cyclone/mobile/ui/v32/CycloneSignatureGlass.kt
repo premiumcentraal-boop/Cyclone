@@ -284,7 +284,7 @@ internal fun CycloneSignatureGlass(
     }
 }
 
-internal enum class SignatureGlyph { ADD, MIC, SEND, PAUSE, PLAY }
+internal enum class SignatureGlyph { ADD, MIC, SEND, PAUSE, PLAY, LIVE }
 
 /** Thin, consistent line icons from the reference, with independent 48dp hit targets. */
 @Composable
@@ -298,6 +298,8 @@ internal fun SignatureIcon(glyph: SignatureGlyph, modifier: Modifier = Modifier,
             SignatureGlyph.ADD -> { line(12f, 4f, 12f, 20f); line(4f, 12f, 20f, 12f) }
             SignatureGlyph.SEND -> { line(12f, 21f, 12f, 3f); line(4f, 11f, 12f, 3f); line(12f, 3f, 20f, 11f) }
             SignatureGlyph.PAUSE -> { line(8f, 5f, 8f, 19f); line(16f, 5f, 16f, 19f) }
+            // Live voice: a spoken wave, five bars, tallest in the middle.
+            SignatureGlyph.LIVE -> { line(4f, 10f, 4f, 14f); line(8f, 7f, 8f, 17f); line(12f, 4f, 12f, 20f); line(16f, 7f, 16f, 17f); line(20f, 10f, 20f, 14f) }
             SignatureGlyph.PLAY -> {
                 val path = Path().apply { moveTo(8f*u, 4f*u); lineTo(19f*u, 12f*u); lineTo(8f*u, 20f*u); close() }
                 drawPath(path, color, style = Stroke(1.45f*u))

@@ -99,6 +99,59 @@ object DriverOverlay {
     private var lastRepairMs = 0L
     private var buttonDp = 0
     private var faceJob: kotlinx.coroutines.Job? = null
+    /** Whether the voice panel is up: the Ask overlay steps aside for it, and comes back as it was after. */
+    val panelOpen = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    private fun showFace(w: Windows, face: VoiceFace) {
+        w.show(face)
+        if (panelOpen.value != face.panel) {
+            panelOpen.value = face.panel
+            OverlayChromeRuntime.refreshExternalSurface()
+        }
+    }
+
+    /** Live voice started from the Ask bar, without the car button: it ends when the conversation does. */
+    private var liveOnly = false
+    private var endJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Live voice: the Ask bar's empty-field button. Talks now, in the same conversation Driver mode's button opens:
+     * with the car button on, that session listens; otherwise a session without the button opens for this
+     * conversation and closes once it, and any task it started, is over.
+     */
+    fun live(service: CycloneAccessibilityService) {
+        attach(service)
+        session?.let { s -> guarded("live.tap") { s.tap() }; return }
+        guarded("live.start") { startLive(service) }
+    }
+
+    private fun startLive(service: CycloneAccessibilityService) {
+        val next = VoiceSession(service, VoiceTraceSink(service))
+        session = next
+        liveOnly = true
+        val w = runCatching { Windows(service, next, DriverMode.settings.value.buttonDp, withButton = false) }
+            .onFailure { record("live.windows", it) }
+            .getOrNull()
+        windows = w
+        if (w == null) { stop(); return }
+        var opened = false
+        faceJob = scope?.launch {
+            next.turn.collect { turn ->
+                guarded("live.face") { showFace(w, VoiceFace.of(turn)) }
+                if (busy(turn)) { opened = true; endJob?.cancel(); endJob = null }
+                else if (opened && endJob == null) endJob = scope?.launch {
+                    // A finished line stays readable a moment; "keep listening" reopens the mic within this grace.
+                    kotlinx.coroutines.delay(LIVE_CLOSE_AFTER_MS)
+                    if (session === next && !busy(next.turn.value)) stop()
+                }
+            }
+        }
+        next.tap()
+    }
+
+    private fun busy(turn: com.cyclone.mobile.voice.VoiceTurn): Boolean =
+        turn.phase !in setOf(com.cyclone.mobile.voice.VoicePhase.IDLE, com.cyclone.mobile.voice.VoicePhase.CLOSED) ||
+            turn.taskLive || turn.speaking || turn.quickLive
 
     /**
      * Attaches the Drive windows to [service]. Called by the accessibility service itself (alpha 95), so the orb no
@@ -151,21 +204,27 @@ object DriverOverlay {
             .onFailure { record("drive.orb.windows", it) }
             .getOrNull()
         val w = windows ?: return
-        faceJob = scope?.launch { next.turn.collect { turn -> guarded("drive.orb.face") { w.show(VoiceFace.of(turn)) } } }
+        faceJob = scope?.launch { next.turn.collect { turn -> guarded("drive.orb.face") { showFace(w, VoiceFace.of(turn)) } } }
     }
 
     private fun stop() {
+        liveOnly = false
+        endJob?.cancel()
+        endJob = null
         faceJob?.cancel()
         faceJob = null
         windows?.let { w -> guarded("drive.orb.remove") { w.remove() } }
         windows = null
         session?.let { s -> guarded("drive.orb.session") { s.close() } }
         session = null
+        if (panelOpen.value) { panelOpen.value = false; guarded("drive.orb.chrome") { OverlayChromeRuntime.refreshExternalSurface() } }
     }
 
     /** One look at the orb: repairs whatever is missing while Driver mode is on ([com.cyclone.mobile.voice.OrbKeeper]). */
     private fun heal() {
         val svc = service ?: return
+        // Live voice without the car button has no orb to keep.
+        if (liveOnly) return
         val settings = DriverMode.settings.value
         val live = CycloneAccessibilityService.instance
         val w = windows
@@ -216,7 +275,8 @@ object DriverOverlay {
     }
 
     /** The three windows and their Compose content. */
-    private class Windows(private val context: CycloneAccessibilityService, private val session: VoiceSession, private val buttonDp: Int) {
+    private class Windows(private val context: CycloneAccessibilityService, private val session: VoiceSession, private val buttonDp: Int,
+                          private val withButton: Boolean = true) {
         private val wm = context.getSystemService(WindowManager::class.java)
         private val density = context.resources.displayMetrics.density
         private val lifecycles = mutableListOf<OverlayComposeLifecycle>()
@@ -257,7 +317,7 @@ object DriverOverlay {
 
         init {
             place()
-            wm.addView(button, buttonParams)
+            if (withButton) wm.addView(button, buttonParams)
         }
 
         /** Touchable unless hidden or yielding to a gesture Cyclone is making. */
@@ -489,6 +549,8 @@ object DriverOverlay {
     }
 
     const val HOLD_TO_MOVE_MS = 1_000L
+    /** Live voice from the Ask bar closes this long after the conversation (and its task) is over. */
+    const val LIVE_CLOSE_AFTER_MS = 2_500L
 }
 
 /** AI mode: status, captions on veil pills, the big orb, Stop and "Not now". Glanceable: large type, two lines at most. */

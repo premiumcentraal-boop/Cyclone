@@ -372,6 +372,7 @@ class OverlayChromeController(
                                 onRequestSubmitted = onRequestSubmitted,
                                 onVoiceInput = ::beginVoiceInput,
                                 onVoiceStop = ::stopVoiceInput,
+                                onLiveVoice = ::beginLiveVoice,
                                 aiSettings = aiSettings,
                                 onAiSettingsChanged = { next ->
                                     aiSettings = next
@@ -597,7 +598,9 @@ class OverlayChromeController(
         val driverIdle = com.cyclone.mobile.voice.DriverMode.settings.value.enabled && compact && !minimizedComposer &&
             (snapshot.state == OverlayChromeState.IDLE || snapshot.launcherCollapsed) && !glass()
         val shown = (secretVisible || !compact || snapshot.idleChipVisible || glass()) &&
-            !OverlayExternalInteraction.active.value && !driverIdle
+            !OverlayExternalInteraction.active.value && !driverIdle &&
+            // Live voice's panel has the bottom of the screen; the Ask overlay comes back as it was when it closes.
+            !com.cyclone.mobile.ui.overlay.DriverOverlay.panelOpen.value
         // Alpha.134: a stroke on Cyclone's glass never hides what the owner sees. The drawn card never takes a touch
         // (only its empty touch layer steps aside); in idle the window is the empty hotspot and its halo stays.
         val visible = shown && !(hideHost && compact)
@@ -1097,6 +1100,28 @@ class OverlayChromeController(
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 },
             )
+        }
+    }
+
+    /**
+     * Live voice (the empty Ask bar's button): a spoken conversation with Cyclone, the one Driver mode's button opens.
+     * The Ask overlay steps aside while the voice panel is up ([applyLayout]) and comes back as it was.
+     */
+    fun beginLiveVoice() {
+        onMain {
+            if (ContextCompat.checkSelfPermission(service, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                onVoiceStateChanged(false, null, "Allow microphone access once, then tap Live voice again.")
+                service.startActivity(
+                    Intent(service, MainActivity::class.java)
+                        .setAction(MainActivity.ACTION_REQUEST_OVERLAY_VOICE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                )
+                return@onMain
+            }
+            if (voiceSession) { speechRecognizer?.cancel(); voiceSession = false; onVoiceStateChanged(false, null, null) }
+            // The keyboard leaves with the Ask bar.
+            root?.let { v -> runCatching { service.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.hideSoftInputFromWindow(v.windowToken, 0) } }
+            com.cyclone.mobile.ui.overlay.DriverOverlay.live(service)
         }
     }
 

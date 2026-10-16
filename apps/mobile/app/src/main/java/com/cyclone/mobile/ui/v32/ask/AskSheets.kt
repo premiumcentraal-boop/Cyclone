@@ -406,8 +406,8 @@ internal fun AskLogoPanel(modifier: Modifier = Modifier, onSettings: (section: S
             Box(Modifier.size(8.dp).clip(CircleShape).background(if (phone.ready) AskGlass.Done else AskGlass.Waiting))
             Text(AskCopy.phoneValue(phone.ready, phone.needsRepair), color = AskGlass.Muted, fontSize = 14.sp)
         }
-        AskPanelRow(Icons.Rounded.DirectionsCar, "Driver mode", onClick = null) {
-            AskSwitch(drive.enabled, "Driver mode") { on ->
+        AskPanelRow(Icons.Rounded.DirectionsCar, "Live voice in the car", onClick = null) {
+            AskSwitch(drive.enabled, "Live voice in the car") { on ->
                 DriverMode.setEnabled(context, on)
                 // Turning it on plays the short Drive film, which asks for the microphone at its end if needed.
                 if (on) com.cyclone.mobile.ui.overlay.DriveIntroActivity.start(context)

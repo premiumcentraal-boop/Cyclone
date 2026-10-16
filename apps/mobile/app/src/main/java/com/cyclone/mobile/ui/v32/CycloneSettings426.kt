@@ -23,7 +23,7 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Contacts
-import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -164,8 +164,8 @@ internal fun CycloneSettingsPage426(
                     Settings426Row("Phone autonomy", "Phone autonomy", Icons.Rounded.PhoneAndroid, settingsAutonomyLabel(accessProfile)),
                     Settings426Row("User notes", "User notes", Icons.Rounded.Person, if (com.cyclone.mobile.brain.UserMdRuntime.enabled) "On" else "Off"),
                 ),
-                "Drive" to listOf(
-                    Settings426Row("Driver mode", "Driver mode", Icons.Rounded.DirectionsCar,
+                "Live voice" to listOf(
+                    Settings426Row("Live voice", "Live voice", Icons.Rounded.GraphicEq,
                         if (com.cyclone.mobile.voice.DriverMode.enabled(context)) "On" else "Off", com.cyclone.mobile.setup.SetupCard.DRIVER),
                     Settings426Row("Voice", "Voice", Icons.Rounded.RecordVoiceOver, "OpenRouter"),
                 ),
@@ -263,7 +263,7 @@ internal fun CycloneSettingsPage426(
                 }
             }
 
-            "Driver mode" -> item { Settings426Surface { DriverModeSettings(context, refresh) } }
+            "Live voice" -> item { Settings426Surface { DriverModeSettings(context, refresh) } }
             "Voice" -> item { Settings426Surface { VoiceSettings(context) } }
             "Quick setup" -> item { CycloneQuickSetup(context, refresh) { onSection("Permissions") } }
             "Model & API" -> item {
@@ -467,7 +467,7 @@ private const val VISUAL_QUALITY = "Visual quality"
 /** R5: each Settings group has its own tile colour on the rain, so a group is found by colour before words. */
 internal fun settingsGroupTile(group: String): Color = when (group) {
     "AI" -> Color(0xFF7B61FF)
-    "Drive" -> Color(0xFF30B85A)
+    "Live voice" -> Color(0xFF30B85A)
     "Appearance" -> Color(0xFF3E7BFA)
     "Phone" -> Color(0xFFFF9F0A)
     "Profiles" -> Color(0xFF32ADE6)
@@ -788,7 +788,7 @@ private fun Settings426Surface(content: @Composable () -> Unit) {
 }
 
 private fun Settings426DetailSubtitle(section: String): String? = when (section) {
-    "Driver mode" -> "A large voice button for the car: talk, and Cyclone tells you when it is done."
+    "Live voice" -> "Talk with Cyclone from the empty Ask bar, or keep a large voice button on screen for the car."
     "Voice" -> "The voice, the models and how fast Cyclone answers on this phone."
     VISUAL_QUALITY -> "How much glass work the app does: Full, Lite, or Auto for this phone."
     "Working indicator" -> "The Trace Field overlay shown while Cyclone works: mode, style and a live preview."
