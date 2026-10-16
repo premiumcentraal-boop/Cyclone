@@ -29,7 +29,7 @@ class DecisionsTest {
         assertEquals(DecisionProvider.OPENAI_DECISIONS, DecisionProvider.of("openai"))
         // What alpha.123–134 stored for it still reads back.
         assertEquals(DecisionProvider.OPENAI_DECISIONS, DecisionProvider.of("luna"))
-        assertNull(DecisionProvider.of("openai"))
+        assertNull(DecisionProvider.of("gpt-6-luna"))
     }
 
     @Test fun `jev never gets the screenshot and asks in the documented shape`() {
