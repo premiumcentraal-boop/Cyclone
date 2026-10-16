@@ -38,7 +38,10 @@ internal class SafeSealedStores(private val context: Context) {
         }.generateKey()
     }
 
-    fun capture(): List<SafeSnapshot.Entry> {
+    fun capture(onLocked: () -> Unit = {}): List<SafeSnapshot.Entry> = com.cyclone.mobile.identity.HiveKeyring.forSafe {
+        com.cyclone.mobile.identity.IdentityVault.forSafe { onLocked(); captureLocked() }
+    }
+    private fun captureLocked(): List<SafeSnapshot.Entry> {
         val entries = mutableListOf<SafeSnapshot.Entry>()
         try {
             for ((name, box) in boxes) {
@@ -82,7 +85,8 @@ internal class SafeSealedStores(private val context: Context) {
             }
             entries += SafeSnapshot.Entry("sealed/vault", vault.toString().toByteArray(Charsets.UTF_8))
             val memory = File(context.filesDir, "Cyclone Brain/Mind memory.json")
-            if (memory.exists()) entries += SafeSnapshot.Entry("sealed/mind", KeystoreMemorySealer.open(memory.readBytes()))
+            check(!File(memory.path + ".tmp").exists()) { "SAFE_MEMORY_UNSETTLED" }
+            if (memory.exists()) entries += SafeSnapshot.Entry("sealed/mind", SafeMindWire.open(memory.readBytes(), KeystoreMemorySealer::open))
             val trust = context.getSharedPreferences("cyclone_gateway_trust_v33", Context.MODE_PRIVATE)
             check(trust.all.keys.all { it == "trusted_pc_records" }) { "SAFE_TRUST_FIELD_UNKNOWN" }
             trust.getString("trusted_pc_records", null)?.let {
@@ -130,11 +134,14 @@ internal class SafeSealedStores(private val context: Context) {
                     store.save(SecretRecord(SecretSlotMetadata(slot, present, row.getLong("createdAtMs"), row.getLong("updatedAtMs")), sealed))
                 }
             }
-            "mind" -> SafeFiles.atomic(File(context.filesDir, "Cyclone Brain/Mind memory.json"), KeystoreMemorySealer.seal(entry.bytes))
+            "mind" -> SafeFiles.atomic(File(context.filesDir, "Cyclone Brain/Mind memory.json"), SafeMindWire.seal(entry.bytes, KeystoreMemorySealer::seal))
             "trust" -> {
                 // Retain provenance but never resurrect authorization for the old signing key.
-                val rows = JSONArray(String(entry.bytes, Charsets.UTF_8))
-                for (i in 0 until rows.length()) rows.getJSONObject(i).put("revokedAtMs", System.currentTimeMillis())
+                // A PC explicitly paired on the Restore card already trusts this installation's fresh signing key.
+                val current = context.getSharedPreferences("cyclone_gateway_trust_v33", Context.MODE_PRIVATE).getString("trusted_pc_records", null)
+                val rows = SafeTrustWire.restore(JSONArray(String(entry.bytes, Charsets.UTF_8)),
+                    current?.let(::JSONArray) ?: JSONArray(), com.cyclone.mobile.gateway.AndroidGatewayPhoneIdentity(context).phoneId,
+                    System.currentTimeMillis())
                 check(context.getSharedPreferences("cyclone_gateway_trust_v33", Context.MODE_PRIVATE).edit()
                     .putString("trusted_pc_records", rows.toString()).commit()) { "SAFE_TRUST_WRITE_FAILED" }
             }

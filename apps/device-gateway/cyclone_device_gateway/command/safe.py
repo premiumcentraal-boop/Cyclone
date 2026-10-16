@@ -100,6 +100,17 @@ class SafeStore:
     def close(self) -> None:
         self._db.close()
 
+    def deletion_completed(self, phone: str, nonce: str) -> bool:
+        """Idempotent transport acknowledgement only; never authorizes another deletion."""
+        with self._lock:
+            return self._db.execute('SELECT 1 FROM consumed WHERE phone=? AND nonce=?', (phone, nonce)).fetchone() is not None
+
+    def inventory(self, phone: str | None = None) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute('SELECT phone,user,seq,created,bytes,digest FROM snapshot ORDER BY phone,user,seq DESC').fetchall()
+            return [{'phoneId': p, 'user': u, 'seq': s, 'createdAt': c, 'bytes': b, 'sha256': d}
+                    for p, u, s, c, b, d in rows if phone is None or p == phone]
+
     def _directory(self, phone: str, user: int) -> Path:
         if not isinstance(phone, str) or not PHONE.fullmatch(phone) or type(user) is not int or not 0 <= user <= 99999:
             raise SafeError("SAFE_ID_INVALID")

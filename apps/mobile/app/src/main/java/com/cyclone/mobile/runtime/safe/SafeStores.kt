@@ -9,10 +9,10 @@ import java.nio.file.Files
 internal class SafeStores(private val context: Context) {
     private val sealed = SafeSealedStores(context)
     private fun prefsRoot(device: Boolean): File = File(
-        if (device) context.createDeviceProtectedStorageContext().applicationInfo.dataDir else context.applicationInfo.dataDir,
+        if (device) context.createDeviceProtectedStorageContext().dataDir else context.dataDir,
         "shared_prefs",
     )
-    fun capture(): List<SafeSnapshot.Entry> {
+    fun capture(onSealed: () -> Unit = {}): List<SafeSnapshot.Entry> {
         val result = mutableListOf<SafeSnapshot.Entry>()
         try {
             for (device in listOf(false, true)) {
@@ -22,7 +22,7 @@ internal class SafeStores(private val context: Context) {
                         ?: error("SAFE_UNCLASSIFIED_PREFS")
                     if (row.kind == SafeManifest.Kind.SAFE) {
                         check(!Files.isSymbolicLink(file.toPath())) { "SAFE_SYMLINK" }
-                        result += SafeSnapshot.Entry("prefs/${if (device) "de" else "ce"}/${file.name}", file.readBytes())
+                        result += SafeSnapshot.Entry("prefs/${if (device) "de" else "ce"}/${file.name}", SafePrefsWire.read(file))
                     }
                 }
             }
@@ -53,16 +53,16 @@ internal class SafeStores(private val context: Context) {
                     val row = SafeManifest.file(path) ?: error("SAFE_UNCLASSIFIED_FILES")
                     check(!Files.isSymbolicLink(file.toPath())) { "SAFE_SYMLINK" }
                     if (row.kind == SafeManifest.Kind.SAFE && !file.name.endsWith(".tmp") && !file.name.endsWith(".part"))
-                        result += SafeSnapshot.Entry("files/$path", file.readBytes())
+                        result += SafeSnapshot.Entry("files/$path", SafeFiles.readSettled(file))
                 }
             }
             SafeManifest.stores.filter { it.location == SafeManifest.Location.NO_BACKUP && it.kind == SafeManifest.Kind.SAFE }.forEach { row ->
                 File(context.noBackupFilesDir, row.name).walkTopDown().filter { it.isFile }.forEach { file ->
                     check(!Files.isSymbolicLink(file.toPath())) { "SAFE_SYMLINK" }
-                    result += SafeSnapshot.Entry("no_backup/${file.relativeTo(context.noBackupFilesDir).invariantSeparatorsPath}", file.readBytes())
+                    result += SafeSnapshot.Entry("no_backup/${file.relativeTo(context.noBackupFilesDir).invariantSeparatorsPath}", SafeFiles.readSettled(file))
                 }
             }
-            result += sealed.capture()
+            result += sealed.capture(onSealed)
             return result
         } catch (_: Exception) {
             result.forEach { it.close() }
@@ -88,7 +88,8 @@ internal class SafeStores(private val context: Context) {
     fun restore(input: java.io.InputStream, key: ByteArray): org.json.JSONObject =
         SafeRestore.from(input, key, android.os.Process.myUid() / 100000, ::accepts, ::write)
 
-    private fun write(entry: SafeSnapshot.Entry) {
+    internal fun write(entry: SafeSnapshot.Entry) {
+        if (entry.path.startsWith("prefs/")) SafePrefsWire.validate(entry.bytes)
         if (entry.path.startsWith("sealed/")) sealed.restore(entry) else {
             val path = entry.path
             val target = when {

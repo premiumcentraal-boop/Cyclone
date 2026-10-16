@@ -1,5 +1,9 @@
 # Handoff — Cyclone Safe checkpoint (2026-10-16)
 
+Historical foundations checkpoint. Superseded by
+[the integration handoff](HANDOFF-2026-10-16-CYCLONE-SAFE-INTEGRATION.md).
+The status and counts below describe the earlier checkpoint, not the current worktree.
+
 **Not complete / not ready to merge or publish.** The integrated Plan 61 feature
 has not been delivered. No user-facing backup, restore or delete workflow has
 been activated. Do not uninstall Alpha 132 or treat these builds as protection.

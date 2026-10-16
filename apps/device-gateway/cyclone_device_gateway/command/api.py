@@ -35,6 +35,7 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
 
     def call(fn):
         from .ai import AiError
+        from .safe import SafeError
         from .pages import PageConflict
         from .tables import TableConflict
         try:
@@ -47,6 +48,8 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
             raise HTTPException(status_code=409, detail={"code": "AI_UNAVAILABLE", "message": str(exc)}) from exc
         except CommandError as exc:
             raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(exc)}) from exc
+        except SafeError:
+            raise HTTPException(status_code=409, detail={"code": "SAFE_UNAVAILABLE", "message": "Safe operation could not finish. Existing copies were kept."}) from None
         except DesktopRuntimeError as exc:
             raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
 
@@ -239,6 +242,33 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     @router.post("/v1/cc/identities/{account_id}/purge", dependencies=[Depends(auth)])
     def identity_purge(account_id: str):
         return call(lambda: cc().identities.purge(account_id))
+
+    @router.get("/v1/cc/safe/{device_id}", dependencies=[Depends(auth)])
+    def safe_status(device_id: str):
+        return call(lambda: {**cc().safe.public(device_id), 'archives': cc().safe.store.inventory()})
+
+    @router.post("/v1/cc/safe/{device_id}/return", dependencies=[Depends(auth)])
+    def safe_return(device_id: str, body: dict[str, Any]):
+        if set(body) != {'phoneId'}:
+            raise HTTPException(status_code=422, detail='Select one Safe archive.')
+        return call(lambda: cc().safe.approve_returning(device_id, body['phoneId']) or {'approved': True})
+
+    @router.post("/v1/cc/safe/{device_id}/restore", dependencies=[Depends(auth)])
+    def safe_restore(device_id: str, body: dict[str, Any]):
+        from .safe_contract import coordinates
+        if set(body) != {'user', 'seq'} or not coordinates(body['user'], body['seq']):
+            raise HTTPException(status_code=422, detail='Select one Safe copy.')
+        return call(lambda: cc().safe.restore(device_id, body['user'], body['seq']))
+
+    @router.get("/v1/cc/safe-archive/{phone_id}/{user}/{seq}", dependencies=[Depends(auth)])
+    def safe_header(phone_id: str, user: int, seq: int):
+        return call(lambda: cc().safe.header(phone_id, user, seq))
+
+    @router.post("/v1/cc/safe/{device_id}/key", dependencies=[Depends(auth)])
+    def safe_key(device_id: str, body: dict[str, Any]):
+        if set(body) != {'envelope'}:
+            raise HTTPException(status_code=422, detail='Send one sealed envelope.')
+        return call(lambda: cc().safe.restore_key(device_id, body['envelope']))
 
     # Plan 59 (build 2, run 2a): the hive. The key arrives wrapped by the vault key and sealed to each phone in the
     # browser; these routes store and relay ciphertext only.

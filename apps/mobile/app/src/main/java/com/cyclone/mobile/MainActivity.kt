@@ -36,6 +36,12 @@ class MainActivity : ComponentActivity() {
     private var rescueRedirect = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (com.cyclone.mobile.runtime.safe.SafeRuntime(this).needsStartupCheck()) {
+            rescueRedirect = true
+            startActivity(Intent(this, com.cyclone.mobile.runtime.safe.SafeActivity::class.java).putExtra("startup", true))
+            finish()
+            return
+        }
         // Compile the Teal Matrix shaders off the main thread before the first frame needs them.
         com.cyclone.mobile.ui.v32.TealMatrixShaders.warmAsync()
         val needsRescue = com.cyclone.mobile.runtime.workspaces.ProfileSetupRuntime.currentUserId() > 0 &&
@@ -77,6 +83,10 @@ class MainActivity : ComponentActivity() {
         initializeCyclone()
         CycloneV31Runtime.servicesOrNull()?.refreshHealth()
     }
+    override fun onStop() {
+        super.onStop()
+        if (!rescueRedirect) runCatching { com.cyclone.mobile.runtime.safe.SafeSchedule.background(this) }
+    }
 
     /**
      * Keep the proven Cyclone product runtimes as compatibility providers, then install V3.1 as the
@@ -84,6 +94,7 @@ class MainActivity : ComponentActivity() {
      * idempotent, so Activity resume cannot create duplicate runtimes or phone action engines.
      */
     private fun initializeCyclone() {
+        com.cyclone.mobile.runtime.safe.SafeSchedule.install(this)
         AutomationRuntime.initialize(this)
         AppLearnerRuntime.initialize(this)
         SkillRuntime.initialize(this)

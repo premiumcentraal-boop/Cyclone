@@ -219,6 +219,18 @@ off use the step agent above. Design and device test plan: `Cyclone V5 plan/16-c
 
 Observe/act that can run in a workspace carry `sessionId` + `displayId`. Default-foreground is display 0 (`default-foreground`). Named workspace sessions never fall back to display 0; unknown session, display mismatch, and cross-session observation are rejected before mutation. Compiled skills carry the same session/display binding. See [`V4_STAGE2_SESSION_KERNEL.md`](V4_STAGE2_SESSION_KERNEL.md).
 
+## Cyclone Safe recovery (Alpha 135 local candidate)
+
+`runtime/safe/` captures manifest-classified stores into authenticated encrypted
+per-user snapshots outside the sandbox. Main commits root/folder copies; target
+profile workers open only their own Keystore. The PC holds ciphertext and Glass
+can deliver a key sealed to a freshly trusted phone. A startup barrier keeps
+ordinary runtimes closed during recovery; owner-only full deletion requires the
+native screen lock and signed PC acknowledgement. No model operation can mint it.
+This protects the last verified snapshot, not newer unsaved changes. Physical
+uninstall/reinstall behavior is **UNVERIFIED** and publication is owner-gated.
+See [implementation and limits](SAFE-IMPLEMENTATION.md).
+
 ## Observability
 
 Every completed or failed agent run should leave a durable trace. Brain presents recent runs and can export a compact text diagnostic containing model-visible context, decisions, tool requests/results, verification, failures and recovery events. Diagnostics must exclude credentials, raw typed secrets, screenshots/base64, full accessibility trees and hidden provider reasoning.

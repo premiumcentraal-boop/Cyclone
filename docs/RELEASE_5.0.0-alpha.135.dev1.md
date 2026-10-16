@@ -1,28 +1,30 @@
-# Cyclone 5.0.0-alpha.135.dev1 — DRAFT, NOT RELEASE READY
+# Alpha 135 — Cyclone Safe
 
-Android code: **289**. Publication is **not authorized**.
+Version `5.0.0-alpha.135.dev1`, Android code **289**; Glass `1.0.0-alpha.67`.
+Owner authorized the normal signed prerelease lane on 2026-10-16.
 
-This local development checkpoint introduces the encrypted snapshot/key/storage
-foundations and inventory guard for Plan 61, Cyclone Safe. It also adds Android's
-keep-data uninstall flag and excludes Keystore-sealed/transient data from standard
-backup/transfer. Gateway storage retains ciphertext only and validates pinned
-phone signatures before deletion; no bridge or agent route exposes it yet.
+- Adds encrypted per-user recovery snapshots, independent Safe-key wrappings,
+  root and owner-selected folder storage, and ciphertext replication to the PC.
+- Adds Safe setup/status, a startup Restore card, authenticated count previews,
+  fresh-key resealing and explicit pending states for unavailable profile users.
+- Adds returning-phone recovery through ordinary pairing: unlocked Glass can
+  send an HPKE-sealed key; recovery words can instead be entered only on the phone.
+- Adds debounced/background/nightly charging saves, verified read-back before
+  pruning, and protection against a fresh empty profile replacing an older Safe.
+- Adds owner-only full deletion, gated by typed confirmation and native screen
+  lock, with signed PC acknowledgement, ordered deletion and stop-on-failure.
+- Adds Android's keep-data uninstall flag and backup exclusions for sealed stores.
+  No new signer, shared UID, SDK or permissions. Existing approval boundaries stay.
 
-**The Safe workflow is incomplete and inactive.** Scheduling, per-profile
-coordination, the Restore card, secure recovery setup, PC/Glass transport and the
-screen-lock-protected owner delete screen are not integrated. Do not distribute
-this as uninstall protection. See [implementation checkpoint](SAFE-IMPLEMENTATION.md).
+This protects the **last verified snapshot**, not work newer than that snapshot,
+and does not prevent Android uninstall. Current live sealed stores are resealed
+on recovery; historical opaque backup ciphertext is retained without promising
+that an old Keystore key can be recovered.
 
-No new signer, sharedUserId, permissions, SDK levels or approval bypasses.
-Device/signing/bootstrap private keys are never exported. No platform verdict.
+**Physical-device verification is UNVERIFIED.** The owner's Alpha 132 remains
+unprotected by this uninstalled candidate and must not be uninstalled. Existing
+132 → 134 install compatibility is not diagnosed by these changes. Locked/missing
+profile users and unavailable backup destinations remain pending. Large-library heap/scalability remains unverified. Windows packaging and APK signing are gated by release CI.
 
-Physical-device verification, kept-data Keystore behavior, recovery, SAF provider
-atomicity and upgrade installation: **UNVERIFIED**. No device actions were run.
-
-Do not uninstall Alpha 132. Do not publish until implementation and validation
-are complete and the owner explicitly says **merge and publish**.
-
-Local validation: 2,729 Android tests passed; debug and unsigned release APKs
-build successfully. Gateway: 1,190 passed / 18 skipped. These results validate the
-checkpoint, **not an integrated Safe workflow**. Exact commands, auxiliary suite
-counts and known warnings are in [the checkpoint](SAFE-IMPLEMENTATION.md).
+Local checks and artifact details: `HANDOFF-2026-10-16-CYCLONE-SAFE-INTEGRATION.md`.
+Implementation boundaries: `SAFE-IMPLEMENTATION.md`.

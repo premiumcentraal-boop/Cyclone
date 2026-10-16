@@ -79,6 +79,55 @@ def test_delete_has_no_agent_or_task_route():
             assert 'DeleteAllDataScreen' not in body and 'cyclone-safe-delete/v1' not in body, path
 
 
+def test_destructive_safe_adapters_have_only_the_owner_coordinator_as_caller():
+    base = APP / 'java/com/cyclone/mobile'
+    for path, body in sources().items():
+        relative = path.relative_to(base).as_posix()
+        if re.search(r'\b(?:root\.(?:deleteAll|clearProfile)\(|root::clearProfile|\.deleteOwned\()', body):
+            assert relative in {'runtime/safe/SafeDelete.kt', 'runtime/safe/SafeRootStore.kt'}, path
+        if '.requestDeletion(' in body:
+            assert relative == 'runtime/safe/SafeDelete.kt', path
+    screen = (base / 'ui/settings/DeleteAllDataScreen.kt').read_text(encoding='utf-8')
+    assert 'BiometricManager.Authenticators.DEVICE_CREDENTIAL' in screen
+    assert 'result.authenticationType != BiometricPrompt.AUTHENTICATION_RESULT_TYPE_DEVICE_CREDENTIAL' in screen
+    assert 'onAuthenticationSucceeded' in screen and 'typed == "DELETE"' in screen
+    assert 'FLAG_SECURE' in screen and 'rememberSaveable' not in screen
+
+
+def test_safe_model_and_browser_surfaces_cannot_issue_full_delete():
+    contract = (ROOT / 'apps/device-gateway/cyclone_device_gateway/desktop_runtime/v5_contract.py').read_text(encoding='utf-8')
+    operations = contract[contract.index('V5_OPS ='):contract.index('})', contract.index('V5_OPS ='))]
+    assert 'safe.' not in operations
+    api = (ROOT / 'apps/device-gateway/cyclone_device_gateway/command/api.py').read_text(encoding='utf-8')
+    assert not re.search(r'@router\.[^\n]*safe[^\n]*delete', api)
+    for path in (ROOT / 'apps/glass/src').rglob('*.ts'):
+        assert 'cyclone-safe-delete/v1' not in path.read_text(encoding='utf-8'), path
+
+
+def test_restore_precedes_normal_activity_initialization():
+    body = (APP / 'java/com/cyclone/mobile/MainActivity.kt').read_text(encoding='utf-8')
+    assert body.index('SafeRuntime(this).needsStartupCheck()') < body.index('initializeCyclone()')
+    assert 'if (rescueRedirect) return' in body
+    stores = (APP / 'java/com/cyclone/mobile/runtime/safe/SafeStores.kt').read_text(encoding='utf-8')
+    assert 'createDeviceProtectedStorageContext().dataDir' in stores
+    provider = (APP / 'java/com/cyclone/mobile/gateway/GatewayInitProvider.kt').read_text(encoding='utf-8')
+    assert provider.index('SafeStartupGate.whenReady') < provider.index('VaultGatewayV5Integration.install')
+    service = (APP / 'java/com/cyclone/mobile/CycloneAccessibilityService.kt').read_text(encoding='utf-8')
+    assert 'SafeStartupGate.blocked) return' in service
+    profiles = (APP / 'java/com/cyclone/mobile/runtime/safe/SafeProfiles.kt').read_text(encoding='utf-8')
+    assert profiles.index('SAFE_PROFILE_RESTORE_REQUIRED') < profiles.index('entries = SafeStores(this).capture()')
+
+
+def test_recovery_word_list_is_pinned_and_never_saved_by_the_screen():
+    import hashlib
+    data = (APP / 'assets/safe/bip39-english.txt').read_bytes()
+    assert hashlib.sha256(data).hexdigest() == '2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda'
+    assert len(data.splitlines()) == 2048
+    body = (APP / 'java/com/cyclone/mobile/runtime/safe/SafeActivity.kt').read_text(encoding='utf-8')
+    assert 'FLAG_SECURE' in body and 'clearAndSetSemantics' in body
+    assert 'rememberSaveable' not in body and 'ClipboardManager' not in body
+
+
 def test_backup_excludes_sealed_stores():
     android = '{http://schemas.android.com/apk/res/android}'
     app = ET.parse(APP / 'AndroidManifest.xml').getroot().find('application')

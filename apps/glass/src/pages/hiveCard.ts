@@ -16,6 +16,7 @@ import { relativeTime } from "../ui/format.js";
 import { deliveryApi, type Phone } from "../services/delivery.js";
 import { hiveApi, newHiveKey, openHiveKey, sealHiveKey, type HiveMember, type HiveState } from "../services/hive.js";
 import { hiveItemsApi, openHiveKeys, openItem, sealItem, wipe } from "../services/hiveItems.js";
+import { safeApi, newestPerUser, openSafeKey, sealSafeKey } from "../services/safe.js";
 
 export interface HiveCard {
   element: HTMLElement;
@@ -166,6 +167,49 @@ export function createHiveCard(ctx: GlassContext, vk: () => CryptoKey | null, sa
         }
       }
       parts.push(row);
+      if (phone?.key?.trusted) {
+        const find = actionButton("Find this phone's Safe", { variant: "ghost" });
+        find.addEventListener("click", () => void (async () => {
+          find.disabled = true;
+          try {
+          const saved = await safeApi.status(ctx.client, id);
+          const choices = [...new Set(saved.archives.filter(c => c.user === 0).map(c => c.phoneId))];
+          if (!choices.length) throw new Error("There is no PC Safe copy. Use the root copy or recovery folder on the phone.");
+          const select = el("select", "input");
+          for (const phoneId of choices) {
+            const newest = newestPerUser(saved.archives, phoneId).find(c => c.user === 0)!;
+            const option = el("option", undefined, `${phoneId.slice(0, 12)} · ${relativeTime(newest.createdAt)}`);
+            option.value = phoneId; select.append(option);
+          }
+          if (saved.phoneId) select.value = saved.phoneId;
+          const restore = actionButton("This phone is coming back: restore selected Safe", { variant: "primary" });
+          restore.addEventListener("click", () => {
+            if (restore.dataset.confirm !== select.value) {
+              restore.dataset.confirm = select.value; restore.textContent = "Confirm archive and trust the new phone key"; return;
+            }
+            void act("Safe sent. On the phone choose Restore from paired PC, then rejoin the hive", async () => {
+              const selected = newestPerUser(saved.archives, select.value);
+              const owner = selected.find(c => c.user === 0)!;
+              const header = await safeApi.header(ctx.client, owner);
+              const keys = await openHiveKeys(key, state);
+              let safe: Uint8Array | null = null;
+              try {
+                const hive = header.wraps.hive && keys.get(header.wraps.hive.version);
+                if (!hive) throw new Error("This Safe needs a hive key this tab does not hold. Use the recovery folder and recovery code on the phone.");
+                safe = await openSafeKey(header, hive);
+                const sealed = await sealSafeKey(header, safe, phone.key!);
+                await safeApi.returning(ctx.client, id, select.value);
+                for (const copy of selected) await safeApi.upload(ctx.client, id, copy);
+                await safeApi.key(ctx.client, id, sealed);
+              } finally { safe?.fill(0); wipe(keys); }
+            });
+          });
+          const panel = el("div", "cc-row"); panel.append(select, restore); element.append(panel);
+          } catch (error) { say((error as Error).message || "Safe archives could not be checked.", "error"); }
+          finally { find.disabled = false; }
+        })());
+        row.append(find);
+      }
     }
     if (!ids.length) parts.push(el("p", "cc-hint", "No phone is connected."));
     setChildren(element, ...parts);

@@ -1,152 +1,102 @@
-# Cyclone Safe — Alpha 135 implementation checkpoint
+# Cyclone Safe — Alpha 135 implementation
 
-**INCOMPLETE — do not merge or publish as a completed Plan 61 implementation.**
+Local development candidate for Plan 61, based on Alpha 134 (`7a266ba8`), in
+`C:/Users/Agent/Cyclone-safe-alpha135`, branch `codex/cyclone-safe-alpha135`.
+The original specification is `Cyclone V5 plan/61-cyclone-safe.md` (PR #221).
 
-Base: `7a266ba8` (Alpha 134 / code 288) from
-`claude/cyclone-v5-handoff-review-9qrs40`.
-Working branch: `codex/cyclone-safe-alpha135`, in the isolated worktree
-`C:/Users/Agent/Cyclone-safe-alpha135`.
-Specification: `Cyclone V5 plan/61-cyclone-safe.md`, copied unchanged from
-`origin/claude/vigilant-goodall-dy6z4y` (`30c46961`, PR #221).
+**Physical uninstall/reinstall verification: UNVERIFIED.**
+Owner authorized the normal signed prerelease lane: “Continue until released” (2026-10-16).
+Do not uninstall the owner's Alpha 132: this work is not installed on that phone.
+The existing 132 → 134 installation failure has not been diagnosed or changed.
 
-The development metadata is Alpha 135 / code 289. `publication_authorized=false`.
-No merge, push, tag, signing, release, installation, or device action is authorized
-by this checkpoint. The owner must explicitly say **merge and publish** before
-using the existing release lane, after implementation and validation finish.
+## What is now connected
 
-## Implemented foundations
+- Settings → Privacy → Cyclone Safe opens setup, root/folder save status, PC receipt,
+  pending profile users, recovery words shown once and a persisted SAF folder picker.
+  Recovery words use the pinned BIP-39 English list and production scrypt parameters.
+- A 256-bit per-phone Safe key has independent local Keystore, root, newest-hive and
+  recovery wrappings. Root storage is fixed at `/data/adb/cyclone-safe`, with a
+  root-owned 0600 keyfile. Root transport has no model shell surface and does not
+  route key material through the bootstrap step journal. Folder-only setup is an
+  explicit choice, requires a folder, and does not mistake denied root for empty storage.
+- `SafeManifest` classifies preferences, five databases, file stores, transient state
+  and every Keystore alias. Unknown stores fail capture instead of being omitted.
+  Databases use `VACUUM INTO`. Preferences must be settled and valid UTF-8 XML,
+  with no DTD/entities. Symlinks and unknown restore destinations fail closed.
+- Identity, hive, vault, provider key and Mind memory are opened only in app memory,
+  encrypted into the Safe and resealed under the new installation's keys. Mind's
+  `CYM1:` envelope is preserved. Old PC authorization is revoked; a fresh explicit
+  pairing remains active without duplication. Device/signing/bootstrap private keys
+  are never exported. Hive and identity capture share their existing locks so the
+  captured sealed stores and hive wrapping agree.
+- Snapshots use `CYCSAFE1`, chunked AES-256-GCM with authenticated headers/terminal
+  frame and per-entry SHA-256. `.part`, fsync, rename and authenticated read-back
+  precede retention. Root, selected folder and PC keep three copies per user.
+  Folder retention and deletion preserve other phones' copies.
+- Main obtains each unlocked profile's ciphertext through a fixed private worker;
+  only that profile process opens its Keystore. Main commits shared root/folder copies.
+  Stopped/locked/unavailable users remain explicitly pending. A reinstalled empty
+  profile cannot replace its existing external Safe. On restore, existing users are
+  installed/started through fixed commands; locked or missing users retain their
+  copies. An intact profile installation is preserved rather than overwritten.
+- JobScheduler saves after a ten-minute settled change, when the app backgrounds,
+  and at 03:30 local while charging. Jobs persist across restart; file observers
+  reconnect on process start. Clock/timezone changes reschedule the nightly job.
+- The startup Restore card precedes normal Activity/runtime initialization. A
+  process barrier also holds accessibility runtimes, vault initialization and
+  ordinary gateway actions; pairing and private Safe transfer remain available.
+  Authenticated previews show user, date, size and counts, never account values.
+  Restore uses the newest complete matching snapshot and does not merge snapshots.
+  Partial application pins that sequence and keeps normal startup blocked for retry.
+- PC Command Center uses one bounded ciphertext relay worker and transactional
+  archive storage. Explicit returning-phone approval rebinds the archived identity
+  only to a freshly trusted signing key. Glass can unlock the hive wrapping and
+  HPKE-seal the Safe key to the phone's new device key. Without a hive wrapping,
+  Glass transfers ciphertext and the owner enters recovery words on the phone.
+- Owner-only Delete all Cyclone data requires typing `DELETE` and Android
+  `DEVICE_CREDENTIAL`. PC signed-token acknowledgement precedes folder, root,
+  hive, profiles and Main deletion. It stops at the first failure. The optional
+  hive-account checkbox is off by default and uses existing encrypted tombstones
+  and acknowledgements. The model/MCP/fleet/TaskCommands cannot mint this token;
+  the browser cannot initiate deletion. Expired pending deletes cannot cause a
+  previously deleted PC archive to be uploaded again.
+- `hasFragileUserData` and cloud/device-transfer exclusions are installed. The
+  signer configuration, package, SDKs, shared UID and permission set are unchanged.
+  CI includes the SafeManifest and owner-delete boundary guards.
 
-- `SafeManifest`: explicit SAFE / SAFE_SEALED / NEVER classifications and reasons
-  for preferences, databases, file roots, transient device-protected files and
-  Keystore aliases. Longest path match protects the sealed Mind file and excludes
-  its transient mission queue from the enclosing Brain directory.
-- `SafeSnapshot`: versioned `CYCSAFE1` framing, ZIP entries, authenticated header
-  hash, independent random 96-bit nonce per AES-256-GCM chunk, ordered chunk AAD,
-  authenticated terminal frame, entry sizes and SHA-256 hashes. Authentication
-  finishes before restore writes. Tampering, truncation, extra bytes, duplicate
-  entries and traversal paths fail closed.
-- `SafeKey`: random 256-bit keys, domain-separated root/hive/Keystore-key wrapping
-  primitives, version-bound hive wrapping, 256-bit entropy to 24-word BIP-39
-  encoding (word list supplied by caller), and recovery wrapping with scrypt
-  N=131072/r=8/p=1. Production-cost KDF is checked against Python/OpenSSL.
-- `SafeSealedStores`: in-memory adapters for identity, hive, vault, provider key,
-  Mind memory and trust records; private device/signing/bootstrap keys are not
-  exported. Restored trust provenance is revoked, requiring fresh owner pairing.
-  Corrupt sealed data aborts capture instead of becoming an empty backup.
-- `SafeStores`: manifest-driven preferences, files and `VACUUM INTO` database
-  capture; restore ordering databases → files → preferences; Android user pinning;
-  rejection of unknown destinations, symlinks and live database WAL state.
-- `SafeRootStore`: closed, validated command plans using `su --mount-master`,
-  quiet key transport outside the bootstrap journal, root-only 0600 key creation,
-  process-UID Main-only writes, ciphertext staging/read-back and retention of
-  three copies. **Not invoked by any production entry point yet.**
-- `SafeFolderStore`: provider-backed ciphertext `.part` write, fsync, rename,
-  exact-name check, authenticated read-back and per-user retention of three.
-  **No folder picker or persisted URI lifecycle is wired yet.**
-- `SafeRestore`: newest-candidate planning, deterministic restore order, complete
-  archive validation before writes and rejection of another Android user's Safe.
-  **No startup/onboarding integration yet.**
-- `SafeDelete`: pure one-shot/expiring confirmation coordinator with ordered
-  PC → folder → root → hive → profiles → Main steps; stop on first failure.
-  **No owner screen, credential callback, signed phone token issuer or concrete
-  deletion actions yet. No user data can be deleted through this coordinator.**
-- Gateway `command/safe.py`: standalone ciphertext-only store, transactional
-  cross-process writer serialization, three-copy retention, interrupted-part and
-  renamed-orphan recovery, integrity checks, pinned P-256 signature verification,
-  expiry and durable replay protection for delete tokens. **Not wired to bridge,
-  HTTP, MCP, Glass or Command Center routes.** The PC checks framing/digests, not
-  GCM authenticity: it has no Safe key.
-- Android `hasFragileUserData`, explicit cloud/device-transfer backup exclusions
-  for sealed and transient stores, and SafeManifest/owner-delete CI guards.
-  Existing permissions, SDKs, package, signer configuration and UID are unchanged.
-- Bouncy Castle 1.80 supplies scrypt; one unused duplicate OSGi manifest resource
-  is excluded from APK packaging. No runtime network service was added.
+## What protection means
 
-## Required before this can be called Cyclone Safe
+This preserves **the last verified snapshot** outside the sandbox. Android can
+still uninstall the app. Unsaved work and changes made after the last successful
+snapshot are not guaranteed recoverable. A pending or failed save is not protection.
+The setup screen records success only after authenticated read-back; PC receipts
+and pending profile users are shown separately.
 
-1. Implement one-per-phone Safe key lifecycle and durable root/local wraps;
-   integrate the latest hive key, recovery word-list asset and secure one-time
-   owner display. Never generate a new Safe key silently over a recoverable one.
-2. Wire initial/background/debounced/nightly-charging scheduling, read-back failure
-   retries and Main's per-user capture/restore coordination through the existing
-   bootstrap. The raw sealed stores must be captured under their owning locks.
-3. Wire owner SAF folder selection, persisted URI handling and per-place status.
-4. Implement constrained `safe.put/list/get/delete` bridge transport and PC sync,
-   pinned-phone-key lookup, owner-approved returning-phone pairing, Glass status
-   and unlocked-hive Safe-key recovery. Do not add a model-accessible delete path.
-5. Add the Restore card before onboarding/runtime initialization, recovery-code
-   input, new-key re-pairing and existing-user install/bootstrap restore. Preserve
-   snapshots for Android users that no longer exist.
-6. Add the owner-only Main Settings screen with DELETE + DEVICE_CREDENTIAL and
-   explicit destination inventory. Wire all concrete delete steps, PC confirmation
-   and the optional unchecked hive-item deletion. Never expose this through
-   TaskCommands, Lab, fleet, MCP or agent/gateway mutation routes.
-7. Finish startup idempotence/interruption integration and large-library memory
-   checks. The current entry adapter retains plaintext entries in app-process
-   memory; the format itself encrypts/decrypts in bounded chunks. Large libraries
-   still need streaming entry sources to avoid Android heap pressure.
-8. Test actual Android adapters and fresh-Keystore restore end to end. JVM re-key
-   tests prove the common sealing primitive, not Android's hardware Keystore or
-   document-provider behavior. Run full release CI through the normal lane only
-   after the owner authorizes publishing and implementation is complete.
+## Remaining verification and limits
 
-## Device status
+- Physical update, keep-data uninstall, ordinary uninstall/reinstall, all-user
+  uninstall, fresh Keystore behavior, per-user root approvals, SAF provider fsync/
+  rename, 03:30 charging delivery, native credential confirmation, PC pairing/
+  HPKE delivery and real multi-profile restore are **UNVERIFIED**. No device actions
+  were taken. Windows installer/signed CI packaging has not been invoked.
+- Folder-only mode protects the current Main snapshot. Automatic capture of other
+  Android users requires root and their unlocked profile processes; these users
+  are reported pending rather than silently treated as protected.
+- Capture/authentication currently buffer selected entry bodies in app memory
+  (wire limits: 512 MiB per entry, 2 GiB total). Large-library heap/scalability
+  validation remains outstanding. The PC relay also buffers one ciphertext file.
+- Restore-as-new-profile for a deleted Android user remains the explicitly deferred
+  Plan 61 feature. Its existing Safe is kept. Provider/transport failures keep older
+  backups; no broad cleanup, reboot or data reset is used for recovery.
+- Historical opaque `profile-backups` are preserved as bytes. Their embedded old
+  Keystore ciphertext is not retroactively made recoverable; current live stores
+  have independent rekey adapters.
+- Full deletion requires every recorded PC to acknowledge and selected storage to
+  be available. If that fails, deletion pauses; already completed steps are not
+  undone. Archive deletion is not a claim of forensic secure erasure on SSD/flash.
 
-**Physical verification: UNVERIFIED.** No ADB commands or owner device actions.
-Alpha 132 has no Safe. Do not uninstall it. These foundations do not yet make
-uninstall safe. The existing device-side update failure has not been diagnosed
-or altered, and no new signer, sharedUserId or permission was introduced.
+## Validation
 
-## Local verification at this checkpoint (2026-10-16)
-
-- Android: **2,729 passed**, including **35 Safe tests**, no failures or skips.
-- Gateway: **1,190 passed, 18 skipped**; includes **27 Safe tests**.
-- Agent MCP: **93 passed**.
-- Ports SDK: **92 passed, 2 skipped**.
-- Phone MCP: **191 passed**.
-- Repository CI unittest discovery: **276 passed**.
-- Safe/portable-settings/PC-web pytest guards: **18 passed**.
-- `release_versions.py --check`, `mobile_product_guard.py`,
-  `repository_security_guard.py`, and `git diff --check`: passed.
-- `:app:assembleDebug` and `:app:assembleRelease`: passed. Release output is
-  **unsigned**, matching the existing local/CI candidate configuration. No
-  signer or signing workflow was changed. Release CI was not invoked.
-- APK output metadata agrees on `5.0.0-alpha.135.dev1` / code **289**.
-- Manifest permissions compared with the Alpha 134 base: identical;
-  `sharedUserId` absent. No device commands were run.
-
-Build outputs (experimental checkpoint, not a completed Safe release):
-
-| Output | Bytes | SHA-256 |
-|---|---:|---|
-| `apps/mobile/app/build/outputs/apk/debug/app-debug.apk` | 89008618 | `8876d14affe6bbc4ce0fd5e10f17e44da828cdb920ac585fdd91b68c4246ce0f` |
-| `apps/mobile/app/build/outputs/apk/release/app-release-unsigned.apk` | 65684943 | `bd0b4d2551dad6521f7d7d2a6f4d9e91e5f5de41d6e637337a9043e8e0247fd2` |
-
-Exact commands (PowerShell, worktree root):
-
-```powershell
-$env:JAVA_HOME = 'C:/Program Files/Eclipse Adoptium/jdk-17.0.20.101-hotspot'
-& "$env:TEMP/cloak-build/gradle-8.11.1/bin/gradle.bat" -p apps/mobile :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --console=plain
-uv run --with-editable 'apps/device-gateway[test]' --with-editable tools/codex-phone-mcp --with-editable tools/cyclone-ports-sdk --with-editable tools/cyclone-testbench -- python -X utf8 -m pytest apps/device-gateway/tests -q -o addopts=''
-uv run --with-editable 'apps/device-gateway[test]' --with-editable tools/cyclone-agent-mcp --with-editable tools/cyclone-ports-sdk -- python -m pytest tools/cyclone-agent-mcp/tests -q
-uv run --with-editable 'apps/device-gateway[test]' --with-editable tools/cyclone-ports-sdk -- python -m pytest tools/cyclone-ports-sdk/tests -q
-uv run --with-editable 'apps/device-gateway[test]' --with-editable tools/codex-phone-mcp --with-editable tools/cyclone-ports-sdk -- python -m unittest discover -s tools/codex-phone-mcp/tests -v
-uv run --with pytest -- python -X utf8 -m unittest discover -s scripts/ci/tests -v
-uv run --with pytest -- python -X utf8 -m pytest scripts/ci/tests/test_cyclone_safe_guard.py scripts/ci/tests/test_portable_settings_guard.py scripts/ci/tests/test_pc_web_only.py -q
-uv run -- python scripts/ci/release_versions.py --check
-uv run -- python scripts/ci/mobile_product_guard.py
-uv run -- python scripts/ci/repository_security_guard.py
-git diff --check
-git diff --cached --check
-```
-
-Verification notes: running gateway and agent pytest directories together first
-caused their existing duplicate test module names to collide; separate processes
-resolved collection. The Windows-default CP1252 gateway run encountered an
-existing UTF-8 fixture failure; `-X utf8` passed. The successful gateway suite
-still reports an anyio deprecation warning and an existing fake-server thread's
-JSONDecodeError warning. The first full Android compilation reported existing
-`jvmTarget` deprecation and four nullable-Java test warnings; no Safe-source
-compiler warning appeared. Initial APK packaging exposed duplicate OSGi metadata;
-the narrow exclusion above fixed it. Git reports the checkout's normal LF/CRLF
-conversion notices when staging new files.
+See `HANDOFF-2026-10-16-CYCLONE-SAFE-INTEGRATION.md` for exact commands, counts,
+artifacts and the scope of the filesystem uninstall simulation. Physical results
+must be recorded separately; these tests are not package-manager evidence.
