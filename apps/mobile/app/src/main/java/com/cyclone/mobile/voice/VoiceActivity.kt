@@ -41,8 +41,11 @@ class VoiceActivity(private val tuning: Tuning = Tuning()) {
     }
 
     sealed interface Result {
-        /** Still listening. [level] is 0..1 for the orb; [speechMs] is how long the owner has been talking so far. */
-        data class Listening(val level: Float, val speaking: Boolean, val speechMs: Int = 0) : Result
+        /**
+         * Still listening. [level] is 0..1 for the orb; [speechMs] is how long the owner has been talking so far.
+         * [pause] is set while the owner has paused long enough that, if they say nothing more, the clip is final.
+         */
+        data class Listening(val level: Float, val speaking: Boolean, val speechMs: Int = 0, val pause: Pause? = null) : Result
         /** The owner spoke and stopped: [voicedMs] of speech (pauses between words included) from [startMs] to [endMs]. */
         data class Heard(val voicedMs: Int, val startMs: Int, val endMs: Int) : Result
         /** Nothing but silence or noise: close, no network. */
@@ -50,6 +53,13 @@ class VoiceActivity(private val tuning: Tuning = Tuning()) {
         /** A blip too short to be a request: close, no network. */
         data class Blip(val voicedMs: Int) : Result
     }
+
+    /**
+     * Plan 65 R1, deciding while they speak: the speech so far, from [startMs] to [endMs], exactly the span [Result.Heard]
+     * will report if no more voice comes. Work started on it (transcribing, understanding) is reused only when Heard
+     * reports the same span.
+     */
+    data class Pause(val voicedMs: Int, val startMs: Int, val endMs: Int)
 
     private val frameSamples = tuning.sampleRate / 50
     private var noiseFloor = 0.0
@@ -80,7 +90,14 @@ class VoiceActivity(private val tuning: Tuning = Tuning()) {
                 finished?.let { return it }
             }
         }
-        return Result.Listening(level, speechStartMs >= 0 && silenceMs == 0, if (speechStartMs >= 0) lastVoiceEndMs - speechStartMs else 0)
+        return Result.Listening(level, speechStartMs >= 0 && silenceMs == 0, if (speechStartMs >= 0) lastVoiceEndMs - speechStartMs else 0, pause())
+    }
+
+    /** The speech so far as a final-looking span, once the owner has been quiet [PAUSE_MS]; null while talking. */
+    private fun pause(): Pause? {
+        if (speechStartMs < 0 || silenceMs < PAUSE_MS || silenceMs >= tuning.endSilenceMs) return null
+        val span = lastVoiceEndMs - speechStartMs
+        return if (span < tuning.minSpeechMs || voicedMs < tuning.startMs) null else Pause(span, speechStartMs, lastVoiceEndMs)
     }
 
     private fun frame(samples: ShortArray) {
@@ -134,6 +151,11 @@ class VoiceActivity(private val tuning: Tuning = Tuning()) {
     companion object {
         const val SAMPLE_RATE = 16_000
         const val FRAME_MS = 20
+        /**
+         * Quiet this long counts as a pause: just past [Wav.trim]'s 250 ms of padding, so the clip cut at a pause is the
+         * very clip cut when speech ends. With the default 700 ms end, the work gets about 440 ms of head start.
+         */
+        const val PAUSE_MS = 260
         private const val CALIBRATION_FRAMES = 5
         /** Zero crossings per sample: voiced speech sits well below hiss (≈0.5) and above hum (≈0). */
         private val SPEECH_ZCR = 0.01..0.35

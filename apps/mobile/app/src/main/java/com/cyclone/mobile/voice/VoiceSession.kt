@@ -62,6 +62,14 @@ class VoiceSession(context: Context, sink: VoiceRunSink = VoiceRunSink.NONE) {
     private val calls = mutableListOf<Call>()
     private var clip: ShortArray? = null
     private var heardText: String? = null
+    /**
+     * Plan 65 R1, deciding while they speak: at a pause the clip so far is transcribed and, when the turn would ask the
+     * understanding model next, understood, before the owner has finished being quiet. Each is used only for the very
+     * same clip span or the very same question.
+     */
+    private var clipSpan: Pair<Int, Int>? = null
+    private val earlyText = HeadStart<Pair<Int, Int>, Deferred<VoiceEvent>> { it.cancel() }
+    private val earlyUnderstanding = HeadStart<VoiceEffect.Understand, Deferred<VoiceEvent>> { it.cancel() }
     private var stoppedTalkingAt = 0L
     private var awaitingAckSound = false
     private var liveTaskId: String? = null
@@ -115,6 +123,7 @@ class VoiceSession(context: Context, sink: VoiceRunSink = VoiceRunSink.NONE) {
 
     fun stop() {
         workJob?.cancel()
+        clearHeadStarts()
         cancelCalls()
         runLog.note("STOP", "Stop pressed", ok = true)
         // Alpha.78: a quick action the owner started by voice stops with the same Stop, at once.
@@ -192,6 +201,7 @@ class VoiceSession(context: Context, sink: VoiceRunSink = VoiceRunSink.NONE) {
         listeningSince = SystemClock.uptimeMillis()
         clip = null
         heardText = null
+        clearHeadStarts()
         val settings = DriverMode.settings.value
         ear = ears.start(settings.onDeviceStt)
         runLog.begin(if (waitMs != null) "the mic stayed open after a quick action" else "a tap", ear.label)
@@ -244,9 +254,11 @@ class VoiceSession(context: Context, sink: VoiceRunSink = VoiceRunSink.NONE) {
         val warm = { scope.launch(Dispatchers.IO) {
             OpenRouterSecretStore.read(app).takeIf { it.isNotBlank() }?.let { runCatching { OpenRouterVoice(it).warm() } }
         }; runLog.note("SPEECH", "Speech started"); Unit }
-        return when (val result = capture.record(tuning, car = car, onSpeech = warm) { micLevel.value = it }) {
+        val pause = { p: VoiceActivity.Pause, samples: ShortArray -> headStart(p, samples) }
+        return when (val result = capture.record(tuning, car = car, onSpeech = warm, onPause = pause) { micLevel.value = it }) {
             is VoiceCapture.Outcome.Clip -> {
                 clip = result.samples
+                clipSpan = (result.startMs to result.endMs).takeIf { result.startMs >= 0 }
                 heard()
                 runLog.note("CLIP", "Speech ended: ${result.samples.size * 1000L / VoiceActivity.SAMPLE_RATE} ms of audio")
                 Hearing.Done(VoiceEvent.Heard)
@@ -294,6 +306,46 @@ class VoiceSession(context: Context, sink: VoiceRunSink = VoiceRunSink.NONE) {
         awaitingAckSound = true
     }
 
+    /** A pause: transcribe this clip now, and understand it when that is what the turn would do next. */
+    private fun headStart(pause: VoiceActivity.Pause, samples: ShortArray) {
+        val started = earlyText.start(pause.startMs to pause.endMs) {
+            scope.async(Dispatchers.IO) {
+                try {
+                    transcribeClip(samples).also { event -> if (event is VoiceEvent.Transcript) understandEarly(event.text) }
+                } finally {
+                    samples.fill(0)
+                }
+            }
+        }
+        if (!started) samples.fill(0)
+    }
+
+    /** What the turn would do with [text] if it were the final transcript, worked out on paper; never dispatched. */
+    private fun understandEarly(text: String) {
+        val now = _turn.value
+        if (now.phase != VoicePhase.LISTENING) return
+        val probe = runCatching { now.on(VoiceEvent.Heard).turn.on(VoiceEvent.Transcript(text)) }.getOrNull() ?: return
+        for (effect in probe.effects) when (effect) {
+            is VoiceEffect.Understand -> earlyUnderstanding.start(effect) {
+                scope.async(Dispatchers.IO) {
+                    understandEvent(effect.transcript, effect.context).also { event ->
+                        // A new task: its decision can start now too, for the goal it will be sent as.
+                        val u = (event as? VoiceEvent.Understood)?.understanding
+                        if (u != null && u.kind == VoiceKind.TASK && u.goal.isNotBlank()) com.cyclone.mobile.mind.modes.CycloneModes.prime(app, u.goal)
+                    }
+                }
+            }
+            is VoiceEffect.Quick -> com.cyclone.mobile.mind.modes.CycloneModes.prime(app, effect.goal)
+            else -> Unit
+        }
+    }
+
+    private fun clearHeadStarts() {
+        clipSpan = null
+        earlyText.clear()
+        earlyUnderstanding.clear()
+    }
+
     private fun stopListening() {
         listenJob?.cancel()
         listenJob = null
@@ -309,21 +361,14 @@ class VoiceSession(context: Context, sink: VoiceRunSink = VoiceRunSink.NONE) {
             return dispatch(VoiceEvent.Failed(VoiceFailure.NOT_HEARD))
         }
         clip = null
+        // Plan 65 R1: the same clip may already be transcribed (or on its way) from the pause before the end.
+        val early = clipSpan?.let { earlyText.take(it) }
+        clipSpan = null
         workJob = scope.launch {
             val started = SystemClock.elapsedRealtime()
-            val event = withContext<VoiceEvent>(Dispatchers.IO) {
-                try {
-                    val key = OpenRouterSecretStore.read(app)
-                    if (key.isBlank()) return@withContext VoiceEvent.Failed(VoiceFailure.NO_KEY)
-                    val model = model(key) { it.stt } ?: return@withContext VoiceEvent.Failed(VoiceFailure.OFFLINE)
-                    VoiceEvent.Transcript(OpenRouterStt(OpenRouterVoice(key), model).transcribe(samples, DriverMode.settings.value.language, ::track))
-                } catch (error: VoiceCallException) {
-                    // Alpha.78: a network or model error never switches ears; the next tap simply tries again.
-                    VoiceEvent.Failed(error.failure)
-                } finally {
-                    samples.fill(0)
-                }
-            }
+            val head = early?.let { runCatching { it.await() }.getOrNull() as? VoiceEvent.Transcript }
+            val event = try { head ?: withContext(Dispatchers.IO) { transcribeClip(samples) } } finally { samples.fill(0) }
+            if (head != null) runLog.note("HEAD_START", "Transcribed during the pause, before speech ended", ok = true)
             val ms = SystemClock.elapsedRealtime() - started
             _timings.value = _timings.value.copy(transcribeMs = ms)
             when (event) {
@@ -335,20 +380,42 @@ class VoiceSession(context: Context, sink: VoiceRunSink = VoiceRunSink.NONE) {
         }
     }
 
+    /** One transcription of [samples] by the owner's model, as the event the turn takes. */
+    private suspend fun transcribeClip(samples: ShortArray): VoiceEvent = try {
+        val key = OpenRouterSecretStore.read(app)
+        val model = if (key.isBlank()) null else model(key) { it.stt }
+        when {
+            key.isBlank() -> VoiceEvent.Failed(VoiceFailure.NO_KEY)
+            model == null -> VoiceEvent.Failed(VoiceFailure.OFFLINE)
+            else -> VoiceEvent.Transcript(OpenRouterStt(OpenRouterVoice(key), model).transcribe(samples, DriverMode.settings.value.language, ::track))
+        }
+    } catch (error: VoiceCallException) {
+        // Alpha.78: a network or model error never switches ears; the next tap simply tries again.
+        VoiceEvent.Failed(error.failure)
+    }
+
+    /** One reading of [transcript] by the understanding model, as the event the turn takes. */
+    private suspend fun understandEvent(transcript: String, context: VoiceContext): VoiceEvent = try {
+        val key = OpenRouterSecretStore.read(app)
+        val model = if (key.isBlank()) null else model(key) { it.fast }
+        when {
+            key.isBlank() -> VoiceEvent.Failed(VoiceFailure.NO_KEY)
+            model == null -> VoiceEvent.Failed(VoiceFailure.OFFLINE)
+            else -> VoiceEvent.Understood(OpenRouterVoice(key).understand(model, transcript, context, ::track))
+        }
+    } catch (error: VoiceCallException) {
+        VoiceEvent.Failed(error.failure)
+    }
+
     private fun understand(transcript: String, context: VoiceContext) {
         val jev = if (DriverMode.settings.value.jevWatch) watchJev(transcript, context) else null
+        // Plan 65 R1: the same question may already be answered (or on its way) from the pause.
+        val early = earlyUnderstanding.take(VoiceEffect.Understand(transcript, context))
         workJob = scope.launch {
             val started = SystemClock.elapsedRealtime()
-            val event = withContext<VoiceEvent>(Dispatchers.IO) {
-                try {
-                    val key = OpenRouterSecretStore.read(app)
-                    if (key.isBlank()) return@withContext VoiceEvent.Failed(VoiceFailure.NO_KEY)
-                    val model = model(key) { it.fast } ?: return@withContext VoiceEvent.Failed(VoiceFailure.OFFLINE)
-                    VoiceEvent.Understood(OpenRouterVoice(key).understand(model, transcript, context, ::track))
-                } catch (error: VoiceCallException) {
-                    VoiceEvent.Failed(error.failure)
-                }
-            }
+            val head = early?.let { runCatching { it.await() }.getOrNull() as? VoiceEvent.Understood }
+            if (head != null) runLog.note("HEAD_START", "Understood during the pause, before speech ended", ok = true)
+            val event = head ?: withContext(Dispatchers.IO) { understandEvent(transcript, context) }
             val ms = SystemClock.elapsedRealtime() - started
             _timings.value = _timings.value.copy(understandMs = ms)
             when (event) {

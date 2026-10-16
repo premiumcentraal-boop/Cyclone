@@ -1139,12 +1139,18 @@ class OverlayChromeController(
         override fun onResults(results: Bundle?) {
             voiceSession = false
             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+            // Plan 65 R1: the words wait in the field for Send; their decision can be ready by then.
+            if (!transcript.isNullOrBlank()) com.cyclone.mobile.mind.modes.CycloneModes.prime(service, transcript)
             onVoiceStateChanged(false, transcript, if (transcript.isNullOrBlank()) "I didn't catch that." else null)
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
             val transcript = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-            if (!transcript.isNullOrBlank()) onVoiceStateChanged(true, transcript, OverlayCopy.LISTENING)
+            if (!transcript.isNullOrBlank()) {
+                // Plan 65 R1: decide while they speak, once the words have held still for a moment.
+                com.cyclone.mobile.mind.modes.CycloneModes.prime(service, transcript, afterMs = PRIME_SETTLE_MS)
+                onVoiceStateChanged(true, transcript, OverlayCopy.LISTENING)
+            }
         }
 
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -1154,6 +1160,11 @@ class OverlayChromeController(
         val expectedGeneration = generation
         if (Looper.myLooper() == Looper.getMainLooper()) block()
         else main.post { if (generation == expectedGeneration) block() }
+    }
+
+    private companion object {
+        /** Dictation's words must hold still this long before their decision starts early. */
+        const val PRIME_SETTLE_MS = 250L
     }
 
     private fun dp(value: Int): Int = (value * service.resources.displayMetrics.density).toInt()

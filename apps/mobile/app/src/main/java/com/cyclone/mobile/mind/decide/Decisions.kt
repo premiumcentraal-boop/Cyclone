@@ -95,7 +95,8 @@ object Decisions {
      * board. Each lane goes through [call], so each keeps its own breaker; a lane whose breaker is open answers nothing
      * at once and the other decides under the one-answer rule. Null without an OpenRouter key.
      */
-    fun engine(context: Context, engine: com.cyclone.mobile.mind.modes.DecisionEngine): com.cyclone.mobile.mind.modes.EngineDecider? {
+    fun engine(context: Context, engine: com.cyclone.mobile.mind.modes.DecisionEngine,
+               record: ((EngineRecord) -> Unit)? = null): com.cyclone.mobile.mind.modes.EngineDecider? {
         if (engine == com.cyclone.mobile.mind.modes.DecisionEngine.CLASSIC) return null
         val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
         refresh(context)
@@ -110,7 +111,7 @@ object Decisions {
         }
         val app = context.applicationContext
         return com.cyclone.mobile.mind.modes.RaceEngine(engine, com.cyclone.mobile.mind.modes.DecisionRace(lanes, ENGINE_DEADLINE_MS),
-            record = { EngineStore.save(app, it) })
+            record = record ?: { EngineStore.save(app, it) })
     }
 
     /**

@@ -27,7 +27,7 @@ class VoiceCapture(private val context: Context) {
 
     sealed interface Outcome {
         /** Speech, trimmed to the part worth sending. */
-        class Clip(val samples: ShortArray, val voicedMs: Int) : Outcome
+        class Clip(val samples: ShortArray, val voicedMs: Int, val startMs: Int = -1, val endMs: Int = -1) : Outcome
         data object NothingHeard : Outcome
         data class Failed(val failure: VoiceFailure) : Outcome
     }
@@ -51,18 +51,20 @@ class VoiceCapture(private val context: Context) {
      * route from [routeToCar], released when the recording ends.
      */
     @SuppressLint("MissingPermission")
-    suspend fun record(tuning: VoiceActivity.Tuning, car: AudioDeviceInfo? = null, onSpeech: () -> Unit = {}, onLevel: (Float) -> Unit): Outcome =
+    suspend fun record(tuning: VoiceActivity.Tuning, car: AudioDeviceInfo? = null, onSpeech: () -> Unit = {},
+                       onPause: (VoiceActivity.Pause, ShortArray) -> Unit = { _, _ -> }, onLevel: (Float) -> Unit): Outcome =
         withContext<Outcome>(Dispatchers.IO) {
             try {
                 if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return@withContext Outcome.Failed(VoiceFailure.NO_MIC)
-                recordFrom(car, tuning, onSpeech, onLevel)
+                recordFrom(car, tuning, onSpeech, onPause, onLevel)
             } finally {
                 carMic.release()
             }
         }
 
     @SuppressLint("MissingPermission")
-    private suspend fun recordFrom(car: AudioDeviceInfo?, tuning: VoiceActivity.Tuning, onSpeech: () -> Unit, onLevel: (Float) -> Unit): Outcome {
+    private suspend fun recordFrom(car: AudioDeviceInfo?, tuning: VoiceActivity.Tuning, onSpeech: () -> Unit,
+                                   onPause: (VoiceActivity.Pause, ShortArray) -> Unit, onLevel: (Float) -> Unit): Outcome {
         finishEarly = false
         val rate = VoiceActivity.SAMPLE_RATE
         val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -83,6 +85,7 @@ class VoiceCapture(private val context: Context) {
         var count = 0
         val chunk = ShortArray(rate / 50)
         var spoke = false
+        var pausedAt = -1
         return try {
             record.startRecording()
             if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) return Outcome.Failed(VoiceFailure.MIC_BUSY)
@@ -100,10 +103,14 @@ class VoiceCapture(private val context: Context) {
                         onLevel(result.level)
                         // Speech longer than a blip: never on a silent or blip-only open, which stays free.
                         if (!spoke && result.speechMs >= tuning.minSpeechMs) { spoke = true; onSpeech() }
+                        // Plan 65 R1: a pause hands over the clip as it stands, once per pause, so the work can start now.
+                        result.pause?.let { p ->
+                            if (p.endMs != pausedAt) { pausedAt = p.endMs; runCatching { onPause(p, Wav.trim(all, count, p.startMs, p.endMs)) } }
+                        }
                         if (finishEarly) return early(all, count, detector)
                     }
                     is VoiceActivity.Result.Heard ->
-                        return Outcome.Clip(Wav.trim(all, count, result.startMs, result.endMs), result.voicedMs)
+                        return Outcome.Clip(Wav.trim(all, count, result.startMs, result.endMs), result.voicedMs, result.startMs, result.endMs)
                     VoiceActivity.Result.NoSpeech, is VoiceActivity.Result.Blip -> return Outcome.NothingHeard
                 }
             }

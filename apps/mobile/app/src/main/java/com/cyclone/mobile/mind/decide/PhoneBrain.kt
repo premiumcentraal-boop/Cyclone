@@ -32,6 +32,15 @@ object PhoneBrain {
         return PhoneDecider(current, earned, mayAct = use == PhoneModelUse.EARNED, audit = audit, replay = replay)
     }
 
+    /**
+     * Plan 65 R1: the phone model for a request that isn't sent yet (deciding while the owner speaks). Never an audit,
+     * and it doesn't count towards the audit cadence.
+     */
+    fun peek(context: Context, use: PhoneModelUse, bar: Double): PhoneDecider? {
+        if (use == PhoneModelUse.OFF) return null
+        return PhoneDecider(ready(context, bar), earned, mayAct = use == PhoneModelUse.EARNED, audit = false, replay = replay)
+    }
+
     /** Keeps one routed request (not when it looks like it carries a secret). */
     fun record(context: Context, lesson: Lesson, bar: Double) {
         val kept = Lessons.keepable(lesson) { MindMemory.looksSecret(it) } ?: return
