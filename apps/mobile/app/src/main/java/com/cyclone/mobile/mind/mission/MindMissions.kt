@@ -790,6 +790,8 @@ object MindMissions {
                         MindStatus.FAILED -> MissionStatus.FAILED
                         MindStatus.CANCELLED -> MissionStatus.CANCELLED
                         MindStatus.OUT_OF_BUDGET -> MissionStatus.PAUSED
+                        // Only OneMind's wheel hands back; a plain mission never does.
+                        MindStatus.HANDED_BACK -> MissionStatus.PAUSED
                     },
                     summary = result.summary, evidence = result.evidence.orEmpty(), turns = result.turns, workingMs = result.workingMs,
                     usage = result.usage, modelLabel = result.modelLabel, waitingFor = null,

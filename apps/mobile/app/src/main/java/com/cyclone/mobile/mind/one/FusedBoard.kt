@@ -97,7 +97,7 @@ object FusedBoard {
         questions["popup_dismiss"] = DQuestion.Choice("If there is an interruption, which control closes it without accepting anything?",
             controls.associate { c -> c.ref to "${c.role} \"${c.label}\"" } + ("none" to ""))
         questions["divergence"] = DQuestion.Score("How is the run doing against this milestone?", DIVERGENCE)
-        ask.orders.filter { it.kind == StandingOrder.Kind.WAKE_WHEN && !it.question.isNullOrBlank() }.forEach { o ->
+        StandingOrders.questions(ask.orders).forEach { o ->
             questions["order_${o.id}"] = DQuestion.Noul(o.question!!, "yes", "no")
         }
         ask.step.branches.forEachIndexed { i, b -> questions["branch_$i"] = DQuestion.Noul("Is this true now: ${b.condition}?", "true", "not true") }
@@ -164,6 +164,28 @@ object FusedBoard {
             matchesRequest = minOf { it.matchesRequest },
         )
     }
+
+    // ---- the done check --------------------------------------------------------------------------------------------
+
+    /**
+     * Plan 69 §4.4 DONE: a separate call whenever a finish is claimed. It only judges what the screen and the facts
+     * show; code's own done predicate is checked first and a model can never turn a code miss into done.
+     */
+    fun doneRequest(goal: String, finished: List<String>, facts: List<Fact>, screen: StepScreen?): Request {
+        val state = buildList {
+            add(DPart.Text("Goal: $goal"))
+            if (finished.isNotEmpty()) add(DPart.Text("Milestones finished:\n" + finished.joinToString("\n") { "- $it" }))
+            if (facts.isNotEmpty()) add(DPart.Text("Facts found:\n" + facts.takeLast(20).joinToString("\n") { "- ${it.name} = ${it.value.take(80)}" }))
+            screen?.let { add(DPart.Text("Screen now: ${it.appLabel}\n" + it.texts.take(MAX_TEXT_LINES).joinToString("\n"))) }
+        }
+        val questions = linkedMapOf<String, DQuestion>(
+            "done" to DQuestion.Noul("Has the goal been fully achieved, as far as the screen and the facts show?", "fully achieved", "not (fully) achieved"),
+        )
+        return Request(state, questions, emptyMap())
+    }
+
+    /** The careful reading of the done check across providers: the lowest yes. Null when nobody answered. */
+    fun doneRead(replies: List<DReply>): Double? = replies.mapNotNull { it.noul("done")?.yes }.minOrNull()
 
     /** A yes counts from here; a branch or a skip needs more. */
     const val YES = 0.5

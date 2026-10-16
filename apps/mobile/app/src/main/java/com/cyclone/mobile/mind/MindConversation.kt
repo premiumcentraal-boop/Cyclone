@@ -60,6 +60,8 @@ class MindConversation(initial: List<MindMessage> = emptyList()) {
     fun all(): List<MindMessage> = messages.toList()
     fun size(): Int = messages.size
     fun add(message: MindMessage) { messages += message }
+    /** Plan 69 §8: compaction folds a message in place; indices never move, so tool calls keep their results. */
+    fun set(index: Int, message: MindMessage) { messages[index] = message }
     fun replaceFirst(message: MindMessage) { if (messages.isEmpty()) messages += message else messages[0] = message }
     fun chars(): Int = messages.sumOf { it.chars() }
     /** Provider reasoning state only makes sense to the model that produced it; drop it when the model changes. */

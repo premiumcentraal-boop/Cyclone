@@ -201,6 +201,8 @@ class StepEngine(
         val result: MindToolResult = runCatching { hands.execute(MindToolCall(id(), name, args.toString()), args) }
             .getOrElse { MindToolResult.error(it.message ?: "the action failed") }
         record("act", "${describe(name, label, args)} (rung $rung)" + if (result.ok) "" else " — failed: ${result.brief}")
+        // A tool step can keep its result as a fact (plan 69 §4.6: "as" names it); the value is the tool's own text.
+        if (result.ok) step.args["as"]?.takeIf { FACT_NAME.matches(it) }?.let { record("fact:$it", result.text.take(Score.MAX_FACT)) }
         val after = eyes.look(false)
         val key = "$name:${label ?: args.optString("app", args.optString("url", ""))}"
         if (!result.ok) {
@@ -279,5 +281,6 @@ class StepEngine(
         /** Actions that always carry the risk questions, whatever the plan says. */
         val TRIPWIRE_ACTIONS = setOf("type_text", "press_enter")
         const val MAX_POPUPS_PER_STEP = 2
+        private val FACT_NAME = Regex("^[a-z][a-z0-9_]{0,40}$")
     }
 }

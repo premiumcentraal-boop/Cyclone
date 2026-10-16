@@ -75,6 +75,9 @@ class Breaker {
         }
     }
 
+    /** The owner answered a check-in with "keep going": the wake counters start again. */
+    fun checkedIn() { wakesThisMilestone = 0; triggerCounts.clear() }
+
     /** The done check doubted a finish. True while another re-check is allowed. */
     fun doneDoubt(): Boolean = ++doneRechecks <= MAX_DONE_RECHECKS
 

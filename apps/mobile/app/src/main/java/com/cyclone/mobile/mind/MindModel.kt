@@ -15,43 +15,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class MindUsage(val promptTokens: Int = 0, val completionTokens: Int = 0, val costUsd: Double = 0.0) {
-    operator fun plus(other: MindUsage) = MindUsage(promptTokens + other.promptTokens,
-        completionTokens + other.completionTokens, costUsd + other.costUsd)
-}
-
-data class MindModelReply(
-    val text: String,
-    val toolCalls: List<MindToolCall>,
-    val reasoningDetails: JSONArray? = null,
-    val usage: MindUsage = MindUsage(),
-    val latencyMs: Long = 0,
-)
-
-data class MindModelRequest(
-    val messages: JSONArray,
-    val tools: List<MindToolSpec>,
-    val nativeTools: Boolean,
-    val budgetMs: Long,
-)
-
-/** Typed failures so the loop can decide: wait and retry, switch to the backup model, or stop honestly. */
-sealed class MindModelError(message: String) : Exception(message) {
-    class RateLimited(message: String, val retryAfterMs: Long = 2_000) : MindModelError(message)
-    class Transient(message: String) : MindModelError(message)
-    class Deadline(message: String) : MindModelError(message)
-    class Cancelled : MindModelError("The mission was stopped.")
-    class ToolsUnsupported(message: String) : MindModelError(message)
-    class Fatal(message: String) : MindModelError(message)
-}
-
-interface MindModel {
-    val id: String
-    val label: String
-    val vision: Boolean
-    fun complete(request: MindModelRequest): MindModelReply
-}
-
 /** OpenRouter chat completions with native tool calling, a mission-sized time budget and usage accounting. */
 class OpenRouterMindModel(
     private val apiKey: String,

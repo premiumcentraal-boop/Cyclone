@@ -14,7 +14,11 @@ data class MindBudget(
     val warnBeforeEndMs: Long = 3 * 60_000L,
 )
 
-enum class MindStatus { COMPLETED, GAVE_UP, FAILED, CANCELLED, OUT_OF_BUDGET }
+enum class MindStatus {
+    COMPLETED, GAVE_UP, FAILED, CANCELLED, OUT_OF_BUDGET,
+    /** Plan 69: the loop drove as OneMind's wheel and the mind handed back to the crew with a new plan. */
+    HANDED_BACK,
+}
 
 data class MindOutcome(
     val status: MindStatus,
@@ -80,6 +84,8 @@ class MindLoop(
      * before each turn; the first time it holds, the model is told to finish.
      */
     private val goalMet: () -> String? = { null },
+    /** Plan 69 §5.5: as OneMind's wheel, true once the mind wrote a new plan (plan_write); the loop ends after that turn. */
+    private val handBack: () -> Boolean = { false },
 ) {
     private var goalNoted = false
     private var model: MindModel = primary
@@ -182,6 +188,9 @@ class MindLoop(
                 if (ending == null) guarded { ws.stepAdvice()?.let { conversation.add(MindMessage.User(it, origin = MindMessage.User.Origin.HARNESS)) } }
             }
             checkpoint(conversation)
+            if (ending == null && runCatching(handBack).getOrDefault(false)) {
+                return end(MindStatus.HANDED_BACK, "Handed back to the crew with a new plan.", null, conversation)
+            }
             if (ending != null) return end(
                 if (ending.ending == MindEnding.COMPLETED) MindStatus.COMPLETED else MindStatus.GAVE_UP,
                 ending.summary ?: ending.text, ending.evidence, conversation,

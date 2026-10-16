@@ -35,6 +35,23 @@ object AndroidCrew {
         }
     }
 
+    /** The DONE check (plan 69 §4.4): the same race on its own call, every answer counted in the ledger. */
+    fun doneBoard(key: String, ledger: Ledger, zdr: Boolean, clock: () -> Long = System::currentTimeMillis): DoneBoard = DoneBoard { request ->
+        val providers = DecisionProvider.entries.filter { it.usable }
+        if (providers.isEmpty()) return@DoneBoard emptyList()
+        val lanes = providers.map { Lane(it.wire, ProviderTypedBox(key, it, DONE_DEADLINE_MS, "done", zdr), it.wire) }
+        DecisionRace(lanes, DONE_DEADLINE_MS).run(prompt = { Prompt(request.state, request.questions) }).decided.mapNotNull { arrival ->
+            val answer = arrival.answer
+            val provider = providers.firstOrNull { it.wire == arrival.provider }
+            ledger.add(LedgerEntry(clock(), "decisions", answer?.reply?.model ?: provider?.model.orEmpty(),
+                inputTokens = answer?.reply?.inputTokens ?: 0, costUsd = answer?.reply?.cost ?: 0.0, ms = arrival.ms, ok = answer != null))
+            answer?.reply
+        }
+    }
+
+    /** The done check may take a little longer than a step: nothing waits on it but the finish. */
+    const val DONE_DEADLINE_MS = 4_000L
+
     /** JEV's Box on the side, off the step's path: it records where it would tap and never taps. */
     fun visionShadow(key: String, ledger: Ledger, record: (String) -> Unit, clock: () -> Long = System::currentTimeMillis): (StepScreen, Step) -> Unit =
         { screen, step ->
