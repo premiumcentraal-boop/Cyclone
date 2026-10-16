@@ -129,6 +129,20 @@ class LunaBoxGuard(unittest.TestCase):
             fields = log[log.index(cls):log.index(") {", log.index(cls))]
             self.assertNotRegex(fields, r"\b(request|text|body|answer|key)\b\s*:")
 
+    def test_replay_repeats_only_verified_easy_to_undo_actions(self):
+        """Plan 65: a verified repeat runs with no model call, only for an easy-to-undo action, after the rules."""
+        replay = read("mind/decide/Replay.kt")
+        self.assertIn("g.intent !in ModeRouter.REVERSIBLE", replay)
+        self.assertIn("Outcome.FAILED, Outcome.PROMOTED, Outcome.CANCELLED -> streaks.remove(key)", replay)
+        self.assertIn("const val STREAK = 2", replay)
+        router = read("mind/modes/ModeRouter.kt")
+        route = router[router.index("    fun route(text: String"):]
+        step = route.index("phone.replay[")
+        self.assertLess(route.index("forced(text, world)?.let"), step)
+        self.assertLess(route.index("SECOND_CLAUSE.containsMatchIn(text)"), step)
+        self.assertIn("phone.mayAct && !phone.audit && plainNow(text)", route)
+        self.assertIn("?.takeIf { it.intent in REVERSIBLE }", route)
+
     def test_sight_goes_to_openai_decisions(self):
         """Plan 62/63: JEV's images run in its slower long-context mode, so Cyclone never sends JEV a screenshot."""
         decide = read("mind/decide/Decisions.kt")

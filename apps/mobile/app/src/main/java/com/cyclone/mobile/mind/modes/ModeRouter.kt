@@ -48,6 +48,8 @@ class PhoneDecider(
     val earned: Set<String>,
     val mayAct: Boolean,
     val audit: Boolean,
+    /** Plan 65: requests this phone has done the same verified way before, keyed by [com.cyclone.mobile.mind.decide.Replay.keyOf]. */
+    val replay: Map<String, com.cyclone.mobile.mind.decide.Guess> = emptyMap(),
 )
 
 /** Facts the phone knows without a model, for short answers. */
@@ -246,6 +248,13 @@ object ModeRouter {
         forced(text, world)?.let { return it.copy(by = Decider.RULES, decision = guessOf(it.mode)) }
         if (speed == Speed.COMMANDS) return Route(Mode.MIND, "not a clear command", by = Decider.SETTING, decision = guessOf(Mode.MIND))
         if (SECOND_CLAUSE.containsMatchIn(text)) return Route(Mode.FLASH, "more than one step", by = Decider.RULES, decision = guessOf(Mode.FLASH))
+        // Plan 65: a request this phone has already done the same way, verified, more than once: no model is asked.
+        // Not on an audit, so the models keep checking the replays now and then.
+        if (phone != null && phone.mayAct && !phone.audit && plainNow(text)) {
+            phone.replay[com.cyclone.mobile.mind.decide.Replay.keyOf(text)]?.takeIf { it.intent in REVERSIBLE }?.let { g ->
+                fromGuess(g, text, world)?.let { return it.copy(why = "you asked this before and it worked", by = Decider.PHONE, decision = g, decideMs = 0) }
+            }
+        }
         val candidates = world.labels + world.apps.map { it.first }
         val started = System.nanoTime()
         // The phone model never breaks routing: a failure is just no shadow.
