@@ -1,7 +1,6 @@
 # 62 · The Instant Mind: decisions that are ready before you finish asking
 
-Status: **Design (2026-10-16), nothing built.** Written at alpha.134 dev1. It is the umbrella over plan 58 (the Luna
-Decision Box) and plan 61 (no trigger words), and uses what the latest models on OpenRouter actually offer. Physical
+Status: **Design (2026-10-16), nothing built. Revised the same day: JEV, OpenAI Decisions and GPT-6 Luna named apart (§1).** Written at alpha.134 dev1. It is the umbrella over plan 58 (the "Luna Decision Box": its "Luna" meant OpenAI Decisions) and plan 61 (no trigger words), and uses what the latest models on OpenRouter actually offer. Physical
 device: **UNVERIFIED**.
 
 **Owner's ask (2026-10-16):**
@@ -19,7 +18,7 @@ one before. **The Instant Mind turns that around.**
 - **It has already worked out what you could ask here.** Each screen's possible actions are pre-computed in idle time
   and cached.
 - **It starts deciding while you are still speaking or typing.**
-- **It asks both decision models at once** and takes the first sure answer.
+- **It asks both decision models (JEV and OpenAI Decisions) at once** and takes the first sure answer.
 - **It acts the moment it is sure, then checks**, and undoes a reversible move that turned out wrong.
 
 So by the time you finish the sentence, the decision has usually already been made. That, not a faster model, is what
@@ -27,29 +26,43 @@ makes it feel like it knew.
 
 ---
 
-## 1. What the models really offer (October 2026, OpenRouter)
+## 1. Three different things, kept apart
 
-| | **JEV 1.14** (`typesafe/jev-1.14`, `~typesafe/jev-latest`) | **GPT-6 Luna Decisions** (`openai/gpt-6-luna-decisions`) |
-|---|---|---|
-| **Question types** | choice, noul, score, and **box** (1.14 only): finds one target in an image and returns its edges and a confidence. A box has no "not found", so pair it with a noul | choice, noul (predicate), score; may answer **refusal** |
-| **Images** | PNG or JPEG, 256–1,568 px a side, ≤ 16 MiB. **Every request with an image runs in JEV's long-context mode, which its docs call "slower and less accurate"** | Up to **128 images** per request; built multimodal |
-| **Context** | 262,144 tokens (over ~32 KB of text also switches to long-context mode) | ~1.05 M tokens; up to 200 questions per request |
-| **Price (input; output free)** | $0.042 / M tokens | $0.10 / M tokens |
-| **Measured speed** | OpenRouter's own test, text: **194 ms** median, 0.63–0.69 s p95. Community: 0.21–0.51 s median | Community through OpenRouter: 0.16–0.35 s median, 0.74–0.86 s worst. OpenAI's claim: ~150 ms |
-| **Head to head, same endpoint** | Puzzle test: ~470 ms median, more puzzles solved (but tuned on JEV) | ~550 ms median |
-| **Accuracy (small, mostly vendor tests)** | About equal; slightly ahead on moderation and puzzles | Slightly ahead on intent routing (Banking77: 80.7% vs 78.3%) |
+Earlier plans wrote "Luna" for two different products. From this plan on they are named apart:
 
-Sources are in §12. **What the numbers say:**
-- Both models land within a few hundred milliseconds of each other, typically 150–500 ms.
-- **JEV is the fast text lane**, and cheaper.
-- **Luna is the vision lane:** JEV's own docs say images make it slower and less accurate.
-- JEV's **box** is a unique tool for pointing at an unlabelled spot (a game, a canvas, a video).
-- Input is cheap and output is free for both. **Asking both at once costs a fraction of a cent**, which changes what's
-  sensible (§5).
+| | **JEV** | **OpenAI Decisions** | **GPT-6 Luna** |
+|---|---|---|---|
+| **What it is** | TypeSafe's decision model | OpenAI's Decisions API. On OpenRouter its id is `openai/gpt-6-luna-decisions`: GPT-6 Luna served through the Decisions endpoint | OpenAI's general model, used through chat completions / Responses |
+| **Id on OpenRouter** | `typesafe/jev-1.14`, `~typesafe/jev-latest` (1.13 still listed) | `openai/gpt-6-luna-decisions` | `openai/gpt-6-luna` |
+| **Endpoint** | `POST /api/alpha/decisions` | `POST /api/alpha/decisions` (natively `POST /v1/decisions`) | `POST /api/v1/chat/completions` |
+| **What it returns** | Typed answers only: choice, noul, score, and **box** (1.14) | Typed answers only: choice, noul (predicate), score, or a refusal | **Free text, JSON, tool calls.** It can write |
+| **Images** | PNG/JPEG, 256–1,568 px a side; **any image puts JEV in its "slower and less accurate" long-context mode** | Up to 128 per request; built multimodal | Yes (image parts in messages) |
+| **Context / limits** | 262 K tokens | ~1.05 M tokens; up to 200 questions | ~1 M tokens |
+| **Price** | $0.042 / M input, output free | $0.10 / M input, output free | $0.10 / M input, $0.50 / M output (plan 54) |
+| **Measured speed** | OpenRouter's own test, text: **194 ms** median, 0.63–0.69 s p95 | Community via OpenRouter: 0.16–0.35 s median, 0.74–0.86 s worst; OpenAI claims ~150 ms | Chat: 0.8–1.1 s median in OpenRouter's test (GPT 5.6 Luna); 1.47–2 s in ML6 and AIML tests; OpenAI's own figure 1.6 s |
+| **Cyclone uses it for** | Fast typed decisions on text; box for unlabelled targets | Typed decisions on text (second opinion) and **all decisions that need sight** | **Only what needs writing:** free-value slots, Flash's short plans, the Mind (if chosen), and a slow fallback for typed questions when both decision models are down |
 
-None of this is measured on Cyclone's own requests yet. The first build step measures it (§10, R0).
+**The evidence, sorted by what it really compared:**
+- **JEV vs OpenAI Decisions, both through the decisions endpoint:** only one test, the GitHub puzzle benchmark. JEV
+  ~470 ms median vs ~550 ms, and more puzzles solved (14.8 vs 9.7 of 20). The solver was tuned on JEV.
+- **JEV vs GPT-6 Luna, the chat model** (not the Decisions API):
+  - ML6: JEV 0.3 s vs Luna ~2 s, accuracy about tied;
+  - AIML API: Luna chat 80.7% vs JEV 78.3% on intent routing, at 1.47 s;
+  - OpenRouter's own test: JEV 194 ms vs chat Luna ~1.1 s.
 
----
+  These show JEV beats a **generative** model on speed. They say nothing about OpenAI Decisions.
+- **OpenAI Decisions alone:** community timings of 0.16–0.35 s median, plus OpenAI's ~150 ms claim.
+
+**What the numbers say:**
+- **The two decision models are close.** Both are typically 150–550 ms; JEV was a little faster in the one matched
+  test.
+- **The generative model is a different class:** about 1–2 s. That is too slow for the instant tier, and fine for
+  writing.
+- **For sight, OpenAI Decisions:** JEV's own docs say images make it slower and less accurate.
+- **JEV's box** is unique for pointing at an unlabelled spot.
+- **Input is cheap and output is free for both decision models,** so asking both costs a fraction of a cent (§5).
+
+None of this is measured on Cyclone's own requests yet. R0 measures it (§10).
 
 ## 2. Five principles
 
@@ -76,7 +89,7 @@ None of this is measured on Cyclone's own requests yet. The first build step mea
             │              likely next requests, pre-resolved candidates, warm sockets   │
             ├──────────────────────────────────────────────────────────────────────────┤
  as you     │ 3 DECIDE     Streaming intent → Request Graph. Cascade: on-device cache →  │
- speak      │              JEV ∥ Luna race (hedged) → the Mind. Calibrated, conformal    │
+ speak      │              JEV ∥ OpenAI Decisions race → GPT-6 Luna writes → the Mind │
             ├──────────────────────────────────────────────────────────────────────────┤
  < 400 ms   │ 4 ACT        Optimistic for reversible moves; approval for consequential    │
             ├──────────────────────────────────────────────────────────────────────────┤
@@ -106,7 +119,7 @@ battery stay intact.
 - the App Map's reachable destinations, with routes;
 - the capabilities that make sense here (on a camera screen: shutter, switch camera, video);
 - for icon-only or unlabelled screens, a **marked-screenshot description computed once**:
-  - Luna answers, in one call, "what does each numbered control do?" over the fixed effect list;
+  - OpenAI Decisions answers, in one call, "what does each numbered control do?" over the fixed effect list;
   - where no accessibility node exists at all (games, canvases, video), JEV 1.14's **box** locates the target.
 
 **This is computed when a new screen is first seen and the phone is idle,** then reused every time that screen comes
@@ -135,9 +148,10 @@ back. A tap on "the blue one" then usually needs **no image call at request time
 | Tier | Where | Typical time | Decides |
 |---|---|---|---|
 | **T0 · Live Phone Model + affordance cache + on-device embedding** | Phone | ≤ 30 ms | Requests that clearly match a capability, cached destination or affordance |
-| **T1 · Text race: JEV ∥ Luna** | OpenRouter | ~200–500 ms | The Request Graph's typed questions (Triage, Bind) on text and the numbered control list |
-| **T2 · Sight: Luna (+ JEV box when nothing is labelled)** | OpenRouter | ~300–800 ms | Only when T0/T1 say they need to see (§4.3) |
-| **T3 · The Mind** | Generative model | seconds | Writing, judgement, long plans; Luna/JEV still step the routine parts |
+| **T1 · Text race: JEV ∥ OpenAI Decisions** | OpenRouter | ~200–500 ms | The Request Graph's typed questions (Triage, Bind) on text and the numbered control list |
+| **T2 · Sight: OpenAI Decisions (+ JEV box when nothing is labelled)** | OpenRouter | ~300–800 ms | Only when T0/T1 say they need to see (§4.3) |
+| **T3 · Writing: GPT-6 Luna** | OpenRouter (chat) | ~1–2 s | Only free values that aren't choices (a duration's number of minutes when it isn't plain digits, the words of a note), in a strict JSON schema that code validates; Flash's short plans |
+| **T4 · The Mind** | The owner's Mind model | seconds | Messages, judgement, long plans; the decision models still step the routine parts |
 
 **3c. The race (§5)** is how T1 gets both the speed of the faster model and the safety of two opinions.
 
@@ -176,13 +190,13 @@ back. A tap on "the blue one" then usually needs **no image call at request time
 ### 4.1 Text decisions → the race, JEV favoured
 
 - **Text-only boards go to both models at once** (§5).
-- **JEV usually answers first.** It's faster on text in every test that compared them and cheaper, with
-  equal-or-better accuracy on most.
-- **Luna's answer is the second opinion:** if it arrives within the hedge window, it confirms or contradicts JEV.
+- **JEV is expected to answer first.** It was faster (~470 vs ~550 ms) in the one test that ran both through the decisions
+  endpoint, and it is cheaper. That is one test, tuned on JEV, so R0 confirms it on Cyclone's own requests.
+- **OpenAI Decisions' answer is the second opinion:** if it arrives within the hedge window, it confirms or contradicts JEV.
 
-### 4.2 Sight → Luna
+### 4.2 Sight → OpenAI Decisions
 
-- **Any decision that needs the screen as an image goes to Luna:**
+- **Any decision that needs the screen as an image goes to OpenAI Decisions:**
   - it is built multimodal and takes up to 128 images;
   - JEV's own docs say an image puts JEV into its slower, less accurate long-context mode.
 - **Screenshots are PNG or JPEG**, sized for both models, so either can be used. WebP is out (JEV rejects it).
@@ -224,7 +238,7 @@ $0.00001–0.00005 per model. Asking both costs almost nothing, and it buys two 
 
 ### 5.1 The protocol
 
-1. **Send to JEV at once.** Send to Luna at once as well, or as a **hedged request** once JEV hasn't answered by its
+1. **Send to JEV at once.** Send to OpenAI Decisions at once as well, or as a **hedged request** once JEV hasn't answered by its
    own p50 (the classic "tail at scale" technique). The choice is set by measurement in R0.
 2. **The first answer that passes its bar** (§5.4) acts, if the capability is reversible.
 3. **When the second answer arrives:**
@@ -234,6 +248,13 @@ $0.00001–0.00005 per model. Asking both costs almost nothing, and it buys two 
 4. **Consequential capabilities:**
    - **both models must agree, or the request goes up;**
    - and they still need your approval. Agreement only decides whether Cyclone *proposes* the action.
+
+### 5.1b When both decision models are unreachable
+
+- **GPT-6 Luna (chat) can answer the same typed questions** with a strict JSON schema. The current code already has
+  this wire: `BoxWire.chatBody`.
+- **It is slower (~1–2 s),** so it only steps in when both decision models' breakers are open. The routing deadline
+  still applies: a late answer is no answer, and the request goes up.
 
 ### 5.2 One request, many questions
 
@@ -258,7 +279,7 @@ Unused answers are dropped. A daily cost cap and the breaker (alpha.123) bound a
   for a call), Cyclone computes the set of answers the model can't rule out. **It acts only when that set has exactly
   one answer.** If two candidates remain (Mam and Mama), it asks you or goes up. This turns "unsure goes up" into a
   stated, measured guarantee instead of a hand-picked 0.9.
-- **Agreement between JEV and Luna** is a feature in the calibration, not a vote count.
+- **Agreement between JEV and OpenAI Decisions** is a feature in the calibration, not a vote count.
 
 ---
 
@@ -316,8 +337,8 @@ Plans 58 and 61 fold into this one; release numbers are assigned when building s
 
 | Release | Builds | Gate |
 |---|---|---|
-| **R0 · Measure the models** | The probe extended: JEV 1.14 and Luna on Cyclone's own text and image boards, five runs each, p50/p95, accuracy on the golden set, box accuracy on a set of game/canvas screenshots. JEV marked able to see; screenshots as PNG/JPEG in both models' limits. The race in watch mode (both asked, JEV decides as today) | Real numbers per model and modality on the owner's network; the routing table in §4 confirmed or changed |
-| **R1 · Perceive + Decide** | The Live Phone Model; the Request Graph and on-device embedding tier (plan 61 A); the compiled question sets; the race with hedging; calibration and conformal bars; sight routed to Luna; box behind its switch | Golden set v2 in 12+ languages; 0 consequential under-routes; p50 ≤ 400 ms in the Lab |
+| **R0 · Measure the models** | The probe extended: JEV 1.14 and OpenAI Decisions on Cyclone's own text and image boards, plus GPT-6 Luna (chat) on the slot-extraction schema, five runs each, p50/p95, accuracy on the golden set, box accuracy on a set of game/canvas screenshots. JEV marked able to see; screenshots as PNG/JPEG in both models' limits. Naming in code and Settings follows §1: the `LUNA` provider becomes `OPENAI_DECISIONS`, "Test LUNA" becomes "Test OpenAI Decisions", and GPT-6 Luna (chat) is named only where it writes. The race in watch mode (both asked, JEV decides as today) | Real numbers per model and modality on the owner's network; the routing table in §4 confirmed or changed |
+| **R1 · Perceive + Decide** | The Live Phone Model; the Request Graph and on-device embedding tier (plan 61 A); the compiled question sets; the race with hedging; calibration and conformal bars; sight routed to OpenAI Decisions; box behind its switch; GPT-6 Luna (chat) only for validated free-value slots and the fallback | Golden set v2 in 12+ languages; 0 consequential under-routes; p50 ≤ 400 ms in the Lab |
 | **R2 · Anticipate + Act** | The affordance cache (built in idle time); likely-next ranking; streaming partial decisions for Live voice; speculative Bind; optimistic reversible moves with Verify and auto-undo; Screen Semantics effects (plan 61 B) | Perceived latency targets met on the device matrix; wrong reversible moves ≤ 2%; 0 consequential without approval |
 | **R3 · Learn** | On-phone learning loop (plan 61 C); chains (plan 58 §5B) on the graph; Glass draws the numbers; the old word lists and routers deleted with the vocabulary guard on | T0 share rising; every §9 row met; owner sign-off |
 
@@ -328,7 +349,7 @@ Plans 58 and 61 fold into this one; release numbers are assigned when building s
    from R0's numbers; hedged by default.*
 2. **Optimistic reversible moves:** act before Verify for reversible moves (recommended), or always verify first
    (slower)?
-3. **Idle-time affordance cache:** allow Luna to describe new screens in idle time, with a screenshot of
+3. **Idle-time affordance cache:** allow OpenAI Decisions to describe new screens in idle time, with a screenshot of
    non-sensitive screens only (recommended, with the "see the screen" switch respected), or only on demand?
 4. **JEV box** for unlabelled targets (games, canvases): on behind its own switch after R0's box test (recommended), or
    wait until TypeSafe calls it stable?
@@ -338,11 +359,11 @@ Plans 58 and 61 fold into this one; release numbers are assigned when building s
 - [OpenRouter: JEV docs (1.14, box, long-context mode)](https://openrouter.ai/docs/guides/community/jev)
 - [OpenRouter: Multimodal Decisions (image limits per model)](https://openrouter.ai/docs/guides/community/multimodal-decisions)
 - [OpenRouter: Decisions API reference](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-questions-and-answers-request)
-- [OpenRouter: Jev vs LLM benchmark (2026-09-19)](https://openrouter.ai/blog/tutorials/jev-vs-llm-when-to-use-each/)
+- [OpenRouter: Jev vs LLM benchmark (2026-09-19)](https://openrouter.ai/blog/tutorials/jev-vs-llm-when-to-use-each/) (JEV vs chat GPT 5.6 Luna)
 - [GPT-6 Luna Decisions on OpenRouter](https://openrouter.ai/openai/gpt-6-luna-decisions)
-- [Benchmark Jev vs GPT-6 Luna Decisions via OpenRouter (GitHub PR)](https://github.com/matsonj/eval-connections/pull/33)
-- [ML6: Jev vs GPT-6 Luna vs BERT](https://www.ml6.eu/en/blog/jev-vs-gpt-6-luna-vs-bert-text-classification)
-- [AIML API: What is Jev (Banking77, TweetEval)](https://aimlapi.com/blog/what-is-jev)
+- [Benchmark Jev vs GPT-6 Luna Decisions via OpenRouter (GitHub PR)](https://github.com/matsonj/eval-connections/pull/33) (the only matched decisions-endpoint test)
+- [ML6: Jev vs GPT-6 Luna vs BERT](https://www.ml6.eu/en/blog/jev-vs-gpt-6-luna-vs-bert-text-classification) (GPT-6 Luna through OpenAI's endpoint, not the Decisions API)
+- [AIML API: What is Jev (Banking77, TweetEval)](https://aimlapi.com/blog/what-is-jev) (GPT-6 Luna and Sol as generative models, not the Decisions API)
 - [OrcaRouter: OpenAI's Decisions API](https://www.orcarouter.ai/blog/openai-decisions-api-gpt-6-luna)
 - Live endpoint data: `GET https://openrouter.ai/api/v1/models/{id}/endpoints` (2026-10-16: both 100% uptime over 30
   min; latency not reported for decisions models)

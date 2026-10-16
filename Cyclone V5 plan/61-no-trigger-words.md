@@ -3,6 +3,10 @@
 Status: **Plan (2026-10-16), nothing built.** Written at alpha.134 dev1. It supersedes the keyword parts of plan 42
 (the grammar and the router's rules) and extends plan 58 (the Luna Decision Box). Physical device: **UNVERIFIED**.
 
+> **Naming (2026-10-16, plan 62 §1):** "Luna" in this plan means **OpenAI Decisions** (`openai/gpt-6-luna-decisions`),
+> the typed Decisions API. **GPT-6 Luna** (`openai/gpt-6-luna`) is the separate generative model, used only where
+> something must be written.
+
 **Owner's ask (2026-10-16):**
 > No trigger words. People use different languages and different words. Build it the way Google or Apple would with
 > today's technology.
@@ -129,7 +133,8 @@ The existing pieces map onto it:
    - It already reads any language. This is Triage (plan 58), generalised to the graph.
 3. **Slot extraction for free values: a small generative call, validated.**
    - Some values aren't choices: "in 37 minutes", "at half past seven", a message's words.
-   - Decisions can't write, so a fast generative model fills a **strict JSON schema** for just those slots.
+   - Decisions can't write, so **GPT-6 Luna** (the generative model, not the Decisions API) fills a **strict JSON
+     schema** for just those slots.
    - **Code validates every value:** a duration in range, a time that parses, a contact that exists. Anything invalid
      is no answer.
    - Numbers are parsed locale-aware with ICU (`android.icu`), which reads spelled-out numbers in many languages, not
