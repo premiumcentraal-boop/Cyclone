@@ -75,3 +75,16 @@ Settings → Speed → Decision engine. Run each row in **Consensus**, then **Sp
 | 5.9 | Say "get the picture thing up" three times (in Consensus) | The camera each time. The third time the trace says "you asked this before and it worked" and it opens with no wait | UNVERIFIED |
 | 5.10 | Repeat 5.9, but cancel the second run | The third run asks the models again (Replay forgot it) | UNVERIFIED |
 | 5.11 | 20 everyday requests, then the health report's `decisions.engine.lanes` | Each model shows `selfAgreement`. Four answers per decision (two per model) in the engine log | UNVERIFIED |
+
+## alpha.137 · Live voice from the Ask bar, decided while you speak (plan 65 R1)
+
+| # | Steps | Expected | Result |
+|---|---|---|---|
+| 6.1 | Open the Ask bar, type nothing | The send arrow is a voice wave; typing turns it back into Send | UNVERIFIED |
+| 6.2 | Tap the wave, say "turn it up a bit" | The Ask bar steps aside, the voice panel rises with Cyclone's smoke glass, volume goes up, the panel closes and the Ask bar comes back as it was | UNVERIFIED |
+| 6.3 | Tap the wave, say "open my email and read the newest one" | One-line confirmation; the task runs; Cyclone says when it is done; the voice session then closes by itself | UNVERIFIED |
+| 6.4 | Live voice: say "pull up the picture", pause briefly, then "thing please" | Works as usual; the run history shows no head start used for the first half | UNVERIFIED |
+| 6.5 | Live voice: say a short request and stop | The run history shows "Transcribed during the pause"; the answer feels quicker than alpha.136 | UNVERIFIED |
+| 6.6 | Dictate "pull up the picture thing" with the mic, wait a second, tap Send | The trace says "decided while you spoke" | UNVERIFIED |
+| 6.7 | Settings → Live voice → "Voice button for the car" on | The large button is on screen as in Driver mode; the wave in the Ask bar uses the same conversation | UNVERIFIED |
+| 6.8 | Settings → Visual quality → Lite, then 6.2 | The orb holds still, the panel fades in without growing | UNVERIFIED |
