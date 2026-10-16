@@ -383,7 +383,21 @@ private fun ComposerPanel(
     val upperVisible = !minimized && (task != null || foregroundWorking || queued.isNotEmpty() ||
         sharing.phase != ScreenSharePhase.OFF || attached)
     // Plan 27: folded while working, the Ask bar becomes the island with the live status.
-    val island = minimized && activeWork
+    val workingIsland = minimized && activeWork
+    // A task that ends while its island shows leaves a finished island (done, couldn't finish, stopped) until the owner
+    // opens the stack, closes it, types, or new work starts; it no longer drops straight back to the Ask bar.
+    val islandHold = remember { WorkIslandHold() }
+    var closedIsland by remember { mutableStateOf<String?>(null) }
+    val islandEnd = when {
+        task?.phase == com.cyclone.mobile.runtime.background.TaskPhase.FAILED -> WorkIslandHold.End.FAILED
+        task?.phase == com.cyclone.mobile.runtime.background.TaskPhase.DONE -> WorkIslandHold.End.DONE
+        task == null && snapshot.state == OverlayChromeState.DONE -> WorkIslandHold.End.DONE
+        task == null -> WorkIslandHold.End.STOPPED
+        else -> WorkIslandHold.End.DONE
+    }
+    val finishedIsland = islandHold.step(minimized, activeWork, task?.taskId ?: snapshot.sessionId.ifBlank { null },
+        task?.title, islandEnd, snapshot.composerText.isNotBlank(), closedIsland)
+    val island = workingIsland || finishedIsland != null
     val mindTaskId = task?.taskId?.takeIf { it.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX) }
     // Plan 38: while a Mind mission runs, typed text + send offers Steer / Queue / Parallel for the task on this card
     // (D7), and the empty bar's button is the real pause (the mission holds at its next step) and the two-tap stop.
@@ -459,7 +473,22 @@ private fun ComposerPanel(
                 contentAlignment = Alignment.BottomCenter,
                 label = "Ask bar or island",
             ) { showIsland ->
-                if (showIsland) {
+                val done = finishedIsland
+                if (showIsland && done != null) {
+                    WorkIsland(
+                        appPackage = if (task != null) WorkingApp.forTask(task.taskId, task.packageName) else foregroundApp,
+                        lines = WorkIslandHold.lines(done),
+                        fraction = 1f,
+                        working = false,
+                        paused = false,
+                        taskKey = done.key,
+                        onOpen = { onAction(OverlayUserAction.ASK_CYCLONE) },
+                        onPause = {},
+                        onStop = {},
+                        finished = done.end,
+                        onClose = { closedIsland = done.key },
+                    )
+                } else if (showIsland) {
                     val lines = islandSnapshot?.let {
                         OverlayGlassCopy.island(it.currentMilestone, it.title, it.completedCount, it.totalCount)
                     } ?: OverlayGlassCopy.island(snapshot.statusMessage ?: snapshot.bullets.firstOrNull(), "Cyclone is working", 0, null)

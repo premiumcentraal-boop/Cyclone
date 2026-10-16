@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.CornerRadius
@@ -628,8 +629,12 @@ internal fun WorkIsland(
     onOpen: () -> Unit,
     onPause: () -> Unit,
     onStop: () -> Unit,
+    /** Set once the task has ended while the island showed: the island stays, finished, with a close button. */
+    finished: WorkIslandHold.End? = null,
+    onClose: () -> Unit = {},
 ) {
     val blur = com.cyclone.mobile.ui.overlay.glass.rememberBlurPanel(OverlayStackGeometry.BAR_RADIUS_DP.dp)
+    val warm = finished == WorkIslandHold.End.FAILED || finished == WorkIslandHold.End.STOPPED
     Box(Modifier.fillMaxWidth().height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).then(blur.modifier)
         .tiltGlass(OverlayStackGeometry.BAR_RADIUS_DP.dp, palette = LocalGlassPalette.current, lift = blur.lift)) {
         Row(
@@ -637,26 +642,50 @@ internal fun WorkIsland(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            RingedLogo(appPackage, working)
+            Box(contentAlignment = Alignment.BottomEnd) {
+                RingedLogo(appPackage, working)
+                if (finished != null) FinishedBadge(warm)
+            }
             Column(
                 Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(VeilTint)
-                    .clickable(onClickLabel = "Open the task", onClick = onOpen)
+                    .clickable(onClickLabel = if (finished != null) "Open the result" else "Open the task", onClick = onOpen)
                     .padding(horizontal = 16.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(lines.first, color = GlassInk, fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                Text(lines.first, color = if (warm) GlassWarm else GlassInk, fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                 Text(lines.second, color = GlassMuted, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center)
             }
-            OverlayRequestAction(working = working, paused = paused, taskKey = taskKey, canSend = false,
+            if (finished != null) {
+                com.cyclone.mobile.ui.overlay.glass.GlassRoundButton("Close", onClose) {
+                    com.cyclone.mobile.ui.v32.SignatureIcon(com.cyclone.mobile.ui.v32.SignatureGlyph.ADD, Modifier.rotate(45f))
+                }
+            } else OverlayRequestAction(working = working, paused = paused, taskKey = taskKey, canSend = false,
                 onSend = {}, onPauseOrResume = onPause, onStop = onStop)
         }
         Canvas(Modifier.align(Alignment.BottomCenter).padding(horizontal = 30.dp, vertical = 5.dp).fillMaxWidth().height(2.dp)) {
             drawRoundRect(Color.White.copy(alpha = 0.08f), cornerRadius = CornerRadius(1.dp.toPx()))
             fraction?.let {
-                drawRoundRect(GlassTeal, size = Size(size.width * it.coerceIn(0.02f, 1f), size.height), cornerRadius = CornerRadius(1.dp.toPx()))
+                drawRoundRect(if (warm) GlassWarm else GlassTeal, size = Size(size.width * it.coerceIn(0.02f, 1f), size.height),
+                    cornerRadius = CornerRadius(1.dp.toPx()))
             }
+        }
+    }
+}
+
+/** The finished island's mark on the app logo: a check (teal) when done, a dash (warm) when it couldn't finish or stopped. */
+@Composable
+private fun FinishedBadge(warm: Boolean) {
+    Canvas(Modifier.size(16.dp)) {
+        drawCircle(Color(0xFF0C0D10))
+        drawCircle(if (warm) GlassWarm else GlassTeal, radius = size.minDimension / 2 - 1.dp.toPx())
+        val ink = Color(0xFF052528)
+        val w = 1.6.dp.toPx()
+        if (warm) drawLine(ink, Offset(size.width * 0.3f, size.height / 2), Offset(size.width * 0.7f, size.height / 2), w, StrokeCap.Round)
+        else {
+            drawLine(ink, Offset(size.width * 0.28f, size.height * 0.52f), Offset(size.width * 0.44f, size.height * 0.68f), w, StrokeCap.Round)
+            drawLine(ink, Offset(size.width * 0.44f, size.height * 0.68f), Offset(size.width * 0.72f, size.height * 0.36f), w, StrokeCap.Round)
         }
     }
 }
