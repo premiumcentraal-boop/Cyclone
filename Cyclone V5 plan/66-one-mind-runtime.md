@@ -1,0 +1,435 @@
+# Plan 66: The One Mind runtime
+
+**Status:** design (2026-10-16). Nothing is built yet.
+
+**Scope:** Flash and the Mind (`Mode.FLASH`, `Mode.MIND`, the "Cyclone Mind" missions).
+
+**Builds on:**
+- plan 16 (Cyclone Mind);
+- plan 41 (the Pilot, lessons L1–L14);
+- plan 42 (modes and the baton);
+- plan 58 (Decisions wire, the destination index);
+- plans 63 and 65 (decision engines, Replay, deciding while you speak).
+
+## 1. What is true today
+
+These facts come from a full read of the code, not from older plans.
+
+**Flash has no engine of its own.**
+- A Flash run is a Mind mission with one extra sentence: "This is a quick run…" (`MindPrompt.FLASH`, used once at
+  `MindMissions.kt:765`).
+- It uses the same frontier model, the same 30-minute budget, the same 400 turns and the same card ("Cyclone Mind").
+- Plan 42's `FlashRun` "with its own planner" was never built.
+
+**Every step of every Flash or Mind run is one frontier-model call.**
+- The model gets the whole compacted conversation: up to 100k characters, about 15–25k tokens a turn.
+- It also gets about 45 tool schemas and the screen as text.
+- It is one call per turn, not streamed, with up to 180 s per call.
+- Only Anthropic models get cache breakpoints.
+
+**The cheap decision path inside missions is off.**
+- The Pilot (plan 41) walks a plan on a fast model or on Decisions/JEV.
+- It is the only cheap path inside a run, and `FastMode.enabled` defaults to **false**.
+- So in practice Decisions and JEV are used only *before* a run starts (routing). Never during it.
+
+**Nothing checks the finish.**
+- A run ends when the model calls `task_finish` with some evidence.
+- No independent check confirms that the goal was met.
+- The gateway Lab has a `false_success` category because this happens.
+
+**Loops only warn.**
+- A repeated identical failure adds a note for the model.
+- Nothing else stops a looping run except 30 minutes of working time or 400 turns.
+
+**Cost is half-counted and uncapped on the phone.**
+- `MindUsage` counts the main model only. Pilot and advisor calls are thrown away.
+- The phone has no USD cap. Only the PC Manager has one.
+
+**Safety is good, and stays.**
+- Gates are decided by code: `GateClassifier` (PAY/SEND/DELETE/GRANT), the access profile, `ClickGateIntercept`
+  on the real click, exact-text approval for sends, and the vault for secrets.
+- Models never approve anything. This plan keeps that exactly.
+
+**The arithmetic of a routine 10-step Flash run today** (estimates, not measured on Cyclone):
+
+| | Today |
+|---|---|
+| Frontier-model calls | about 12–20 turns |
+| Input tokens | about 250–400k (each turn re-sends the conversation) |
+| Wall time | about 60–90 s, mostly waiting for the model (plan 41 §2 measured ~70 s for 10 steps, against ~25 s of acting) |
+| Who checks the finish | nobody but the model itself |
+
+## 2. First principles
+
+### 2.1 What a step needs
+
+The question is what an agent step needs, not what our loop does.
+
+Most steps of a phone task are **obvious given the plan**:
+- tap the search field;
+- type the name;
+- tap the result;
+- tap the message box;
+- type;
+- press send (gated).
+
+They need *recognition*: which of these 40 controls is "the search field"? That is a typed choice. Decision
+models answer typed choices in about 0.2–0.5 s for a fraction of a cent.
+
+A few moments need a **mind**:
+- understanding the goal;
+- writing words;
+- choosing between real alternatives ("which of the two Annas?");
+- making sense of a surprise;
+- deciding that the job is done.
+
+**Today we pay mind prices for recognition work.** That is the whole cost and latency problem in one sentence.
+
+### 2.2 Difficulty is a property of a moment, not of a request
+
+"Send Anna the photo from yesterday" is:
+- Mind-hard at one moment (which Anna, which photo);
+- Instant-easy at nine (open WhatsApp, tap search…).
+
+A runtime that picks one difficulty per request is wrong most of the time in both directions:
+- too slow and expensive on the easy steps;
+- or too shallow on the hard one.
+
+**So Instant, Flash and the Mind stop being three engines.** They become three starting points on one ladder that
+every single step climbs only as far as it needs.
+
+That is what makes transitions seamless. There is nothing to transition between:
+- an Instant action inside a Mind run is just a step decided on rung 0 or 1;
+- a hard moment inside a Flash run is just a step that climbs to rung 3.
+
+### 2.3 The best part is no part
+
+Delete before optimising. Each item below goes, or folds into one place:
+
+| What | Where it goes |
+|---|---|
+| The separate Flash concept | Gone. Flash is "the plan came from the fast planner". |
+| Re-sending the whole conversation every turn | Gone. The Mind gets a situation report (§3.6). |
+| A frontier call to tap an obvious button | Gone. |
+| The Mind certifying its own success | Gone. Independent done check (§3.5). |
+| Unbounded loops | Gone. A hard breaker (§3.7). |
+| Uncounted calls | Gone. One ledger (§3.7). |
+
+### 2.4 Reliability comes from checks, not from a smarter driver
+
+A frontier model driving every step is still one point of failure per step.
+
+The reliable shape is the one rockets use:
+- a plan;
+- a cheap, independent check after every action;
+- an expensive mind only where the checks say something is off.
+
+**Every action gets a postcondition, and every postcondition gets checked before the next step.** Errors are then
+caught one step after they happen, not ten steps later, when the model notices it is in the wrong chat.
+
+### 2.5 Decision models can only make things safer, never riskier
+
+The rule keeps plan 41's lessons. A decision model may:
+- pick among options the code made valid;
+- say "stop, this needs the Mind";
+- say "stop, this needs the owner".
+
+A decision model may **never**:
+- approve a gated action;
+- declare a run done;
+- write words that get sent.
+
+## 3. The system
+
+### 3.1 One loop
+
+```
+request ──► Route (plans 63/65: grammar, rules, Replay, engines)
+              │  gives: a starting plan source + a starting rung
+              ▼
+        ┌──────────── THE PLAN (a contract, typed) ────────────┐
+        │ goal · steps[do, target hint, expect, risk, slots]   │
+        │ done predicate · owner-visible milestones            │
+        └───────────────────────────────────────────────────────┘
+              │
+              ▼   for each step:
+   OBSERVE (tree + screen keys; image only when weak) ─► interruption? ─► POPUP board
+              │
+   DECIDE on the ladder:  rung 0  code / map / recipe ............ 0 calls
+                          rung 1  Decisions race (JEV ∥ OpenAI) .. ~0.3 s
+                          rung 2  Decisions + screenshot ......... ~0.5 s
+                          rung 3  the Mind, with a situation report
+              │
+   TRIPWIRE (parallel, cheap; only for anything not easy to undo) ─► may stop, never approve
+   GATE (code, unchanged) ─► owner approves sends, payments, deletes, grants
+              │
+   ACT  (PhoneToolExecutor, unchanged: the only mutation path)
+              │
+   VERIFY (code first, then the VERIFY board) ─► held: next step
+              │                                 └ missed: climb a rung for this step
+              ▼
+   DONE CHECK (code predicate + DONE board, independent of whoever claims done) ─► finish, or back to the Mind
+              │
+   RECIPE (a verified run compiles to a recipe: the next time it runs on rung 0)
+```
+
+**One task card, one trace, one cost ledger, from the first word to the finish.**
+- The card's title shows the rung the run is on, not "Cyclone Mind" for everything.
+- The owner sees one smooth run that sometimes "thinks" for a moment.
+
+### 3.2 The plan: where the intelligence goes, once
+
+A plan is typed data, not prose. Each step has:
+- `do`: a verb and a target hint ("tap · the search field");
+- `expect`: a postcondition as a screen predicate, for example:
+  - "the app is WhatsApp";
+  - "a field with focus";
+  - "a row containing 'Anna'";
+  - "the composer contains the draft";
+- `risk`: undoable / gated / irreversible, taken from the action class (code decides; the plan can only raise it);
+- `slots`: values the plan carries, for example the composed message, written once by the planner.
+
+The plan also carries a **done predicate**: what the screen must show when the goal is met.
+
+**Plan sources, cheapest first:**
+1. **Recipe** (§3.8): a verified earlier run of the same kind of request, slots filled by code or by one
+   Decisions call. **No model writes anything.**
+2. **Map / destination index** (plan 58 §5C): known screens and moves.
+3. **Fast planner**: GPT-6 Luna (the chat model, about 1–2 s), as plan 62 intended. **This is Flash.**
+4. **The Mind**: the frontier model at the owner's effort. **This is the Mind.**
+
+The router chooses the starting source. Any step that the plan can't carry escalates to rung 3. The Mind can then
+rewrite the rest of the plan, and the run continues cheaply after that.
+
+### 3.3 The ladder: deciding each step
+
+**Rung 0 (code):**
+- the step's target hint resolves to exactly one control by code: an exact label, a map move, or a recipe's
+  recorded control identity;
+- or the step is a direct action: open an app, a deep link, settings, back, home, wait.
+
+There is no call. Most recipe steps and many plan steps land here.
+
+**Rung 1 (the STEP board):** Decisions, JEV and OpenAI Decisions racing, as in plan 63's Consensus.
+- `next`: a choice over the shortlisted controls plus typed verbs (scroll, back, wait, done-with-step,
+  needs_mind);
+- `fits_plan`: noul;
+- `surprise`: noul (the screen is not what this step expected).
+
+The rule for acting:
+- an easy-to-undo move acts on Sprint;
+- anything else needs Consensus.
+
+This is plan 41's Pilot, promoted from an optional side tool to the default step engine, with two models instead of
+one.
+
+**Rung 2 (the same board with the screenshot):** OpenAI Decisions with the marked screenshot. Used when:
+- the tree is weak (no useful controls);
+- or rung 1 disagrees.
+
+**Rung 3 (the Mind):** the frontier model, called with a **situation report** (§3.6), not the conversation. It
+returns one of:
+- an action for this step;
+- a rewritten rest of the plan;
+- a question for the owner;
+- give up.
+
+A step climbs **only** when:
+- the rung below is unsure or disagrees;
+- its result missed its postcondition;
+- or the code says the step needs words or a real judgement.
+
+A step never climbs because the request was labelled "Mind". After the Mind has answered, the **next** step starts
+at rung 0 again. That is the seamless transition.
+
+### 3.4 Cheap checks everywhere (almost free)
+
+Each check is one Decisions call: about 0.2–0.5 s, a fraction of a cent, often in parallel with something else.
+
+| Board | When | Questions | It can |
+|---|---|---|---|
+| **VERIFY** | after every action, only when code can't settle the `expect` predicate | `expectation_held` (noul); `blocked_by` (dialog, login, permission, error, none) | move on, or climb a rung |
+| **POPUP** | a new screen that isn't in the plan | interruption kind (cookie, rating, permission, update, ad, none); `dismiss` target | dismiss an easy-to-undo popup on rung 1, or escalate. Popups waste many Mind turns today. |
+| **TRIPWIRE** | in parallel with any move that isn't easy to undo, and before typing into any field | `sends_or_posts`, `money`, `destroys`, `shares_personal`, `account`; `matches_request` (is this what the owner asked for?) | stop and climb to the Mind or the owner. **Never approves.** The code gate still decides. |
+| **DRAFT** | before a gated send, on the exact text | `faithful` (does the text say what the owner asked?); `recipient_matches` | send the owner a sharper approval card ("This may not match what you asked: …"), or bounce it to the Mind to rewrite. Never sends. |
+| **DONE** | when anyone claims the goal is done | `goal_achieved` with the screenshot and the done predicate; `partial` | veto a false finish (back to the Mind with the reason). It can't finish a run on its own. |
+| **ASK** | before the Mind interrupts the owner with a question | `answerable_from_context` (the goal, memory, the screen) | let the Mind try once more with the hint "the answer is likely in …". The owner is asked only when this says no, or when the question is about consent. |
+
+Each board is typed, has a deadline, and degrades safely:
+- **no answer** means today's behaviour (the Mind decides, or the owner is asked);
+- **a disagreement** means the careful side.
+
+### 3.5 The independent finish
+
+Today's biggest silent failure is a run that says "done" when it isn't.
+
+The new finish has two sides:
+1. **Code first:** the plan's done predicate on the real screen.
+   - Examples: the message bubble with the draft text exists and is newest; the timer is listed; the setting reads
+     the new value.
+   - `PhoneSettingReader` already does this for settings.
+2. **The DONE board** with the screenshot when code can't settle it.
+
+The decision:
+- **both say done:** the run finishes;
+- **the code predicate fails:** back to the Mind with exactly what's missing;
+- **the board alone doubts:** the run finishes, but the card says "Done — please check", and the case is logged
+  for the numbers.
+
+### 3.6 The Mind's context diet
+
+When the Mind is called (rung 3), the code builds a **situation report**:
+- the goal and its version (steers included);
+- the plan, with each step's state (done ✓ / here ▶ / to do);
+- the last few events, one line each: "tapped Search (rung 0) · typed 'Anna' (rung 0) · verify missed: two Annas";
+- the current screen (text, plus the image only when weak);
+- the question for the Mind: "two contacts match 'Anna'; which, or ask the owner?";
+- memory facts that apply.
+
+The report is built so its first part stays byte-identical between calls (rules, then goal, then plan). That lets
+**every** provider's automatic prompt cache hit, not only Anthropic's.
+
+**Expected effect:**
+- Mind calls go from about 20k tokens to about 5–8k;
+- they happen only at real judgement points: about 1–4 per routine run instead of 12–20.
+
+The full conversation is kept as the **record**, for the trace and for `recall`, not as the prompt.
+
+### 3.7 One ledger, one breaker
+
+**Ledger.** Every call is counted on the run: the plan, Mind calls, every board, the fast planner. Each entry has
+its model, tokens, cost and ms. The owner gets:
+- a per-run **cost cap**: default $0.50, switchable;
+- a per-day **cap**: default $5.
+
+Near a cap, the run asks before continuing. It never just stops in the middle of a send.
+
+**Breaker** (hard limits, owned by code):
+- the same action on the same screen key twice without progress: the step climbs a rung;
+- the Mind proposing the same failing action twice: the run asks the owner;
+- three missed postconditions in a row: the Mind rewrites the plan. A fourth: the run asks the owner;
+- no plan step completed for 10 actions: the run stops and explains.
+
+### 3.8 Recipes: the run that teaches itself
+
+A run that passed its done check compiles to a **recipe**:
+- the plan;
+- each step's resolved control identity (the semantic name, role and screen key, as Replay and the map already
+  store them);
+- each postcondition;
+- the slot boundaries: what was owner-specific, such as the contact name or the message text.
+
+It is keyed by the request's shape:
+- "message ⟨contact⟩ on WhatsApp ⟨text⟩";
+- "set a timer for ⟨duration⟩";
+- "turn on ⟨setting⟩".
+
+The shape comes from the Triage board's typed slots (plan 64's Request Graph when it lands), not from words.
+
+**Next time:**
+- the router finds the recipe;
+- slots are filled by code, or by one Decisions call;
+- only a **written** slot (the message text) needs the fast planner;
+- every step runs on rung 0 with its postcondition;
+- any miss climbs as usual, and the run then updates the recipe.
+
+**Recipes are forgotten** the same way Replay entries are: after a failed or cancelled run, or when the app changes
+(its version or screen keys). They live on the phone only.
+
+This is plan 65's Replay generalised to multi-step runs. It is the biggest saving over time, because
+**people mostly repeat the same twenty kinds of task**.
+
+## 4. What it should do to the numbers
+
+Estimates from public latencies and today's token sizes. They are **targets to measure, not results.**
+
+| A routine 10-step task | Today | One Mind runtime | With a recipe |
+|---|---|---|---|
+| Frontier-model calls | 12–20 | 1 plan (Luna, not frontier) + 0–2 Mind | 0 (1 Luna call if a slot must be written) |
+| Decisions calls | 0 | about 10–25 (step, verify and check boards) | about 3–8 (checks only) |
+| Input tokens to big models | 250–400k | about 10–20k | about 0–2k |
+| Cost (frontier at ~$3/M input) | about $0.80–1.50 | about $0.03–0.08 | under $0.01 |
+| Waiting on models | about 45–70 s | about 6–12 s (0.3 s boards; acting dominates) | about 1–3 s |
+| Checked finish | no | yes | yes |
+
+**A hard Mind task** (40 steps with real judgement):
+- the Mind is called about 8–15 times instead of 50+, with a 5–8k context instead of 20k;
+- **about 8–15× cheaper**, and it keeps the frontier model exactly where it earns its price.
+
+## 5. Why this won't repeat alpha.23
+
+Plan 41 deferred "routes and forks" because alpha.23's screen shortcuts **hijacked runs**: they acted before
+anything understood the goal. This design differs in four ways:
+1. **A goal-understanding model writes the plan first** (or a verified recipe of the same request shape). Rungs
+   only *execute* it.
+2. **Every step is checked against its postcondition** and `fits_plan`. A step that drifts climbs at once, not
+   ten steps later.
+3. **Climbing is cheap and fast:** about 0.5 s to the board, or one Mind call. "Unsure goes up" costs little,
+   so the thresholds can be strict.
+4. **The code still owns safety:** gates, the vault, keep-off apps, exact-text approval.
+
+## 6. Points of failure, before and after
+
+| | Today | One Mind runtime |
+|---|---|---|
+| Engines | Instant + the Mind (Flash is a sentence), plus the classic agent for background tasks | one runtime; Instant is a one-step plan |
+| A wrong step | noticed when the model notices | caught by the next postcondition |
+| A false finish | not caught on the phone | code predicate + DONE board |
+| A loop | 30 minutes or 400 turns | the breaker, within 2–4 actions |
+| A provider outage | backup model once, then stop | rungs degrade: Decisions down → the Mind decides; the Mind down → the run asks the owner and pauses (resumable) |
+| Cost | uncounted parts, no cap | one ledger, run and day caps |
+| Safety | code gates | the same code gates + TRIPWIRE and DRAFT checks that can only stop |
+
+## 7. Releases
+
+Each release ships behind a switch in Settings → Speed → **Run engine: Classic / One Mind**, so either can be
+chosen without live tests, as with the decision engines. Classic is today's Mind loop, unchanged.
+
+**R0 · Measure and guard** (low risk, no change to how runs act):
+- the ledger: count every call (including the Pilot and the advisor), with run and day caps;
+- the hard breaker;
+- DONE, TRIPWIRE and VERIFY boards in **shadow** inside today's Mind runs: they record and never act. This gives
+  their agreement with the Mind and the false finishes they would catch.
+- Proven offline with golden runs from the Lab traces, the same way plan 63 proved the engines.
+
+**R1 · Flash becomes real:**
+- the plan contract (typed steps, postconditions, done predicate);
+- the fast planner (GPT-6 Luna);
+- the step engine (rungs 0–2; the Pilot's code becomes its core);
+- POPUP and VERIFY acting;
+- the DONE check acting.
+
+Rung 3 is today's Mind loop, started with the situation report and handing back after one answer.
+
+**R2 · The Mind on the ladder:**
+- Mind runs start with a Mind-written plan, and routine stretches run on rungs 0–2;
+- the context diet;
+- TRIPWIRE, DRAFT and ASK acting.
+
+**R3 · Recipes:**
+- verified runs compile;
+- the router starts known request shapes from a recipe.
+
+**R4 · One runtime:**
+- one task card that shows the rung;
+- Instant becomes a one-step plan on the same runtime;
+- the classic agent's remaining uses (background workspace) move over;
+- the Flash/Mind split leaves the code.
+
+## 8. Open questions for the owner
+
+1. **Caps:** are $0.50 a run and $5 a day the right defaults, and should a run ask or stop at the cap?
+2. **The fast planner:** GPT-6 Luna, or the owner's chosen frontier model at low effort?
+3. **"Done — please check":** show it when only the DONE board doubts, or treat every doubt as not done?
+
+## 9. Limits, stated plainly
+
+- **Nothing here is measured on Cyclone yet.** R0 exists to measure before anything acts.
+- **Decision models have not been tested on Cyclone's step boards at scale.** The Pilot's route to them exists but
+  has been off by default.
+- **Postconditions must be written well.** A weak `expect` either climbs too often (costly but safe) or misses a
+  wrong step (the done check is the backstop).
+- **Recipes depend on stable screen identities across app updates.** Plan 58's destination index and the map
+  already face this; recipes are forgotten when an app changes.
+- **The plan must be honest about writing.** Any step that composes words for someone else always goes through the
+  planner or the Mind, and then the DRAFT check and the owner's approval.
