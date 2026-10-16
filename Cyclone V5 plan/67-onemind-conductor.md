@@ -1,5 +1,7 @@
 # Plan 67: OneMind, the conductor
 
+> **Design history.** The final plan is [plan 69](69-onemind-final-plan.md). Where this plan differs from it, plan 69 wins.
+
 **Status:** design (2026-10-16). Nothing is built.
 
 **What it is:** the control structure of plan 66's One Mind runtime, as the owner asked for it:

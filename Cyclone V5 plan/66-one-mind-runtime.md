@@ -1,5 +1,7 @@
 # Plan 66: The One Mind runtime
 
+> **Design history.** The final plan is [plan 69](69-onemind-final-plan.md). Where this plan differs from it, plan 69 wins.
+
 **Status:** design (2026-10-16). Nothing is built yet. §10 adds what JEV 1.14 and the Decisions API offer: pin the
 version now; Box for targets with no node; icon matching through images as options; one fused call per step. §11 keeps replanning and diverting: plan drive
 and Mind drive in one run, wake triggers, local replans, detours, and a ≥ 98% recall bar measured on today's runs.

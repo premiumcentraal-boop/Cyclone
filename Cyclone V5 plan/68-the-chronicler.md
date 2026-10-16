@@ -1,5 +1,7 @@
 # Plan 68: The Chronicler
 
+> **Design history.** The final plan is [plan 69](69-onemind-final-plan.md). Where this plan differs from it, plan 69 wins.
+
 **Status:** design (2026-10-16). Nothing is built. **§10 revises the cadence:** compaction is an economic
 decision computed from cache prices, Luna is called on demand (0–3 times a run), and code writes the record.
 
