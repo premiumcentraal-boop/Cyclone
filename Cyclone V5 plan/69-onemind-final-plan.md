@@ -311,6 +311,8 @@ The existing `MindConversation.compact` (today: a fixed 100k-*character* ceiling
 
 ## 12. The build programme
 
+> **Replaced by §14, the four build checkpoints.** The order of work below still holds inside them.
+
 Seven code runs. Each ends compiling, with existing tests and CI green. Nothing is released before run 7.
 
 **New code lives in `mind/one/`.** Today's `MindLoop` becomes the wheel.
@@ -371,3 +373,184 @@ Seven code runs. Each ends compiling, with existing tests and CI green. Nothing 
 
 The classic page agent (`OpenRouterAdaptiveAgent`) is used today only when the Mind is turned off and for background
 workspace tasks. It stays as it is for now. Moving those uses onto OneMind is a later plan.
+
+## 14. Build checkpoints (replaces §12's seven runs)
+
+The build happens in **four checkpoints**. Each is one long working run that ends with:
+- a significant push to the work branch (`claude/dazzling-volta-8kn1wm`);
+- the code compiling;
+- the existing tests and Mobile CI green;
+- the plan's checkbox list (§14.5) updated.
+
+Nothing reaches the owner's phone until checkpoint 4. Each checkpoint builds only on the one before it, so any
+agent can pick up from the last pushed checkpoint.
+
+### Checkpoint 1: the foundation and the crew
+
+**Goal:** everything OneMind stands on, built and tested as pure code. Wired in only as a recorder beside today's
+Mind, so nothing changes yet for the owner.
+
+**Steps:**
+1. **`mind/one/Score.kt`** with:
+   - `Goal` and its versions;
+   - `Plan` → `Milestone` → `Step` (`do`, target hint, `Expect`, `Risk`, slots, optional `Branch` conditions);
+   - `Fact` with provenance;
+   - `Event`, `StandingOrder`, `Barrier`.
+
+   Plus `ScoreCodec` (JSON, saved with the mission journal).
+2. **`mind/one/Ledger.kt`:** one entry per model call (model, tokens, cached tokens, cost, ms, purpose). The main
+   model (`OpenRouterMindModel` usage), the Pilot, the advisor and Decisions calls (`CallLog`) all report into it.
+3. **`mind/one/Breaker.kt`:** the hard loop breaker and §7's wake limits, which produce a `CheckIn`.
+4. **`mind/one/Expect.kt`:** postconditions evaluated by code on the observed screen:
+   - the app is X;
+   - a control is present or absent;
+   - text is present;
+   - a field is focused;
+   - a field holds a value;
+   - a setting reads a value (reusing `PhoneSettingReader`).
+
+   Plus done predicates for finishes.
+5. **`mind/one/FusedBoard.kt`:** builds **one** Decisions request per step, from `DecisionsWire`:
+   - STEP, VERIFY, POPUP, DIVERGENCE, standing-order questions and TRIPWIRE;
+   - images only for OpenAI Decisions;
+   - races JEV ∥ OpenAI Decisions through `DecisionRace`;
+   - combines the answers with plan 63's agreement rules.
+6. **`mind/one/StepEngine.kt`:** rungs 0–2 for one step.
+   - It resolves the target by code first (exact label, map move, recipe identity), else through the FusedBoard.
+   - It acts through the toolbox's existing `act` path (gates unchanged) and checks the `Expect`.
+   - It returns `Done`, `Missed`, `Surprise`, `Blocked`, `NeedsMind(reason)` or `AtBarrier`.
+7. **`mind/one/ToolSteps.kt`:** typed tool steps (calendar, notifications, contacts, timers, open app/link/settings,
+   `port_send` / `port_wait`, memory) mapped onto `PhoneMindToolbox`'s existing tool functions. Results become facts.
+8. **Vision in shadow:** JEV Box (with the image header) and icons as answer options are recorded as events, and
+   **never tap**.
+9. **`ScoreRecorder`:** today's `MindLoop` and toolbox write events into a Score. Recording only, no behaviour
+   change.
+10. **Tests (pure Kotlin):**
+    - Score codec round trip;
+    - Breaker limits and spiral detection;
+    - every Expect kind;
+    - FusedBoard request body and answer parsing;
+    - StepEngine with fake hands and fake boards (rung choice, climb on a miss, stop at a barrier).
+
+**Done when:** all of the above compiles, its tests pass, CI is green, and the work is pushed.
+
+### Checkpoint 2: the minds
+
+**Goal:** OneMind and the Flash mind, complete and tested against scripted models. Still not wired to the owner's
+requests.
+
+**Steps:**
+1. **`mind/one/Briefing.kt`:** code-built briefings: event lines since the last wake, the trigger, focused evidence.
+2. **`mind/one/StandingOrders.kt`:** compiles each order into a yes/no question for the FusedBoard, a code check on a
+   fact, or a briefing filter (at most 8).
+3. **Plan format and prompts:**
+   - plans are written as **one JSON object per line** (a milestone or a step), so a plan can stream and start
+     acting on its first line;
+   - `OneMindPrompt` for Mind and `FlashPrompt` for Flash: planning, standing orders, wake replies;
+   - every wake reply is a typed decision: continue / adjust / replan / take the wheel / ask the owner / finish /
+     give up.
+4. **`mind/one/Conductor.kt`, one conductor with two profiles:**
+   - **Mind:** the owner's model and effort; glances on the milestones OneMind marks, plus forced reviews before
+     consequential milestones; standing orders.
+   - **Flash:** the owner's model; streamed branching plans; already-done first; pipelined boards; one approval at
+     the end; at most 3 replans.
+   - **Both:**
+     - one append-only conversation;
+     - the four wake kinds, with reasoning effort per kind;
+     - barriers, with glances running beside easy-to-undo work (and undo if a glance disagrees);
+     - local replans;
+     - detours (a stack, at most 3 deep);
+     - done doubt (at most 2 re-checks);
+     - the spiral check-in (through `OwnerInbox`);
+     - the automatic Flash → Mind handover.
+5. **The wheel:** `MindLoop` learns to start from an existing conversation and to hand back when the mind writes a
+   new plan. Today's loop is kept, unchanged inside.
+6. **`mind/one/Compactor.kt`:** the "Compact history at" limit in tokens (default 100k):
+   - it folds at the next milestone boundary, or at once if 20% over;
+   - it keeps facts and the mind's own words;
+   - one GPT-6 Luna call writes the story so far, with a code fallback;
+   - the same path writes the handover summary.
+
+   `MindConversation.compact` moves from characters to this.
+7. **Tests:** the Conductor with a scripted fake model and a fake StepEngine:
+   - each wake kind;
+   - barriers with a parallel glance and the undo;
+   - replans and detours;
+   - done doubt;
+   - the wake limits and the check-in;
+   - the handover;
+   - streamed plan parsing;
+   - compaction at the limit and never below it.
+
+**Done when:** it compiles, the tests pass, CI is green, and the work is pushed.
+
+### Checkpoint 3: the switch-over
+
+**Goal:** OneMind becomes the engine behind every Flash and Mind request, with recipes, Instant on the same runtime,
+and everything the owner sees.
+
+**Steps:**
+1. **The new engine:**
+   - `MindMissions.execute` runs the Conductor (Mind profile for Mind, Flash profile for Flash);
+   - `CycloneModes.mission` routes there;
+   - the Instant → Flash baton becomes the Score itself;
+   - `MindPrompt.FLASH` and the Fast mode switch are retired: the Pilot's work lives in the StepEngine now.
+2. **Task Kit:**
+   - Steer (a new goal version and a replan), Queue, Parallel and Pause reach the Conductor through
+     `TaskCommands`;
+   - a resume after process death reloads the Score.
+3. **`mind/one/Recipes.kt`, extending `Replay`:**
+   - a recipe is compiled from a run that passed its done check;
+   - it is found by request shape (Triage's typed slots plus the normalised words) and started automatically;
+   - any miss falls back to planning and updates the recipe;
+   - approvals are never carried forward.
+4. **Instant:** a one-step plan on the same runtime, so a promotion keeps the same run.
+5. **The phone card and the work island:**
+   - milestones with their state;
+   - the step line;
+   - each wake and why;
+   - cost so far;
+   - the check-in card;
+   - "Couldn't confirm: please check";
+   - the end report.
+6. **The PC and Glass:**
+   - the gateway's task and health feeds carry the Score summary (milestones, wakes, cost: counts and lines, no
+     screen text);
+   - Glass shows milestones and wakes, with detail on tap.
+7. **Settings:**
+   - Settings → Speed gains **Compact history at**;
+   - Fast mode settings are removed;
+   - the router's settings (decision engines, phone model) stay.
+8. **Lab and guards:** the Lab adapter reports the Score and the ledger. Python guards are updated for the new
+   prompts and paths. Old guard expectations that described the retired Flash sentence are rewritten.
+
+**Done when:** the whole app compiles with OneMind as the only engine, CI is green, and the work is pushed.
+
+### Checkpoint 4: release
+
+**Goal:** OneMind on the owner's phone.
+
+**Steps:**
+1. **The version:** the one release carries alpha.137's unpublished work (Live voice from the Ask bar, deciding while
+   you speak, the finished work island) together with OneMind, as **alpha.138**. Alpha.137 is not published on its
+   own, unless the owner says otherwise before this checkpoint.
+2. **Release notes:** what changed for each difficulty, the new settings, what the owner will see, and the known
+   limits.
+3. **Device matrix rows** for the owner to test on the new system:
+   - Instant, Flash and Mind tasks;
+   - a steer;
+   - a detour;
+   - a check-in;
+   - compaction on a long run;
+   - recipes on a repeat.
+4. **Mobile CI green, then publish** to the release branch and verify the release: manifest source commit, APK
+   checksum, the release signer. The owner asked for an immediate release on completion, so this checkpoint
+   publishes without asking again.
+5. **Plan 69 marked built,** with a list of anything deliberately deferred.
+
+### 14.5 Progress (agents update this list at every checkpoint)
+
+- [ ] Checkpoint 1: foundation and crew
+- [ ] Checkpoint 2: the minds
+- [ ] Checkpoint 3: the switch-over
+- [ ] Checkpoint 4: release (alpha.138)
