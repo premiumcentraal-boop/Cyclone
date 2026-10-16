@@ -647,3 +647,38 @@ on Cyclone yet, and seven code runs will be built without a phone to test on.
 - Vision taps stay in shadow until TypeSafe is ready.
 - Questions are tried once before reaching the owner.
 - One full rebuild before release (with T6).
+
+## 19. Owner's final calls on §18 (2026-10-16)
+
+**Kept: T2, limits on wakes, with a quick owner check-in.**
+- **Done doubt:** at most 2 re-checks. Then the run ends as "Couldn't confirm: please check", never as "Done".
+- **Too many wakes:** after 4 wakes in one milestone, OneMind must change its standing orders or take the wheel.
+- **A spiral:** the run asks the owner a **quick check-in** when either of these happens:
+  - 8 wakes in one milestone;
+  - the same trigger firing three times with no milestone progress.
+
+  The check-in says "This seems stuck on ⟨reason⟩. Keep going, change course, or stop?". The owner's answer is a
+  steer.
+- **Handovers:** at most one Flash → Mind handover per run.
+
+**Dropped:** T1, T3, T4, T5, T6, T7 and T8. The decisions as made in §15–§16 stand unchanged. In particular:
+- **No transition.** One Mind replaces Classic in the release, as the only engine:
+  - no Run engine switch;
+  - no silent comparison runs;
+  - no parity bars.
+
+  Today's turn-by-turn loop lives on inside it as the wheel (Mind drive). The owner tests on the new system
+  directly.
+- **No extra test programme** beyond what the build needs to compile and pass CI. That means no recorded-screen
+  replay suite and no Lab comparison before release.
+- **The Flash mind uses the model the owner selected,** as selected. This may be revisited later.
+- **JEV uses `~typesafe/jev-latest`** (1.14 is live on OpenRouter), and **OpenAI Decisions** uses its current model.
+  There is no version watch and no re-tuning step.
+- **Plan 68 §10's compaction economics stand** (the owner's own question). The Chronicler is on demand, and code
+  writes the record.
+
+**The build programme (§17) changes at run 7:** "prove and release" becomes **"build and release"**. It covers:
+- the Mobile CI build;
+- release notes;
+- device matrix rows for the owner to test on the new system;
+- the release, with One Mind as the only engine.

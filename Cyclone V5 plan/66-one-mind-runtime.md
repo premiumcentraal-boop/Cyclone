@@ -384,6 +384,10 @@ anything understood the goal. This design differs in four ways:
 
 ## 7. Releases
 
+> **Superseded by the owner (plan 67 §19):** there is no staged rollout and no switch. The whole runtime is built
+> in the code runs of plan 67 §17 and released at once as the only engine, and the owner tests on it directly. The
+> list below is kept as the order of work.
+
 Each release ships behind a switch in Settings → Speed → **Run engine: Classic / One Mind**, so either can be
 chosen without live tests, as with the decision engines. Classic is today's Mind loop, unchanged.
 
