@@ -103,8 +103,9 @@ class LunaBoxGuard(unittest.TestCase):
         # Plan 65: a model that answered its two phrasings differently never acts; Sprint needs two sure answers and no dissent.
         merge = ensemble[ensemble.index("    fun merge("):ensemble.index("    /** Every model's merged opinion")]
         self.assertIn('if (careful.route.mode == Mode.INSTANT) Route(Mode.FLASH', merge)
-        pair = ensemble[ensemble.index("    fun sprintPair("):ensemble.index("    /** One model's answers")]
-        self.assertIn("it.value.size >= 2", pair)
+        pair = ensemble[ensemble.index("    fun sprintEarly("):ensemble.index("    /** One model's answers")]
+        self.assertIn("it.value.size >= need", pair)
+        self.assertIn("val need = if (race.size > models.size) 2 else 1", ensemble)
         self.assertIn("if (opinions.any { keyOf(it.route) != (Mode.INSTANT to action) }) return null", pair)
         self.assertIn("Ensemble.combine(Ensemble.perModel(opinions))", ensemble)
         self.assertIn('Route(Mode.FLASH, "the decision models disagree on the action")', combine)

@@ -950,12 +950,11 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 /** Plan 63: what each decision engine does, in one or two sentences. */
 private fun engineCopy(engine: com.cyclone.mobile.mind.modes.DecisionEngine): String = when (engine) {
     com.cyclone.mobile.mind.modes.DecisionEngine.CONSENSUS ->
-        "Consensus: JEV and OpenAI Decisions each answer twice at the same moment, the question worded two ways. Cyclone " +
-            "acts only when all four answers agree; any disagreement goes to the smarter mode. If only one model answers " +
-            "in time, only an easy-to-undo action goes ahead."
+        "Consensus: JEV and OpenAI Decisions answer at the same moment. Cyclone acts only when both agree; any disagreement " +
+            "goes to the smarter mode. If only one answers in time, only an easy-to-undo action goes ahead."
     com.cyclone.mobile.mind.modes.DecisionEngine.SPRINT ->
-        "Sprint: the same four answers, but as soon as two are sure of the same easy-to-undo action (camera, volume, " +
-            "opening an app) and none disagrees, it acts. Everything else waits, as in Consensus."
+        "Sprint: both answer at the same moment, and the first one that's sure of an easy-to-undo action (camera, volume, " +
+            "opening an app) acts at once, unless the other has already disagreed. Everything else waits for both, as in Consensus."
     com.cyclone.mobile.mind.modes.DecisionEngine.CLASSIC ->
         "Classic: one decision model, as before, with the other one able to compare beside it."
 }

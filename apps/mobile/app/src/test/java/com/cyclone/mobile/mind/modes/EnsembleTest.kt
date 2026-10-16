@@ -124,12 +124,20 @@ class EnsembleTest {
         assertEquals(setOf(0, 1), records.single().lanes.filter { it.lane == "openai" }.map { it.copy }.toSet())
     }
 
-    @Test fun `sprint never acts on one answer alone, nor while any answer disagrees`() {
-        // One sure answer: Sprint waits for a second.
-        val one = engine(DecisionEngine.SPRINT, lane("jev", 30, camera), lane("openai", 350, camera))
+    @Test fun `sprint acts on the first answer when each model answers once, needs two when each answers twice, never against dissent`() {
+        // The default race (one answer per model): the first sure easy-to-undo answer acts.
+        val pair = engine(DecisionEngine.SPRINT, lane("jev", 30, camera), lane("openai", 350, camera))
+        val p0 = System.nanoTime()
+        assertEquals(Mode.INSTANT, pair.decide("open camera", world, 0.85).mode)
+        assertTrue("sprint didn't wait for the second model", (System.nanoTime() - p0) / 1_000_000 < 250)
+        // The four-answer race: one sure answer waits for a second.
+        val one = engine(DecisionEngine.SPRINT, lane("jev", 30, camera), lane("jev", 350, camera, variant = 1),
+            lane("openai", 380, camera), lane("openai", 400, camera, variant = 1))
         val t0 = System.nanoTime()
         assertEquals(Mode.INSTANT, one.decide("open camera", world, 0.85).mode)
         assertTrue("sprint waited for the second answer", (System.nanoTime() - t0) / 1_000_000 >= 300)
+        // A dissent that is already in stops the early act.
+        assertNull(Ensemble.sprintEarly(listOf(op("jev", camera), op("openai", volume)), 1))
         // A fast dissent stops the early act, and the model that answered two ways can't act.
         val split = engine(DecisionEngine.SPRINT, lane("jev", 20, camera), lane("jev", 40, volume, variant = 1),
             lane("openai", 60, camera), lane("openai", 80, camera, variant = 1))
@@ -289,7 +297,7 @@ class EnsembleTest {
                 if (route.mode == Mode.IGNORE) assertTrue(answers.all { it.route.mode == Mode.IGNORE })
                 else assertTrue(Ensemble.rank(route.mode) >= answers.filter { it.route.mode != Mode.IGNORE }.maxOf { Ensemble.rank(it.route.mode) })
                 // Sprint's early act: two sure answers of one easy-to-undo action, and nothing else said.
-                Ensemble.sprintPair(answers)?.let { early ->
+                Ensemble.sprintEarly(answers, 2)?.let { early ->
                     assertTrue(Ensemble.undoable(early.route) && !early.reading.risky)
                     assertTrue(answers.all { Ensemble.keyOf(it.route) == Ensemble.keyOf(early.route) })
                 }
