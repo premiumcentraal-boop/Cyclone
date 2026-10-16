@@ -403,3 +403,16 @@ The owner sees the same card change from Flash to Mind.
 | Wakes | — | triggers only | triggers + glances + milestone reviews |
 | Typical model calls | 0 | 1–3 fast | 6–14 frontier |
 | Goes up to | Flash (same run) | Mind (handover) | — (takes the wheel itself) |
+
+## 15. Owner decisions (2026-10-16, round 1)
+
+1. **Milestone glances in Mind runs: OneMind decides.** OneMind marks the milestones it wants to review when it
+   writes the plan, and code forces a review before any milestone that ends in a send, payment or delete.
+2. **Parallel work: keep working.** During a glance the crew continues on easy-to-undo moves. Nothing
+   consequential crosses an open review.
+3. **The Flash mind is the model the owner picked for the run,** not a separate fast-model setting. Its context
+   stays small because its history comes from the Chronicler (plan 68), which is hard-coded to GPT-6 Luna. The
+   speed estimates in §14.5 assumed a fast model; with a frontier model picked, the Flash mind runs at low
+   reasoning effort and on short briefings to stay quick.
+4. **Flash → Mind: hand over automatically.** OneMind takes the same run with the Chronicler's summary as its first
+   briefing.
