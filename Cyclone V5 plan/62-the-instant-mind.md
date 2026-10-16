@@ -1,6 +1,6 @@
 # 62 · The Instant Mind: decisions that are ready before you finish asking
 
-Status: **Design (2026-10-16), nothing built. Revised the same day: JEV, OpenAI Decisions and GPT-6 Luna named apart (§1).** Written at alpha.134 dev1. It is the umbrella over plan 58 (the "Luna Decision Box": its "Luna" meant OpenAI Decisions) and plan 61 (no trigger words), and uses what the latest models on OpenRouter actually offer. Physical
+Status: **Design (2026-10-16), nothing built. Revised the same day: JEV, OpenAI Decisions and GPT-6 Luna named apart (§1).** Written at alpha.134 dev1. It is the umbrella over plan 58 (the "Luna Decision Box": its "Luna" meant OpenAI Decisions) and plan 64 (no trigger words), and uses what the latest models on OpenRouter actually offer. Physical
 device: **UNVERIFIED**.
 
 **Owner's ask (2026-10-16):**
@@ -69,7 +69,7 @@ None of this is measured on Cyclone's own requests yet. R0 measures it (§10).
 1. **Never start from zero.** The phone's state, the screen's possible actions and your likely next request are already
    computed when you speak.
 2. **Every decision is typed and chosen from what's really there.** Models pick from candidates the phone supplies.
-   They never invent an app, a contact or a button (plans 58, 61).
+   They never invent an app, a contact or a button (plans 58, 64).
 3. **Spend latency only on the critical path.** Everything else is speculative, parallel or done in idle time.
 4. **Confidence is earned and measured.** Each capability acts only above a calibrated bar, with a guaranteed error
    rate (§5.4). Unsure goes up, never down.
@@ -102,7 +102,7 @@ None of this is measured on Cyclone's own requests yet. R0 measures it (§10).
 **A small, always-current picture of the phone,** maintained from accessibility events, never fetched at request
 time:
 - **the foreground app and screen**: its fingerprint, and where it sits in the App Map (plan 58 §5C);
-- **the numbered controls**: label, role, bounds, and **effect** from Screen Semantics (plan 61 B);
+- **the numbered controls**: label, role, bounds, and **effect** from Screen Semantics (plan 64 B);
 - **sensitivity flags** from Android's own structure: password fields, autofill hints, `FLAG_SECURE`;
 - **recent context**: the last few requests, the open conversation, what Cyclone just did.
 
@@ -135,7 +135,7 @@ back. A tap on "the blue one" then usually needs **no image call at request time
 ### Layer 3 · Decide: streaming, racing, calibrated
 
 **3a. Decide while the words arrive.**
-- **Live voice:** the speech-to-text partials stream into the on-device tier (plan 61 A's multilingual embedding cache)
+- **Live voice:** the speech-to-text partials stream into the on-device tier (plan 64 A's multilingual embedding cache)
   on every partial.
 - **When the partial is already clear,** the decision is ready before the sentence ends. One example: "open the cam…"
   is already nearest to `camera.open` with a large margin.
@@ -167,7 +167,7 @@ back. A tap on "the blue one" then usually needs **no image call at request time
   the request, and ≤ 100 ms when T0 decided.
 - **Owner-visible moves keep their window:** a call or an alarm keeps the 2-second "tap to stop".
 - **Consequential moves never act optimistically:** send, pay, delete, post, account, permission. They are decided by
-  **effect** (plan 61 B), not words, and wait for your approval.
+  **effect** (plan 64 B), not words, and wait for your approval.
 
 ### Layer 5 · Verify and learn
 
@@ -176,7 +176,7 @@ back. A tap on "the blue one" then usually needs **no image call at request time
   - It asks with an image only for visual apps.
 - **A reversible move that verifies false is undone automatically** (Back, or the previous screen, or volume reset),
   and the request goes one tier up, with the baton.
-- **Every verified outcome becomes an on-phone lesson** (plan 61 C), labelled by the outcome:
+- **Every verified outcome becomes an on-phone lesson** (plan 64 C), labelled by the outcome:
   - new exemplars for T0;
   - recalibrated bars;
   - a better ranking of likely next requests.
@@ -209,7 +209,7 @@ back. A tap on "the blue one" then usually needs **no image call at request time
 **The phone adds hard signals of its own:**
 - the likely targets have no text or description (icon-only);
 - the screen has almost no accessibility nodes (a game, a video, a canvas, a WebView);
-- the request points at what is shown, which is understood by meaning, not trigger words (plan 61);
+- the request points at what is shown, which is understood by meaning, not trigger words (plan 64);
 - Verify is checking a visual app.
 
 **Sight is never used:**
@@ -298,7 +298,7 @@ Unused answers are dropped. A daily cost cap and the breaker (alpha.123) bound a
 
 ## 7. Safety: the speed never touches the boundaries
 
-- **Consequential is decided by effect, not words** (plan 61 B).
+- **Consequential is decided by effect, not words** (plan 64 B).
 - **Every consequential action:**
   - needs both models to agree, or it goes up;
   - always needs your approval.
@@ -327,20 +327,20 @@ Unused answers are dropped. A daily cost cap and the breaker (alpha.123) bound a
 | **Consequential actions without approval** | **0, the hard gate** |
 | Conformal guarantee holds | Observed error ≤ the chosen rate per capability, on held-out data |
 | Cost | ≤ $0.002 per request on average, including the race and speculation |
-| Languages | Every golden-set language within a fixed margin of English (plan 61 C) |
+| Languages | Every golden-set language within a fixed margin of English (plan 64 C) |
 
 ---
 
 ## 10. Build order
 
-Plans 58 and 61 fold into this one; release numbers are assigned when building starts.
+Plans 58 and 64 fold into this one; release numbers are assigned when building starts.
 
 | Release | Builds | Gate |
 |---|---|---|
 | **R0 · Measure the models** | The probe extended: JEV 1.14 and OpenAI Decisions on Cyclone's own text and image boards, plus GPT-6 Luna (chat) on the slot-extraction schema, five runs each, p50/p95, accuracy on the golden set, box accuracy on a set of game/canvas screenshots. JEV marked able to see; screenshots as PNG/JPEG in both models' limits. Naming in code and Settings follows §1: the `LUNA` provider becomes `OPENAI_DECISIONS`, "Test LUNA" becomes "Test OpenAI Decisions", and GPT-6 Luna (chat) is named only where it writes. The race in watch mode (both asked, JEV decides as today) | Real numbers per model and modality on the owner's network; the routing table in §4 confirmed or changed |
-| **R1 · Perceive + Decide** | The Live Phone Model; the Request Graph and on-device embedding tier (plan 61 A); the compiled question sets; the race with hedging; calibration and conformal bars; sight routed to OpenAI Decisions; box behind its switch; GPT-6 Luna (chat) only for validated free-value slots and the fallback | Golden set v2 in 12+ languages; 0 consequential under-routes; p50 ≤ 400 ms in the Lab |
-| **R2 · Anticipate + Act** | The affordance cache (built in idle time); likely-next ranking; streaming partial decisions for Live voice; speculative Bind; optimistic reversible moves with Verify and auto-undo; Screen Semantics effects (plan 61 B) | Perceived latency targets met on the device matrix; wrong reversible moves ≤ 2%; 0 consequential without approval |
-| **R3 · Learn** | On-phone learning loop (plan 61 C); chains (plan 58 §5B) on the graph; Glass draws the numbers; the old word lists and routers deleted with the vocabulary guard on | T0 share rising; every §9 row met; owner sign-off |
+| **R1 · Perceive + Decide** | The Live Phone Model; the Request Graph and on-device embedding tier (plan 64 A); the compiled question sets; the race with hedging; calibration and conformal bars; sight routed to OpenAI Decisions; box behind its switch; GPT-6 Luna (chat) only for validated free-value slots and the fallback | Golden set v2 in 12+ languages; 0 consequential under-routes; p50 ≤ 400 ms in the Lab |
+| **R2 · Anticipate + Act** | The affordance cache (built in idle time); likely-next ranking; streaming partial decisions for Live voice; speculative Bind; optimistic reversible moves with Verify and auto-undo; Screen Semantics effects (plan 64 B) | Perceived latency targets met on the device matrix; wrong reversible moves ≤ 2%; 0 consequential without approval |
+| **R3 · Learn** | On-phone learning loop (plan 64 C); chains (plan 58 §5B) on the graph; Glass draws the numbers; the old word lists and routers deleted with the vocabulary guard on | T0 share rising; every §9 row met; owner sign-off |
 
 ## 11. Owner decisions
 

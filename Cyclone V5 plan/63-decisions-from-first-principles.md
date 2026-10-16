@@ -1,7 +1,7 @@
 # 63 · Decisions from first principles: what a good Cyclone truly is, and how to build it
 
 Status: **Design + first build (2026-10-16).** §6's two engines are built (alpha.136, unreleased at the time of
-writing); the rest is the plan. This plan consolidates plans 58 (the decision box), 61 (no trigger words) and 62 (the
+writing); the rest is the plan. This plan consolidates plans 58 (the decision box), 64 (no trigger words) and 62 (the
 Instant Mind) into one design, worked out from the product backwards. Physical device: **UNVERIFIED**.
 
 **Owner's ask (2026-10-16):**
@@ -119,7 +119,7 @@ turn:**
 | **Consequential** | Send, post, pay, buy, delete, sign in/out, permissions | **Never on a model's word.** Both models agree to *propose* it; you approve it; it is recorded |
 
 **Two rules make this hold everywhere:**
-- **The class is decided by code,** from the action's identity, and later from the control's **effect** (plan 61 B).
+- **The class is decided by code,** from the action's identity, and later from the control's **effect** (plan 64 B).
   It is never a model's opinion.
 - **A model can only make a request more careful, never less** (the rules and structural safety floors come first).
 
@@ -151,13 +151,13 @@ whole system explainable when something goes wrong.
 
 | Layer | Where it is planned | State |
 |---|---|---|
-| L0 Contract | 58 (wire), 61 A (Request Graph), 61 B (effects) | **Wire built (alpha.123)**; graph and effects planned |
+| L0 Contract | 58 (wire), 64 A (Request Graph), 64 B (effects) | **Wire built (alpha.123)**; graph and effects planned |
 | L1 Perceive | 62 §3 L1 | Planned |
 | L2 Anticipate | 62 §3 L2, 58 §5C (destination index) | Planned |
-| L3 Decide | 58 (Triage), 61 A (T0), 62 §5 (race), **63 §6 (engines)** | **Triage + engines built**; T0 embedding planned |
-| L4 Act | Existing (`PhoneToolExecutor`, Instant) | Built; effects-based gates planned (61 B) |
+| L3 Decide | 58 (Triage), 64 A (T0), 62 §5 (race), **63 §6 (engines)** | **Triage + engines built**; T0 embedding planned |
+| L4 Act | Existing (`PhoneToolExecutor`, Instant) | Built; effects-based gates planned (64 B) |
 | L5 Verify | 58 §4, 62 §3 L5 | Planned |
-| L6 Learn | 61 C, 62 §3 L5 | Phone model exists (word-based); embedding learning planned |
+| L6 Learn | 64 C, 62 §3 L5 | Phone model exists (word-based); embedding learning planned |
 | L7 Measure | 58 §10–11, 63 §8 | **Golden set, Lab, call/watch/engine numbers built** |
 
 ---
@@ -178,7 +178,7 @@ re-measured on Cyclone's own requests as soon as real calls are allowed (§9, R0
 
 ## 4. Request Graph, effects and capabilities: the contract (L0)
 
-These are planned in plan 61 and unchanged here. In short:
+These are planned in plan 64 and unchanged here. In short:
 - **The Request Graph:** every request, in any language, becomes one typed graph: steps, a capability per step,
   validated slots, risk flags, time, a calibrated confidence. Every component reads the graph, never the words.
 - **Effects:** every control on screen gets a typed effect (navigate, toggle, send, pay, delete, …) from structure,
@@ -324,7 +324,7 @@ agreeing):
 - **No safety from a model alone.** Structure, effects, the rules and your approval decide what is consequential.
 - **No screenshots by default** of sensitive screens, or when "Let decisions see the screen" is off.
 - **No hidden speculation that acts.** Speculative calls only ask questions.
-- **No word lists for meaning** once their replacement passes (plan 61).
+- **No word lists for meaning** once their replacement passes (plan 64).
 
 ---
 
@@ -338,7 +338,7 @@ agreeing):
 | Wrong Instant actions (owner undo, Verify when built) | ≤ 1% |
 | **Consequential actions without approval** | **0, the hard gate** |
 | Engine-decided requests going up because of disagreement | Watched; tuned only with data |
-| Languages | Every golden-set language within a fixed margin of English (plan 61 C) |
+| Languages | Every golden-set language within a fixed margin of English (plan 64 C) |
 
 All the engine numbers are in Settings → Speed (one line) and in the health report (`decisions.engine`), as counts
 only.
@@ -351,9 +351,9 @@ only.
 |---|---|---|
 | **alpha.136 (this)** | The two engines; sight to OpenAI Decisions; provider renamed; engine numbers | Provably safe now; worst case is today or one rung up; it measures both models on every request |
 | **R0 · Real numbers** (when real calls are allowed) | The probe on both models with text and images; the Lab on both; JEV box test; the routing table confirmed | Every later threshold comes from these numbers |
-| **R1 · Understand anything** (61 A + 62 L1) | The Request Graph; the on-device multilingual embedding tier (T0); the Live Phone Model; golden set v2 in 12+ languages; the vocabulary guard | Removes word lists from understanding; makes T0 instant |
-| **R2 · Ahead of you** (62 L2, L5) | The affordance cache; streaming partial decisions in Live voice; Verify with auto-undo; Screen Semantics effects (61 B) | Takes the model off the critical path; safety by effect |
-| **R3 · Learns** (61 C) | On-phone learning; calibration and conformal bars per capability; chains (58 §5B); Glass draws the numbers; old routers and word lists deleted | Gets faster and more personal with use |
+| **R1 · Understand anything** (64 A + 62 L1) | The Request Graph; the on-device multilingual embedding tier (T0); the Live Phone Model; golden set v2 in 12+ languages; the vocabulary guard | Removes word lists from understanding; makes T0 instant |
+| **R2 · Ahead of you** (62 L2, L5) | The affordance cache; streaming partial decisions in Live voice; Verify with auto-undo; Screen Semantics effects (64 B) | Takes the model off the critical path; safety by effect |
+| **R3 · Learns** (64 C) | On-phone learning; calibration and conformal bars per capability; chains (58 §5B); Glass draws the numbers; old routers and word lists deleted | Gets faster and more personal with use |
 
 ## 10. Owner decisions
 

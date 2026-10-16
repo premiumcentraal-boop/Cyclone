@@ -1,6 +1,6 @@
-# 61 · No trigger words: understanding requests and screens in any language
+# 64 · No trigger words: understanding requests and screens in any language
 
-Status: **Plan (2026-10-16), nothing built.** Written at alpha.134 dev1. It supersedes the keyword parts of plan 42
+Status: **Plan (2026-10-16), nothing built.** (First written as plan 61; renumbered because 61 is Cyclone Safe.) Written at alpha.134 dev1. It supersedes the keyword parts of plan 42
 (the grammar and the router's rules) and extends plan 58 (the Luna Decision Box). Physical device: **UNVERIFIED**.
 
 > **Naming (2026-10-16, plan 62 §1):** "Luna" in this plan means **OpenAI Decisions** (`openai/gpt-6-luna-decisions`),
