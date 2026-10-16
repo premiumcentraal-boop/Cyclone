@@ -1,7 +1,10 @@
 # Plan 65: Zero-wait Cyclone
 
-**Status:** design + first build (2026-10-16). Built in alpha.136: **Quorum** (four answers in parallel) and
-**Replay** (verified repeats with no call). Everything else here is the road.
+**Status:** design + first builds (2026-10-16).
+- **Built in alpha.136:** **Quorum** (four answers in parallel) and **Replay** (verified repeats with no call).
+- **Built in alpha.137:** **R1**, deciding while they speak. The engines are back to one answer per model (the
+  owner's call); the second phrasing stays built, behind `Decisions.ENGINE_PHRASINGS`.
+- Everything else here is the road.
 
 **Builds on:** plan 62 (The Instant Mind), plan 63 (Decisions from first principles) and plan 64 (No trigger words).
 
@@ -126,7 +129,14 @@ Pure code in `mind/decide/Replay.kt`, built from the lessons already kept on thi
 
 ## 4. The road
 
-**R1. Decide while they speak.**
+**R1. Decide while they speak.** **Built in alpha.137:**
+- In Live voice, at a 260 ms pause, the clip (exactly the one the end of speech will cut) is transcribed and, if the
+  turn would ask next, understood; a new task's decision race starts too.
+- Ask-bar dictation starts the race on the words so far.
+- Each is used only for the same span, words, question, screen and bar.
+- Still to do: the partial words of Android's recognizer.
+
+The original plan for R1:
 - Start the four-answer race on the partial transcript.
 - Cancel and restart it when the words change in a way that matters (the typed answers change, not the characters).
 - When speech ends, the decision is usually already in.
