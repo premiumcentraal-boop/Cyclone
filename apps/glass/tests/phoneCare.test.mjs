@@ -46,6 +46,51 @@ test("phone care parses defensively and names Android's exit kinds", () => {
   assert.equal(exitKindLabel("nope"), "Unknown reason");
 });
 
+test("returning Safe requires a second confirmation and sends only the selected phone's ciphertext", async () => {
+  const copies = [
+    { phoneId: "phone_a", user: 0, seq: 1, createdAt: NOW, bytes: 100, sha256: "a".repeat(64) },
+    { phoneId: "phone_a", user: 0, seq: 2, createdAt: NOW, bytes: 100, sha256: "a".repeat(64) },
+    { phoneId: "phone_a", user: 17, seq: 3, createdAt: NOW, bytes: 100, sha256: "a".repeat(64) },
+    { phoneId: "phone_b", user: 0, seq: 4, createdAt: NOW, bytes: 100, sha256: "a".repeat(64) },
+  ];
+  const gw = fakeGateway({
+    [`GET ${PATH}`]: () => answer(),
+    "GET /v1/cc/safe/d1": () => ({ state: "not_recorded", savedAt: null, bytes: 0, archives: copies }),
+    "POST /v1/cc/safe/d1/return": () => ({ rebound: true }),
+    "POST /v1/cc/safe/d1/restore": () => ({ uploaded: true }),
+  });
+  const view = createPhoneCareView(new GatewayClient({ token: "t", fetch: gw.fetch }), "d1", clock().deps);
+  await flush();
+  const select = view.element.querySelector("select"); select.value = "phone_a";
+  const send = button(view.element, "Return selected Safe");
+  assert.ok(send, "recovery is available without an unlocked hive");
+  send.click(); await flush();
+  assert.equal(gw.calls.filter(c => c.method === "POST").length, 0);
+  select.value = "phone_b"; send.click(); await flush();
+  assert.equal(gw.calls.filter(c => c.method === "POST").length, 0, "changing the archive needs a new confirmation");
+  select.value = "phone_a"; send.click(); await flush(); send.click(); await flush();
+  const writes = gw.calls.filter(c => c.method === "POST");
+  assert.equal(writes.length, 3, "one explicit rebind plus newest copy of each selected user's archive");
+  assert.match(view.element.textContent, /Sent encrypted copies/);
+  assert.ok(writes.every(c => !/password|recoveryWords|hiveKey|safeKey/.test(JSON.stringify(c.body))));
+  view.destroy();
+});
+
+test("failed Safe transfer keeps recovery instructions visible", async () => {
+  const gw = fakeGateway({
+    [`GET ${PATH}`]: () => answer(),
+    "GET /v1/cc/safe/d1": () => ({ state: "not_recorded", savedAt: null, bytes: 0, archives: [{ phoneId: "phone_a", user: 0, seq: 1, createdAt: NOW, bytes: 100, sha256: "a".repeat(64) }] }),
+    "POST /v1/cc/safe/d1/return": () => json({ detail: "unavailable" }, 409),
+  });
+  const view = createPhoneCareView(new GatewayClient({ token: "t", fetch: gw.fetch }), "d1", clock().deps);
+  await flush(); view.element.querySelector("select").value = "phone_a";
+  const send = button(view.element, "Return selected Safe"); send.click(); send.click(); await flush();
+  assert.match(view.element.textContent, /Keep the PC copy, check pairing and retry/);
+  assert.equal(send.disabled, false);
+  assert.equal(gw.calls.filter(c => c.method === "POST").length, 1);
+  view.destroy();
+});
+
 test("a healthy phone is one quiet line; the evidence is behind Details", async () => {
   const gw = fakeGateway({ [`GET ${PATH}`]: () => answer() });
   const c = clock();

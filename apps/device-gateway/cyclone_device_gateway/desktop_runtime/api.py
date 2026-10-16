@@ -212,7 +212,15 @@ class DesktopRuntime:
         self.lab = LabService(settings.runtime_dir / "lab", share_contract, lambda device_id: PhoneProbe(self.fleet.get(device_id).adb))
         # Plan 33 (C0): the Command Center's accounts, tasks, routines, results and approvals, in one local SQLite file.
         from ..command.center import CommandCenter
-        self.command = CommandCenter(settings.runtime_dir / "command" / "command.db", share_contract, self.fleet.list_public)
+        def safe_signing_key(device_id):
+            import base64
+            record = self.trust.store.record(device_id) or {}
+            value = record.get('phonePublicKey')
+            if not isinstance(value, str):
+                return None
+            return base64.urlsafe_b64decode(value + '=' * (-len(value) % 4))
+        self.command = CommandCenter(settings.runtime_dir / "command" / "command.db", share_contract, self.fleet.list_public,
+                                     safe={'pinned_key': safe_signing_key, 'root': settings.runtime_dir / 'safe'})
         self.command.signup.install_starters()
         from .scenes import SceneStore
         from .fleet_orchestrator import FleetOrchestrator

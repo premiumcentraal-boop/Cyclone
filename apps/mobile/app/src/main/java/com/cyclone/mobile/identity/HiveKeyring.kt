@@ -34,6 +34,8 @@ object HiveKeyring {
     private const val AAD = "cyclone-hive/v1/local"
     private val JOIN_ID = Regex("^hj_[A-Za-z0-9_-]{16,40}$")
     private val lock = Any()
+    /** Safe takes Hive → Identity locks, matching hive.sync, only while copying sealed records in memory. */
+    internal fun <T> forSafe(block: () -> T): T = synchronized(lock) { block() }
 
     class Rejected(val code: String) : Exception(code)
 

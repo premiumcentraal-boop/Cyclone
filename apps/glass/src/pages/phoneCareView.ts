@@ -10,6 +10,7 @@ import { el, setChildren } from "../ui/dom.js";
 import { relativeTime } from "../ui/format.js";
 import type { GatewayClient } from "../services/gateway.js";
 import { actionLabel, exitKindLabel, phoneCareApi, type CareDecisions, type PhoneCare } from "../services/phoneCare.js";
+import { safeApi, newestPerUser, type SafeStatus } from "../services/safe.js";
 
 export interface PhoneCareDeps {
   now(): number;
@@ -43,6 +44,7 @@ export function createPhoneCareView(client: GatewayClient, deviceId: string, dep
   const element = el("div", "care");
   element.hidden = true;
   let care: PhoneCare | null = null;
+  let safe: SafeStatus | null = null;
   let open = false;
   let busy = false;
   let destroyed = false;
@@ -55,6 +57,7 @@ export function createPhoneCareView(client: GatewayClient, deviceId: string, dep
   };
 
   async function refresh(): Promise<void> {
+    safe = await safeApi.status(client, deviceId).catch(() => null);
     try {
       care = await phoneCareApi.get(client, deviceId);
     } catch {
@@ -95,6 +98,36 @@ export function createPhoneCareView(client: GatewayClient, deviceId: string, dep
     const when = care.atMs ? `${relativeTime(care.atMs, deps.now())} · ` : "";
     if (care.detail) text.append(el("span", "care-detail", `${when}${care.detail}`));
     if (care.hint) text.append(el("span", "care-hint", care.hint));
+    if (safe) text.append(el("span", "care-hint", safe.savedAt
+      ? `Phone Safe: saved ${relativeTime(safe.savedAt, deps.now())} · ${(safe.bytes / 1048576).toFixed(1)} MB of ciphertext`
+      : "Phone Safe: no PC copy recorded. Root and folder copies are checked on the phone."));
+    const safeControls: HTMLElement[] = [];
+    if (safe?.archives?.some(c => c.user === 0)) {
+      const saved = safe;
+      const select = el("select", "input");
+      for (const phone of [...new Set(saved.archives.filter(c => c.user === 0).map(c => c.phoneId))]) {
+        const newest = newestPerUser(saved.archives, phone).find(c => c.user === 0)!;
+        const option = el("option", undefined, `${phone.slice(0, 12)} · ${relativeTime(newest.createdAt, deps.now())}`);
+        option.value = phone; select.append(option);
+      }
+      if (saved.phoneId) select.value = saved.phoneId;
+      const send = actionButton("Return selected Safe using recovery words", { variant: "ghost" });
+      const note = el("p", "cc-hint", "Ciphertext only. Choose the archive for this returning phone; enter recovery words only on the phone.");
+      send.addEventListener("click", () => {
+        if (send.dataset.confirm !== select.value) { send.dataset.confirm = select.value; send.textContent = "Confirm this archive and the newly paired phone"; return; }
+        const phone = select.value;
+        send.disabled = true;
+        void (async () => {
+          try {
+            await safeApi.returning(client, deviceId, phone);
+            for (const copy of newestPerUser(saved.archives, phone)) await safeApi.upload(client, deviceId, copy);
+            note.textContent = "Sent encrypted copies. On the phone use Open paired PC copy with recovery words.";
+          } catch { note.textContent = "Safe transfer could not finish. Keep the PC copy, check pairing and retry."; }
+          finally { send.disabled = false; }
+        })();
+      });
+      safeControls.push(select, send, note);
+    }
 
     const row = el("div", "care-row");
     const dot = el("span", care.status === "working" ? "care-dot spinner" : "care-dot");
@@ -114,7 +147,7 @@ export function createPhoneCareView(client: GatewayClient, deviceId: string, dep
       render();
     });
     row.append(toggle);
-    setChildren(element, row, ...(open ? [details(care)] : []));
+    setChildren(element, row, ...safeControls, ...(open ? [details(care)] : []));
   }
 
   function details(value: PhoneCare): HTMLElement {

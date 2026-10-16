@@ -72,11 +72,29 @@
 
     <application
         android:allowBackup="true"
+        android:hasFragileUserData="true"
+        android:fullBackupContent="@xml/cyclone_backup_rules"
+        android:dataExtractionRules="@xml/cyclone_data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Cyclone"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <activity android:name=".runtime.safe.SafeActivity" android:exported="false" android:excludeFromRecents="true" />
+        <activity android:name=".ui.settings.DeleteAllDataScreen" android:exported="false" android:excludeFromRecents="true" />
+        <service android:name=".runtime.safe.SafeBackupJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
+        <receiver android:name=".runtime.safe.SafeClockReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <service android:name=".runtime.safe.SafeProfileService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Encrypted Cyclone Safe profile capture and restore" />
+        </service>
+        <service android:name=".runtime.safe.SafeMainService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Schedule Main-owned encrypted profile recovery copies" />
+        </service>
         <activity
             android:name=".direct.DirectAccessActivity"
             android:exported="false"
