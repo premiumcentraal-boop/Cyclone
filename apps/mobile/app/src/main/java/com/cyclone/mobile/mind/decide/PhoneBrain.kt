@@ -55,6 +55,9 @@ object PhoneBrain {
             .put("calls", CallLog.summary(Decisions.calls()))
             .put("watch", WatchLog.summary(DecisionWatch.records(context)))
             .put("lab", com.cyclone.mobile.mind.lab.DecisionLab.reports(context))
+            // Plan 63: the decision engine's numbers (both models' answer rates, speed, agreement, early acts).
+            .put("engine", EngineLog.summary(EngineStore.records(context))
+                .put("active", com.cyclone.mobile.mind.modes.CycloneModes.settings(context).engine.wire))
             .put("paused", org.json.JSONObject().also { o ->
                 DecisionProvider.entries.forEach { p -> Decisions.breaker(p).reason()?.let { o.put(p.wire, it.wire) } }
             })
@@ -64,6 +67,7 @@ object PhoneBrain {
     fun forget(context: Context, bar: Double) = synchronized(lock) {
         runCatching { file(context).delete() }
         DecisionWatch.forget(context)
+        EngineStore.forget(context)
         lessons = emptyList()
         train(emptyList(), bar)
     }

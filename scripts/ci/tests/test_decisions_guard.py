@@ -22,11 +22,12 @@ class DecisionsGuard(unittest.TestCase):
         self.assertIn("DecisionsWire.ENDPOINT", voice)
         self.assertIn("DecisionsWire.body(", read("voice/JevShadow.kt"))
 
-    def test_jev_decides_by_default_and_luna_is_live_with_vision(self):
+    def test_jev_decides_by_default_and_openai_decisions_is_live_with_vision(self):
         decide = read("mind/decide/Decisions.kt")
         self.assertIn('JEV("JEV (TypeSafe)", "~typesafe/jev-latest", DecisionsWire.ENDPOINT, vision = false, live = true, wire = "jev")', decide)
-        self.assertIn('LUNA("GPT-6 Luna Decisions", "openai/gpt-6-luna-decisions", DecisionsWire.ENDPOINT, vision = true, live = true, wire = "luna")', decide)
-        self.assertNotIn("OPENAI_DECISIONS", decide)
+        self.assertIn('OPENAI_DECISIONS("OpenAI Decisions", "openai/gpt-6-luna-decisions", DecisionsWire.ENDPOINT, vision = true, live = true, wire = "openai")', decide)
+        # What alpha.123–134 stored for it still reads back.
+        self.assertIn('if (wire == "luna") OPENAI_DECISIONS', decide)
         self.assertIn("val DEFAULT: DecisionProvider = DecisionProvider.JEV", decide)
         self.assertIn("chosen.takeIf { it.usable } ?: DEFAULT", decide)
         # The provider is a setting, defaulting to JEV.

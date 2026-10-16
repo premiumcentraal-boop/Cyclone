@@ -13,7 +13,7 @@ import com.cyclone.mobile.mind.modes.WatchBoard
 import java.io.File
 
 /**
- * Plan 58 (alpha.123): the watch. After a request is routed, the provider that is not deciding (GPT-6 Luna Decisions
+ * Plan 58 (alpha.123): the watch. After a request is routed, the provider that is not deciding (OpenAI Decisions
  * while JEV decides) answers the same Board 0, and Triage while it is in shadow, on its own thread. Nothing it says is
  * acted on; it is recorded so the Lab gate can compare. One call per request, skipped while that provider's breaker is
  * open, never for a request that looks like it carries a secret.

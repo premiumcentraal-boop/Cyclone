@@ -389,3 +389,18 @@ def test_plan58_call_and_watch_numbers_pass_as_counts_only(tmp_path):
     assert lab["luna"]["calibration"] == [{"from": 0.9, "to": 1.0, "answers": 100, "right": 96}]
     text = json.dumps(decisions)
     assert "text mom" not in text and "pay 300" not in text
+
+
+def test_plan63_engine_numbers_pass_as_counts_only(tmp_path):
+    raw = {**REPORT, "decisions": {"engine": {
+        "active": "consensus",
+        "engines": {"consensus": {"decisions": 40, "bothAnswered": 0.95, "agreement": 0.9, "earlyActs": 0,
+                                  "chosen": {"instant": 10, "flash": 20, "Bad Key": 3}, "request": "pay 300 euro"},
+                    "../x": {"decisions": 1}},
+        "lanes": {"jev": {"asked": 40, "answerRate": 0.97, "p50": 210, "p95": 640, "firstShare": 0.6},
+                  "openai": {"asked": 40, "answerRate": 0.95, "p50": 330, "p95": 820, "firstShare": 0.4}}}}}
+    engine = h.clean_report(raw)["decisions"]["engine"]
+    assert engine["active"] == "consensus" and list(engine["engines"]) == ["consensus"]
+    assert engine["engines"]["consensus"]["chosen"] == {"instant": 10, "flash": 20}
+    assert engine["lanes"]["openai"]["p95"] == 820
+    assert "pay 300" not in json.dumps(engine)

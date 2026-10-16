@@ -9,7 +9,7 @@ enum class Mode { INSTANT, FLASH, MIND, ANSWER, IGNORE }
 enum class Speed(val wire: String, val label: String) {
     /** The router: grammar, then one decision box, then the rules. */
     AUTO("auto", "Auto"),
-    /** Instant for clear commands (the grammar), everything else the Mind. The default until the Lab passes. */
+    /** Instant for clear commands (the grammar), everything else the Mind. */
     COMMANDS("commands", "Instant for commands"),
     /** Every request is a Mind mission, as before alpha.77. */
     MIND("mind", "Always Mind");
@@ -238,7 +238,7 @@ object ModeRouter {
      * agreement with JEV is measured all the time.
      */
     fun route(text: String, world: GrammarWorld, facts: LocalFacts, speed: Speed, box: DecisionBox?, bar: Double,
-              phone: PhoneDecider? = null, triage: TypedBox? = null): Route {
+              phone: PhoneDecider? = null, triage: TypedBox? = null, engine: EngineDecider? = null): Route {
         if (speed == Speed.MIND) return Route(Mode.MIND, "Speed is set to Always Mind", by = Decider.SETTING, decision = guessOf(Mode.MIND))
         stage0(text, world, facts)?.let { r ->
             return r.copy(by = if (r.mode == Mode.ANSWER) Decider.ANSWER else Decider.GRAMMAR, decision = guessOf(r.mode, r.command))
@@ -263,6 +263,12 @@ object ModeRouter {
         if (phone != null && shadow != null && phone.mayAct && shadow.mode == "instant" && shadow.intent in REVERSIBLE &&
             shadow.confidence >= com.cyclone.mobile.mind.decide.Earning.SURE && plainNow(text)) {
             fromGuess(shadow, text, world)?.let { return it.copy(by = Decider.PHONE, decision = shadow, decideMs = phoneMs, shadow = shadow) }
+        }
+        // Plan 63: a decision engine (Consensus or Sprint) races both decision models; it comes after the grammar, the rules
+        // and the phone model, so it can only decide what they leave open.
+        if (engine != null) {
+            runCatching { engine.decide(text, world, bar) }.getOrNull()?.let { return it.copy(shadow = shadow) }
+            return Route(Mode.FLASH, "the decision engine failed", by = Decider.FALLBACK, decision = guessOf(Mode.FLASH), shadow = shadow)
         }
         if (box == null) return Route(Mode.MIND, "no decision provider is reachable", by = Decider.FALLBACK, decision = guessOf(Mode.MIND), shadow = shadow)
         // Plan 58: with Triage switched on, its one call replaces Board 0. Its answers can only make a request more

@@ -71,7 +71,7 @@ object DecisionLab {
         }
     }
 
-    /** The last report per provider ({"jev": {...}, "luna": {...}}). */
+    /** The last report per provider ({"jev": {...}, "openai": {...}}). */
     fun reports(context: Context): JSONObject = runCatching {
         JSONObject(file(context).takeIf { it.isFile }?.readText() ?: "{}")
     }.getOrDefault(JSONObject())

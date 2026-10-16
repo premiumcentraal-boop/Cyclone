@@ -79,7 +79,7 @@ data class DReply(
 
 object DecisionsWire {
     const val ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
-    /** Documented limits: 200 questions per request; up to 128 images for GPT-6 Luna Decisions. */
+    /** Documented limits: 200 questions per request; up to 128 images for OpenAI Decisions. */
     const val MAX_QUESTIONS = 200
     const val MAX_IMAGES = 128
 

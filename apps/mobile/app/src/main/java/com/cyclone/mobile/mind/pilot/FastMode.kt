@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 enum class FastRoute(val wire: String, val label: String) {
     /** An ordinary fast model with a strict output schema. Sees screenshots. */
     MODEL("model", "Fast model"),
-    /** The decision provider (plan 58: JEV or GPT-6 Luna Decisions, chosen in Settings → Speed). See `mind/decide`. */
+    /** The decision provider (plan 58: JEV or OpenAI Decisions, chosen in Settings → Speed). See `mind/decide`. */
     DECISIONS("decisions", "Decision model");
 
     companion object { fun of(wire: String?) = entries.firstOrNull { it.wire == wire } ?: MODEL }
@@ -99,7 +99,7 @@ class MindPilotAdvisor(private val model: com.cyclone.mobile.mind.MindModel) : P
 class OpenRouterPilotDecider(private val key: String, private val route: FastRoute, private val model: String) : PilotDecider {
     override fun decide(question: PilotQuestion): PilotAnswer? {
         val started = SystemClock.elapsedRealtime()
-        // The decision route goes to the one decision provider (plan 58: JEV or GPT-6 Luna Decisions, a setting).
+        // The decision route goes to the one decision provider (plan 58: JEV or OpenAI Decisions, a setting).
         val answer = when (route) {
             FastRoute.MODEL -> PilotWire.parseChoice(post(CHAT, PilotWire.choiceBody(model, question)) ?: return null)
             FastRoute.DECISIONS -> {

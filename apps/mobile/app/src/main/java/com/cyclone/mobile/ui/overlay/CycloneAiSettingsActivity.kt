@@ -235,7 +235,7 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 Text("Speed", fontWeight = FontWeight.Bold)
                 Text(
                     when (modes.speed) {
-                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly. For anything else ${modes.provider.label} decides in one quick " +
+                        com.cyclone.mobile.mind.modes.Speed.AUTO -> "Auto: clear commands happen instantly. For anything else the decision engine below decides in one quick " +
                             "call: Instant, Flash (a few routine steps) or the full Mind. The phone model learns from it and takes over the actions " +
                             "it has proven it gets right. Unsure always goes to the smarter mode."
                         com.cyclone.mobile.mind.modes.Speed.COMMANDS -> "Clear commands like \"swipe up\", \"open my camera\", \"take a selfie\" or " +
@@ -267,32 +267,47 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Plan 58: who decides, the watch beside it, Triage's switch and strict privacy.
-                    Text("Decided by", style = MaterialTheme.typography.bodyMedium)
+                    // Plan 63: the decision engine. Consensus and Sprint ask both decision models at once; Classic is one model.
+                    Text("Decision engine", style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        com.cyclone.mobile.mind.decide.DecisionProvider.entries.filter { it.usable }.forEach { provider ->
-                            FilterChip(selected = modes.provider == provider, onClick = {
-                                save(modes.copy(provider = provider))
-                                com.cyclone.mobile.mind.decide.Decisions.refresh(context)
-                            }, label = { Text(provider.label) })
+                        com.cyclone.mobile.mind.modes.DecisionEngine.entries.forEach { engine ->
+                            FilterChip(selected = modes.engine == engine, onClick = { save(modes.copy(engine = engine)) }, label = { Text(engine.label) })
                         }
                     }
                     Text(
-                        "JEV reads text only. GPT-6 Luna Decisions can also read the screen. Switch after the Lab's numbers say the new one " +
-                            "is at least as good.",
+                        engineCopy(modes.engine) + " " + engineSummary(stats),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Compare beside it", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                watchSummary(stats),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                    val classicEngine = modes.engine == com.cyclone.mobile.mind.modes.DecisionEngine.CLASSIC
+                    // Plan 58 (Classic only): who decides, and the watch beside it.
+                    if (classicEngine) {
+                        Text("Decided by", style = MaterialTheme.typography.bodyMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            com.cyclone.mobile.mind.decide.DecisionProvider.entries.filter { it.usable }.forEach { provider ->
+                                FilterChip(selected = modes.provider == provider, onClick = {
+                                    save(modes.copy(provider = provider))
+                                    com.cyclone.mobile.mind.decide.Decisions.refresh(context)
+                                }, label = { Text(provider.label) })
+                            }
                         }
-                        Switch(checked = modes.watch, onCheckedChange = { save(modes.copy(watch = it)) })
+                        Text(
+                            "JEV reads text only. OpenAI Decisions can also read the screen. Switch after the Lab's numbers say the new one " +
+                                "is at least as good.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Compare beside it", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    watchSummary(stats),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(checked = modes.watch, onCheckedChange = { save(modes.copy(watch = it)) })
+                        }
                     }
                     // Plan 58: the decisions Lab: the golden set through one provider, a few cents, about a minute.
                     var labNote by remember { mutableStateOf(labSummary(stats)) }
@@ -303,22 +318,24 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                                     labNote = report?.let { labLine(it) } ?: "The test didn't finish. Try again."
                                 }
                                 labNote = if (started) "Testing ${provider.label} on 300 labelled requests…" else "A test is already running, or there's no OpenRouter key."
-                            }) { Text("Test ${provider.wire.uppercase()}") }
+                            }) { Text("Test ${provider.label}") }
                         }
                     }
                     Text(labNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Triage", style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        com.cyclone.mobile.mind.modes.StageSwitch.entries.forEach { stage ->
-                            FilterChip(selected = modes.triage == stage, onClick = { save(modes.copy(triage = stage)) }, label = { Text(stage.label) })
+                    if (classicEngine) {
+                        Text("Triage", style = MaterialTheme.typography.bodyMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            com.cyclone.mobile.mind.modes.StageSwitch.entries.forEach { stage ->
+                                FilterChip(selected = modes.triage == stage, onClick = { save(modes.copy(triage = stage)) }, label = { Text(stage.label) })
+                            }
                         }
+                        Text(
+                            "Triage asks how hard a request is, what it means and whether it is risky, all in one call. Watch only: it is asked " +
+                                "and measured but never decides. Turn it on once the Lab's numbers pass.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Text(
-                        "Triage asks how hard a request is, what it means and whether it is risky, all in one call. Watch only: it is asked " +
-                            "and measured but never decides. Turn it on once the Lab's numbers pass.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Strict privacy", style = MaterialTheme.typography.bodyMedium)
@@ -930,6 +947,36 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /** One line about how requests are decided on this phone (alpha 89). */
+/** Plan 63: what each decision engine does, in one or two sentences. */
+private fun engineCopy(engine: com.cyclone.mobile.mind.modes.DecisionEngine): String = when (engine) {
+    com.cyclone.mobile.mind.modes.DecisionEngine.CONSENSUS ->
+        "Consensus: JEV and OpenAI Decisions answer at the same moment. Cyclone acts only when both agree; any disagreement " +
+            "goes to the smarter mode. If only one answers in time, only an easy-to-undo action goes ahead."
+    com.cyclone.mobile.mind.modes.DecisionEngine.SPRINT ->
+        "Sprint: both answer at the same moment, and the first one that's sure of an easy-to-undo action (camera, volume, " +
+            "opening an app) acts at once. Everything else waits for both, as in Consensus."
+    com.cyclone.mobile.mind.modes.DecisionEngine.CLASSIC ->
+        "Classic: one decision model, as before, with the other one able to compare beside it."
+}
+
+/** Plan 63: the active engine's numbers in one line ("120 decided · both answered 97% · agreed 91% · JEV first 64%"). */
+private fun engineSummary(stats: org.json.JSONObject?): String {
+    val engine = stats?.optJSONObject("engine") ?: return ""
+    val active = engine.optString("active")
+    val numbers = engine.optJSONObject("engines")?.optJSONObject(active) ?: return ""
+    val parts = mutableListOf("${numbers.optInt("decisions")} decided")
+    numbers.optDouble("bothAnswered").takeIf { !it.isNaN() }?.let { parts += "both answered ${(it * 100).toInt()}%" }
+    numbers.optDouble("agreement").takeIf { !it.isNaN() }?.let { parts += "agreed ${(it * 100).toInt()}%" }
+    engine.optJSONObject("lanes")?.let { lanes ->
+        lanes.keys().asSequence().sorted().forEach { lane ->
+            val l = lanes.optJSONObject(lane) ?: return@forEach
+            val name = com.cyclone.mobile.mind.decide.DecisionProvider.of(lane)?.label ?: lane
+            l.optLong("p50", -1).takeIf { it > 0 }?.let { parts += "$name $it ms" }
+        }
+    }
+    return parts.joinToString(" · ") + "."
+}
+
 /** Plan 58: the decisions Lab's last reports, one line each. */
 private fun labSummary(stats: org.json.JSONObject?): String {
     val lab = stats?.optJSONObject("lab")
@@ -944,7 +991,8 @@ private fun labLine(report: org.json.JSONObject): String {
     val accuracy = score?.optDouble("accuracy")?.takeIf { !it.isNaN() }?.let { "${(it * 100).toInt()}% right" } ?: "no answers"
     val risky = score?.optJSONArray("riskyUnder")?.length() ?: 0
     val p95 = report.optLong("p95", -1).takeIf { it > 0 }?.let { " · p95 $it ms" }.orEmpty()
-    return "${report.optString("provider").uppercase()}: $accuracy · $risky risky too low$p95 · answered ${report.optInt("answered")} of ${report.optInt("requests")}"
+    val name = com.cyclone.mobile.mind.decide.DecisionProvider.of(report.optString("provider"))?.label ?: report.optString("provider")
+    return "$name: $accuracy · $risky risky too low$p95 · answered ${report.optInt("answered")} of ${report.optInt("requests")}"
 }
 
 /** Plan 58: the watch in one line ("Luna answered 95% · agreed 88% · triage 84% · 0 below the rules"). */

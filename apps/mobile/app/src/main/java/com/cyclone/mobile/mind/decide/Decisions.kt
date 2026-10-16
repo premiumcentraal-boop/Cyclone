@@ -17,8 +17,8 @@ import java.io.File
  * route and the watch. One port, one setting, so the provider changes in one place.
  *
  * - [JEV]: TypeSafe's decision model. **Text only:** it never gets a screenshot, so none is taken for it.
- * - [LUNA]: GPT-6 Luna Decisions (OpenAI's Decisions API on OpenRouter, public beta since 2026-10-06). Reads text and
- *   images.
+ * - [OPENAI_DECISIONS]: OpenAI's Decisions API on OpenRouter (`openai/gpt-6-luna-decisions`, public beta since
+ *   2026-10-06). Reads text and images. GPT-6 Luna the chat model is a different thing and never decides here.
  *
  * Both go to OpenRouter's Decisions endpoint with the same request shape (`decisions/DecisionsWire`). Plan 58: the
  * provider is a setting (Settings → Speed → Advanced, default [DEFAULT]), so switching to Luna after the Lab's numbers
@@ -29,7 +29,10 @@ enum class DecisionProvider(
     val label: String,
     val model: String,
     val endpoint: String?,
-    /** Can it read a screenshot? A provider without vision never receives one. */
+    /**
+     * Does Cyclone send it screenshots? JEV 1.14 accepts images, but its docs say every request with an image runs in
+     * its slower, less accurate long-context mode (plan 62 §1), so Cyclone gives sight to OpenAI Decisions only.
+     */
     val vision: Boolean,
     /** False when it must never be picked. */
     val live: Boolean,
@@ -37,11 +40,15 @@ enum class DecisionProvider(
     val wire: String,
 ) {
     JEV("JEV (TypeSafe)", "~typesafe/jev-latest", DecisionsWire.ENDPOINT, vision = false, live = true, wire = "jev"),
-    LUNA("GPT-6 Luna Decisions", "openai/gpt-6-luna-decisions", DecisionsWire.ENDPOINT, vision = true, live = true, wire = "luna");
+    /** OpenAI's Decisions API: GPT-6 Luna served through the Decisions endpoint. Not GPT-6 Luna the chat model. */
+    OPENAI_DECISIONS("OpenAI Decisions", "openai/gpt-6-luna-decisions", DecisionsWire.ENDPOINT, vision = true, live = true, wire = "openai");
 
     val usable: Boolean get() = live && endpoint != null && model.isNotBlank()
 
-    companion object { fun of(wire: String?): DecisionProvider? = entries.firstOrNull { it.wire == wire } }
+    companion object {
+        /** A stored name; "luna" is what alpha.123–134 stored for OpenAI Decisions. */
+        fun of(wire: String?): DecisionProvider? = if (wire == "luna") OPENAI_DECISIONS else entries.firstOrNull { it.wire == wire }
+    }
 }
 
 object Decisions {
@@ -81,6 +88,35 @@ object Decisions {
         if (settings.triage != com.cyclone.mobile.mind.modes.StageSwitch.ON) return null
         val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
         return ProviderTypedBox(key, refresh(context), TRIAGE_DEADLINE_MS, "triage", settings.strictPrivacy)
+    }
+
+    /**
+     * Plan 63: the decision engine for [engine] (Consensus or Sprint): both decision models, raced on the same Triage
+     * board. Each lane goes through [call], so each keeps its own breaker; a lane whose breaker is open answers nothing
+     * at once and the other decides under the one-answer rule. Null without an OpenRouter key.
+     */
+    fun engine(context: Context, engine: com.cyclone.mobile.mind.modes.DecisionEngine): com.cyclone.mobile.mind.modes.EngineDecider? {
+        if (engine == com.cyclone.mobile.mind.modes.DecisionEngine.CLASSIC) return null
+        val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
+        refresh(context)
+        val zdr = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).strictPrivacy
+        val lanes = DecisionProvider.entries.filter { it.usable }.map { provider ->
+            com.cyclone.mobile.mind.modes.Lane(provider.wire, ProviderTypedBox(key, provider, ENGINE_DEADLINE_MS, "race", zdr))
+        }
+        val app = context.applicationContext
+        return com.cyclone.mobile.mind.modes.RaceEngine(engine, com.cyclone.mobile.mind.modes.DecisionRace(lanes, ENGINE_DEADLINE_MS),
+            record = { EngineStore.save(app, it) })
+    }
+
+    /**
+     * Plan 63: the box for questions that may need the screen as an image (Instant's follow-ups): OpenAI Decisions, the
+     * decision model built to read images. Null without a key.
+     */
+    fun sight(context: Context): DecisionBox? {
+        val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
+        refresh(context)
+        val zdr = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).strictPrivacy
+        return ProviderDecisionBox(key, DecisionProvider.OPENAI_DECISIONS, ROUTING_DEADLINE_MS, board = "sight", zdr = zdr)
     }
 
     /**
@@ -132,6 +168,12 @@ object Decisions {
     /** Plan 58 §4: Triage must answer within 1.2 s, or the request goes one rung up. */
     const val TRIAGE_DEADLINE_MS = 1_200L
 
+    /**
+     * Plan 63: how long an engine waits for both decision models. Measured medians are 0.2–0.55 s with tails to ~0.9 s
+     * (plan 62 §1); a later answer is no answer, and the other model decides under the one-answer rule.
+     */
+    const val ENGINE_DEADLINE_MS = 1_500L
+
     /** The watch never makes anyone wait, so it may take longer: it measures, it doesn't decide. */
     const val WATCH_DEADLINE_MS = 6_000L
 
@@ -151,7 +193,7 @@ class ProviderDecisionBox(
     override fun ask(request: BoxRequest): BoxReply? {
         val body = runCatching { body(provider, request, zdr) }.getOrNull() ?: return null
         // The router's Board 0 and Instant's follow-up questions are counted apart.
-        val name = if (request.questions.any { it.id == "route" }) board else "instant"
+        val name = if (request.questions.any { it.id == "route" } || board != "board0") board else "instant"
         val result = Decisions.call(key, provider, body, "Cyclone Modes", name, deadlineMs) as? DecisionsResult.Ok ?: return null
         return BoxWire.parseDecisions(result.body, request)?.copy(ms = result.ms)
     }

@@ -13,7 +13,8 @@ import java.util.UUID
 
 /** Settings → Speed (plan 42), stored on this phone only. */
 data class ModeSettings(
-    val speed: Speed = Speed.COMMANDS,
+    // Auto is the default (alpha 89); this matches Speed.of(null), which a fresh install reads.
+    val speed: Speed = Speed.AUTO,
     /** Live voice: seconds the mic stays open after a quick action, for a follow-up or the rest of a sentence. */
     val keepListeningSeconds: Int = 8,
     /** Live voice: a quick action that worked is confirmed with a sound and a buzz, not words. */
@@ -28,6 +29,8 @@ data class ModeSettings(
     val triage: StageSwitch = StageSwitch.SHADOW,
     /** Plan 58: ask OpenRouter for zero-data-retention providers only (slower, fewer providers). */
     val strictPrivacy: Boolean = false,
+    /** Plan 63: how undecided Auto requests are decided. Consensus (both decision models must agree) by default. */
+    val engine: DecisionEngine = DecisionEngine.CONSENSUS,
 )
 
 
@@ -59,7 +62,8 @@ object CycloneModes {
                 ?: com.cyclone.mobile.mind.decide.Decisions.DEFAULT,
             watch = p.getBoolean("decision_watch", true),
             triage = StageSwitch.of(p.getString("triage", null), StageSwitch.SHADOW),
-            strictPrivacy = p.getBoolean("strict_privacy", false))
+            strictPrivacy = p.getBoolean("strict_privacy", false),
+            engine = DecisionEngine.of(p.getString("decision_engine", null)))
     }
 
     fun save(context: Context, settings: ModeSettings) {
@@ -67,7 +71,8 @@ object CycloneModes {
             .putString("speed", settings.speed.wire).putInt("keep_listening_s", settings.keepListeningSeconds.coerceIn(0, 20))
             .putBoolean("silent_success", settings.silentSuccess).putString("phone_model", settings.phoneModel.wire)
             .putString("decision_provider", settings.provider.wire).putBoolean("decision_watch", settings.watch)
-            .putString("triage", settings.triage.wire).putBoolean("strict_privacy", settings.strictPrivacy).apply()
+            .putString("triage", settings.triage.wire).putBoolean("strict_privacy", settings.strictPrivacy)
+            .putString("decision_engine", settings.engine.wire).apply()
     }
 
     @Volatile private var current: Running? = null
@@ -139,7 +144,7 @@ object CycloneModes {
         try {
             val fast = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
             learnBar = fast.sureness.bar
-            // Decisions go to the one decision provider (plan 58: JEV or GPT-6 Luna Decisions, a setting).
+            // Decisions go to the one decision provider (plan 58: JEV or OpenAI Decisions, a setting).
             val box = if (settings.speed == Speed.AUTO) com.cyclone.mobile.mind.decide.Decisions.box(context) else null
             val blocker = device.blocker()
             // The screen is read only when the command needs its labels ("tap Pokémon GO") or Auto may ask a box; a
@@ -149,12 +154,16 @@ object CycloneModes {
             val phone = if (settings.speed == Speed.AUTO) runCatching {
                 com.cyclone.mobile.mind.decide.PhoneBrain.decider(context, settings.phoneModel, fast.sureness.bar)
             }.getOrNull() else null
-            // Plan 58: Triage replaces Board 0 only when its switch is on (after the Lab gate); in shadow the watch asks it.
-            val triage = if (settings.speed == Speed.AUTO) com.cyclone.mobile.mind.decide.Decisions.triage(context) else null
-            val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar, phone, triage) }
+            // Plan 63: the decision engine. Consensus and Sprint race both decision models; Classic is alpha.123's one model,
+            // where Triage replaces Board 0 only when its switch is on and the watch asks the other model beside it.
+            val classic = settings.engine == DecisionEngine.CLASSIC
+            val engine = if (settings.speed == Speed.AUTO && !classic) com.cyclone.mobile.mind.decide.Decisions.engine(context, settings.engine) else null
+            val triage = if (settings.speed == Speed.AUTO && classic) com.cyclone.mobile.mind.decide.Decisions.triage(context) else null
+            val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar, phone, triage, engine) }
             routed = route
-            // Plan 58: the provider that isn't deciding answers the same questions beside it, on its own thread, never acting.
-            if (settings.speed == Speed.AUTO) runCatching {
+            // Plan 58: in Classic, the provider that isn't deciding answers the same questions beside it, never acting. The
+            // engines already ask both.
+            if (settings.speed == Speed.AUTO && classic) runCatching {
                 com.cyclone.mobile.mind.decide.DecisionWatch.watch(context, request, world, route, settings, fast.sureness.bar)
             }
             AskLedger.routed(request, route.mode.name.lowercase(), route.by.name.lowercase(), route.why, route.decideMs)
@@ -170,7 +179,8 @@ object CycloneModes {
                         atMs = System.currentTimeMillis(), request = request, candidates = world.labels.take(25),
                         decider = route.by, decision = route.decision ?: ModeRouter.guessOf(route.mode, route.command),
                         decideMs = route.decideMs, shadow = route.shadow, outcome = outcome,
-                        provider = if (route.by == com.cyclone.mobile.mind.decide.Decider.DECISIONS) com.cyclone.mobile.mind.decide.Decisions.active().name else null,
+                        provider = if (route.by != com.cyclone.mobile.mind.decide.Decider.DECISIONS) null
+                            else if (classic) com.cyclone.mobile.mind.decide.Decisions.active().name else settings.engine.name,
                     ), fast.sureness.bar)
                 }
             }
@@ -196,7 +206,10 @@ object CycloneModes {
                     }
                     if (chrome) OverlayChromeRuntime.missionWorking(running.id, InstantCopy.working(command))
                     confirmWindow = { text, ms -> window(running, text, ms, chrome) }
-                    val outcome = trace.time(InstantCopy.working(command)) { InstantRun.run(command, hands, box, fast.sureness.bar) }
+                    // Plan 63: in the engines, Instant's follow-up questions (the shutter, the call button) go to OpenAI Decisions
+                    // with the screenshot; Classic keeps the one provider.
+                    val sight = if (classic) box else com.cyclone.mobile.mind.decide.Decisions.sight(context) ?: box
+                    val outcome = trace.time(InstantCopy.working(command)) { InstantRun.run(command, hands, sight, fast.sureness.bar) }
                     val promotion = outcome.promotion
                     when {
                         // Stopped by the owner (Stop, "no", or a newer request): nothing more happens.

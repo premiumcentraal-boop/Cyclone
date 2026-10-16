@@ -131,6 +131,7 @@ def clean_decisions(raw: Any) -> dict[str, Any] | None:
         "calls": _clean_calls(raw.get("calls")),
         "watch": _clean_watch(raw.get("watch")),
         "lab": _clean_lab(raw.get("lab")),
+        "engine": _clean_engine(raw.get("engine")),
         "paused": {k: v for k, v in (raw.get("paused") or {}).items()
                    if isinstance(k, str) and _INTENT.match(k) and isinstance(v, str) and _INTENT.match(v)}
         if isinstance(raw.get("paused"), dict) else {},
@@ -188,6 +189,27 @@ def _clean_lab(raw: Any) -> dict[str, Any]:
                              "right": _int(b.get("right"))} for b in report.get("calibration") or [] if isinstance(b, dict)][:10],
         }
     return out
+
+
+def _clean_engine(raw: Any) -> dict[str, Any] | None:
+    """Plan 63: the decision engine's numbers: per engine and per decision model. Counts, shares and times only."""
+    if not isinstance(raw, dict):
+        return None
+    engines = {}
+    for name, e in (raw.get("engines") or {}).items() if isinstance(raw.get("engines"), dict) else []:
+        if isinstance(name, str) and _INTENT.match(name) and isinstance(e, dict):
+            engines[name] = {"decisions": _int(e.get("decisions")), "bothAnswered": _share(e.get("bothAnswered")),
+                             "agreement": _share(e.get("agreement")), "earlyActs": _int(e.get("earlyActs")),
+                             "chosen": _counts(e.get("chosen"))}
+    lanes = {}
+    for name, l in (raw.get("lanes") or {}).items() if isinstance(raw.get("lanes"), dict) else []:
+        if isinstance(name, str) and _INTENT.match(name) and isinstance(l, dict):
+            lanes[name] = {"asked": _int(l.get("asked")), "answerRate": _share(l.get("answerRate")),
+                           "p50": _int(l.get("p50")) or None, "p95": _int(l.get("p95")) or None,
+                           "firstShare": _share(l.get("firstShare"))}
+    active = raw.get("active")
+    return {"active": active if isinstance(active, str) and _INTENT.match(active) else None,
+            "engines": dict(list(engines.items())[:4]), "lanes": dict(list(lanes.items())[:4])}
 
 
 def _clean_watch(raw: Any) -> dict[str, Any] | None:
