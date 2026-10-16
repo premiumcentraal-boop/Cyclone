@@ -36,8 +36,8 @@ class EnsembleTest {
         flags.forEach { (k, v) -> put(k, DAnswer.Noul(v)) }
     })
 
-    private fun op(lane: String, reply: DReply, text: String = "x", ms: Long = 200) =
-        Ensemble.opinion(Arrival(lane, TypedAnswer(reply, ms), ms), text, world, 0.85)!!
+    private fun op(lane: String, reply: DReply, text: String = "x", ms: Long = 200, variant: Int = 0) =
+        Ensemble.opinion(Arrival("$lane#$variant", TypedAnswer(reply, ms), ms, lane, variant), text, world, 0.85)!!
 
     private val camera = reply(0.05, "camera")
     private val volume = reply(0.05, "volume_up")
@@ -90,17 +90,17 @@ class EnsembleTest {
 
     // ---- the race ------------------------------------------------------------------------------------------------------
 
-    private fun lane(name: String, delayMs: Long, reply: DReply?, fail: Boolean = false) = Lane(name, TypedBox { _, _ ->
+    private fun lane(name: String, delayMs: Long, reply: DReply?, fail: Boolean = false, variant: Int = 0) = Lane("$name#$variant", TypedBox { _, _ ->
         Thread.sleep(delayMs)
         if (fail) throw IllegalStateException("down")
         reply?.let { TypedAnswer(it, delayMs) }
-    })
+    }, name, variant)
 
     private fun engine(kind: DecisionEngine, vararg lanes: Lane, deadline: Long = 800, records: MutableList<EngineRecord> = CopyOnWriteArrayList(),
                        done: CountDownLatch? = null) =
         RaceEngine(kind, DecisionRace(lanes.toList(), deadline, graceMs = 600), record = { records += it; done?.countDown() })
 
-    @Test fun `consensus waits for both, sprint acts on the first sure easy-to-undo answer`() {
+    @Test fun `consensus waits for both, sprint acts on the first two sure easy-to-undo answers`() {
         val c = engine(DecisionEngine.CONSENSUS, lane("jev", 50, camera), lane("openai", 400, camera))
         val started = System.nanoTime()
         val route = c.decide("open camera", world, 0.85)
@@ -111,15 +111,73 @@ class EnsembleTest {
 
         val records = CopyOnWriteArrayList<EngineRecord>()
         val settled = CountDownLatch(1)
-        val s = engine(DecisionEngine.SPRINT, lane("jev", 50, camera), lane("openai", 400, camera), records = records, done = settled)
+        val s = engine(DecisionEngine.SPRINT, lane("jev", 50, camera), lane("jev", 80, camera, variant = 1),
+            lane("openai", 400, camera), lane("openai", 450, camera, variant = 1), records = records, done = settled)
         val t0 = System.nanoTime()
         assertEquals(Mode.INSTANT, s.decide("open camera", world, 0.85).mode)
         assertTrue("sprint didn't wait", (System.nanoTime() - t0) / 1_000_000 < 300)
-        // The late answer still reaches the numbers.
+        // The late answers still reach the numbers, each with its phrasing.
         assertTrue(settled.await(2, TimeUnit.SECONDS))
         assertEquals("jev", records.single().early)
         assertEquals(true, records.single().agreed)
-        assertEquals(2, records.single().lanes.count { it.answered })
+        assertEquals(4, records.single().lanes.count { it.answered })
+        assertEquals(setOf(0, 1), records.single().lanes.filter { it.lane == "openai" }.map { it.copy }.toSet())
+    }
+
+    @Test fun `sprint never acts on one answer alone, nor while any answer disagrees`() {
+        // One sure answer: Sprint waits for a second.
+        val one = engine(DecisionEngine.SPRINT, lane("jev", 30, camera), lane("openai", 350, camera))
+        val t0 = System.nanoTime()
+        assertEquals(Mode.INSTANT, one.decide("open camera", world, 0.85).mode)
+        assertTrue("sprint waited for the second answer", (System.nanoTime() - t0) / 1_000_000 >= 300)
+        // A fast dissent stops the early act, and the model that answered two ways can't act.
+        val split = engine(DecisionEngine.SPRINT, lane("jev", 20, camera), lane("jev", 40, volume, variant = 1),
+            lane("openai", 60, camera), lane("openai", 80, camera, variant = 1))
+        assertEquals(Mode.FLASH, split.decide("open camera", world, 0.85).mode)
+    }
+
+    @Test fun `once every model has answered, the rest get a short grace, not the whole deadline`() {
+        val records = CopyOnWriteArrayList<EngineRecord>()
+        val settled = CountDownLatch(1)
+        val e = RaceEngine(DecisionEngine.CONSENSUS, DecisionRace(listOf(lane("jev", 30, camera), lane("jev", 40, camera, variant = 1),
+            lane("openai", 60, camera), lane("openai", 2_000, camera, variant = 1)), 1_500, graceMs = 2_500),
+            record = { records += it; settled.countDown() })
+        val t0 = System.nanoTime()
+        assertEquals(Mode.INSTANT, e.decide("open camera", world, 0.85).mode)
+        val took = (System.nanoTime() - t0) / 1_000_000
+        assertTrue("quorum grace, not the deadline ($took ms)", took in 300..900)
+        // The straggler still reaches the numbers.
+        assertTrue(settled.await(4, TimeUnit.SECONDS))
+        assertEquals(4, records.single().lanes.count { it.answered })
+    }
+
+    @Test fun `one model's two phrasings merge into one opinion`() {
+        assertEquals(Mode.INSTANT, Ensemble.merge(listOf(op("jev", camera), op("jev", camera, variant = 1)))!!.route.mode)
+        // Two different actions from one model: it isn't sure, so no action.
+        assertEquals(Mode.FLASH, Ensemble.merge(listOf(op("jev", camera), op("jev", volume, variant = 1)))!!.route.mode)
+        // Different rungs: the more careful one.
+        assertEquals(Mode.MIND, Ensemble.merge(listOf(op("jev", camera), op("jev", mind, variant = 1)))!!.route.mode)
+        assertEquals(2, Ensemble.perModel(listOf(op("jev", camera), op("jev", camera, variant = 1), op("openai", camera))).size)
+        // Four answers: an action only when all four say the same one.
+        assertEquals(Mode.INSTANT, Ensemble.combine(Ensemble.perModel(listOf(op("jev", camera), op("jev", camera, variant = 1),
+            op("openai", camera), op("openai", camera, variant = 1)))).mode)
+        assertEquals(Mode.FLASH, Ensemble.combine(Ensemble.perModel(listOf(op("jev", camera), op("jev", camera, variant = 1),
+            op("openai", camera), op("openai", volume, variant = 1)))).mode)
+    }
+
+    @Test fun `the second phrasing asks the same question in a different order`() {
+        val words = "open instagram"
+        val plain = Triage.questions(world, words, 0)
+        val turned = Triage.questions(world, words, 1)
+        assertEquals(plain.keys, turned.keys)
+        for (name in listOf("capability", "target")) {
+            val a = (plain.getValue(name) as com.cyclone.mobile.decisions.DQuestion.Choice).options.keys.toList()
+            val b = (turned.getValue(name) as com.cyclone.mobile.decisions.DQuestion.Choice).options.keys.toList()
+            assertEquals(a.toSet(), b.toSet())
+            assertEquals("none", b.last())
+            assertEquals(a.dropLast(1).reversed(), b.dropLast(1))
+        }
+        assertNotEquals(Triage.state(words, world, 0), Triage.state(words, world, 1))
     }
 
     @Test fun `sprint never acts alone on a tap and waits for the other model`() {
@@ -213,6 +271,33 @@ class EnsembleTest {
         assertTrue("the noise reached Instant sometimes ($instant)", instant > 0)
     }
 
+    @Test fun `over the golden set four answers act only when all four agree`() {
+        val rnd = Random(65_4)
+        var instant = 0
+        repeat(10) {
+            for (r in golden) {
+                val first = noise(rnd)
+                val answers = listOf("jev" to 0, "jev" to 1, "openai" to 0, "openai" to 1).map { (m, v) ->
+                    op(m, if (rnd.nextDouble() < 0.75) first else noise(rnd), r.text, variant = v)
+                }
+                val route = Ensemble.combine(Ensemble.perModel(answers))
+                if (route.mode == Mode.INSTANT) {
+                    instant++
+                    assertTrue(answers.all { it.route.mode == Mode.INSTANT })
+                    assertEquals(1, answers.map { Ensemble.actionOf(it.route) }.distinct().size)
+                }
+                if (route.mode == Mode.IGNORE) assertTrue(answers.all { it.route.mode == Mode.IGNORE })
+                else assertTrue(Ensemble.rank(route.mode) >= answers.filter { it.route.mode != Mode.IGNORE }.maxOf { Ensemble.rank(it.route.mode) })
+                // Sprint's early act: two sure answers of one easy-to-undo action, and nothing else said.
+                Ensemble.sprintPair(answers)?.let { early ->
+                    assertTrue(Ensemble.undoable(early.route) && !early.reading.risky)
+                    assertTrue(answers.all { Ensemble.keyOf(it.route) == Ensemble.keyOf(early.route) })
+                }
+            }
+        }
+        assertTrue("the noise reached Instant sometimes ($instant)", instant > 0)
+    }
+
     @Test fun `two perfect models reproduce the golden labels`() {
         // The same perfect answers GoldenSetTest builds, given to both lanes: the engine must keep every label.
         val scored = golden.filter { it.tag !in GoldenSet.ON_PHONE_TAGS && it.rung != "answer" }
@@ -243,6 +328,7 @@ class EnsembleTest {
         assertEquals(0.5, sprint.getDouble("bothAnswered"), 1e-9)
         assertEquals(1.0, sprint.getDouble("agreement"), 1e-9)
         assertEquals(1, sprint.getInt("earlyActs"))
+        assertTrue(s.getJSONObject("lanes").getJSONObject("jev").isNull("selfAgreement"))
         val jev = s.getJSONObject("lanes").getJSONObject("jev")
         assertEquals(1.0, jev.getDouble("answerRate"), 1e-9)
         assertEquals(1.0, jev.getDouble("firstShare"), 1e-9)

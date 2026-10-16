@@ -12,15 +12,17 @@ data class LaneRecord(
     val mode: String? = null,
     /** The Instant action it chose ("camera:", "open_app:com.instagram.android"), when it chose one. */
     val action: String? = null,
+    /** Plan 65: which phrasing of the question this answer came from (0 or 1). */
+    val copy: Int = 0,
 ) {
     fun toJson(): JSONObject = JSONObject().put("lane", lane).put("ms", ms).put("answered", answered)
-        .put("mode", mode ?: JSONObject.NULL).put("action", action ?: JSONObject.NULL)
+        .put("mode", mode ?: JSONObject.NULL).put("action", action ?: JSONObject.NULL).put("copy", copy)
 
     companion object {
         fun fromJson(o: JSONObject): LaneRecord? = runCatching {
             LaneRecord(o.getString("lane"), o.getLong("ms"), o.getBoolean("answered"),
                 o.optString("mode").takeIf { it.isNotBlank() && !o.isNull("mode") },
-                o.optString("action").takeIf { it.isNotBlank() && !o.isNull("action") })
+                o.optString("action").takeIf { it.isNotBlank() && !o.isNull("action") }, o.optInt("copy", 0))
         }.getOrNull()
     }
 }
@@ -62,12 +64,13 @@ object EngineLog {
 
     /**
      * Per engine: decisions, how often both models answered, how often they agreed, how often one acted first, the rungs
-     * chosen; per lane: the answer rate, p50/p95 and how often it was the first to answer.
+     * chosen; per model: the answer rate, p50/p95, how often it was the first to answer and how often its two
+     * phrasings agreed.
      */
     fun summary(records: List<EngineRecord>): JSONObject {
         val engines = JSONObject()
         records.groupBy { it.engine }.toSortedMap().forEach { (engine, list) ->
-            val both = list.filter { r -> r.lanes.count { it.answered } >= 2 }
+            val both = list.filter { r -> r.lanes.filter { it.answered }.map { it.lane }.toSet().size >= 2 }
             val compared = list.filter { it.agreed != null }
             val chosen = JSONObject()
             list.groupingBy { it.chosen }.eachCount().toSortedMap().forEach { (k, v) -> chosen.put(k, v) }
@@ -83,7 +86,11 @@ object EngineLog {
         all.groupBy { it.lane }.toSortedMap().forEach { (lane, list) ->
             val ok = list.filter { it.answered }.map { it.ms }
             val firsts = records.count { r -> r.lanes.filter { it.answered }.minByOrNull { it.ms }?.lane == lane }
+            // Plan 65: when one model answered both phrasings, how often it gave the same answer to itself.
+            val twice = records.map { r -> r.lanes.filter { it.lane == lane && it.answered } }.filter { it.size >= 2 }
+            val steady = twice.count { copies -> copies.map { it.mode to it.action }.toSet().size == 1 }
             lanes.put(lane, JSONObject()
+                .put("selfAgreement", share(steady, twice.size))
                 .put("asked", list.size)
                 .put("answerRate", share(ok.size, list.size))
                 .put("p50", DecisionStats.percentile(ok, 50) ?: JSONObject.NULL)

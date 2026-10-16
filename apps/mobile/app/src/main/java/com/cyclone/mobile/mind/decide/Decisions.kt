@@ -100,8 +100,13 @@ object Decisions {
         val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
         refresh(context)
         val zdr = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).strictPrivacy
-        val lanes = DecisionProvider.entries.filter { it.usable }.map { provider ->
-            com.cyclone.mobile.mind.modes.Lane(provider.wire, ProviderTypedBox(key, provider, ENGINE_DEADLINE_MS, "race", zdr))
+        // Plan 65: every usable model answers twice, once per phrasing of the same question, so a slip in one reading
+        // or a bias towards the first option shows up as disagreement instead of an action.
+        val lanes = DecisionProvider.entries.filter { it.usable }.flatMap { provider ->
+            (0 until com.cyclone.mobile.mind.modes.Triage.VARIANTS).map { variant ->
+                com.cyclone.mobile.mind.modes.Lane("${provider.wire}#$variant",
+                    ProviderTypedBox(key, provider, ENGINE_DEADLINE_MS, "race", zdr), provider.wire, variant)
+            }
         }
         val app = context.applicationContext
         return com.cyclone.mobile.mind.modes.RaceEngine(engine, com.cyclone.mobile.mind.modes.DecisionRace(lanes, ENGINE_DEADLINE_MS),

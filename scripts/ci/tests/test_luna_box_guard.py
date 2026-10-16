@@ -97,7 +97,16 @@ class LunaBoxGuard(unittest.TestCase):
         """Plan 63: Consensus and Sprint race JEV and OpenAI Decisions; an action needs both, unless it is easy to undo."""
         ensemble = read("mind/modes/Ensemble.kt")
         combine = ensemble[ensemble.index("    fun combine("):ensemble.index("    private fun single(")]
-        self.assertIn("if (actionOf(ra) == actionOf(rb))", combine)
+        self.assertIn("routes.all { it.mode == Mode.INSTANT } ->", combine)
+        self.assertIn("routes.map { actionOf(it) }.distinct().size == 1", combine)
+        self.assertIn('if (others.any { it.mode == Mode.INSTANT }) Route(Mode.FLASH', combine)
+        # Plan 65: a model that answered its two phrasings differently never acts; Sprint needs two sure answers and no dissent.
+        merge = ensemble[ensemble.index("    fun merge("):ensemble.index("    /** Every model's merged opinion")]
+        self.assertIn('if (careful.route.mode == Mode.INSTANT) Route(Mode.FLASH', merge)
+        pair = ensemble[ensemble.index("    fun sprintPair("):ensemble.index("    /** One model's answers")]
+        self.assertIn("it.value.size >= 2", pair)
+        self.assertIn("if (opinions.any { keyOf(it.route) != (Mode.INSTANT to action) }) return null", pair)
+        self.assertIn("Ensemble.combine(Ensemble.perModel(opinions))", ensemble)
         self.assertIn('Route(Mode.FLASH, "the decision models disagree on the action")', combine)
         single = ensemble[ensemble.index("    private fun single("):ensemble.index("    /** Instant below Flash")]
         self.assertIn("op.route.mode == Mode.INSTANT && undoable(op.route)", single)

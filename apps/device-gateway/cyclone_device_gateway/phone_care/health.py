@@ -206,7 +206,7 @@ def _clean_engine(raw: Any) -> dict[str, Any] | None:
         if isinstance(name, str) and _INTENT.match(name) and isinstance(l, dict):
             lanes[name] = {"asked": _int(l.get("asked")), "answerRate": _share(l.get("answerRate")),
                            "p50": _int(l.get("p50")) or None, "p95": _int(l.get("p95")) or None,
-                           "firstShare": _share(l.get("firstShare"))}
+                           "firstShare": _share(l.get("firstShare")), "selfAgreement": _share(l.get("selfAgreement"))}
     active = raw.get("active")
     return {"active": active if isinstance(active, str) and _INTENT.match(active) else None,
             "engines": dict(list(engines.items())[:4]), "lanes": dict(list(lanes.items())[:4])}

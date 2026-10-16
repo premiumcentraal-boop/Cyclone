@@ -35,13 +35,23 @@ object Triage {
 
     private fun flag(instructions: String, yes: String, no: String) = DQuestion.Noul(instructions, yes, no)
 
+    /**
+     * Plan 65: how many phrasings of the same board a race asks. Variant 0 is the plain board; variant 1 lists every
+     * choice's options in reverse order and puts the screen before the request. Same questions, same option names: only
+     * the order a model reads them in changes, so a model's preference for whatever comes first can't decide alone.
+     */
+    const val VARIANTS = 2
+
+    private fun <T> ordered(items: List<T>, variant: Int): List<T> = if (variant % 2 == 1) items.reversed() else items
+
     /** Every Triage question, all independent of each other, so one call answers them all. */
-    fun questions(world: GrammarWorld, text: String): Map<String, DQuestion> = linkedMapOf<String, DQuestion>().apply {
+    fun questions(world: GrammarWorld, text: String, variant: Int = 0): Map<String, DQuestion> = linkedMapOf<String, DQuestion>().apply {
         put("difficulty", DIFFICULTY)
         put("capability", DQuestion.Choice("If one single action on the phone does the whole request, which one? Otherwise none.",
-            ModeRouter.INTENTS.keys.filter { it != "none" }.associateWith { ACTION_GUIDANCE[it].orEmpty() } + ("none" to
+            ordered(ModeRouter.INTENTS.keys.filter { it != "none" }, variant).associateWith { ACTION_GUIDANCE[it].orEmpty() } + ("none" to
                 "No single action does it: it needs several steps, writing, an answer, or it is not a phone action.")))
-        put("target", DQuestion.Choice("For tap or open_app: which on-screen thing or app. Otherwise none.", targets(world, text).associateWith { "" }))
+        put("target", DQuestion.Choice("For tap or open_app: which on-screen thing or app. Otherwise none.",
+            (ordered(targets(world, text).filter { it != "none" }, variant) + "none").associateWith { "" }))
         put("is_for_cyclone", flag("Is this meant for the phone assistant?",
             "An instruction or a question for the assistant.", "Chatter, thanks, or words said to someone else."))
         put("answer_only", flag("Does it only ask for information, with nothing to do on the phone?",
@@ -65,15 +75,17 @@ object Triage {
             STEP_KINDS.associateWith { STEP_GUIDANCE[it].orEmpty() }))
     }
 
-    /** The state: the request, then what the phone can see and offer (app words only). */
-    fun state(text: String, world: GrammarWorld): List<DPart> = listOf(
+    /** The state: the request and what the phone can see and offer (app words only); variant 1 shows the phone first. */
+    fun state(text: String, world: GrammarWorld, variant: Int = 0): List<DPart> = listOf(
         DPart.Text("Triage one request to a phone assistant that operates this Android phone."),
         DPart.Text(BoxWire.clean(buildString {
-            appendLine("Request: ${text.take(300)}")
-            val labels = world.labels.filter { it.isNotBlank() }.distinct().take(25)
+            val request = "Request: ${text.take(300)}"
+            if (variant % 2 == 0) appendLine(request)
+            val labels = ordered(world.labels.filter { it.isNotBlank() }.distinct().take(25), variant)
             if (labels.isNotEmpty()) appendLine("On screen: ${labels.joinToString(", ")}")
-            val apps = rankedApps(world, text)
+            val apps = ordered(rankedApps(world, text), variant)
             if (apps.isNotEmpty()) appendLine("Apps that may be meant: ${apps.joinToString(", ")}")
+            if (variant % 2 == 1) appendLine(request)
         }.trimEnd())),
     )
 
