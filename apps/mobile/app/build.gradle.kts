@@ -11,8 +11,8 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 33
         targetSdk = 35
-        versionCode = 295
-        versionName = "5.0.0-alpha.141.dev1"
+        versionCode = 296
+        versionName = "5.0.0-alpha.142.dev1"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -76,5 +76,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20250517")
+    // Unit tests use Android's own org.json, not JSON-java: the phone's behaviour, not a lookalike.
+    testImplementation(project(":test-android-json"))
 }

@@ -1,6 +1,7 @@
 # Plan 69: Cyclone OneMind, the final plan
 
-**Status:** FINAL. Agreed with the owner on 2026-10-16, and the source of truth for the build. Nothing is built yet.
+**Status:** BUILT and released as **5.0.0-alpha.138.dev1** on 2026-10-17 (see §14.5). Physical device verification is
+still to do (device matrix rows 7.1–7.12). Agreed with the owner on 2026-10-16; the source of truth for the build.
 
 **For agents:** read this plan first and build from it. Plans 65–68 are the design history behind it. Where they
 differ from this plan, **this plan wins**. Each section points to the history for the reasoning.
@@ -570,4 +571,8 @@ and everything the owner sees.
     - `recall` reopens folded history only within the running process (not after a resume).
   - Compatibility: a PC gateway older than this build rejects ask.status while a OneMind run is live (the new
     `onemind` key). The phone and PC must be updated together; say so in the release notes.
-- [ ] Checkpoint 4: release (alpha.138)
+- [x] Checkpoint 4: release (alpha.138): published as `v5.0.0-alpha.138.dev1` from source `3ac17da9` (Mobile CI run
+  1509 on the work branch, 1510 on the release branch); APK SHA-256
+  `d76210270ce6f82425b0ee5345964f076969d9986b6666dd7717c9911458382a` matches the manifest; signed v3 with the rotated
+  release key `e78c6e0b32d66da05839243c65e9987ba54722d402543f00408b57b1585dbf60`. Release notes:
+  `docs/RELEASE_5.0.0-alpha.138.dev1.md`. Deferred items are listed under checkpoint 3.

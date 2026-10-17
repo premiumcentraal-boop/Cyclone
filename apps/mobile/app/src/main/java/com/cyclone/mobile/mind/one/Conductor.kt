@@ -445,7 +445,7 @@ class Conductor(
             } catch (error: Exception) {
                 lastError = error
                 record(kind, model, null, clock() - started, ok = false)
-                listener.onNotice("${model.label} didn't answer${if (attempt == 0) "; asking again" else ""}: ${error.message ?: error.javaClass.simpleName}")
+                listener.onNotice("${model.label} didn't answer${if (attempt == 0) "; asking again" else ""}: ${com.cyclone.mobile.mind.mission.FailureText.describe(error)}")
             }
         }
         end(RunEnd.FAILED, "${model.label} could not answer: ${lastError?.message ?: "no reply"}")

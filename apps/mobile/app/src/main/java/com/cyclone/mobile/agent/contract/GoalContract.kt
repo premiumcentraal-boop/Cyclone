@@ -414,7 +414,7 @@ object GoalContractCompiler {
             val words = normalizedWords("${control.label} ${control.semanticName}")
             if (words.any { word -> terms.any { term -> fuzzyEquivalent(term, word) } }) score += 2
         }
-        val textWords = normalizedWords("${page.pageSummary} ${page.pageText}")
+        val textWords = normalizedWords("${page.pageSummary.searchText()} ${page.pageText.searchText()}")
         if (textWords.any { word -> generic.any { term -> fuzzyEquivalent(term, word) } }) score += 1
         return score
     }
@@ -427,7 +427,7 @@ object GoalContractCompiler {
             val text = "${control.label} ${control.semanticName}".lowercase()
             if (actionTerms.any(text::contains)) score += 2
         }
-        val surfaceText = "${page.pageSummary} ${page.pageText}".lowercase()
+        val surfaceText = "${page.pageSummary.searchText()} ${page.pageText.searchText()}".lowercase()
         if (notificationTerms.any(surfaceText::contains)) score += 2
         return score
     }
@@ -435,9 +435,9 @@ object GoalContractCompiler {
     private fun pageHaystack(page: AgentPageCard): String = buildString {
         append(page.packageName).append(' ')
         append(page.activity.orEmpty()).append(' ')
-        append(page.pageSummary.toString()).append(' ')
-        append(page.pageText.toString()).append(' ')
-        append(page.pageEvidence.toString()).append(' ')
+        append(page.pageSummary.searchText()).append(' ')
+        append(page.pageText.searchText()).append(' ')
+        append(page.pageEvidence.searchText()).append(' ')
         page.controls.take(64).forEach { control ->
             append(control.label).append(' ')
             append(control.semanticName).append(' ')
@@ -456,7 +456,7 @@ object GoalContractCompiler {
         if (addressControls.any { it.evidence.optBoolean("focused") }) return false
         val text = if (addressControls.isNotEmpty()) addressControls.joinToString(" ") {
             "${it.label} ${it.semanticName}"
-        } else "${page.pageSummary} ${page.pageText}"
+        } else "${page.pageSummary.searchText()} ${page.pageText.searchText()}"
         return exactHost.containsMatchIn(text)
     }
 

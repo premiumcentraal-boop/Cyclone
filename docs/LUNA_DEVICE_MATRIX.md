@@ -108,3 +108,12 @@ OneMind is the only engine for Flash and Mind. Watch the task card: milestones, 
 | 7.10 | Repeat 7.3 a second time | The trace says "Started from a recipe"; no planning call | UNVERIFIED |
 | 7.11 | Pause a Mind task from the card, wait, resume | It holds, then continues where it was | UNVERIFIED |
 | 7.12 | Glass → Phone → Ask "open WhatsApp and search for Anna" | Glass shows the milestones, then "Flash · n wakes · $… · <step>" under them | UNVERIFIED |
+
+## alpha.142 · What only broke on the phone
+
+| # | Steps | Expected | Result |
+|---|---|---|---|
+| 8.1 | "open ad.nl" | Chrome opens ad.nl and the task ends as done (it used to keep going) | UNVERIFIED |
+| 8.2 | "open reddit.com on Chrome and login for me", already signed in | Done once the page shows you are signed in | UNVERIFIED |
+| 8.3 | A Mind task, e.g. "find Anna in WhatsApp and open her chat" | No step, search or target reads "null" in the run's steps | UNVERIFIED |
+| 8.4 | Install over 141 with `adb install -r`, `adb logcat -s PackageManager PackageInstaller` running | Installs; if not, the `INSTALL_FAILED_…` code names why | UNVERIFIED |

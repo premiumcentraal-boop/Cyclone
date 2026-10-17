@@ -5,7 +5,8 @@ import org.json.JSONObject
 
 /** One tool call the model asked for. [arguments] is the raw JSON text the model produced. */
 data class MindToolCall(val id: String, val name: String, val arguments: String) {
-    fun argumentsJson(): JSONObject? = runCatching { JSONObject(arguments.ifBlank { "{}" }) }.getOrNull()
+    /** The arguments as JSON, with explicit nulls dropped (a null means "not given"; see [ModelJson]). */
+    fun argumentsJson(): JSONObject? = runCatching { ModelJson.parse(arguments.ifBlank { "{}" }) }.getOrNull()
 }
 
 /**

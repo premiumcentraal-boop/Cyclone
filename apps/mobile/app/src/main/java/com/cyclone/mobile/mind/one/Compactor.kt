@@ -93,7 +93,7 @@ class Compactor(private val limit: CompactAt = CompactAt.DEFAULT, private val st
 
     /** What `recall` reopens: folded lines that mention [what], newest first. */
     fun recall(what: String): String {
-        val words = what.lowercase().split(Regex("\\W+")).filter { it.length > 2 }
+        val words = what.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length > 2 }
         val hits = folded.asReversed().filter { text -> words.isNotEmpty() && words.any { text.lowercase().contains(it) } }
         if (hits.isEmpty()) return "RECALL \"$what\": nothing in the folded history mentions it."
         return "RECALL \"$what\":\n" + hits.take(3).joinToString("\n---\n") { it.take(MATERIAL_PER_MESSAGE) }

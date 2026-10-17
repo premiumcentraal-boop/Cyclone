@@ -33,7 +33,7 @@ object PlanLines {
     fun parse(line: String, nextStepId: () -> String): Item? {
         val text = line.trim().removePrefix("-").trim().trimEnd(',')
         if (!text.startsWith("{") || !text.endsWith("}")) return null
-        val j = runCatching { JSONObject(text) }.getOrNull() ?: return null
+        val j = runCatching { com.cyclone.mobile.mind.ModelJson.parse(text) }.getOrNull() ?: return null
         return when {
             j.has("decision") -> WakeReply.Kind.of(j.optString("decision"))?.let { Item.Decision(it, j) }
             j.has("milestone") -> j.optString("milestone").takeIf { it.isNotBlank() }
