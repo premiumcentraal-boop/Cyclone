@@ -293,11 +293,25 @@ internal fun OverlayIdleHalo(
         pulseAlpha.animateTo(0f, tween(170))
     }
 
+    val cy by com.cyclone.mobile.ui.overlay.cy.CyLook.enabled.collectAsState()
     // Plan 27: a small, slightly oval, see-through glass bubble with a thin shine and Cyclone's mark; taps light it up.
     Box(
         modifier.size(OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp, OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp),
         contentAlignment = Alignment.Center,
     ) {
+        if (cy) {
+            // Alpha.139: Cy floats on its own (no bubble behind it); taps make it jump a little, like the bubble did.
+            com.cyclone.mobile.ui.overlay.cy.Cy(
+                if (state.activating) com.cyclone.mobile.ui.overlay.cy.CyMood.LISTEN else com.cyclone.mobile.ui.overlay.cy.CyMood.IDLE,
+                34.dp,
+                Modifier.graphicsLayer {
+                    scaleX = pulseScale.value
+                    scaleY = pulseScale.value
+                },
+                glow = true,
+            )
+            return@Box
+        }
         val response = pulseAlpha.value
         Box(
             Modifier.size(58.dp, 50.dp)
