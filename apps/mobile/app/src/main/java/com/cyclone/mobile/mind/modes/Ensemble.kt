@@ -70,6 +70,9 @@ class DecisionRace(
 
     val providers: Set<String> get() = lanes.map { it.provider }.toSet()
 
+    /** How many answers the race asks for (one per lane). */
+    val size: Int get() = lanes.size
+
     fun run(
         prompt: (Lane) -> Prompt,
         stopEarly: (List<Arrival>) -> Boolean = { false },
@@ -162,13 +165,14 @@ object Ensemble {
     const val SPRINT_SURE = 0.9
 
     /**
-     * Plan 65: Sprint acts early when **two** answers so far are sure of the same easy-to-undo action and **no** answer so
-     * far says anything else. Returns that action's first opinion, or null to keep waiting.
+     * Sprint acts early when [need] answers so far are sure of the same easy-to-undo action and **no** answer so far says
+     * anything else. One answer per model (the default race) needs one; with two phrasings per model (plan 65's
+     * four-answer race) it needs two. Returns that action's first opinion, or null to keep waiting.
      */
-    fun sprintPair(opinions: List<Opinion>): Opinion? {
-        if (opinions.size < 2) return null
+    fun sprintEarly(opinions: List<Opinion>, need: Int = 1): Opinion? {
+        if (opinions.size < need || opinions.isEmpty()) return null
         val sure = opinions.filter { sprintMayAct(it) }
-        val action = sure.groupBy { actionOf(it.route) }.entries.firstOrNull { it.value.size >= 2 }?.key ?: return null
+        val action = sure.groupBy { actionOf(it.route) }.entries.firstOrNull { it.value.size >= need }?.key ?: return null
         if (opinions.any { keyOf(it.route) != (Mode.INSTANT to action) }) return null
         return sure.first { actionOf(it.route) == action }
     }
@@ -254,18 +258,20 @@ class RaceEngine(
         val started = System.nanoTime()
         var early: Ensemble.Opinion? = null
         val models = race.providers
+        // Two answers from one model (two phrasings) are needed to act early only when each model answers twice.
+        val need = if (race.size > models.size) 2 else 1
         val result = race.run(
             prompt = { lane -> Prompt(Triage.state(text, world, lane.variant), Triage.questions(world, text, lane.variant)) },
             stopEarly = { arrived ->
                 engine == DecisionEngine.SPRINT &&
-                    Ensemble.sprintPair(arrived.mapNotNull { Ensemble.opinion(it, text, world, bar) })?.also { early = it } != null
+                    Ensemble.sprintEarly(arrived.mapNotNull { Ensemble.opinion(it, text, world, bar) }, need)?.also { early = it } != null
             },
             // Every model has answered once: its second phrasing gets a short grace, not the full deadline.
             quorum = { arrived -> arrived.map { it.provider }.toSet().containsAll(models) },
         )
         val ms = (System.nanoTime() - started) / 1_000_000
         val opinions = result.decided.mapNotNull { Ensemble.opinion(it, text, world, bar) }
-        val route = early?.let { it.route.copy(why = "two answers were sure of it first, none disagreed, and it is easy to undo: ${it.route.why}") }
+        val route = early?.let { it.route.copy(why = "${it.lane} was sure of it first, none disagreed, and it is easy to undo: ${it.route.why}") }
             ?: Ensemble.combine(Ensemble.perModel(opinions))
         result.all.thenAccept { all -> runCatching { record(recordOf(atMs, all, route, early?.lane, text, world, bar)) } }
         return route.copy(by = Decider.DECISIONS, decision = Ensemble.guessOf(route, opinions), decideMs = ms)

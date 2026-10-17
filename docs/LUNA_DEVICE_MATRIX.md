@@ -75,3 +75,36 @@ Settings → Speed → Decision engine. Run each row in **Consensus**, then **Sp
 | 5.9 | Say "get the picture thing up" three times (in Consensus) | The camera each time. The third time the trace says "you asked this before and it worked" and it opens with no wait | UNVERIFIED |
 | 5.10 | Repeat 5.9, but cancel the second run | The third run asks the models again (Replay forgot it) | UNVERIFIED |
 | 5.11 | 20 everyday requests, then the health report's `decisions.engine.lanes` | Each model shows `selfAgreement`. Four answers per decision (two per model) in the engine log | UNVERIFIED |
+
+## alpha.137 · Live voice from the Ask bar, decided while you speak (plan 65 R1)
+
+| # | Steps | Expected | Result |
+|---|---|---|---|
+| 6.1 | Open the Ask bar, type nothing | The send arrow is a voice wave; typing turns it back into Send | UNVERIFIED |
+| 6.2 | Tap the wave, say "turn it up a bit" | The Ask bar steps aside, the voice panel rises with Cyclone's smoke glass, volume goes up, the panel closes and the Ask bar comes back as it was | UNVERIFIED |
+| 6.3 | Tap the wave, say "open my email and read the newest one" | One-line confirmation; the task runs; Cyclone says when it is done; the voice session then closes by itself | UNVERIFIED |
+| 6.4 | Live voice: say "pull up the picture", pause briefly, then "thing please" | Works as usual; the run history shows no head start used for the first half | UNVERIFIED |
+| 6.5 | Live voice: say a short request and stop | The run history shows "Transcribed during the pause"; the answer feels quicker than alpha.136 | UNVERIFIED |
+| 6.6 | Dictate "pull up the picture thing" with the mic, wait a second, tap Send | The trace says "decided while you spoke" | UNVERIFIED |
+| 6.7 | Settings → Live voice → "Voice button for the car" on | The large button is on screen as in Driver mode; the wave in the Ask bar uses the same conversation | UNVERIFIED |
+| 6.8 | Settings → Visual quality → Lite, then 6.2 | The orb holds still, the panel fades in without growing | UNVERIFIED |
+| 6.9 | Open a task's work island, let the task finish while it is open | The island stays open in its finished state until you close it | UNVERIFIED |
+
+## alpha.138 · OneMind (plan 69)
+
+OneMind is the only engine for Flash and Mind. Watch the task card: milestones, the step line, wakes and cost.
+
+| # | Steps | Expected | Result |
+|---|---|---|---|
+| 7.1 | Instant: "turn it up a bit" | Volume up at once, as before (Instant is unchanged) | UNVERIFIED |
+| 7.2 | Flash: "turn on dark mode" (with dark mode already on) | Finishes at once: "Already on", checked; no steps taken | UNVERIFIED |
+| 7.3 | Flash: "open WhatsApp and search for Anna" | The card shows the step line moving; 0–1 wakes; cost under a cent | UNVERIFIED |
+| 7.4 | Mind: "find my last invoice email and tell me the amount" | Milestones on the card tick off; the amount in the end report is exactly what the mail says | UNVERIFIED |
+| 7.5 | Mind: "text Anna I'm on my way" | A review before the send milestone; the usual approval card for the exact text; nothing sent without it | UNVERIFIED |
+| 7.6 | During 7.4, Steer: "use the work account instead" | The card shows a new plan version; the run follows the new goal | UNVERIFIED |
+| 7.7 | A task that hits a login screen | A side trip to log in (vault fills passwords), then back to the paused milestone | UNVERIFIED |
+| 7.8 | A task that can't succeed (an app that isn't installed, asked three ways) | A check-in card: "This seems stuck on … Keep going, change course, or stop?" | UNVERIFIED |
+| 7.9 | Settings → Speed → Compact history at → 50k, then a long Mind task (20+ steps) | The trace shows "History compacted" at a milestone boundary; the run keeps its facts | UNVERIFIED |
+| 7.10 | Repeat 7.3 a second time | The trace says "Started from a recipe"; no planning call | UNVERIFIED |
+| 7.11 | Pause a Mind task from the card, wait, resume | It holds, then continues where it was | UNVERIFIED |
+| 7.12 | Glass → Phone → Ask "open WhatsApp and search for Anna" | Glass shows the milestones, then "Flash · n wakes · $… · <step>" under them | UNVERIFIED |

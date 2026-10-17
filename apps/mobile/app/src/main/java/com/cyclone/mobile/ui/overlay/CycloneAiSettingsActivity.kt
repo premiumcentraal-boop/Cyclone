@@ -449,80 +449,26 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
-                // Plan 41: Fast mode, the Pilot. Off by default; the full Mind always takes over when the fast model is unsure.
-                var fast by remember { mutableStateOf(com.cyclone.mobile.mind.pilot.FastMode.settings(context)) }
-                fun save(next: com.cyclone.mobile.mind.pilot.FastModeSettings) {
-                    fast = next
-                    com.cyclone.mobile.mind.pilot.FastMode.save(context, next)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Fast mode", fontWeight = FontWeight.Bold)
-                        Text(
-                            "The smart model plans the whole run; a fast model carries it out, a second per move, doing the low-risk moves " +
-                                "itself and asking the smart model when the screen doesn't match. Anything that can't be undone still asks you. " +
-                                "Banking, payment and authenticator apps are never done fast.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Plan 69 §8: OneMind compacts a long run's history only past this limit (like Claude and ChatGPT do).
+                var compactAt by remember { mutableStateOf(com.cyclone.mobile.mind.one.OneMindStore.compactAt(context)) }
+                Text("Compact history at", fontWeight = FontWeight.Bold)
+                Text(
+                    "A long task's history is shortened only when it grows past this size: old screens fold into one line each, " +
+                        "the facts found stay exact, and a short summary is written for the rest. In tokens; 100k is the default. Off keeps " +
+                        "everything until the model's own limit.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.cyclone.mobile.mind.one.CompactAt.entries.forEach { option ->
+                        FilterChip(
+                            selected = compactAt == option,
+                            onClick = {
+                                compactAt = option
+                                com.cyclone.mobile.mind.one.OneMindStore.setCompactAt(context, option)
+                            },
+                            label = { Text(option.label.removeSuffix(" tokens")) },
                         )
-                    }
-                    Switch(checked = fast.enabled, onCheckedChange = { save(fast.copy(enabled = it)) })
-                }
-                if (fast.enabled) {
-                    Spacer(Modifier.size(8.dp))
-                    Text("Fast decisions by", style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        com.cyclone.mobile.mind.pilot.FastRoute.entries.forEach { route ->
-                            FilterChip(selected = fast.route == route, onClick = { save(fast.copy(route = route)) }, label = { Text(route.label) })
-                        }
-                    }
-                    if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) {
-                        // The decision model is Cyclone's decision provider, chosen under Speed (plan 58), not a free choice.
-                        val provider = remember { com.cyclone.mobile.mind.decide.Decisions.refresh(context) }
-                        Text(
-                            "${provider.label}${if (provider.vision) ", reads the screen too" else ", text only"}. Choose it under Speed.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        var model by remember(fast.route) { mutableStateOf(fast.model) }
-                        androidx.compose.material3.OutlinedTextField(
-                            value = model,
-                            onValueChange = { value -> model = value.take(120); save(fast.copy(model = model)) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            label = { Text("Fast model (OpenRouter)") },
-                        )
-                    }
-                    Text("How sure before acting", style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        com.cyclone.mobile.mind.pilot.FastSureness.entries.forEach { level ->
-                            FilterChip(selected = fast.sureness == level, onClick = { save(fast.copy(sureness = level)) }, label = { Text(level.label) })
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Screenshots when needed", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) "JEV reads text only: no screenshots are taken for it."
-                                else "Only when the screen's text isn't enough, never with a password, code or card field on screen.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = fast.images, onCheckedChange = { save(fast.copy(images = it)) })
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Smart model checks ahead", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "While the fast model works, the smart model reviews the rest of the plan, and it always has before " +
-                                    "anything that can't be undone. Faster and safer; it uses a few more smart-model calls.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = fast.lookahead, onCheckedChange = { save(fast.copy(lookahead = it)) })
                     }
                 }
             }
@@ -834,7 +780,7 @@ internal fun ColumnScope.WorkingIndicatorSettings(context: Context) {
     var mode by remember { mutableStateOf(TraceFieldPrefs.mode(context)) }
     var style by remember { mutableStateOf(TraceFieldPrefs.style(context)) }
     var previewMessage by remember { mutableStateOf<String?>(null) }
-    // Alpha.137: Cy, Cyclone's character, in the overlay (first concept). Off brings back Cyclone's mark.
+    // Alpha.139: Cy, Cyclone's character, in the overlay (first concept). Off brings back Cyclone's mark.
     var cy by remember { mutableStateOf(com.cyclone.mobile.ui.overlay.cy.CyLook.also { it.load(context) }.enabled.value) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -966,12 +912,11 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 /** Plan 63: what each decision engine does, in one or two sentences. */
 private fun engineCopy(engine: com.cyclone.mobile.mind.modes.DecisionEngine): String = when (engine) {
     com.cyclone.mobile.mind.modes.DecisionEngine.CONSENSUS ->
-        "Consensus: JEV and OpenAI Decisions each answer twice at the same moment, the question worded two ways. Cyclone " +
-            "acts only when all four answers agree; any disagreement goes to the smarter mode. If only one model answers " +
-            "in time, only an easy-to-undo action goes ahead."
+        "Consensus: JEV and OpenAI Decisions answer at the same moment. Cyclone acts only when both agree; any disagreement " +
+            "goes to the smarter mode. If only one answers in time, only an easy-to-undo action goes ahead."
     com.cyclone.mobile.mind.modes.DecisionEngine.SPRINT ->
-        "Sprint: the same four answers, but as soon as two are sure of the same easy-to-undo action (camera, volume, " +
-            "opening an app) and none disagrees, it acts. Everything else waits, as in Consensus."
+        "Sprint: both answer at the same moment, and the first one that's sure of an easy-to-undo action (camera, volume, " +
+            "opening an app) acts at once, unless the other has already disagreed. Everything else waits for both, as in Consensus."
     com.cyclone.mobile.mind.modes.DecisionEngine.CLASSIC ->
         "Classic: one decision model, as before, with the other one able to compare beside it."
 }

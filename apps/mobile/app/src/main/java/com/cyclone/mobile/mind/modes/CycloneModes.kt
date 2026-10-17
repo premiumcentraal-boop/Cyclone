@@ -117,6 +117,47 @@ object CycloneModes {
         Thread({ run(app, request, settings, voice, done) }, "cyclone-modes").start()
     }
 
+    /** Plan 65 R1: decisions made while the owner was still speaking. */
+    val speculation = Speculation()
+    private val primer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "cyclone-prime").apply { isDaemon = true } }
+    @Volatile private var pendingPrime: java.util.concurrent.ScheduledFuture<*>? = null
+
+    /**
+     * Plan 65 R1, deciding while they speak: words that aren't sent yet ([text]: dictation so far, or a pause in Live
+     * voice) go through the same stages as a request, but nothing is carried out: if the grammar, the rules, Replay and
+     * the phone model leave it to the decision engine, the engine's race starts now and its answer waits in
+     * [speculation] for the same words. [afterMs] waits for the words to settle first (dictation updates every word).
+     * Only in Auto with Consensus or Sprint, and never while a mission runs.
+     */
+    fun prime(context: Context, text: String, afterMs: Long = 0) {
+        val app = context.applicationContext
+        pendingPrime?.cancel(false)
+        if (text.trim().split(Regex("\\s+")).count { it.isNotBlank() } < 2) return
+        pendingPrime = primer.schedule({ runCatching { primeNow(app, text) } }, afterMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
+    private fun primeNow(context: Context, text: String) {
+        val settings = settings(context)
+        if (settings.speed != Speed.AUTO || settings.engine == DecisionEngine.CLASSIC || MindMissions.live.value != null) return
+        val fast = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
+        val bar = fast.sureness.bar
+        // The same world the request will see: run() reads the screen when a box may be asked or the words need labels.
+        val box = com.cyclone.mobile.mind.decide.Decisions.box(context)
+        val device = com.cyclone.mobile.mind.mission.AndroidMindDevice(context)
+        val screen = if (device.blocker() == null && (box != null || InstantGrammar.needsScreen(text)))
+            runCatching { AndroidInstantHands(context, text, device, { _, _ -> false }, { false }).look() }.getOrNull() else null
+        val world = GrammarWorld(screen?.labels.orEmpty(), device.apps().map { it.label to it.packageName })
+        val phone = runCatching { com.cyclone.mobile.mind.decide.PhoneBrain.peek(context, settings.phoneModel, bar) }.getOrNull()
+        val early = EngineDecider { t, w, b ->
+            speculation.prime(t, w, b) { ticket ->
+                com.cyclone.mobile.mind.decide.Decisions.engine(context, settings.engine, record = ticket::recorded)?.decide(t, w, b)
+            }
+            null
+        }
+        // No box: if the engine is reached, its race is started above and this route is thrown away.
+        ModeRouter.route(text, world, facts(context), settings.speed, null, bar, phone, null, early)
+    }
+
     private fun run(context: Context, request: String, settings: ModeSettings, voice: Boolean, reply: (ModeResult) -> Unit) {
         val running = Running("instant-${UUID.randomUUID()}")
         current = running
@@ -157,7 +198,11 @@ object CycloneModes {
             // Plan 63: the decision engine. Consensus and Sprint race both decision models; Classic is alpha.123's one model,
             // where Triage replaces Board 0 only when its switch is on and the watch asks the other model beside it.
             val classic = settings.engine == DecisionEngine.CLASSIC
-            val engine = if (settings.speed == Speed.AUTO && !classic) com.cyclone.mobile.mind.decide.Decisions.engine(context, settings.engine) else null
+            // Plan 65 R1: a decision made while the owner spoke these exact words on this screen is used first.
+            val engine = if (settings.speed == Speed.AUTO && !classic) com.cyclone.mobile.mind.decide.Decisions.engine(context, settings.engine)?.let {
+                SpeculativeEngine(it, speculation, com.cyclone.mobile.mind.decide.Decisions.ENGINE_DEADLINE_MS,
+                    save = { r -> com.cyclone.mobile.mind.decide.EngineStore.save(context, r) })
+            } else null
             val triage = if (settings.speed == Speed.AUTO && classic) com.cyclone.mobile.mind.decide.Decisions.triage(context) else null
             val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar, phone, triage, engine) }
             routed = route

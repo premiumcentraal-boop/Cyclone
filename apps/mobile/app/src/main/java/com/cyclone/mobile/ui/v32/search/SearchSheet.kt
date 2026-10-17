@@ -181,7 +181,7 @@ fun CycloneSearchSheet(
 }
 
 /** The settings people open most, shown before anything is typed. */
-private val SUGGESTED = setOf("Model & API", "Visual quality", "Phone control", "Driver mode")
+private val SUGGESTED = setOf("Model & API", "Visual quality", "Phone control", "Live voice")
 
 @Composable
 private fun SearchChip(label: String, count: Int, selected: Boolean, onClick: () -> Unit) {

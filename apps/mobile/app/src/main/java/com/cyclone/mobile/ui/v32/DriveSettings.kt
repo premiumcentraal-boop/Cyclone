@@ -60,8 +60,9 @@ internal fun DriverModeSettings(context: Context, refresh: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("Driver mode", style = MaterialTheme.typography.titleMedium)
-                Text("The Ask bubble becomes a large voice button. Tap it and talk; Cyclone confirms in one line and tells you when it is done.",
+                Text("Voice button for the car", style = MaterialTheme.typography.titleMedium)
+                Text("Live voice is always one tap away: the button at the end of the empty Ask bar. Turn this on and the Ask " +
+                    "bubble becomes a large voice button too, for the car. Talk; Cyclone confirms in one line and tells you when it is done.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(12.dp))

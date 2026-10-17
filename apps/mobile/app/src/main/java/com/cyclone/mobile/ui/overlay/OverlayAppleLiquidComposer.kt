@@ -116,6 +116,8 @@ internal fun OverlayAppleComposerBar(
     modifier: Modifier = Modifier,
     /** Plan 38: typed text sent while Cyclone works opens the Steer / Queue / Parallel list (null: not offered). */
     onSendWhileWorking: (() -> Unit)? = null,
+    /** Live voice: with nothing typed, the send button opens a spoken conversation (null: the button only sends). */
+    onLive: (() -> Unit)? = null,
 ) {
     // Plan 27: the Ask bar on tilt-lit glass. Round controls carry the lit edge; the words sit on one soft pill that
     // fills the space between + and the voice button; the voice button becomes the glowing orb only while listening.
@@ -156,7 +158,8 @@ internal fun OverlayAppleComposerBar(
                 description = if (voiceListening) "Listening. Tap to stop" else "Dictate request. Tap, or hold while you speak",
                 onStart = onDictate, onStop = onStopDictation,
             ) { tint -> SignatureIcon(SignatureGlyph.MIC, color = tint) }
-            OverlayRequestAction(working, paused, taskKey, text.isNotBlank(), onPrimary, onPause, onStop, onSendWhileWorking)
+            OverlayRequestAction(working, paused, taskKey, text.isNotBlank(), onPrimary, onPause, onStop, onSendWhileWorking,
+                onLive = onLive?.takeIf { !voiceListening })
         }
     }
 }
@@ -276,6 +279,7 @@ internal fun OverlayRequestAction(
     working: Boolean, paused: Boolean, taskKey: String, canSend: Boolean,
     onSend: () -> Unit, onPauseOrResume: () -> Unit, onStop: () -> Unit,
     onSendWhileWorking: (() -> Unit)? = null,
+    onLive: (() -> Unit)? = null,
 ) {
     // Plan 38: with typed text the button is Send even while working (it opens the options); empty, it is pause and
     // the two-tap stop.
@@ -342,14 +346,20 @@ internal fun OverlayRequestAction(
             onClick { accessibleTap(); true }
             customActions = listOf(CustomAccessibilityAction("Stop request") { gesture.reset(); stopAction(); true })
         }
+    else if (!canSend && onLive != null) Modifier.clickable(role = Role.Button, onClick = onLive)
+        // Live voice: with nothing typed, the button talks with Cyclone instead of sending.
+        .semantics { contentDescription = "Live voice. Talk with Cyclone" }
     else Modifier.clickable(enabled = canSend, role = Role.Button, onClick = onSend)
         .semantics { contentDescription = "Send request" }
     Box(Modifier.size(46.dp).clip(CircleShape)
         .background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Color.White.copy(alpha = .07f), Color.White.copy(alpha = .02f))))
         .litRim()
         .then(action), contentAlignment = Alignment.Center) {
-        SignatureIcon(if (!working) SignatureGlyph.SEND else if (paused) SignatureGlyph.PLAY else SignatureGlyph.PAUSE,
-            color = SignatureInk.copy(alpha = if (working || canSend) 1f else .50f))
+        val glyph = if (working) { if (paused) SignatureGlyph.PLAY else SignatureGlyph.PAUSE }
+            else if (!canSend && onLive != null) SignatureGlyph.LIVE else SignatureGlyph.SEND
+        androidx.compose.animation.Crossfade(glyph, animationSpec = androidx.compose.animation.core.tween(160), label = "RequestGlyph") { g ->
+            SignatureIcon(g, color = SignatureInk.copy(alpha = if (working || canSend || g == SignatureGlyph.LIVE) 1f else .50f))
+        }
         if (progress > 0f) Canvas(Modifier.size(48.dp)) {
             drawArc(OverlayBlue, -90f, progress * 360f, false,
                 style = Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))

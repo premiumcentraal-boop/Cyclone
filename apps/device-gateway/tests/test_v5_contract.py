@@ -531,6 +531,25 @@ def test_alpha91_ask_defaults_to_the_main_screen_and_reads_one_request_back():
         assert str(caught.value.code) == "PROTOCOL_MISMATCH"
 
 
+ONEMIND = {"difficulty": "mind", "goalVersion": 1, "planVersion": 2,
+           "milestones": [{"title": "Open the invoice", "state": "done"}, {"title": "Pay it", "state": "running"}],
+           "step": "Tapping \"Pay\"", "wakes": 2, "wakeLines": ["Replan: the app opened on the wrong account"],
+           "calls": 9, "costUsd": 0.0123}
+
+
+def test_plan69_ask_status_carries_the_onemind_summary_and_nothing_else():
+    svc, _ = _ask_service({**ASK_STATUS, "onemind": ONEMIND})
+    status = svc.forward("phone-1", "ask.status", dict(FOREGROUND))
+    assert status["onemind"]["wakes"] == 2 and status["onemind"]["milestones"][1]["state"] == "running"
+    for bad in ({**ONEMIND, "screen": "Invoice 4821"}, {**ONEMIND, "difficulty": "turbo"}, {**ONEMIND, "costUsd": -1},
+                {**ONEMIND, "wakeLines": ["x" * 161]}, {**ONEMIND, "milestones": [{"title": "t", "state": "weird"}]},
+                {**ONEMIND, "wakes": True}, "not a dict"):
+        broken, _ = _ask_service({**ASK_STATUS, "onemind": bad})
+        with pytest.raises(DesktopRuntimeError) as caught:
+            broken.forward("phone-1", "ask.status", dict(FOREGROUND))
+        assert str(caught.value.code) == "PROTOCOL_MISMATCH"
+
+
 def test_alpha4_malformed_phone_ask_status_is_rejected():
     svc, _ = _ask_service({**ASK_STATUS, "state": "walking"})
     with pytest.raises(DesktopRuntimeError) as caught:

@@ -8,7 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** alpha.137: Cy, Cyclone's character (first concept). */
+/** alpha.139: Cy, Cyclone's character (first concept). */
 class CyTest {
     @Test
     fun handsOnlyWhenTheyMeanSomething() {

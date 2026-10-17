@@ -373,6 +373,7 @@ class OverlayChromeController(
                                 onRequestSubmitted = onRequestSubmitted,
                                 onVoiceInput = ::beginVoiceInput,
                                 onVoiceStop = ::stopVoiceInput,
+                                onLiveVoice = ::beginLiveVoice,
                                 aiSettings = aiSettings,
                                 onAiSettingsChanged = { next ->
                                     aiSettings = next
@@ -598,7 +599,9 @@ class OverlayChromeController(
         val driverIdle = com.cyclone.mobile.voice.DriverMode.settings.value.enabled && compact && !minimizedComposer &&
             (snapshot.state == OverlayChromeState.IDLE || snapshot.launcherCollapsed) && !glass()
         val shown = (secretVisible || !compact || snapshot.idleChipVisible || glass()) &&
-            !OverlayExternalInteraction.active.value && !driverIdle
+            !OverlayExternalInteraction.active.value && !driverIdle &&
+            // Live voice's panel has the bottom of the screen; the Ask overlay comes back as it was when it closes.
+            !com.cyclone.mobile.ui.overlay.DriverOverlay.panelOpen.value
         // Alpha.134: a stroke on Cyclone's glass never hides what the owner sees. The drawn card never takes a touch
         // (only its empty touch layer steps aside); in idle the window is the empty hotspot and its halo stays.
         val visible = shown && !(hideHost && compact)
@@ -1102,6 +1105,28 @@ class OverlayChromeController(
     }
 
     /**
+     * Live voice (the empty Ask bar's button): a spoken conversation with Cyclone, the one Driver mode's button opens.
+     * The Ask overlay steps aside while the voice panel is up ([applyLayout]) and comes back as it was.
+     */
+    fun beginLiveVoice() {
+        onMain {
+            if (ContextCompat.checkSelfPermission(service, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                onVoiceStateChanged(false, null, "Allow microphone access once, then tap Live voice again.")
+                service.startActivity(
+                    Intent(service, MainActivity::class.java)
+                        .setAction(MainActivity.ACTION_REQUEST_OVERLAY_VOICE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                )
+                return@onMain
+            }
+            if (voiceSession) { speechRecognizer?.cancel(); voiceSession = false; onVoiceStateChanged(false, null, null) }
+            // The keyboard leaves with the Ask bar.
+            root?.let { v -> runCatching { service.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.hideSoftInputFromWindow(v.windowToken, 0) } }
+            com.cyclone.mobile.ui.overlay.DriverOverlay.live(service)
+        }
+    }
+
+    /**
      * The owner stopped talking (tap on the orb, or let go after holding it). The recognizer finishes what it heard,
      * so the words land in the Ask field instead of being thrown away.
      */
@@ -1140,12 +1165,18 @@ class OverlayChromeController(
         override fun onResults(results: Bundle?) {
             voiceSession = false
             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+            // Plan 65 R1: the words wait in the field for Send; their decision can be ready by then.
+            if (!transcript.isNullOrBlank()) com.cyclone.mobile.mind.modes.CycloneModes.prime(service, transcript)
             onVoiceStateChanged(false, transcript, if (transcript.isNullOrBlank()) "I didn't catch that." else null)
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
             val transcript = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-            if (!transcript.isNullOrBlank()) onVoiceStateChanged(true, transcript, OverlayCopy.LISTENING)
+            if (!transcript.isNullOrBlank()) {
+                // Plan 65 R1: decide while they speak, once the words have held still for a moment.
+                com.cyclone.mobile.mind.modes.CycloneModes.prime(service, transcript, afterMs = PRIME_SETTLE_MS)
+                onVoiceStateChanged(true, transcript, OverlayCopy.LISTENING)
+            }
         }
 
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -1155,6 +1186,11 @@ class OverlayChromeController(
         val expectedGeneration = generation
         if (Looper.myLooper() == Looper.getMainLooper()) block()
         else main.post { if (generation == expectedGeneration) block() }
+    }
+
+    private companion object {
+        /** Dictation's words must hold still this long before their decision starts early. */
+        const val PRIME_SETTLE_MS = 250L
     }
 
     private fun dp(value: Int): Int = (value * service.resources.displayMetrics.density).toInt()

@@ -62,6 +62,23 @@ class MissionStore(private val root: File, private val keep: Int = 40) {
         )
     }
 
+    /** Plan 69: a OneMind run's Score, beside its journal, so a resume reloads it. Passes through [MindRedaction]. */
+    @Synchronized fun saveScore(missionId: String, score: com.cyclone.mobile.mind.one.Score) =
+        write(score(missionId), com.cyclone.mobile.mind.one.ScoreCodec.encode(scrub(score)).toString())
+
+    /** Every free-text field scrubbed one by one, so the JSON stays whole. */
+    private fun scrub(s: com.cyclone.mobile.mind.one.Score): com.cyclone.mobile.mind.one.Score = s.copy(
+        goals = s.goals.map { it.copy(text = MindRedaction.scrubText(it.text)) },
+        facts = s.facts.map { it.copy(value = MindRedaction.scrubText(it.value)) },
+        events = s.events.map { it.copy(line = MindRedaction.scrubText(it.line)) },
+        plan = s.plan?.let { p -> p.copy(milestones = p.milestones.map { m ->
+            m.copy(steps = m.steps.map { st -> st.copy(args = st.args.mapValues { (_, v) -> MindRedaction.scrubText(v) }) })
+        }) },
+    )
+
+    @Synchronized fun loadScore(id: String): com.cyclone.mobile.mind.one.Score? =
+        read(score(id))?.let { runCatching { com.cyclone.mobile.mind.one.ScoreCodec.decode(JSONObject(it)) }.getOrNull() }
+
     /** Newest first. */
     @Synchronized fun list(): List<Mission> = (root.listFiles { file -> file.name.endsWith(META_SUFFIX) } ?: emptyArray())
         .mapNotNull { file -> runCatching { Mission.fromJson(JSONObject(file.readText())) }.getOrNull() }
@@ -71,6 +88,7 @@ class MissionStore(private val root: File, private val keep: Int = 40) {
         meta(id).delete()
         journal(id).delete()
         trail(id).delete()
+        score(id).delete()
     }
 
     /** What the mission saw and did, for Learn. Structure only (see MissionTrail). */
@@ -105,6 +123,7 @@ class MissionStore(private val root: File, private val keep: Int = 40) {
     private fun meta(id: String) = File(root, safe(id) + META_SUFFIX)
     private fun journal(id: String) = File(root, safe(id) + JOURNAL_SUFFIX)
     private fun trail(id: String) = File(root, safe(id) + ".trail.json")
+    private fun score(id: String) = File(root, safe(id) + ".score.json")
     private fun safe(id: String): String {
         require(ID.matches(id)) { "invalid mission id" }
         return id

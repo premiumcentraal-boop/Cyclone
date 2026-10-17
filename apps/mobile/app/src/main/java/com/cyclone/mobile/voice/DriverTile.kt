@@ -18,10 +18,10 @@ class DriverTile : TileService() {
     private fun render() {
         val tile = qsTile ?: return
         val on = DriverMode.enabled(this)
-        tile.label = "Cyclone Drive"
+        tile.label = "Cyclone Live voice"
         tile.subtitle = if (on) "On" else "Off"
         tile.state = if (on) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        tile.contentDescription = if (on) "Cyclone Drive is on" else "Cyclone Drive is off"
+        tile.contentDescription = if (on) "Cyclone Live voice button is on" else "Cyclone Live voice button is off"
         tile.updateTile()
     }
 }

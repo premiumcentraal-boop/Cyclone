@@ -95,22 +95,23 @@ object Decisions {
      * board. Each lane goes through [call], so each keeps its own breaker; a lane whose breaker is open answers nothing
      * at once and the other decides under the one-answer rule. Null without an OpenRouter key.
      */
-    fun engine(context: Context, engine: com.cyclone.mobile.mind.modes.DecisionEngine): com.cyclone.mobile.mind.modes.EngineDecider? {
+    fun engine(context: Context, engine: com.cyclone.mobile.mind.modes.DecisionEngine,
+               record: ((EngineRecord) -> Unit)? = null): com.cyclone.mobile.mind.modes.EngineDecider? {
         if (engine == com.cyclone.mobile.mind.modes.DecisionEngine.CLASSIC) return null
         val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
         refresh(context)
         val zdr = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).strictPrivacy
-        // Plan 65: every usable model answers twice, once per phrasing of the same question, so a slip in one reading
-        // or a bias towards the first option shows up as disagreement instead of an action.
+        // One answer per model. Plan 65's second phrasing (options reversed) is built and tested; raise
+        // ENGINE_PHRASINGS to 2 to ask each model twice again.
         val lanes = DecisionProvider.entries.filter { it.usable }.flatMap { provider ->
-            (0 until com.cyclone.mobile.mind.modes.Triage.VARIANTS).map { variant ->
+            (0 until ENGINE_PHRASINGS).map { variant ->
                 com.cyclone.mobile.mind.modes.Lane("${provider.wire}#$variant",
                     ProviderTypedBox(key, provider, ENGINE_DEADLINE_MS, "race", zdr), provider.wire, variant)
             }
         }
         val app = context.applicationContext
         return com.cyclone.mobile.mind.modes.RaceEngine(engine, com.cyclone.mobile.mind.modes.DecisionRace(lanes, ENGINE_DEADLINE_MS),
-            record = { EngineStore.save(app, it) })
+            record = record ?: { r -> EngineStore.save(app, r); Unit })
     }
 
     /**
@@ -178,6 +179,8 @@ object Decisions {
      * (plan 62 §1); a later answer is no answer, and the other model decides under the one-answer rule.
      */
     const val ENGINE_DEADLINE_MS = 1_500L
+    /** How many phrasings of the question each model is asked per decision (1 or 2, at most [com.cyclone.mobile.mind.modes.Triage.VARIANTS]). */
+    const val ENGINE_PHRASINGS = 1
 
     /** The watch never makes anyone wait, so it may take longer: it measures, it doesn't decide. */
     const val WATCH_DEADLINE_MS = 6_000L

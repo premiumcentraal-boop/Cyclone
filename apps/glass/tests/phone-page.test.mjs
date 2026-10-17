@@ -161,6 +161,25 @@ test("Ask sends the sentence unchanged and mirrors the phone's run", async () =>
   page.destroy();
 });
 
+test("a OneMind run shows its wakes and cost under the milestones", async () => {
+  const fake = phone();
+  const { page, timers } = open(fake);
+  await flush();
+  page.element.querySelector(".ask-input").value = "pay the October invoice";
+  page.element.querySelector(".ask-form").dispatchEvent({ type: "submit" });
+  await flush();
+  fake.state.ask = { ...fake.state.ask, onemind: { difficulty: "mind", goalVersion: 1, planVersion: 2,
+    milestones: [{ title: "Open the invoice", state: "done" }], step: "Tapping \"Pay\"", wakes: 2,
+    wakeLines: ["Replan: the app opened on the wrong account"], calls: 9, costUsd: 0.0123 } };
+  for (const fn of timers.splice(0)) fn();
+  await flush();
+  await flush();
+  const text = page.element.querySelector(".ask-hud").textContent;
+  assert.match(text, /OneMind · 2 wakes · \$0\.01 · Tapping "Pay"/);
+  assert.match(text, /the app opened on the wrong account/);
+  page.destroy();
+});
+
 test("Ask refusals are named in plain words", async () => {
   const fake = phone({ askError: "ASK_BUSY" });
   const { page } = open(fake);

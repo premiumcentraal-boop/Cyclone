@@ -15,10 +15,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -99,6 +97,59 @@ object DriverOverlay {
     private var lastRepairMs = 0L
     private var buttonDp = 0
     private var faceJob: kotlinx.coroutines.Job? = null
+    /** Whether the voice panel is up: the Ask overlay steps aside for it, and comes back as it was after. */
+    val panelOpen = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    private fun showFace(w: Windows, face: VoiceFace) {
+        w.show(face)
+        if (panelOpen.value != face.panel) {
+            panelOpen.value = face.panel
+            OverlayChromeRuntime.refreshExternalSurface()
+        }
+    }
+
+    /** Live voice started from the Ask bar, without the car button: it ends when the conversation does. */
+    private var liveOnly = false
+    private var endJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Live voice: the Ask bar's empty-field button. Talks now, in the same conversation Driver mode's button opens:
+     * with the car button on, that session listens; otherwise a session without the button opens for this
+     * conversation and closes once it, and any task it started, is over.
+     */
+    fun live(service: CycloneAccessibilityService) {
+        attach(service)
+        session?.let { s -> guarded("live.tap") { s.tap() }; return }
+        guarded("live.start") { startLive(service) }
+    }
+
+    private fun startLive(service: CycloneAccessibilityService) {
+        val next = VoiceSession(service, VoiceTraceSink(service))
+        session = next
+        liveOnly = true
+        val w = runCatching { Windows(service, next, DriverMode.settings.value.buttonDp, withButton = false) }
+            .onFailure { record("live.windows", it) }
+            .getOrNull()
+        windows = w
+        if (w == null) { stop(); return }
+        var opened = false
+        faceJob = scope?.launch {
+            next.turn.collect { turn ->
+                guarded("live.face") { showFace(w, VoiceFace.of(turn)) }
+                if (busy(turn)) { opened = true; endJob?.cancel(); endJob = null }
+                else if (opened && endJob == null) endJob = scope?.launch {
+                    // A finished line stays readable a moment; "keep listening" reopens the mic within this grace.
+                    kotlinx.coroutines.delay(LIVE_CLOSE_AFTER_MS)
+                    if (session === next && !busy(next.turn.value)) stop()
+                }
+            }
+        }
+        next.tap()
+    }
+
+    private fun busy(turn: com.cyclone.mobile.voice.VoiceTurn): Boolean =
+        turn.phase !in setOf(com.cyclone.mobile.voice.VoicePhase.IDLE, com.cyclone.mobile.voice.VoicePhase.CLOSED) ||
+            turn.taskLive || turn.speaking || turn.quickLive
 
     /**
      * Attaches the Drive windows to [service]. Called by the accessibility service itself (alpha 95), so the orb no
@@ -151,21 +202,27 @@ object DriverOverlay {
             .onFailure { record("drive.orb.windows", it) }
             .getOrNull()
         val w = windows ?: return
-        faceJob = scope?.launch { next.turn.collect { turn -> guarded("drive.orb.face") { w.show(VoiceFace.of(turn)) } } }
+        faceJob = scope?.launch { next.turn.collect { turn -> guarded("drive.orb.face") { showFace(w, VoiceFace.of(turn)) } } }
     }
 
     private fun stop() {
+        liveOnly = false
+        endJob?.cancel()
+        endJob = null
         faceJob?.cancel()
         faceJob = null
         windows?.let { w -> guarded("drive.orb.remove") { w.remove() } }
         windows = null
         session?.let { s -> guarded("drive.orb.session") { s.close() } }
         session = null
+        if (panelOpen.value) { panelOpen.value = false; guarded("drive.orb.chrome") { OverlayChromeRuntime.refreshExternalSurface() } }
     }
 
     /** One look at the orb: repairs whatever is missing while Driver mode is on ([com.cyclone.mobile.voice.OrbKeeper]). */
     private fun heal() {
         val svc = service ?: return
+        // Live voice without the car button has no orb to keep.
+        if (liveOnly) return
         val settings = DriverMode.settings.value
         val live = CycloneAccessibilityService.instance
         val w = windows
@@ -216,7 +273,8 @@ object DriverOverlay {
     }
 
     /** The three windows and their Compose content. */
-    private class Windows(private val context: CycloneAccessibilityService, private val session: VoiceSession, private val buttonDp: Int) {
+    private class Windows(private val context: CycloneAccessibilityService, private val session: VoiceSession, private val buttonDp: Int,
+                          private val withButton: Boolean = true) {
         private val wm = context.getSystemService(WindowManager::class.java)
         private val density = context.resources.displayMetrics.density
         private val lifecycles = mutableListOf<OverlayComposeLifecycle>()
@@ -257,7 +315,7 @@ object DriverOverlay {
 
         init {
             place()
-            wm.addView(button, buttonParams)
+            if (withButton) wm.addView(button, buttonParams)
         }
 
         /** Touchable unless hidden or yielding to a gesture Cyclone is making. */
@@ -378,25 +436,30 @@ object DriverOverlay {
                 setViewTreeLifecycleOwner(owner)
                 setViewTreeViewModelStoreOwner(owner)
                 setViewTreeSavedStateRegistryOwner(owner)
-                setContent { TiltGlassTheme { content() } }
+                // The Ask overlay's look: its forced-dark scheme and glass, so the voice windows read as part of it.
+                setContent { com.cyclone.mobile.ui.v32.CycloneSignatureTheme { TiltGlassTheme { content() } } }
             }
         }
 
         @Composable
         private fun ButtonContent() {
+            com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
             val turn by session.turn.collectAsState()
             val level by session.level.collectAsState()
             val face = remember(turn) { VoiceFace.of(turn) }
             DriverButtonFace(face, level, buttonDp.dp)
         }
 
+        /** The dim: the overlay's smoke (graphite, no teal), deepest behind the panel; it fades in on the overlay's spring. */
         @Composable
         private fun DimContent() {
-            val shade by animateFloatAsState(0.46f, tween(260), label = "Dim")
+            val shade = remember { androidx.compose.animation.core.Animatable(if (OverlayLite.active) DIM else 0f) }
+            androidx.compose.runtime.LaunchedEffect(Unit) { if (!OverlayLite.active) shade.animateTo(DIM, OverlayMotion.float) }
+            val s = shade.value
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-                0f to Color.Black.copy(alpha = shade * 0.75f),
-                0.7f to Color.Black.copy(alpha = shade),
-                1f to Color(0xFF04181D).copy(alpha = shade + 0.2f),
+                0f to Color.Black.copy(alpha = s * 0.6f),
+                0.65f to Color.Black.copy(alpha = s * 0.9f),
+                1f to SMOKE.copy(alpha = (s + 0.22f).coerceAtMost(1f)),
             )))
         }
 
@@ -405,8 +468,12 @@ object DriverOverlay {
             val turn by session.turn.collectAsState()
             val level by session.level.collectAsState()
             val face = remember(turn) { VoiceFace.of(turn) }
+            com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
             val enter = remember { MutableTransitionState(false).apply { targetState = true } }
-            AnimatedVisibility(enter, enter = slideInVertically(tween(260)) { it / 2 } + fadeIn(tween(200))) {
+            // The overlay's one spring (OverlayMotion), growing up from the bottom edge; Lite only fades.
+            val rise = if (OverlayLite.active) fadeIn(OverlayMotion.float)
+                else fadeIn(OverlayMotion.float) + androidx.compose.animation.expandVertically(OverlayMotion.size, expandFrom = Alignment.Bottom)
+            AnimatedVisibility(enter, enter = rise) {
                 AiModePanel(face, level, onOrb = session::tap, onStop = session::stop, onNotNow = session::notNow)
             }
         }
@@ -489,32 +556,45 @@ object DriverOverlay {
     }
 
     const val HOLD_TO_MOVE_MS = 1_000L
+    /** How dark the dim gets; [SMOKE] is the overlay's graphite (the VEIL glass body). */
+    private const val DIM = 0.46f
+    private val SMOKE = Color(0xFF08090B)
+    /** Live voice from the Ask bar closes this long after the conversation (and its task) is over. */
+    const val LIVE_CLOSE_AFTER_MS = 2_500L
 }
 
-/** AI mode: status, captions on veil pills, the big orb, Stop and "Not now". Glanceable: large type, two lines at most. */
+/**
+ * Live voice's panel: the Ask overlay's card (its glass, 30 dp corners, 16 dp side margins, grabber and padding), with
+ * the status, the captions on veil pills, the orb, Stop and "Not now". Glanceable: large type, two lines at most. It
+ * grows and shrinks with its words on the overlay's spring (still in Lite).
+ */
 @Composable
 internal fun AiModePanel(face: VoiceFace, level: Float, onOrb: () -> Unit, onStop: () -> Unit, onNotNow: () -> Unit) {
+    val radius = OverlayStackGeometry.CARD_RADIUS_DP.dp
     Column(
-        Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 12.dp)
-            .tiltGlass(30.dp)
-            .padding(horizontal = 20.dp, vertical = 18.dp),
+        Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
+            .tiltGlass(radius, palette = com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette.current)
+            .then(if (OverlayLite.active) Modifier else Modifier.animateContentSize(OverlayMotion.size))
+            .padding(start = 22.dp, end = 22.dp, top = 6.dp, bottom = 22.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Box(Modifier.padding(bottom = 14.dp).size(32.dp, 3.dp).background(GlassMuted.copy(alpha = 0.38f), androidx.compose.foundation.shape.CircleShape))
         // The small status word shows only when no caption already says it (never "LISTENING" over "Listening…").
         if (face.showStatus) {
             Text(face.status.uppercase(), color = if (face.warm) GlassWarm else GlassMuted, fontSize = 12.sp, letterSpacing = 1.6.sp,
                 fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
         }
+        // The owner's words in the Ask field's type; Cyclone's line in the overlay's question type, a step larger.
         if (face.you.isNotBlank()) {
-            Caption(face.you, GlassMuted, 20, FontWeight.Medium)
+            Caption(face.you, GlassMuted, 17, FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
         }
-        if (face.cyclone.isNotBlank()) Caption(face.cyclone, GlassInk, 23, FontWeight.SemiBold)
+        if (face.cyclone.isNotBlank()) Caption(face.cyclone, GlassInk, 21, FontWeight.Medium)
         Spacer(Modifier.height(10.dp))
         val interaction = remember { MutableInteractionSource() }
         Box(
-            Modifier.size(136.dp)
+            Modifier.size(128.dp)
                 .clickable(interaction, indication = null, role = Role.Button, onClick = onOrb)
                 .semantics {
                     role = Role.Button
@@ -524,12 +604,12 @@ internal fun AiModePanel(face: VoiceFace, level: Float, onOrb: () -> Unit, onSto
                 },
             contentAlignment = Alignment.Center,
         ) {
-            DriveOrb(face.motion, level, face.warm, Modifier.size(136.dp))
+            DriveOrb(face.motion, level, face.warm, Modifier.size(128.dp))
         }
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally)) {
-            if (face.notNow) GlassCapsuleButton("Not now", primary = false, onClick = onNotNow, modifier = Modifier.weight(1f).height(56.dp))
-            GlassCapsuleButton("Stop", primary = true, onClick = onStop, modifier = Modifier.weight(1f).height(56.dp))
+            if (face.notNow) GlassCapsuleButton("Not now", primary = false, onClick = onNotNow, modifier = Modifier.weight(1f).height(52.dp))
+            GlassCapsuleButton("Stop", primary = true, onClick = onStop, modifier = Modifier.weight(1f).height(52.dp))
         }
     }
 }

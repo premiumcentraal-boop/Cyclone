@@ -433,6 +433,36 @@ class PhoneMindToolbox(
 
     private fun read() = observeAndRender(null)
 
+    /**
+     * Plan 69: the screen as the OneMind crew reads it, bound with the same refs the tools use, so a pick from a decision
+     * model is acted on through the normal tool path and its gates. A screenshot only when asked for and never of a
+     * sensitive screen. Null when the screen can't be read.
+     */
+    fun stepScreen(image: Boolean = false): com.cyclone.mobile.mind.one.StepScreen? {
+        val observed = if (image) env.observeWithImage(goal) else env.observe(goal)
+        val page = observed.page ?: return null
+        val bound = bind(page)
+        val label = appLabel(page.packageName)
+        val sensitive = bound.any { it.password } || runCatching { com.cyclone.mobile.mind.pilot.Pilot.keepOff(page.packageName, label) }.getOrDefault(false)
+        val png = observed.image?.optString("pngBase64")?.takeIf { it.isNotBlank() }
+        val shot = if (sensitive || png == null) null else runCatching { prepareShot(page, bound, png, observed.image!!) }.getOrNull()
+        return com.cyclone.mobile.mind.one.StepScreen(
+            packageName = page.packageName,
+            appLabel = label ?: page.packageName,
+            pageKey = page.pageKey,
+            fingerprint = page.structuralKey + "|" + page.contentKey,
+            controls = bound.map { ref ->
+                com.cyclone.mobile.mind.one.StepControl(ref.ref, ref.label, ref.role, ref.editable,
+                    focused = ref.editable && controlsById[ref.elementId]?.evidence?.optBoolean("focused") == true,
+                    value = fieldValues[ref.elementId])
+            },
+            texts = MindScreen.textLines(page).take(60),
+            weak = !page.treeUseful || bound.isEmpty(),
+            imageDataUrl = shot,
+            sensitive = sensitive,
+        )
+    }
+
     /** The app's map, the first time the Mind is in an app Cyclone has learned. */
     private val manualShown = HashSet<String>()
 
