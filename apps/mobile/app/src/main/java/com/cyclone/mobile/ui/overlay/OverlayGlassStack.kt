@@ -434,12 +434,13 @@ internal fun GlassCard(content: @Composable () -> Unit) {
  * line; the last few steps; and one quiet line with the step count and apps.
  */
 @Composable
-internal fun OverlayWorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion? = null, onMinimize: () -> Unit) =
-    WorkCard(task, diversion, appsOpen = false, onMinimize = onMinimize)
+internal fun OverlayWorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion? = null, thinking: Boolean = false, onMinimize: () -> Unit) =
+    WorkCard(task, diversion, appsOpen = false, onMinimize = onMinimize, thinking = thinking)
 
 /** The working card itself; [appsOpen] starts it with the app strip fanned out (previews). */
 @Composable
-internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen: Boolean, onMinimize: () -> Unit, historyOpen: Boolean = false) {
+internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen: Boolean, onMinimize: () -> Unit, historyOpen: Boolean = false,
+                      thinking: Boolean = false) {
     val context = LocalContext.current
     val snapshot = remember(task) { TaskPresentationProjector.project(task) }
     // The app it is in now: the main screen's app when the task works on the screen, its own app when it works in the
@@ -470,7 +471,8 @@ internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen
             CycloneTaskVisualState.WORKING -> {
                 GlassProgress(snapshot.progressFraction)
                 Spacer(Modifier.height(14.dp))
-                CyBeside(com.cyclone.mobile.ui.overlay.cy.CyMood.WORK) {
+                // Plan 70: Cy thinks while the mind is awake (a replan, a check), and works while the crew acts.
+                CyBeside(if (thinking) com.cyclone.mobile.ui.overlay.cy.CyMood.THINK else com.cyclone.mobile.ui.overlay.cy.CyMood.WORK) {
                     if (diversion != null) {
                         // Plan 38 §4: a change of plan stays in the card: the old plan tucked, the branch, the new steps.
                         PlanDiversionBlock(diversion)
@@ -563,7 +565,7 @@ private fun StepRow(label: String, current: Boolean) {
         Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
             if (current) GlassSpinner(12) else Icon(Icons.Rounded.Check, null, Modifier.size(16.dp), tint = GlassTeal)
         }
-        Text(label, color = if (current) GlassInk else GlassMuted, fontSize = 14.5.sp,
+        Text(OverlayGlassCopy.label(label), color = if (current) GlassInk else GlassMuted, fontSize = 14.5.sp,
             fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -661,6 +663,8 @@ internal fun WorkIsland(
     /** Set once the task has ended while the island showed: the island stays, finished, with a close button. */
     finished: WorkIslandHold.End? = null,
     onClose: () -> Unit = {},
+    /** Plan 70: the mind is awake (replanning, checking): Cy thinks instead of working. */
+    thinking: Boolean = false,
 ) {
     val blur = com.cyclone.mobile.ui.overlay.glass.rememberBlurPanel(OverlayStackGeometry.BAR_RADIUS_DP.dp)
     val warm = finished == WorkIslandHold.End.FAILED || finished == WorkIslandHold.End.STOPPED
@@ -672,7 +676,7 @@ internal fun WorkIsland(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(contentAlignment = Alignment.BottomEnd) {
-                RingedLogo(appPackage, working, paused, finished = finished?.let { if (warm) false else true })
+                RingedLogo(appPackage, working, paused, finished = finished?.let { if (warm) false else true }, thinking = thinking)
                 if (finished != null) FinishedBadge(warm)
             }
             Column(
@@ -720,7 +724,7 @@ private fun FinishedBadge(warm: Boolean) {
 }
 
 @Composable
-private fun RingedLogo(appPackage: String?, working: Boolean, paused: Boolean = false, finished: Boolean? = null) {
+private fun RingedLogo(appPackage: String?, working: Boolean, paused: Boolean = false, finished: Boolean? = null, thinking: Boolean = false) {
     // Alpha.134: the ring turns (and asks for frames) only while the task works.
     val turn = if (working && !OverlayLite.active) rememberInfiniteTransition(label = "Island ring")
         .animateFloat(0f, 360f, infiniteRepeatable(tween(1_400, easing = LinearEasing)), label = "Ring") else null
@@ -744,6 +748,7 @@ private fun RingedLogo(appPackage: String?, working: Boolean, paused: Boolean = 
                         finished == true -> com.cyclone.mobile.ui.overlay.cy.CyMood.DONE
                         finished == false -> com.cyclone.mobile.ui.overlay.cy.CyMood.STUCK
                         paused -> com.cyclone.mobile.ui.overlay.cy.CyMood.PAUSE
+                        working && thinking -> com.cyclone.mobile.ui.overlay.cy.CyMood.THINK
                         working -> com.cyclone.mobile.ui.overlay.cy.CyMood.WORK
                         else -> com.cyclone.mobile.ui.overlay.cy.CyMood.IDLE
                     },
@@ -754,6 +759,48 @@ private fun RingedLogo(appPackage: String?, working: Boolean, paused: Boolean = 
                     .border(1.5.dp, Color(0xFF0C0D10), RoundedCornerShape(5.dp)))
             }
         } else if (appPackage != null) AppLogo(appPackage, 32.dp) else CycloneMark(22)
+    }
+}
+
+// ---- the whisper (plan 70) -------------------------------------------------------------------------------------
+
+/**
+ * Plan 70: an Instant run whispers. The Ask bar folds into a small capsule centred where it was: Cy working in its ring
+ * (the app on its shoulder) and the same pause / hold-to-stop control as the bar. No words while it works. At the end
+ * Cy hops ([ending] done), or says in a few words what didn't happen or what the answer is, then the bar comes back.
+ */
+@Composable
+internal fun WhisperCapsule(
+    appPackage: String?,
+    ending: RunPresentation.Ending?,
+    taskKey: String,
+    onPause: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val blur = com.cyclone.mobile.ui.overlay.glass.rememberBlurPanel(OverlayStackGeometry.BAR_RADIUS_DP.dp)
+    val words = ending?.words
+    Box(Modifier.height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).widthIn(max = 360.dp).then(blur.modifier)
+        .tiltGlass(OverlayStackGeometry.BAR_RADIUS_DP.dp, palette = LocalGlassPalette.current, lift = blur.lift)
+        .semantics(mergeDescendants = true) {
+            contentDescription = when {
+                ending == null -> "Cyclone is doing it"
+                words != null -> words
+                else -> "Done"
+            }
+        }) {
+        Row(
+            Modifier.height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).padding(start = 12.dp, end = if (ending == null) 10.dp else 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            RingedLogo(appPackage, working = ending == null, finished = ending?.done)
+            if (words != null) {
+                Text(words, Modifier.weight(1f, fill = false), color = if (ending.done) GlassInk else GlassWarm, fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (ending == null) OverlayRequestAction(working = true, paused = false, taskKey = taskKey, canSend = false,
+                onSend = {}, onPauseOrResume = onPause, onStop = onStop)
+        }
     }
 }
 

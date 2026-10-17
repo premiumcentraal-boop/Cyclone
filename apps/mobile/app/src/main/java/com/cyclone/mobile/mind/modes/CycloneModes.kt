@@ -235,8 +235,9 @@ object CycloneModes {
                 Mode.ANSWER -> {
                     learn(com.cyclone.mobile.mind.decide.Outcome.NONE)
                     if (chrome) {
+                        // Plan 70: an answer is the whisper's words: the bar shows it a moment, then folds back.
                         OverlayChromeRuntime.missionWorking(running.id, route.answer)
-                        OverlayChromeRuntime.missionFinished(running.id, true, route.answer.orEmpty())
+                        OverlayChromeRuntime.missionFinished(running.id, true, route.answer.orEmpty(), ending = true to route.answer)
                     }
                     done(ModeResult(Mode.ANSWER, route.answer, true))
                 }
@@ -277,7 +278,9 @@ object CycloneModes {
                         }
                         else -> {
                             learn(if (outcome.done) com.cyclone.mobile.mind.decide.Outcome.VERIFIED else com.cyclone.mobile.mind.decide.Outcome.FAILED)
-                            if (chrome) OverlayChromeRuntime.missionFinished(running.id, true, InstantCopy.done(outcome))
+                            // Plan 70: done is a hop, no words; what didn't happen says so in a few words.
+                            if (chrome) OverlayChromeRuntime.missionFinished(running.id, true, InstantCopy.done(outcome),
+                                ending = outcome.done to (if (outcome.done) null else InstantCopy.done(outcome)))
                             done(ModeResult(Mode.INSTANT, if (voice && settings.silentSuccess) null else InstantCopy.done(outcome), true))
                         }
                     }
@@ -331,7 +334,8 @@ object CycloneModes {
 
     /** "Calling Mam in 2 s": the owner can stop it (the Stop button or "no"); silence lets it go ahead. */
     private fun window(running: Running, text: String, ms: Long, chrome: Boolean): Boolean {
-        if (chrome) OverlayChromeRuntime.missionWorking(running.id, "$text in ${ms / 1000} s. Tap Stop to cancel.")
+        // Plan 70: a cancel window is the one Instant moment with words: the owner must be able to read it and stop it.
+        if (chrome) OverlayChromeRuntime.missionWorking(running.id, "$text in ${ms / 1000} s. Tap Stop to cancel.", loud = true)
         val end = System.currentTimeMillis() + ms
         while (System.currentTimeMillis() < end) {
             if (running.stopped) return false
