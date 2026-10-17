@@ -34,6 +34,10 @@ android {
         // Duplicate JVM OSGi metadata in bcprov/jspecify is unused on Android.
         resources.excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
     }
+    sourceSets {
+        // Android's own org.json for unit tests (see src/testAndroidJson/README.md).
+        getByName("test").java.srcDir("src/testAndroidJson/java")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -76,5 +80,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20250517")
+    // Unit tests use Android's own org.json (src/testAndroidJson), not JSON-java: the phone's behaviour, not a lookalike.
 }
