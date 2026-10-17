@@ -142,7 +142,8 @@ class CommandCenter:
     def __init__(self, path: Path, contract: CommandContract, devices: Callable[[], list[dict[str, Any]]], *,
                  clock: Callable[[], int] = _now_ms, local_now: Callable[[], datetime] | None = None,
                  tick_seconds: float = 5.0, connections: dict[str, Any] | None = None,
-                 ai: dict[str, Any] | None = None, health: dict[str, Any] | None = None) -> None:
+                 ai: dict[str, Any] | None = None, health: dict[str, Any] | None = None,
+                 safe: dict[str, Any] | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
@@ -208,6 +209,9 @@ class CommandCenter:
         # Plan 59 (build 2, run 2a): the hive's members and its key (wrapped and sealed in the browser; ciphertext only).
         from .hive import HiveStore
         self.hive = HiveStore(self)
+        from .safe_sync import SafeSync
+        self.safe = SafeSync((safe or {}).get('root', path.parent / 'safe'), contract,
+                             pinned_key=(safe or {}).get('pinned_key', lambda _: None), clock=clock)
         self._task_listener = None
         self._wake = threading.Event()
         self._tick_done = threading.Condition()
@@ -244,6 +248,7 @@ class CommandCenter:
         if self._thread:
             self._thread.join(timeout=5)
         self.connections.close()
+        self.safe.close()
         with self._lock:
             self._db.close()
 
@@ -1036,6 +1041,7 @@ class CommandCenter:
             self.hive.sweep(set(ready))
             self.signup.sync()
             self.buttons.sync()
+        self.safe.sweep(set(ready))
 
     def _fire_routines(self) -> None:
         now = self._clock()

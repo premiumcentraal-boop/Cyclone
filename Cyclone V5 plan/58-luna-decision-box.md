@@ -3,6 +3,10 @@
 Status: **Final plan (2026-10-09). alpha.123 (Foundation) built 2026-10-10, unreleased, see §14; alpha.124–125 planned.** Written at alpha.122 dev1. Builds on plan 41 (Fast mode and decisions)
 and plan 42 (Instant, Flash, Mind). Physical device: **UNVERIFIED** throughout.
 
+> **Naming (2026-10-16, plan 62 §1):** "Luna" in this plan means **OpenAI Decisions** (`openai/gpt-6-luna-decisions`),
+> the typed Decisions API. **GPT-6 Luna** (`openai/gpt-6-luna`) is the separate generative model, used only where
+> something must be written.
+
 **Owner's ask (2026-10-09).** OpenAI's Decisions API is now on OpenRouter as `openai/gpt-6-luna-decisions`, and it
 reads **images as well as text**. Build Cyclone's "decision box" on it:
 

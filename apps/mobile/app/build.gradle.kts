@@ -11,8 +11,8 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 33
         targetSdk = 35
-        versionCode = 289
-        versionName = "5.0.0-alpha.135.dev1"
+        versionCode = 291
+        versionName = "5.0.0-alpha.137.dev1"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -29,6 +29,10 @@ android {
         aidl = true
         compose = true
         buildConfig = true
+    }
+    packaging {
+        // Duplicate JVM OSGi metadata in bcprov/jspecify is unused on Android.
+        resources.excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -49,6 +53,7 @@ android {
 
 dependencies {
     implementation(project(":mobilerun-embedded"))
+    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("androidx.core:core-ktx:1.15.0")

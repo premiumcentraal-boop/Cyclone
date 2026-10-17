@@ -9,7 +9,7 @@ enum class Mode { INSTANT, FLASH, MIND, ANSWER, IGNORE }
 enum class Speed(val wire: String, val label: String) {
     /** The router: grammar, then one decision box, then the rules. */
     AUTO("auto", "Auto"),
-    /** Instant for clear commands (the grammar), everything else the Mind. The default until the Lab passes. */
+    /** Instant for clear commands (the grammar), everything else the Mind. */
     COMMANDS("commands", "Instant for commands"),
     /** Every request is a Mind mission, as before alpha.77. */
     MIND("mind", "Always Mind");
@@ -48,6 +48,8 @@ class PhoneDecider(
     val earned: Set<String>,
     val mayAct: Boolean,
     val audit: Boolean,
+    /** Plan 65: requests this phone has done the same verified way before, keyed by [com.cyclone.mobile.mind.decide.Replay.keyOf]. */
+    val replay: Map<String, com.cyclone.mobile.mind.decide.Guess> = emptyMap(),
 )
 
 /** Facts the phone knows without a model, for short answers. */
@@ -238,7 +240,7 @@ object ModeRouter {
      * agreement with JEV is measured all the time.
      */
     fun route(text: String, world: GrammarWorld, facts: LocalFacts, speed: Speed, box: DecisionBox?, bar: Double,
-              phone: PhoneDecider? = null, triage: TypedBox? = null): Route {
+              phone: PhoneDecider? = null, triage: TypedBox? = null, engine: EngineDecider? = null): Route {
         if (speed == Speed.MIND) return Route(Mode.MIND, "Speed is set to Always Mind", by = Decider.SETTING, decision = guessOf(Mode.MIND))
         stage0(text, world, facts)?.let { r ->
             return r.copy(by = if (r.mode == Mode.ANSWER) Decider.ANSWER else Decider.GRAMMAR, decision = guessOf(r.mode, r.command))
@@ -246,6 +248,13 @@ object ModeRouter {
         forced(text, world)?.let { return it.copy(by = Decider.RULES, decision = guessOf(it.mode)) }
         if (speed == Speed.COMMANDS) return Route(Mode.MIND, "not a clear command", by = Decider.SETTING, decision = guessOf(Mode.MIND))
         if (SECOND_CLAUSE.containsMatchIn(text)) return Route(Mode.FLASH, "more than one step", by = Decider.RULES, decision = guessOf(Mode.FLASH))
+        // Plan 65: a request this phone has already done the same way, verified, more than once: no model is asked.
+        // Not on an audit, so the models keep checking the replays now and then.
+        if (phone != null && phone.mayAct && !phone.audit && plainNow(text)) {
+            phone.replay[com.cyclone.mobile.mind.decide.Replay.keyOf(text)]?.takeIf { it.intent in REVERSIBLE }?.let { g ->
+                fromGuess(g, text, world)?.let { return it.copy(why = "you asked this before and it worked", by = Decider.PHONE, decision = g, decideMs = 0) }
+            }
+        }
         val candidates = world.labels + world.apps.map { it.first }
         val started = System.nanoTime()
         // The phone model never breaks routing: a failure is just no shadow.
@@ -263,6 +272,12 @@ object ModeRouter {
         if (phone != null && shadow != null && phone.mayAct && shadow.mode == "instant" && shadow.intent in REVERSIBLE &&
             shadow.confidence >= com.cyclone.mobile.mind.decide.Earning.SURE && plainNow(text)) {
             fromGuess(shadow, text, world)?.let { return it.copy(by = Decider.PHONE, decision = shadow, decideMs = phoneMs, shadow = shadow) }
+        }
+        // Plan 63: a decision engine (Consensus or Sprint) races both decision models; it comes after the grammar, the rules
+        // and the phone model, so it can only decide what they leave open.
+        if (engine != null) {
+            runCatching { engine.decide(text, world, bar) }.getOrNull()?.let { return it.copy(shadow = shadow) }
+            return Route(Mode.FLASH, "the decision engine failed", by = Decider.FALLBACK, decision = guessOf(Mode.FLASH), shadow = shadow)
         }
         if (box == null) return Route(Mode.MIND, "no decision provider is reachable", by = Decider.FALLBACK, decision = guessOf(Mode.MIND), shadow = shadow)
         // Plan 58: with Triage switched on, its one call replaces Board 0. Its answers can only make a request more

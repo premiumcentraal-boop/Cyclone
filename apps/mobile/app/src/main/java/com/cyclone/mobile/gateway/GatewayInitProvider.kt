@@ -19,6 +19,10 @@ import android.net.Uri
 class GatewayInitProvider : ContentProvider() {
     override fun onCreate(): Boolean {
         val app = context?.applicationContext ?: return true
+        com.cyclone.mobile.runtime.safe.SafeStartupGate.initialize(
+            runCatching { com.cyclone.mobile.runtime.safe.SafeRuntime(app).needsStartupCheck() }.getOrDefault(true))
+        com.cyclone.mobile.runtime.safe.SafeStartupGate.whenReady {
+        runCatching { com.cyclone.mobile.runtime.safe.SafeSchedule.install(app) }
         // First, so a freeze during startup is caught too.
         runCatching { com.cyclone.mobile.runtime.health.MainThreadWatchdog.start(app) }
         runCatching { com.cyclone.mobile.ai.OpenRouterCatalogStore.initialize(app) }
@@ -36,6 +40,8 @@ class GatewayInitProvider : ContentProvider() {
                     "Phone Vault metadata source could not initialize safely.",
                 )
             }
+        }
+        // Pairing is deliberately available on the Restore card; it does not initialize Brain databases.
         runCatching { GatewayRuntime.startPairingBootstrap(app) }
             .onFailure {
                 GatewayRuntime.reportSafeError(

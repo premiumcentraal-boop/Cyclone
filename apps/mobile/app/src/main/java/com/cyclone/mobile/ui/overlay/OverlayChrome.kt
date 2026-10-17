@@ -297,7 +297,7 @@ internal fun OverlayIdleHalo(
         contentAlignment = Alignment.Center,
     ) {
         if (cy) {
-            // Alpha.135: Cy floats on its own (no bubble behind it); taps make it jump a little, like the bubble did.
+            // Alpha.137: Cy floats on its own (no bubble behind it); taps make it jump a little, like the bubble did.
             com.cyclone.mobile.ui.overlay.cy.Cy(
                 if (state.activating) com.cyclone.mobile.ui.overlay.cy.CyMood.LISTEN else com.cyclone.mobile.ui.overlay.cy.CyMood.IDLE,
                 34.dp,

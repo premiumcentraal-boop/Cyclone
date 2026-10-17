@@ -37,7 +37,7 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Cy, Cyclone's character (first concept, alpha.135): a frosted orb with two dark eyes, and two small orb hands only
+ * Cy, Cyclone's character (first concept, alpha.137): a frosted orb with two dark eyes, and two small orb hands only
  * when they mean something (busy, waving, celebrating). It lives where the overlay already draws Cyclone (the idle
  * bubble, the island ring, the working card, the "needs you" header); it never adds a window or a panel of its own.
  *

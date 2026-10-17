@@ -171,6 +171,7 @@ internal object GatewayProtocol {
         "hive.join",
         "hive.leave",
         "hive.sync",
+        "safe.list", "safe.get", "safe.put", "safe.delete",
         // Cyclone Ports (plan 48 run 4): the PC's Port Hub collects what runs send and answers their waits.
         "ports.poll",
         "ports.blob",

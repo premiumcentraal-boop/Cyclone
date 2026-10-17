@@ -19,6 +19,8 @@ object PhoneBrain {
     @Volatile private var lessons: List<Lesson>? = null
     @Volatile private var model: PhoneModel? = null
     @Volatile private var earned: Set<String> = emptySet()
+    /** Plan 65: rebuilt with every lesson (a few ms over at most two thousand). */
+    @Volatile private var replay: Map<String, Guess> = emptyMap()
     private var sinceTraining = 0
     private var requests = 0L
 
@@ -27,7 +29,7 @@ object PhoneBrain {
         if (use == PhoneModelUse.OFF) return null
         val current = ready(context, bar)
         val audit = synchronized(lock) { ++requests % Earning.AUDIT_EVERY == 0L }
-        return PhoneDecider(current, earned, mayAct = use == PhoneModelUse.EARNED, audit = audit)
+        return PhoneDecider(current, earned, mayAct = use == PhoneModelUse.EARNED, audit = audit, replay = replay)
     }
 
     /** Keeps one routed request (not when it looks like it carries a secret). */
@@ -36,6 +38,7 @@ object PhoneBrain {
         synchronized(lock) {
             val all = (load(context) + kept).takeLast(Lessons.MAX_KEPT)
             lessons = all
+            replay = Replay.build(all)
             runCatching {
                 val target = file(context)
                 target.parentFile?.mkdirs()
@@ -55,6 +58,9 @@ object PhoneBrain {
             .put("calls", CallLog.summary(Decisions.calls()))
             .put("watch", WatchLog.summary(DecisionWatch.records(context)))
             .put("lab", com.cyclone.mobile.mind.lab.DecisionLab.reports(context))
+            // Plan 63: the decision engine's numbers (both models' answer rates, speed, agreement, early acts).
+            .put("engine", EngineLog.summary(EngineStore.records(context))
+                .put("active", com.cyclone.mobile.mind.modes.CycloneModes.settings(context).engine.wire))
             .put("paused", org.json.JSONObject().also { o ->
                 DecisionProvider.entries.forEach { p -> Decisions.breaker(p).reason()?.let { o.put(p.wire, it.wire) } }
             })
@@ -64,7 +70,9 @@ object PhoneBrain {
     fun forget(context: Context, bar: Double) = synchronized(lock) {
         runCatching { file(context).delete() }
         DecisionWatch.forget(context)
+        EngineStore.forget(context)
         lessons = emptyList()
+        replay = emptyMap()
         train(emptyList(), bar)
     }
 
@@ -76,6 +84,7 @@ object PhoneBrain {
         val trained = PhoneModel.train(all, bar)
         model = trained
         earned = Earning.earned(all, bar)
+        replay = Replay.build(all)
         sinceTraining = 0
         return trained
     }

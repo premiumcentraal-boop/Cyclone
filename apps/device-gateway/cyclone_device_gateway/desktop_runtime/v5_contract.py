@@ -1475,7 +1475,7 @@ def _validate_connectors_list(value: dict[str, Any]) -> None:
                 raise bad("entry")
 
 
-CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert", "hive.join", "hive.leave", "hive.sync"})
+CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media", "cc.alert", "hive.join", "hive.leave", "hive.sync", "safe.list", "safe.get", "safe.put", "safe.delete"})
 #: Plan 59 (build 2): the hive key sealed to a phone, and a phone leaving the hive.
 HIVE_JOIN_ID = re.compile(r"^hj_[A-Za-z0-9_-]{16,40}$")
 #: Run 2b: a hive item, encrypted with the hive key on the phone or in the browser; the metadata is bound into its AAD.
@@ -1516,6 +1516,13 @@ def _bad_cc(message: str) -> DesktopRuntimeError:
 
 def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) -> None:
     """Plan 33 (C0): a task's start, status and answers. Bounded text only; a moment never carries a typed value."""
+    if op.startswith("safe."):
+        from ..command.safe_contract import validate_response
+        try:
+            validate_response(op, value, args)
+        except (ValueError, KeyError, TypeError):
+            raise _bad_cc("Safe response") from None
+        return
     if op == "cc.start":
         if set(value) != {"accepted", "missionId"} or value["accepted"] is not True or not LAB_MISSION_ID.match(str(value["missionId"])):
             raise _bad_cc("start")
@@ -2350,6 +2357,43 @@ class V5ContractService:
     def cc_key(self, device_id: str) -> dict[str, Any]:
         """Plan 33 (C2): the phone's device key (public half and fingerprint) for sealed delivery."""
         return self._call(device_id, "cc.key", {})
+
+    def safe_list(self, device_id: str) -> dict[str, Any]:
+        return self._call(device_id, "safe.list", {})
+
+    def safe_receipt(self, device_id: str, *, user: int, seq: int, sha256: str) -> dict[str, Any]:
+        from ..command.safe_contract import coordinates
+        if not coordinates(user, seq) or not isinstance(sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Invalid Safe receipt.")
+        return self._call(device_id, "safe.put", {'receipt': {'user': user, 'seq': seq, 'sha256': sha256}}, checked=True)
+
+    def safe_delete_receipt(self, device_id: str, *, nonce: str) -> dict[str, Any]:
+        if not isinstance(nonce, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,64}", nonce):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Invalid Safe receipt.")
+        return self._call(device_id, "safe.delete", {'nonce': nonce, 'deleted': True}, checked=True)
+
+    def safe_restore_key(self, device_id: str, *, envelope: dict) -> dict[str, Any]:
+        if (not isinstance(envelope, dict) or set(envelope) != {'enc', 'ct', 'aad'}
+                or not all(isinstance(envelope[k], str) for k in envelope) or len(envelope['aad']) > 1000
+                or len(envelope['enc']) > 100 or len(envelope['ct']) > 100):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Invalid Safe envelope.")
+        return self._call(device_id, "safe.put", {'keyEnvelope': envelope}, checked=True)
+
+    def safe_get(self, device_id: str, *, user: int, seq: int, offset: int) -> dict[str, Any]:
+        from ..command.safe_contract import coordinates
+        if not coordinates(user, seq, offset):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Invalid Safe coordinates.")
+        return self._call(device_id, "safe.get", {"user": user, "seq": seq, "offset": offset}, checked=True)
+
+    def safe_put(self, device_id: str, *, user: int, seq: int, offset: int, size: int, sha256: str, data: bytes) -> dict[str, Any]:
+        from ..command.safe_contract import coordinates, CHUNK, MAX_SIZE
+        if (not coordinates(user, seq, offset) or type(size) is not int or not 44 <= size <= MAX_SIZE
+                or not isinstance(sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", sha256)
+                or not isinstance(data, bytes) or not 1 <= len(data) <= CHUNK or offset + len(data) > size
+                or (len(data) != CHUNK and offset + len(data) != size)):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Invalid Safe chunk.")
+        return self._call(device_id, "safe.put", {"user": user, "seq": seq, "offset": offset, "size": size,
+            "sha256": sha256, "data": base64.b64encode(data).decode('ascii')}, checked=True)
 
     def cc_status(self, device_id: str, mission_id: str) -> dict[str, Any]:
         return self._call(device_id, "cc.status", {"missionId": _lab_mission(mission_id)})

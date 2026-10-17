@@ -436,6 +436,12 @@ internal fun CycloneSettingsPage426(
             "Privacy & safety" -> item {
                 Settings426Surface {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text("Cyclone Safe", Modifier.clickable {
+                            context.startActivity(Intent(context, com.cyclone.mobile.runtime.safe.SafeActivity::class.java))
+                        }.padding(vertical = 12.dp), style = MaterialTheme.typography.titleMedium)
+                        Text("Delete all Cyclone data", Modifier.clickable {
+                            context.startActivity(Intent(context, com.cyclone.mobile.ui.settings.DeleteAllDataScreen::class.java))
+                        }.padding(vertical = 12.dp), style = MaterialTheme.typography.titleMedium)
                         Settings426InfoRow(Icons.Rounded.Security, "One action authority", "AI, routines and PC requests use the same Cyclone policy and phone executor.")
                         Settings426InfoRow(Icons.Rounded.Visibility, "Verified changes", "Cyclone checks the phone state instead of treating transport success as task success.")
                         Settings426InfoRow(Icons.Rounded.Key, "Sensitive text stays private", "Passwords, OTPs, tokens and typed values are excluded from learning reports.")

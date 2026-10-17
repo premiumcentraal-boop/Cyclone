@@ -8,7 +8,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Plan 58: JEV decides by default; GPT-6 Luna Decisions is live, sees images, and can be chosen as a setting. */
+/** Plan 58/62: JEV decides by default; OpenAI Decisions is live, sees images, and can be chosen as a setting. */
 class DecisionsTest {
     private val request = BoxRequest("Pick the shutter.", "Screen: Camera\nControls: Mode, Button 3",
         listOf(BoxQuestion("next", "Which control takes the photo?", listOf("Mode", "Button 3", "none"))),
@@ -21,13 +21,15 @@ class DecisionsTest {
         assertFalse(DecisionProvider.JEV.vision)
     }
 
-    @Test fun `luna is live, sees images and is the one watching beside jev`() {
-        assertTrue(DecisionProvider.LUNA.usable)
-        assertTrue(DecisionProvider.LUNA.vision)
-        assertEquals("openai/gpt-6-luna-decisions", DecisionProvider.LUNA.model)
-        assertEquals(DecisionProvider.LUNA, Decisions.watching())
-        assertEquals(DecisionProvider.LUNA, DecisionProvider.of("luna"))
-        assertNull(DecisionProvider.of("openai"))
+    @Test fun `openai decisions is live, sees images and is the one watching beside jev`() {
+        assertTrue(DecisionProvider.OPENAI_DECISIONS.usable)
+        assertTrue(DecisionProvider.OPENAI_DECISIONS.vision)
+        assertEquals("openai/gpt-6-luna-decisions", DecisionProvider.OPENAI_DECISIONS.model)
+        assertEquals(DecisionProvider.OPENAI_DECISIONS, Decisions.watching())
+        assertEquals(DecisionProvider.OPENAI_DECISIONS, DecisionProvider.of("openai"))
+        // What alpha.123–134 stored for it still reads back.
+        assertEquals(DecisionProvider.OPENAI_DECISIONS, DecisionProvider.of("luna"))
+        assertNull(DecisionProvider.of("gpt-6-luna"))
     }
 
     @Test fun `jev never gets the screenshot and asks in the documented shape`() {
@@ -40,18 +42,18 @@ class DecisionsTest {
         assertFalse(body.toString().contains("\"choices\""))
     }
 
-    @Test fun `luna gets the screenshot as a state image`() {
-        val body = ProviderDecisionBox.body(DecisionProvider.LUNA, request)
+    @Test fun `openai decisions gets the screenshot as a state image`() {
+        val body = ProviderDecisionBox.body(DecisionProvider.OPENAI_DECISIONS, request)
         val state = body.getJSONArray("state")
         val image = (0 until state.length()).map { state.get(it) }.filterIsInstance<org.json.JSONObject>().single()
         assertEquals("image_url", image.getString("type"))
         assertEquals("data:image/png;base64,AAAA", image.getJSONObject("image_url").getString("url"))
-        assertTrue(ProviderDecisionBox("k", DecisionProvider.LUNA).sees)
+        assertTrue(ProviderDecisionBox("k", DecisionProvider.OPENAI_DECISIONS).sees)
         assertFalse(ProviderDecisionBox("k", DecisionProvider.JEV).sees)
     }
 
     @Test fun `strict privacy asks for zero data retention`() {
-        assertTrue(ProviderDecisionBox.body(DecisionProvider.LUNA, request, zdr = true).getJSONObject("provider").getBoolean("zdr"))
-        assertFalse(ProviderDecisionBox.body(DecisionProvider.LUNA, request).getJSONObject("provider").has("zdr"))
+        assertTrue(ProviderDecisionBox.body(DecisionProvider.OPENAI_DECISIONS, request, zdr = true).getJSONObject("provider").getBoolean("zdr"))
+        assertFalse(ProviderDecisionBox.body(DecisionProvider.OPENAI_DECISIONS, request).getJSONObject("provider").has("zdr"))
     }
 }

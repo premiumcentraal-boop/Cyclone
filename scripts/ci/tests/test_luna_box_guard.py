@@ -93,6 +93,68 @@ class LunaBoxGuard(unittest.TestCase):
         self.assertIn('os.environ.get("OPENROUTER_API_KEY"', probe)
         self.assertNotRegex(probe, r"print\([^)]*key")
 
+    def test_the_engines_act_only_on_agreement_or_an_easy_to_undo_action(self):
+        """Plan 63: Consensus and Sprint race JEV and OpenAI Decisions; an action needs both, unless it is easy to undo."""
+        ensemble = read("mind/modes/Ensemble.kt")
+        combine = ensemble[ensemble.index("    fun combine("):ensemble.index("    private fun single(")]
+        self.assertIn("routes.all { it.mode == Mode.INSTANT } ->", combine)
+        self.assertIn("routes.map { actionOf(it) }.distinct().size == 1", combine)
+        self.assertIn('if (others.any { it.mode == Mode.INSTANT }) Route(Mode.FLASH', combine)
+        # Plan 65: a model that answered its two phrasings differently never acts; Sprint needs two sure answers and no dissent.
+        merge = ensemble[ensemble.index("    fun merge("):ensemble.index("    /** Every model's merged opinion")]
+        self.assertIn('if (careful.route.mode == Mode.INSTANT) Route(Mode.FLASH', merge)
+        pair = ensemble[ensemble.index("    fun sprintPair("):ensemble.index("    /** One model's answers")]
+        self.assertIn("it.value.size >= 2", pair)
+        self.assertIn("if (opinions.any { keyOf(it.route) != (Mode.INSTANT to action) }) return null", pair)
+        self.assertIn("Ensemble.combine(Ensemble.perModel(opinions))", ensemble)
+        self.assertIn('Route(Mode.FLASH, "the decision models disagree on the action")', combine)
+        single = ensemble[ensemble.index("    private fun single("):ensemble.index("    /** Instant below Flash")]
+        self.assertIn("op.route.mode == Mode.INSTANT && undoable(op.route)", single)
+        self.assertIn("ignoring a request needs both to agree", single)
+        self.assertIn("ModeRouter.keyOf(it) in ModeRouter.REVERSIBLE", ensemble)
+        self.assertIn("undoable(op.route) && !op.reading.risky && op.reading.capabilityConfidence >= SPRINT_SURE", ensemble)
+        # The REVERSIBLE list itself never holds a tap, a photo, a selfie or a call.
+        router = read("mind/modes/ModeRouter.kt")
+        reversible = router[router.index("val REVERSIBLE = setOf("):router.index(")", router.index("val REVERSIBLE = setOf("))]
+        for risky in ('"tap"', '"photo"', '"selfie"', '"call"'):
+            self.assertNotIn(risky, reversible)
+        # The engine is asked after the grammar, the rules and the phone model.
+        route = router[router.index("    fun route(text: String"):]
+        self.assertLess(route.index("forced(text, world)?.let"), route.index("engine.decide("))
+        self.assertLess(route.index("m.guess(text, candidates)"), route.index("engine.decide("))
+        # Consensus is the default; the engine log carries no request text.
+        self.assertIn("entries.firstOrNull { it.wire == wire } ?: CONSENSUS", ensemble)
+        log = read("mind/decide/EngineLog.kt")
+        for cls in ("data class LaneRecord(", "data class EngineRecord("):
+            fields = log[log.index(cls):log.index(") {", log.index(cls))]
+            self.assertNotRegex(fields, r"\b(request|text|body|answer|key)\b\s*:")
+
+    def test_replay_repeats_only_verified_easy_to_undo_actions(self):
+        """Plan 65: a verified repeat runs with no model call, only for an easy-to-undo action, after the rules."""
+        replay = read("mind/decide/Replay.kt")
+        self.assertIn("g.intent !in ModeRouter.REVERSIBLE", replay)
+        self.assertIn("Outcome.FAILED, Outcome.PROMOTED, Outcome.CANCELLED -> streaks.remove(key)", replay)
+        self.assertIn("const val STREAK = 2", replay)
+        router = read("mind/modes/ModeRouter.kt")
+        route = router[router.index("    fun route(text: String"):]
+        step = route.index("phone.replay[")
+        self.assertLess(route.index("forced(text, world)?.let"), step)
+        self.assertLess(route.index("SECOND_CLAUSE.containsMatchIn(text)"), step)
+        self.assertIn("phone.mayAct && !phone.audit && plainNow(text)", route)
+        self.assertIn("?.takeIf { it.intent in REVERSIBLE }", route)
+
+    def test_sight_goes_to_openai_decisions(self):
+        """Plan 62/63: JEV's images run in its slower long-context mode, so Cyclone never sends JEV a screenshot."""
+        decide = read("mind/decide/Decisions.kt")
+        self.assertIn('JEV("JEV (TypeSafe)", "~typesafe/jev-latest", DecisionsWire.ENDPOINT, vision = false', decide)
+        sight = decide[decide.index("    fun sight(context: Context)"):decide.index("    /**\n     * One decision call:")]
+        self.assertIn("ProviderDecisionBox(key, DecisionProvider.OPENAI_DECISIONS,", sight)
+        modes = read("mind/modes/CycloneModes.kt")
+        self.assertIn("Decisions.sight(context) ?: box", modes)
+        # Sensitive screens never give a screenshot (code decides, from structure and the keep-off list).
+        hands = read("mind/modes/AndroidInstantHands.kt")
+        self.assertIn("val image = if (!withImage || sensitive) null", hands)
+
 
 if __name__ == "__main__":
     unittest.main()

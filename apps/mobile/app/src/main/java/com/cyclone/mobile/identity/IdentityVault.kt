@@ -27,6 +27,8 @@ object IdentityVault {
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val AAD = "cyclone-identities/v1"
     private val lock = Any()
+    /** Shares the normal writer lock for Safe's in-memory capture. */
+    internal fun <T> forSafe(block: () -> T): T = synchronized(lock) { block() }
 
     /** Seams for JVM tests. */
     internal var clock: () -> Long = System::currentTimeMillis

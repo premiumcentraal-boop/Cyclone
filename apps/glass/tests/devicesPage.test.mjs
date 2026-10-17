@@ -111,7 +111,7 @@ test("disconnect asks first, then revokes and refreshes", async () => {
   assert.match(page.element.textContent, /Disconnect Pixel 8\?/);
   // Phone care reads its status on its own (alpha 87); only commands count here.
   // Cloud phones (alpha 90) also read their status on their own.
-  const commands = () => calls.filter((call) => !call.endsWith("/care") && !call.endsWith("/v1/cloud"));
+  const commands = () => calls.filter((call) => !call.endsWith("/care") && !call.endsWith("/v1/cloud") && !call.startsWith("GET /v1/cc/safe/"));
   assert.equal(commands().length, 0, "nothing sent before the second click");
   buttons().find((b) => b.classList.contains("btn-danger")).click();
   for (let i = 0; i < 10 && !commands().length; i++) await settle();

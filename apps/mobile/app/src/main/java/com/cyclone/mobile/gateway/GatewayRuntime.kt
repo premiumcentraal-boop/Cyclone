@@ -428,6 +428,11 @@ internal object GatewayDispatcher {
     )
 
     private fun dispatch(context: Context, request: GatewayRequest): Any {
+        if (com.cyclone.mobile.runtime.safe.SafeStartupGate.blocked &&
+            !request.op.startsWith("safe.") && !request.op.startsWith("trust.") &&
+            !request.op.startsWith("pair.") && request.op != "bridge.status") {
+            throw GatewayProtocolException("SAFE_RESTORE_REQUIRED", "Open Cyclone and finish the Restore card before continuing.", request.id)
+        }
         // Trust-session IDs belong to authentication. Only execution operations use this scope.
         val bound = bindDispatchIdentity(request)
         LivePhoneMode.check(context, request)
@@ -528,6 +533,9 @@ internal object GatewayDispatcher {
             GatewayV5PortsAdapter.install(context)
             GatewayV5PortsAdapter.dispatch(request.op, request.args)
         }
+        "safe.list", "safe.get", "safe.put", "safe.delete" -> try {
+            com.cyclone.mobile.runtime.safe.SafeBridge.dispatch(context, request.op, request.args)
+        } catch (_: Exception) { throw GatewayProtocolException("SAFE_UNAVAILABLE", "Safe request could not finish; existing copies were kept.") }
         "health.report" -> com.cyclone.mobile.runtime.health.AppHealth.report(context)
         "profiles.list", "profiles.apps", "profiles.switch", "profiles.app", "profiles.cloak", "profiles.debug" -> {
             GatewayV5ProfilesAdapter.install(context)

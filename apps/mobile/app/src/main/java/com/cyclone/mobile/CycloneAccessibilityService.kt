@@ -121,6 +121,14 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        instance = this
+        DeviceState.accessibilityConnected = true
+        com.cyclone.mobile.runtime.safe.SafeStartupGate.whenReady {
+            android.os.Handler(mainLooper).post { if (instance === this) connectReadyRuntimes() }
+        }
+    }
+
+    private fun connectReadyRuntimes() {
         CycloneProcessDiagnostics.install(applicationContext)
         CycloneProcessDiagnostics.markStage(this, "primary.accessibility.onServiceConnected")
         instance = this
@@ -182,6 +190,7 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (com.cyclone.mobile.runtime.safe.SafeStartupGate.blocked) return
         event ?: return
         // This runs on the main thread for every screen event (hundreds a second in a busy app): read Android's window
         // list once per event, and resolve the foreground task's root (one call per window) only when the screen's

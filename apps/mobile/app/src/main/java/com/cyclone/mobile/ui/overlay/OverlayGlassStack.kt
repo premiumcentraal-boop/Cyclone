@@ -535,7 +535,7 @@ internal fun OverlayForegroundCard(snapshot: OverlayChromeSnapshot, onMinimize: 
 }
 
 /**
- * Alpha.135: Cy beside a block of a card, in the mood of the task. With Cy off it is just the block, so the card is the
+ * Alpha.137: Cy beside a block of a card, in the mood of the task. With Cy off it is just the block, so the card is the
  * same as before. Cy sits top-left, at the height of the block's first line, and never makes the card taller.
  */
 @Composable
@@ -707,7 +707,7 @@ private fun RingedLogo(appPackage: String?, working: Boolean, paused: Boolean = 
     }, contentAlignment = Alignment.Center) {
         val cy by com.cyclone.mobile.ui.overlay.cy.CyLook.enabled.collectAsState()
         if (cy) {
-            // Alpha.135: Cy works inside the ring; the app it works in rides on its shoulder, so the island still says where.
+            // Alpha.137: Cy works inside the ring; the app it works in rides on its shoulder, so the island still says where.
             Box(Modifier.size(42.dp)) {
                 com.cyclone.mobile.ui.overlay.cy.Cy(
                     if (paused) com.cyclone.mobile.ui.overlay.cy.CyMood.PAUSE else if (working) com.cyclone.mobile.ui.overlay.cy.CyMood.WORK
@@ -734,7 +734,7 @@ internal fun OverlayOwnerCard(moment: OwnerMoment) {
     GlassCard {
         // The same header as the working card: the state on the left, the apps on the right.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            // Alpha.135: Cy looks up at you beside "Needs you" (waving: it waits for your answer).
+            // Alpha.137: Cy looks up at you beside "Needs you" (waving: it waits for your answer).
             val cy by com.cyclone.mobile.ui.overlay.cy.CyLook.enabled.collectAsState()
             if (cy) com.cyclone.mobile.ui.overlay.cy.Cy(com.cyclone.mobile.ui.overlay.cy.CyMood.ASK, 26.dp)
             StatusChip(CycloneTaskVisualState.ACTION_NEEDED)
