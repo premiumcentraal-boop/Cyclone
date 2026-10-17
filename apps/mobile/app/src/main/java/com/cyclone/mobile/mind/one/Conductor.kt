@@ -31,6 +31,10 @@ interface OwnerLine {
     fun cancelled(): Boolean = false
     /** Steers sent since the last call (each is a new goal version). */
     fun steers(): List<String> = emptyList()
+    /** Messages the owner sent while the run works (not a steer): the mind reads them at its next wake. */
+    fun messages(): List<String> = emptyList()
+    /** Plan 38: the owner paused the run; it holds before its next step. */
+    fun paused(): Boolean = false
     /** A question that only the owner can answer. Null: no answer (stopped, or the owner went away). */
     fun ask(question: String, choices: List<String>): String?
     /** Plan 69 §7: "This seems stuck on ⟨reason⟩. Keep going, change course, or stop?" */
@@ -47,6 +51,8 @@ interface ConductorListener {
     fun onScore(score: Score) {}
     fun onWake(kind: WakeKind, trigger: String, reason: String) {}
     fun onNotice(text: String) {}
+    /** After every step and wake: the run's state, for the journal (a resume after process death reloads it). */
+    fun onCheckpoint(score: Score, conversation: MindConversation) {}
 }
 
 enum class RunEnd { DONE, UNCONFIRMED, GAVE_UP, FAILED, STOPPED, CANCELLED }
@@ -119,12 +125,23 @@ class Conductor(
     private val glanceRunner: (() -> Unit) -> Unit = { task -> Thread(task, "onemind-glance").apply { isDaemon = true }.start() },
     private val clock: () -> Long = System::currentTimeMillis,
     private val callMs: Long = 120_000L,
+    /** A run that already has a Score: an Instant run handed up (the baton), or a run resumed from its journal. */
+    start: Score? = null,
+    /** A resumed run's conversation; with it the run continues instead of planning again. */
+    resumed: MindConversation? = null,
+    /** A verified run's plan for the same request (plan 69 §10): the crew starts on it with no planning call. */
+    private val recipe: Plan? = null,
+    /** What the first briefing also carries: memory, recent missions, an attachment, the Instant baton. */
+    opening: List<String> = emptyList(),
+    private val sleep: (Long) -> Unit = { Thread.sleep(it) },
 ) {
     private var profile = profile
-    var score: Score = Score.start(runId, profile.difficulty, goalText, clock())
+    var score: Score = (start ?: Score.start(runId, profile.difficulty, goalText, clock())).copy(difficulty = profile.difficulty)
         private set
-    var conversation = MindConversation(listOf(MindMessage.System(systemPrompt())))
+    var conversation = resumed ?: MindConversation(listOf(MindMessage.System(systemPrompt())))
         private set
+    private val resuming = resumed != null
+    private var pendingNotes = opening.filter { it.isNotBlank() }
     var wakes = 0
         private set
     private var seenSeq = 0L
@@ -148,7 +165,18 @@ class Conductor(
 
     fun run(): ConductorOutcome = try {
         publish()
-        plan(WakeKind.PLAN, "start", "A new task")
+        when {
+            resuming -> {
+                currentStep()?.let(::retry)
+                wake(WakeKind.REPLAN, "resumed", "The run was interrupted and resumed: the phone may have changed since", null, screen = true)
+            }
+            recipe != null -> {
+                score = score.replan(recipe.copy(milestones = recipe.milestones.map { m ->
+                    m.copy(state = MilestoneState.TODO, steps = m.steps.map { it.copy(state = StepState.TODO) })
+                })).event("recipe", "Started from a recipe: this request ran this way before and was checked", clock())
+            }
+            else -> plan(WakeKind.PLAN, "start", "A new task")
+        }
         loop()
     } catch (end: End) {
         glance = null
@@ -160,8 +188,15 @@ class Conductor(
     private fun loop(): Nothing {
         while (true) {
             if (owner.cancelled()) end(RunEnd.CANCELLED, "Stopped by the owner.")
+            holdWhilePaused()
             steers()
             pollGlance()
+            owner.messages().filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.let { said ->
+                said.forEach { score = score.event("owner", "The owner says: ${it.take(200)}", clock()) }
+                currentStep()?.let(::retry)
+                wake(WakeKind.CONSULT, "owner_message", "The owner sent a message: ${said.joinToString(" / ").take(400)}", currentStep())
+                continue
+            }
             StandingOrders.firedByFacts(score).firstOrNull()?.let { o ->
                 score = StandingOrders.spend(score, o.id)
                 wake(WakeKind.CONSULT, "order", "Your order fired: ${o.text}", null)
@@ -178,8 +213,20 @@ class Conductor(
             drainCrew()
             handle(outcome)
             publish()
+            checkpoint()
         }
     }
+
+    private fun holdWhilePaused() {
+        if (!owner.paused()) return
+        score = score.event("pause", "Paused by the owner", clock())
+        publish()
+        while (owner.paused() && !owner.cancelled()) sleep(PAUSE_POLL_MS)
+        if (owner.cancelled()) end(RunEnd.CANCELLED, "Stopped by the owner.")
+        score = score.event("pause", "Resumed", clock())
+    }
+
+    private fun checkpoint() = runCatching { listener.onCheckpoint(score, conversation) }
 
     private fun handle(o: StepOutcome) {
         when (o) {
@@ -365,7 +412,8 @@ class Conductor(
     private fun brief(kind: WakeKind, trigger: String, reason: String, screen: Boolean, notes: List<String>): Briefing.Brief {
         wakes++
         val evidence = if (screen || kind == WakeKind.PLAN) Briefing.Evidence(runCatching { crew.look(true) }.getOrNull()) else null
-        val brief = Briefing.build(wakes, kind, trigger, reason, score, seenSeq, evidence, notes)
+        val brief = Briefing.build(wakes, kind, trigger, reason, score, seenSeq, evidence, pendingNotes + notes)
+        pendingNotes = emptyList()
         seenSeq = brief.lastSeq
         score = score.event("wake", "${kind.name.lowercase().replaceFirstChar { it.uppercase() }}: $reason", clock())
         listener.onWake(kind, trigger, reason)
@@ -787,6 +835,7 @@ class Conductor(
     private fun end(end: RunEnd, summary: String): Nothing {
         score = score.event("end", "${end.name.lowercase()}: ${summary.take(200)}", clock())
         publish()
+        checkpoint()
         throw End(ConductorOutcome(end, summary, score, wakes, handedOver))
     }
 
@@ -800,5 +849,6 @@ class Conductor(
         const val MAX_DEPTH = 8
         const val KEEP_RECENT = 6
         const val GLANCE_POLL_MS = 200L
+        const val PAUSE_POLL_MS = 250L
     }
 }

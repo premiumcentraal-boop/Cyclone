@@ -80,6 +80,12 @@ ASK_REQUEST_KEYS = frozenset({
     "requestId", "state", "lane", "decider", "why", "decideMs", "startedAtMs", "routedAtMs", "finishedAtMs", "say",
 })
 ASK_REQUEST_STATES = frozenset({"waiting", "running", "done", "failed", "cancelled"})
+# Plan 69: a OneMind run's card summary (counts and lines only, never screen text). Older phones omit it.
+ASK_ONEMIND_KEYS = frozenset({
+    "difficulty", "goalVersion", "planVersion", "milestones", "step", "wakes", "wakeLines", "calls", "costUsd",
+})
+ASK_ONEMIND_DIFFICULTIES = frozenset({"instant", "flash", "mind"})
+ASK_ONEMIND_MILESTONE_STATES = frozenset({"todo", "running", "done", "failed"})
 ASK_LANES = frozenset({"instant", "answer", "ignore", "flash", "mind"})
 ASK_REQUEST_ID = re.compile(r"^req-[0-9a-f-]{8,40}$")
 MAX_GOAL = 2000
@@ -445,6 +451,34 @@ def _validate_ask_request(value: Any) -> None:
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask request record is malformed.")
 
 
+def _validate_ask_onemind(value: Any) -> None:
+    """Plan 69: milestones, the step line, wakes and cost of a OneMind run; bounded text, no screen content."""
+    def bad() -> DesktopRuntimeError:
+        return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask.status OneMind summary is malformed.")
+
+    if not isinstance(value, dict) or set(value) != ASK_ONEMIND_KEYS or value.get("difficulty") not in ASK_ONEMIND_DIFFICULTIES:
+        raise bad()
+    for key in ("goalVersion", "planVersion", "wakes", "calls"):
+        if not _is_int(value.get(key)) or value[key] < 0:
+            raise bad()
+    cost = value.get("costUsd")
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost < 0:
+        raise bad()
+    step = value.get("step")
+    if step is not None and (not isinstance(step, str) or len(step) > 160):
+        raise bad()
+    milestones = value.get("milestones")
+    if not isinstance(milestones, list) or len(milestones) > 12:
+        raise bad()
+    for milestone in milestones:
+        if not isinstance(milestone, dict) or set(milestone) != {"title", "state"} or not isinstance(milestone.get("title"), str) \
+                or len(milestone["title"]) > 90 or milestone.get("state") not in ASK_ONEMIND_MILESTONE_STATES:
+            raise bad()
+    lines = value.get("wakeLines")
+    if not isinstance(lines, list) or len(lines) > 5 or any(not isinstance(line, str) or len(line) > 160 for line in lines):
+        raise bad()
+
+
 def _validate_ask_response(op: str, value: dict[str, Any]) -> None:
     if op == "ask.start":
         keys = set(value)
@@ -463,6 +497,9 @@ def _validate_ask_response(op: str, value: dict[str, Any]) -> None:
     if "request" in value:
         _validate_ask_request(value.get("request"))
         value = {k: v for k, v in value.items() if k != "request"}
+    if "onemind" in value:
+        _validate_ask_onemind(value.get("onemind"))
+        value = {k: v for k, v in value.items() if k != "onemind"}
     if set(value) != ASK_STATUS_KEYS or value.get("state") not in ASK_STATES:
         raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask.status result is malformed.")
     milestones = value.get("milestones")

@@ -14,9 +14,6 @@ import com.cyclone.mobile.mind.MindToolSpec
 import com.cyclone.mobile.mind.MindToolbox
 import com.cyclone.mobile.mind.OpenRouterMindModel
 import com.cyclone.mobile.mind.PhoneMindToolbox
-import com.cyclone.mobile.mind.mission.OwnerInbox
-import com.cyclone.mobile.mind.mission.OwnerRequestKind
-import com.cyclone.mobile.mind.mission.OwnerResponse
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -25,7 +22,7 @@ import org.json.JSONObject
  *
  * - [brain]: the owner's selected model, at low effort for glances and consults and at the owner's effort otherwise.
  * - [luna]: the one GPT-6 Luna call compaction and the handover use (any failure falls back to code).
- * - [owner]: questions and the check-in card through the [OwnerInbox].
+ * - [owner]: questions and the check-in card through the mission's owner port (the usual card).
  * - [wheel]: today's [MindLoop], driving inside OneMind's conversation until the mind hands back with plan_write.
  * - [crew]: the step engine on the Mind's own toolbox (gates unchanged).
  */
@@ -56,32 +53,24 @@ object AndroidMinds {
         }
     }
 
-    fun owner(inbox: OwnerInbox, missionId: String, cancelled: () -> Boolean, steers: () -> List<String>): OwnerLine = object : OwnerLine {
+    /** The owner through the mission's own owner port: questions and the check-in use the same card as every other ask. */
+    fun owner(port: com.cyclone.mobile.mind.MindOwnerPort, cancelled: () -> Boolean, steers: () -> List<String>,
+              messages: () -> List<String>, paused: () -> Boolean): OwnerLine = object : OwnerLine {
         override fun cancelled(): Boolean = cancelled()
         override fun steers(): List<String> = steers()
+        override fun messages(): List<String> = messages()
+        override fun paused(): Boolean = paused()
 
-        override fun ask(question: String, choices: List<String>): String? {
-            val request = inbox.post(missionId, OwnerRequestKind.QUESTION, question, choices)
-            return when (val r = inbox.await(request, OWNER_WAIT_MS, cancelled).response) {
-                is OwnerResponse.Answer -> r.text.takeIf { it.isNotBlank() }
-                OwnerResponse.Approve -> "yes"
-                OwnerResponse.Decline -> "no"
-                OwnerResponse.Done -> "done"
-                else -> null
-            }
-        }
+        override fun ask(question: String, choices: List<String>): String? =
+            port.ask(question, choices, OWNER_WAIT_MS).takeIf { it.answered }?.text?.takeIf { it.isNotBlank() }
 
         override fun checkIn(reason: String): CheckIn {
-            val request = inbox.post(missionId, OwnerRequestKind.QUESTION, OneMindPrompt.checkIn(reason),
-                listOf(OneMindPrompt.KEEP_GOING, OneMindPrompt.STOP))
-            return when (val r = inbox.await(request, OWNER_WAIT_MS, cancelled).response) {
-                is OwnerResponse.Answer -> when (r.text.trim()) {
-                    OneMindPrompt.KEEP_GOING -> CheckIn.KeepGoing
-                    OneMindPrompt.STOP, "" -> CheckIn.Stop
-                    else -> CheckIn.Steer(r.text.trim())
-                }
-                OwnerResponse.Approve, OwnerResponse.Done -> CheckIn.KeepGoing
-                else -> CheckIn.Stop
+            val reply = port.ask(OneMindPrompt.checkIn(reason), listOf(OneMindPrompt.KEEP_GOING, OneMindPrompt.STOP), OWNER_WAIT_MS)
+            if (!reply.answered) return CheckIn.Stop
+            return when (reply.text.trim()) {
+                OneMindPrompt.KEEP_GOING -> CheckIn.KeepGoing
+                OneMindPrompt.STOP, "" -> CheckIn.Stop
+                else -> CheckIn.Steer(reply.text.trim())
             }
         }
     }

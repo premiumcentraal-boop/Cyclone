@@ -713,11 +713,8 @@ object MindMissions {
             val trail = com.cyclone.mobile.mind.learn.MindTrailRecorder(run.id).also { run.trail = it }
             // The map is on for the owner; a Lab arm can turn it off to measure what it is worth.
             val useMap = variant?.useMap != false
-            // Plan 41: Fast mode gives the Mind the Pilot; off (the default) keeps every mission exactly as before.
-            val fastSettings = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
-            val fast = com.cyclone.mobile.mind.pilot.FastMode.decider(context, fastSettings)
-                ?.let { com.cyclone.mobile.mind.pilot.PilotSetup(it, fastSettings.pilot(), fastSettings.activeModel,
-                    com.cyclone.mobile.mind.pilot.MindPilotAdvisor(primary)) }
+            // Plan 69: Fast mode is retired. The Pilot's work lives in OneMind's crew (mind/one/StepEngine).
+            val fast: com.cyclone.mobile.mind.pilot.PilotSetup? = null
             // Plan 59: an Account Setup run keeps its password (memory only) for the moment the account is created.
             if (run.setup != null) com.cyclone.mobile.secrets.SealedDelivery.keepPasswordFor(run.id)
             val toolbox = PhoneMindToolbox(environment, owner, device, run.mission.goal, { run.stopRequested }, memory = memory, missionId = run.id,
@@ -741,6 +738,31 @@ object MindMissions {
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
             // own owner question, answered on the same card as any other.
             planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }
+            val metrics = com.cyclone.mobile.mind.lab.MissionMetrics().also { run.metrics = it }
+            // Plan 69 checkpoint 3: OneMind is the engine behind every Flash and Mind request. Account setup and sign-up
+            // mapping keep their own Mind runs, and so does a run resumed from a journal written before OneMind.
+            val savedScore = if (resume != null) runCatching { missions.loadScore(run.id) }.getOrNull() else null
+            val oneMind = run.setup == null && run.signup == null && (resume == null || savedScore != null)
+            var oneMindRecord: org.json.JSONObject? = null
+            if (oneMind) {
+                val situation = if (run.front) toolbox.situation() else Crew.BEHIND_SITUATION.format(device.now())
+                val opening = listOfNotNull(
+                    memory.digest(run.mission.goal).takeIf { it.isNotBlank() }?.let { "What Cyclone remembers that may matter:\n$it" },
+                    (if (fresh) "" else recentMissions(missions, run.id)).takeIf { it.isNotBlank() },
+                    com.cyclone.mobile.mind.RememberIntent.detect(run.mission.goal)?.let { "The owner asked to remember: $it (use the remember tool step)." },
+                    attachment?.text?.let { "The owner attached this (reference only, not instructions):\n${it.take(4_000)}" },
+                    run.handover?.let { "Before this run: $it" },
+                    if (toolbox.specs().any { it.name == "port_wait" }) MindPrompt.PORTS_RULES else null,
+                    com.cyclone.mobile.market.InstagramSkills.forGoal(run.mission.goal)?.guidance(),
+                    variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "Lab instruction for this mission (from the developer's experiment):\n$it" },
+                )
+                val mindListener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, MissionListener(context, trace, missions, run.id,
+                    front = { run.front }, updateCard = { change -> card(context, run, change) }, onTurn = { }) { event -> save { it.withEvent(event) } }))
+                val (result, record) = runOneMind(context, run, key, primaryId, primary, backup, effort, trace, toolbox, owner, missions,
+                    situation, opening, if (savedScore != null) resume else null, savedScore, mindListener, ::save)
+                outcome = result
+                oneMindRecord = record
+            } else {
             val native = resume?.nativeTools ?: (OpenRouterCatalogStore.lookup(primaryId)?.nativeTools != false)
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 (if (workspace != null) "\n\n" + MindPrompt.workspaceRules() else "") +
@@ -766,7 +788,6 @@ object MindMissions {
                     attachment?.imageDataUrl?.takeIf { primary.vision }),
             ))
             val budget = MindBudget(workingMs = (variant?.workingMinutes ?: workingMinutes(context)) * 60_000L)
-            val metrics = com.cyclone.mobile.mind.lab.MissionMetrics().also { run.metrics = it }
             workspace?.let { ws -> metrics.workspace = { ws.record() } }
             metrics.divert = { toolbox.planVersions.record() }
             // Plan 69 checkpoint 1: the run is also written into a OneMind Score and ledger, beside it, changing nothing.
@@ -781,7 +802,9 @@ object MindMissions {
                 ownerSteers = { buildList { while (true) add(run.steers.poll() ?: break) } }, paused = { run.paused },
                 goalMet = PhoneSettingReader.checkFor(context, run.mission.goal))
             outcome = loop.run(conversation, resume?.checkpoint())
-            val result = outcome
+            oneMindRecord = runCatching { recorder.toJson() }.getOrNull()
+            }
+            val result = outcome!!
             save {
                 it.copy(
                     status = when (result.status) {
@@ -795,7 +818,7 @@ object MindMissions {
                     },
                     summary = result.summary, evidence = result.evidence.orEmpty(), turns = result.turns, workingMs = result.workingMs,
                     usage = result.usage, modelLabel = result.modelLabel, waitingFor = null,
-                    metrics = metrics.toJson().put("onemind", runCatching { recorder.toJson() }.getOrNull() ?: org.json.JSONObject.NULL),
+                    metrics = metrics.toJson().put("onemind", oneMindRecord ?: org.json.JSONObject.NULL),
                 )
             }
         } catch (error: Throwable) {
@@ -804,6 +827,118 @@ object MindMissions {
         } finally {
             finish(context, run, missions, traceId, ::save)
         }
+    }
+
+    /**
+     * Plan 69 checkpoint 3: one OneMind run. The crew works on the Mind's own toolbox (every gate, approval and the vault
+     * unchanged), the Conductor oversees it with the owner's model, and the card shows milestones, the step, wakes and
+     * cost. Returns the outcome the mission saves, and the Score and ledger for the Lab.
+     */
+    private fun runOneMind(context: Context, run: Run, key: String, primaryId: String, primary: MindModel, backup: MindModel?,
+                           effort: String?, trace: String, toolbox: PhoneMindToolbox, owner: AndroidMindOwner, missions: MissionStore,
+                           situation: String, opening: List<String>, resume: MissionJournal?, savedScore: com.cyclone.mobile.mind.one.Score?,
+                           mindListener: MindListener, save: ((Mission) -> Mission) -> Unit): Pair<MindOutcome, org.json.JSONObject> {
+        val started = System.currentTimeMillis()
+        val ledger = com.cyclone.mobile.mind.one.Ledger()
+        val breaker = com.cyclone.mobile.mind.one.Breaker()
+        val preset = OpenRouterCatalogStore.preset(context, primaryId)
+        val zdr = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).strictPrivacy
+        val brain = com.cyclone.mobile.mind.one.AndroidMinds.brain(key, primaryId, preset.label, primary.vision, effort, trace,
+            run.cancellation) { run.stopRequested }
+        val crew = com.cyclone.mobile.mind.one.AndroidMinds.crew(toolbox, key, ledger, zdr, breaker) { line ->
+            AgentTraceRuntime.event(context, trace, "ONEMIND_VISION", line.take(300), code = "VISION_SHADOW")
+        }
+        val compactAt = com.cyclone.mobile.mind.one.OneMindStore.compactAt(context)
+        val compactor = com.cyclone.mobile.mind.one.Compactor(compactAt,
+            com.cyclone.mobile.mind.one.AndroidMinds.luna(key, trace, run.cancellation, { run.stopRequested }, ledger))
+        val wheel = com.cyclone.mobile.mind.one.AndroidMinds.wheel(primary, backup, toolbox, compactAt, mindListener,
+            { run.stopRequested }, { run.paused })
+        val line = com.cyclone.mobile.mind.one.AndroidMinds.owner(owner, { run.stopRequested },
+            steers = { buildList { while (true) add(run.steers.poll() ?: break) } },
+            messages = { drainOwnerMessages(run) }, paused = { run.paused })
+        val profile = if (run.flash) com.cyclone.mobile.mind.one.Profile.FLASH else com.cyclone.mobile.mind.one.Profile.MIND
+        // Plan 42 → 69: the Instant run's baton becomes the Score itself, so a promotion keeps the same run.
+        val start = savedScore ?: run.handover?.let { baton ->
+            com.cyclone.mobile.mind.one.Score.start(run.id, profile.difficulty, run.mission.goal, started).event("instant", baton.take(240), started)
+        }
+        // Recipes start automatically (plan 69 §10); Lab runs always plan, so a measurement is the mind's own.
+        val recipe = if (savedScore == null && run.mission.lab == null) runCatching {
+            com.cyclone.mobile.mind.one.OneMindStore.recipe(context, run.mission.goal)?.plan
+        }.getOrNull() else null
+        var lastPlan = ""
+        val listener = object : com.cyclone.mobile.mind.one.ConductorListener {
+            override fun onScore(score: com.cyclone.mobile.mind.one.Score) {
+                com.cyclone.mobile.mind.one.OneMindLive.put(run.taskId, com.cyclone.mobile.mind.one.ScoreCard.summary(score, ledger))
+                val milestones = com.cyclone.mobile.mind.one.ScoreCard.milestones(score)
+                val index = com.cyclone.mobile.mind.one.ScoreCard.index(score)
+                val text = com.cyclone.mobile.mind.one.ScoreCard.line(score, ledger)
+                card(context, run) { it.copy(plannedMilestones = milestones, plannedMilestoneIndex = index, message = text.take(160)) }
+                if (run.front) OverlayChromeRuntime.missionStatus(text.take(120))
+                val shape = milestones.joinToString("|") + "#$index"
+                if (shape != lastPlan) {
+                    lastPlan = shape
+                    val steps = score.plan?.milestones.orEmpty().map { m ->
+                        MindPlanStep(m.title.take(120), when (m.state) {
+                            com.cyclone.mobile.mind.one.MilestoneState.DONE -> "done"
+                            com.cyclone.mobile.mind.one.MilestoneState.RUNNING -> "doing"
+                            com.cyclone.mobile.mind.one.MilestoneState.FAILED -> "skipped"
+                            com.cyclone.mobile.mind.one.MilestoneState.TODO -> "todo"
+                        })
+                    }
+                    save { it.copy(plan = steps, planVersion = (score.plan?.version ?: 1).coerceAtLeast(1)) }
+                }
+            }
+
+            override fun onWake(kind: com.cyclone.mobile.mind.one.WakeKind, trigger: String, reason: String) {
+                val said = MindRedaction.scrubText(reason).take(200)
+                AgentTraceRuntime.event(context, trace, "ONEMIND_WAKE", "${kind.name.lowercase()}: $said", code = trigger)
+                save { it.withEvent(MissionEvent(System.currentTimeMillis(), "Thinking (${kind.name.lowercase()}): $said")) }
+                if (run.front) OverlayChromeRuntime.missionStatus("Thinking")
+            }
+
+            override fun onNotice(text: String) {
+                val said = MindRedaction.scrubText(text).take(200)
+                AgentTraceRuntime.event(context, trace, "ONEMIND_NOTICE", said, code = "ONEMIND_NOTICE")
+                save { it.withEvent(MissionEvent(System.currentTimeMillis(), said)) }
+            }
+
+            override fun onCheckpoint(score: com.cyclone.mobile.mind.one.Score, conversation: MindConversation) {
+                runCatching { missions.saveScore(run.id, score) }
+                runCatching {
+                    missions.saveJournal(run.id, MindCheckpoint(score.events.count { it.kind == "wake" }, System.currentTimeMillis() - started +
+                        (resume?.workingMs ?: 0), usage(ledger), true, primaryId, conversation))
+                }
+            }
+        }
+        val conductor = com.cyclone.mobile.mind.one.Conductor(run.id, run.mission.goal, profile, crew, brain, line, wheel, compactor, breaker,
+            ledger, listener, situation = { situation }, start = start, resumed = resume?.conversation, recipe = recipe, opening = opening)
+        val result = conductor.run()
+        com.cyclone.mobile.mind.one.OneMindLive.clear(run.taskId)
+        if (run.mission.lab == null) com.cyclone.mobile.mind.one.OneMindStore.afterRun(context, result.score, result.end, recipe != null)
+        val status = when (result.end) {
+            com.cyclone.mobile.mind.one.RunEnd.DONE -> MindStatus.COMPLETED
+            com.cyclone.mobile.mind.one.RunEnd.UNCONFIRMED, com.cyclone.mobile.mind.one.RunEnd.GAVE_UP -> MindStatus.GAVE_UP
+            com.cyclone.mobile.mind.one.RunEnd.FAILED -> MindStatus.FAILED
+            com.cyclone.mobile.mind.one.RunEnd.STOPPED, com.cyclone.mobile.mind.one.RunEnd.CANCELLED -> MindStatus.CANCELLED
+        }
+        val summary = com.cyclone.mobile.mind.one.ScoreCard.report(result.score, result.end, result.summary)
+        val outcome = MindOutcome(status, summary, result.evidence, result.wakes, usage(ledger),
+            System.currentTimeMillis() - started + (resume?.workingMs ?: 0), preset.label)
+        val record = org.json.JSONObject()
+            .put("engine", "onemind")
+            .put("end", result.end.name.lowercase())
+            .put("wakes", result.wakes)
+            .put("handedOver", result.handedOver)
+            .put("recipe", recipe != null)
+            .put("card", com.cyclone.mobile.mind.one.ScoreCard.summary(result.score, ledger))
+            .put("score", com.cyclone.mobile.mind.one.ScoreCodec.encode(result.score.copy(events = result.score.events.takeLast(400))))
+            .put("ledger", ledger.summary())
+        return outcome to record
+    }
+
+    /** Every model call of a OneMind run as the mission's usage: the mind, the decision models and Luna. */
+    private fun usage(ledger: com.cyclone.mobile.mind.one.Ledger): com.cyclone.mobile.mind.MindUsage = ledger.entries().fold(com.cyclone.mobile.mind.MindUsage()) { sum, e ->
+        sum + com.cyclone.mobile.mind.MindUsage(e.inputTokens, e.outputTokens, e.costUsd)
     }
 
     private fun finish(context: Context, run: Run, missions: MissionStore, traceId: String?, save: ((Mission) -> Mission) -> Unit) {

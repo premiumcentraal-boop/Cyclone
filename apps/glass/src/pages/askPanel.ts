@@ -2,7 +2,7 @@
  * Ask from Glass: the developer types the sentence, the phone's own engine runs it (`ask.start`), and Glass mirrors
  * the phone's presentation snapshot (`ask.status`). Glass never plans, rewrites or retries the goal.
  */
-import type { AskStatusView, AtlasClient } from "../services/atlasClient.js";
+import type { AskStatusView, AtlasClient, OneMindView } from "../services/atlasClient.js";
 import { ASK_MAX_GOAL } from "../services/atlasClient.js";
 import { el, link, setChildren } from "../ui/dom.js";
 import { actionButton, chip, type Tone } from "../ui/components.js";
@@ -25,6 +25,22 @@ export interface AskPanel {
 }
 
 const TERMINAL = new Set<AskStatusView["state"]>(["idle", "done", "failed"]);
+
+/** Plan 69: the run's wakes and cost under its milestones, with each wake's reason (no screen text). */
+function oneMindLine(view: OneMindView): HTMLElement {
+  const box = el("div", "ask-onemind");
+  const who = view.difficulty === "mind" ? "OneMind" : view.difficulty === "flash" ? "Flash" : "Instant";
+  const cost = view.costUsd < 0.01 ? "<$0.01" : `$${view.costUsd.toFixed(2)}`;
+  const parts = [who, `${view.wakes} ${view.wakes === 1 ? "wake" : "wakes"}`, cost];
+  if (view.step) parts.push(view.step);
+  box.append(el("p", "ask-onemind-line muted", parts.join(" · ")));
+  if (view.wakeLines.length) {
+    const list = el("ul", "ask-onemind-wakes");
+    for (const line of view.wakeLines) list.append(el("li", "muted", line));
+    box.append(list);
+  }
+  return box;
+}
 
 const STATE_CHIP: Record<AskStatusView["state"], [string, Tone]> = {
   idle: ["Idle", "neutral"],
@@ -139,6 +155,7 @@ export function createAskPanel(deps: AskPanelDeps): AskPanel {
       status.app ? el("p", "muted", status.app) : null,
       status.milestones.length ? steps : null,
       status.supportingCopy ? el("p", "ask-copy", status.supportingCopy) : null,
+      status.onemind ? oneMindLine(status.onemind) : null,
       status.outcomeCopy ? el("p", "ask-outcome", status.outcomeCopy) : null,
       runLink && runLink.askedAt === askedAt
         ? link(TERMINAL.has(status.state) ? "Open this run" : "Watch it step by step", `#/runs/${encodeURIComponent(runLink.runId)}`, "ask-runs-link")

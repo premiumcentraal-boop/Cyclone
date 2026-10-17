@@ -201,6 +201,18 @@ export interface AskStatusView {
   milestones: Array<{ label: string; state: AskMilestoneState }>;
   supportingCopy: string | null;
   outcomeCopy: string | null;
+  /** Plan 69: a OneMind run's wakes and cost, when the phone sends them (counts and lines, never screen text). */
+  onemind: OneMindView | null;
+}
+
+/** Plan 69: what Glass shows of a OneMind run: milestones come in `milestones`; this adds the wakes and the cost. */
+export interface OneMindView {
+  difficulty: "instant" | "flash" | "mind";
+  step: string | null;
+  wakes: number;
+  wakeLines: string[];
+  calls: number;
+  costUsd: number;
 }
 
 export const ASK_MAX_GOAL = 2000;
@@ -543,6 +555,35 @@ function optionalText(value: unknown, max: number): string | null {
   return typeof value === "string" && value.trim() ? value.slice(0, max) : null;
 }
 
+function parseOneMind(value: unknown): OneMindView | null {
+  if (value === undefined || value === null) return null;
+  assertObject(value, "ask.status onemind");
+  const record = value as Record<string, unknown>;
+  const difficulty = record.difficulty;
+  const count = (v: unknown): number => {
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+      throw new AtlasClientError("PROTOCOL_MISMATCH", "Android ask.status OneMind summary is malformed.");
+    }
+    return v;
+  };
+  if (difficulty !== "instant" && difficulty !== "flash" && difficulty !== "mind") {
+    throw new AtlasClientError("PROTOCOL_MISMATCH", "Android ask.status OneMind summary is malformed.");
+  }
+  const cost = record.costUsd;
+  if (typeof cost !== "number" || cost < 0 || !Number.isFinite(cost)) {
+    throw new AtlasClientError("PROTOCOL_MISMATCH", "Android ask.status OneMind summary is malformed.");
+  }
+  const lines = Array.isArray(record.wakeLines) ? record.wakeLines : [];
+  return {
+    difficulty,
+    step: optionalText(record.step, 160),
+    wakes: count(record.wakes),
+    wakeLines: lines.filter((line): line is string => typeof line === "string").slice(-5).map((line) => line.slice(0, 160)),
+    calls: count(record.calls),
+    costUsd: cost,
+  };
+}
+
 export function parseAskStatus(payload: unknown): AskStatusView {
   assertObject(payload, "ask.status");
   assertNoSecretValues(payload);
@@ -571,6 +612,7 @@ export function parseAskStatus(payload: unknown): AskStatusView {
     milestones,
     supportingCopy: optionalText(record.supportingCopy, 240),
     outcomeCopy: optionalText(record.outcomeCopy, 600),
+    onemind: parseOneMind(record.onemind),
   };
 }
 

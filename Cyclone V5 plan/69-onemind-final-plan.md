@@ -551,6 +551,6 @@ and everything the owner sees.
 ### 14.5 Progress (agents update this list at every checkpoint)
 
 - [x] Checkpoint 1: foundation and crew (commit 0a959151, Mobile CI run 1505 green)
-- [ ] Checkpoint 2: the minds
+- [x] Checkpoint 2: the minds (commit 45595c29, Mobile CI run 1506 green)
 - [ ] Checkpoint 3: the switch-over
 - [ ] Checkpoint 4: release (alpha.138)

@@ -121,7 +121,8 @@ data class Score(
                 steps.all { it.state == StepState.DONE || it.state == StepState.SKIPPED } -> MilestoneState.DONE
                 steps.any { it.state == StepState.FAILED } -> MilestoneState.FAILED
                 steps.any { it.state != StepState.TODO } -> MilestoneState.RUNNING
-                else -> m.state
+                // Every step back to do (a glance's undo, a retry): the milestone is to do again, not done.
+                else -> MilestoneState.TODO
             }
             m.copy(steps = steps, state = mState)
         }

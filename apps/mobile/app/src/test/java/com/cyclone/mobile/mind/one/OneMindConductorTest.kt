@@ -507,4 +507,111 @@ class OneMindConductorTest {
         val flash = conductor(ScriptedModel(longPlan), FakeCrew(), profile = Profile.FLASH, compactor = Compactor(CompactAt.K50)).run()
         assertFalse(flash.score.events.any { it.kind == "compact" })
     }
+
+    // ---- checkpoint 3: recipes, resume, the baton, the card --------------------------------------------------------------
+
+    private fun finished(): Score {
+        val plan = WakeReply.read("""{"milestone":"Open the chat"}
+            {"step":"open_app","args":{"app":"WhatsApp"}}
+            {"step":"tap","target":"Anna","if":[{"if":"Anna's chat is already open","then":"skip"}]}
+            {"step":"tap","target":"Archived"}
+            {"milestone":"Write"}
+            {"step":"type_text","target":"Message","args":{"text":"On my way, code 482913"}}""".trimIndent(), "g").plan!!
+        var s = Score.start("r", Difficulty.FLASH, "Tell Anna I'm on my way", 1).copy(plan = plan)
+        s = s.mark("s1", StepState.DONE).mark("s2", StepState.SKIPPED).mark("s3", StepState.SKIPPED).mark("s4", StepState.DONE)
+        return s
+    }
+
+    @Test fun `a verified run leaves a recipe of what ran, and a miss on a recipe drops it`() {
+        val r = Recipes.compile(finished(), RunEnd.DONE, 5, null)!!
+        assertEquals(Recipes.key("tell anna i'm on my way!"), r.key)
+        // The step a branch skipped stays (its condition decides next time); the plain skip goes.
+        assertEquals(listOf("open_app", "tap", "type_text"), r.plan.steps.map { it.action })
+        assertTrue(r.plan.steps.all { it.state == StepState.TODO })
+        assertFalse(r.plan.steps.last().args["text"]!!.contains("482913"))
+        assertNull(Recipes.compile(finished(), RunEnd.UNCONFIRMED, 5, null))
+        assertNull(Recipes.compile(finished().event("wheel", "took the wheel", 2), RunEnd.DONE, 5, null))
+
+        var book = Recipes.after(emptyMap(), finished(), RunEnd.DONE, 5, usedRecipe = false)
+        assertEquals(1, book.size)
+        assertEquals(book, Recipes.decode(Recipes.encode(book)))
+        book = Recipes.after(book, finished(), RunEnd.DONE, 6, usedRecipe = true)
+        assertEquals(2, book.values.single().runs)
+        assertTrue(Recipes.after(book, finished(), RunEnd.FAILED, 7, usedRecipe = true).isEmpty())
+        // A steered run says nothing about the words it started from.
+        assertEquals(book, Recipes.after(book, finished().steer("Call Anna", 3), RunEnd.FAILED, 7, usedRecipe = true))
+    }
+
+    @Test fun `a recipe starts the crew with no planning call`() {
+        val recipe = Recipes.compile(finished(), RunEnd.DONE, 5, null)!!.plan
+        val model = ScriptedModel()
+        val crew = FakeCrew()
+        val out = Conductor("run-2", "Tell Anna I'm on my way", Profile.FLASH, crew, { model }, FakeOwner(), recipe = recipe,
+            glanceRunner = { it() }, clock = { 1L }).run()
+        assertEquals(RunEnd.DONE, out.end)
+        assertEquals(0, model.requests.size)
+        assertEquals(3, crew.runs.size)
+        assertTrue(out.score.events.any { it.kind == "recipe" })
+    }
+
+    @Test fun `a resumed run keeps its Score and conversation and asks the mind where to go on`() {
+        val saved = finished().mark("s4", StepState.TODO).copy(difficulty = Difficulty.MIND)
+        val conversation = MindConversation(listOf(MindMessage.System("You are OneMind"), MindMessage.User("BRIEFING 1 · PLAN"),
+            MindMessage.Assistant("{\"milestone\":\"Open the chat\"}", emptyList())))
+        val model = ScriptedModel("""{"decision":"continue"}""")
+        val crew = FakeCrew()
+        val out = Conductor("run-3", saved.goal.text, Profile.MIND, crew, { model }, FakeOwner(), start = saved, resumed = conversation,
+            glanceRunner = { it() }, clock = { 1L }).run()
+        assertEquals(RunEnd.DONE, out.end)
+        val first = lastText(model.requests.first())
+        assertTrue(first.contains("trigger: resumed"))
+        assertEquals("You are OneMind", model.requests.first().messages.getJSONObject(0).getString("content"))
+        assertEquals(listOf("type_text"), crew.runs.map { it.action }) // only the step that hadn't run
+    }
+
+    @Test fun `the Instant baton is in the Score, and the opening notes reach the first briefing`() {
+        val start = Score.start("run-4", Difficulty.FLASH, "turn on dark mode and lower the brightness", 1)
+            .event("instant", "Instant turned on dark mode; brightness needs a slider", 1)
+        val model = ScriptedModel("""{"step":"open_settings","args":{"page":"display"}}""")
+        val out = Conductor("run-4", start.goal.text, Profile.FLASH, FakeCrew(), { model }, FakeOwner(), start = start,
+            opening = listOf("What Cyclone remembers: the owner likes 30% brightness"), glanceRunner = { it() }, clock = { 1L }).run()
+        assertEquals(RunEnd.DONE, out.end)
+        val brief = lastText(model.requests.first())
+        assertTrue(brief.contains("Instant turned on dark mode"))
+        assertTrue(brief.contains("30% brightness"))
+        assertEquals(Difficulty.FLASH, out.score.difficulty)
+    }
+
+    @Test fun `owner messages wake the mind, and a pause holds the run`() {
+        var paused = true
+        var slept = 0
+        val said = ArrayDeque(listOf("use the work account"))
+        val owner = object : OwnerLine {
+            override fun messages(): List<String> = buildList { while (said.isNotEmpty()) add(said.removeFirst()) }
+            override fun paused(): Boolean = paused
+            override fun ask(question: String, choices: List<String>): String? = null
+            override fun checkIn(reason: String): CheckIn = CheckIn.Stop
+        }
+        val model = ScriptedModel(twoSteps, """{"decision":"continue","why":"noted"}""")
+        val out = Conductor("run-5", "Tell Anna I'm on my way", Profile.MIND, FakeCrew(), { model }, owner,
+            glanceRunner = { it() }, clock = { 1L }, sleep = { slept++; if (slept == 3) paused = false }).run()
+        assertEquals(RunEnd.DONE, out.end)
+        assertEquals(3, slept)
+        assertTrue(out.score.events.any { it.line == "Paused by the owner" })
+        assertTrue(lastText(model.requests[1]).contains("use the work account"))
+    }
+
+    @Test fun `the card shows milestones, the step, wakes and cost, and the PC gets counts and lines only`() {
+        val s = finished().mark("s4", StepState.TODO).event("wake", "Consult: two Annas", 3)
+        val ledger = Ledger().apply { add(LedgerEntry(1, "flash", "m", 100, 0, 10, 0.0042)) }
+        assertEquals(listOf("✓ Open the chat", "Write"), ScoreCard.milestones(s))
+        assertEquals(1, ScoreCard.index(s))
+        assertEquals("Typing into \"Message\"", ScoreCard.stepLine(s))
+        assertEquals("Thinking: two Annas · 1 wake · <$0.01", ScoreCard.line(s, ledger))
+        val summary = ScoreCard.summary(s, ledger)
+        assertEquals(setOf("difficulty", "goalVersion", "planVersion", "milestones", "step", "wakes", "wakeLines", "calls", "costUsd"),
+            summary.keys().asSequence().toSet())
+        assertEquals("done", summary.getJSONArray("milestones").getJSONObject(0).getString("state"))
+        assertEquals("Couldn't confirm: please check. Sent.", ScoreCard.report(s, RunEnd.UNCONFIRMED, "Sent."))
+    }
 }

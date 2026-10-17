@@ -156,6 +156,8 @@ internal object GatewayV5AskAdapter {
         .put("outcomeCopy", snapshot.outcomeCopy?.take(600) ?: JSONObject.NULL)
         .put("sessionId", ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID)
         .put("displayId", 0)
+        // Plan 69: a OneMind run's milestones, wakes and cost (counts and lines, never screen text).
+        .also { json -> com.cyclone.mobile.mind.one.OneMindLive.get(snapshot.taskId)?.let { json.put("onemind", it) } }
 
     private fun idle(): JSONObject = JSONObject()
         .put("taskId", JSONObject.NULL)
