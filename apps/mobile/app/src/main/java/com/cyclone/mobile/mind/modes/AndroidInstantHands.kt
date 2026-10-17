@@ -44,7 +44,11 @@ internal class AndroidInstantHands(
             val height = card.pageEvidence.optInt("captureHeight").takeIf { it > 0 } ?: shot.optInt("height")
             com.cyclone.mobile.mind.mission.AndroidMindImageMarker.mark(png, emptyList(), width, height)?.dataUrl
         }
-        return InstantScreen(app, controls.map { MindRefBook.label(it) }.filter { it.isNotBlank() }, sensitive, image)
+        return InstantScreen(app, controls.map { MindRefBook.label(it) }.filter { it.isNotBlank() }, sensitive, image, card.packageName)
+    }
+
+    override fun pause(ms: Long) {
+        runCatching { Thread.sleep(ms.coerceIn(0, 2_000)) }
     }
 
     override fun gesture(intent: InstantIntent, direction: String?): InstantMove {

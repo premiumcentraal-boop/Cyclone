@@ -848,9 +848,10 @@ object MindMissions {
         val zdr = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).strictPrivacy
         val brain = com.cyclone.mobile.mind.one.AndroidMinds.brain(key, primaryId, preset.label, primary.vision, effort, trace,
             run.cancellation) { run.stopRequested }
-        val crew = com.cyclone.mobile.mind.one.AndroidMinds.crew(toolbox, key, ledger, zdr, breaker) { line ->
-            AgentTraceRuntime.event(context, trace, "ONEMIND_VISION", line.take(300), code = "VISION_SHADOW")
-        }
+        com.cyclone.mobile.mind.modes.CycloneModes.registerHomes(context)
+        // Plan 72: what each app taught the crew, on by default, kept on this phone (structure only).
+        val memory = com.cyclone.mobile.mind.one.FileMoveMemory(java.io.File(context.applicationContext.filesDir, "Cyclone Brain/Moves"))
+        val crew = com.cyclone.mobile.mind.one.AndroidMinds.crew(toolbox, key, ledger, zdr, breaker, memory)
         val compactAt = com.cyclone.mobile.mind.one.OneMindStore.compactAt(context)
         val compactor = com.cyclone.mobile.mind.one.Compactor(compactAt,
             com.cyclone.mobile.mind.one.AndroidMinds.luna(key, trace, run.cancellation, { run.stopRequested }, ledger))

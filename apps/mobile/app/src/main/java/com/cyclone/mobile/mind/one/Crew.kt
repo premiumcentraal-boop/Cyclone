@@ -35,9 +35,11 @@ class EngineCrew(
     breaker: Breaker,
     private val settings: SettingReader? = null,
     shadow: (StepScreen, Step) -> Unit = { _, _ -> },
+    memory: MoveMemory? = null,
 ) : Crew {
     private val recorded = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, String>>()
-    private val engine = StepEngine(eyes, board, hands, breaker, settings, record = { kind, line -> recorded += kind to line }, shadow = shadow)
+    private val engine = StepEngine(eyes, board, hands, breaker, settings, record = { kind, line -> recorded += kind to line }, shadow = shadow,
+        memory = memory)
     private var undoCalls = 0
 
     override fun run(step: Step, score: Score): StepOutcome = engine.run(step, score)
@@ -49,7 +51,9 @@ class EngineCrew(
 
     override fun done(score: Score, screen: StepScreen?): Double? {
         val finished = score.plan?.milestones?.filter { it.state == MilestoneState.DONE }?.map { it.title }.orEmpty()
-        val request = FusedBoard.doneRequest(score.goal.text, finished, score.facts, screen?.takeIf { !it.sensitive })
+        // The proving call sees the page: a fresh look with the screenshot (never on a sensitive screen).
+        val seen = runCatching { eyes.look(true) }.getOrNull()?.takeIf { !it.sensitive } ?: screen?.takeIf { !it.sensitive }
+        val request = FusedBoard.doneRequest(score.goal.text, finished, score.facts, seen)
         return FusedBoard.doneRead(runCatching { doneBoard.ask(request) }.getOrDefault(emptyList()))
     }
 

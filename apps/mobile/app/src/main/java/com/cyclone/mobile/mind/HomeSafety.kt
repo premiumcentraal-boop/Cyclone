@@ -13,8 +13,19 @@ object HomeSafety {
             "coinbase|binance|bitvavo|kraken|crypto\\w*|bitwarden|1password|lastpass|dashlane|keepass\\w*|password\\w*|wachtwoord\\w*)\\b",
     )
 
+    /**
+     * Alpha 143 (plan 72): the home screen apps Android itself names (every app that answers the HOME intent), so a
+     * phone whose launcher isn't called "launcher" (Samsung's One UI Home, a custom home app) is still known.
+     */
+    @Volatile var homes: Set<String> = emptySet()
+        private set
+
+    fun registerHomes(packages: Set<String>) {
+        if (packages.isNotEmpty()) homes = packages
+    }
+
     fun isLauncher(packageName: String?): Boolean =
-        packageName != null && (packageName.contains("launcher", ignoreCase = true) || packageName == "com.android.systemui")
+        packageName != null && (packageName in homes || packageName.contains("launcher", ignoreCase = true) || packageName == "com.android.systemui")
 
     /** True when [label] looks like a banking, payment, sign-in or password app. */
     fun sensitiveApp(label: String): Boolean = SENSITIVE.containsMatchIn(label)

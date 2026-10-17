@@ -56,6 +56,9 @@ object OneMindPrompt {
         |Expect (what must be true after a step): {"app":"WhatsApp"} {"shows":"text"} {"absent":"text"} {"control":"label"}
         |{"focused":true} {"field_has":"text"} {"changed":true} {"setting":"dark_mode","value":"on"} {"fact":"name"}
         |{"described":"plain words, checked by the crew"} {"all":[...]}. Give every step the strongest expect code can check.
+        |The done line must prove the whole goal, not where it starts: "open my profile in Instagram" is
+        |{"all":[{"app":"Instagram"},{"control":"Edit profile"}]}, never just {"app":"Instagram"}. An app or "changed" alone
+        |proves nothing: a finish with only those is checked again before it counts.
         |
         |Decisions: continue (go on; new order lines replace your orders), adjust (step lines replace the rest of this milestone),
         |replan (milestone and step lines replace the remaining milestones; finished ones stay finished), detour (a short side

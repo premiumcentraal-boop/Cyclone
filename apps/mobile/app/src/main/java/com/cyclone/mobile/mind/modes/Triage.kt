@@ -75,6 +75,28 @@ object Triage {
             STEP_KINDS.associateWith { STEP_GUIDANCE[it].orEmpty() }))
     }
 
+    /**
+     * Plan 72: the second phrasing inside the same call. The action and target questions again with their options in
+     * reverse order, under [FOLDED] names, so one call per model also shows whether a pick only won by coming first.
+     */
+    fun folded(world: GrammarWorld, text: String): Map<String, DQuestion> =
+        questions(world, text, 1).filterKeys { it in REORDERED }.mapKeys { FOLDED + it.key }
+
+    /** The same answer read as its second phrasing: the folded answers in place of the plain ones. Null without them. */
+    fun unfold(reply: com.cyclone.mobile.decisions.DReply): com.cyclone.mobile.decisions.DReply? {
+        val folded = reply.answers.filterKeys { it.startsWith(FOLDED) }.mapKeys { it.key.removePrefix(FOLDED) }
+        if (folded.isEmpty()) return null
+        return reply.copy(answers = reply.answers.filterKeys { !it.startsWith(FOLDED) } + folded)
+    }
+
+    /** Without the folded answers: the first phrasing. */
+    fun plain(reply: com.cyclone.mobile.decisions.DReply): com.cyclone.mobile.decisions.DReply =
+        reply.copy(answers = reply.answers.filterKeys { !it.startsWith(FOLDED) })
+
+    const val FOLDED = "rev_"
+    /** The questions whose options a second phrasing reverses. */
+    val REORDERED = setOf("capability", "target")
+
     /** The state: the request and what the phone can see and offer (app words only); variant 1 shows the phone first. */
     fun state(text: String, world: GrammarWorld, variant: Int = 0): List<DPart> = listOf(
         DPart.Text("Triage one request to a phone assistant that operates this Android phone."),

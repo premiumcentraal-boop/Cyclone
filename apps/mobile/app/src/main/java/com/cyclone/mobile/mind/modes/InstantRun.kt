@@ -2,8 +2,12 @@ package com.cyclone.mobile.mind.modes
 
 import com.cyclone.mobile.mind.pilot.Pilot
 
-/** The screen as Instant sees it: the app, the labels, and whether code says it is sensitive. */
-data class InstantScreen(val app: String, val labels: List<String>, val sensitive: Boolean = false, val image: String? = null)
+/**
+ * The screen as Instant sees it: the app, the labels, and whether code says it is sensitive. [packageName] is the app in
+ * the foreground, so an open can be proven (blank when the phone didn't say).
+ */
+data class InstantScreen(val app: String, val labels: List<String>, val sensitive: Boolean = false, val image: String? = null,
+                         val packageName: String = "")
 data class InstantMove(val ok: Boolean, val changed: Boolean, val note: String)
 data class InstantContact(val name: String, val numbers: List<String>)
 
@@ -17,6 +21,11 @@ data class InstantOutcome(
     val promotion: Promotion? = null,
     /** Cancelled by the owner (the call window). Not a failure, not a promotion. */
     val cancelled: Boolean = false,
+    /**
+     * Alpha 143: the phone showed the result (the app in front, the screen changed, the tool said so). Only a verified
+     * run teaches Replay and the phone model; a done that isn't verified says so instead of claiming success.
+     */
+    val verified: Boolean = false,
 ) {
     fun baton(goal: String): RunBaton? = promotion?.let { RunBaton(goal, listOf(Mode.INSTANT), lines, it.reason, it.candidates) }
 }
@@ -42,6 +51,8 @@ interface InstantHands {
     fun zoom(zoomIn: Boolean): InstantMove = InstantMove(false, false, "zooming isn't available here")
     /** Plan 52 run 6: press, carry and drop the control labelled [from] onto the one labelled [to]. */
     fun drag(from: String, to: String): InstantMove = InstantMove(false, false, "dragging isn't available here")
+    /** Alpha 143: waits a moment for the phone to settle before the result is checked again. */
+    fun pause(ms: Long) {}
 }
 
 /**
@@ -50,11 +61,17 @@ interface InstantHands {
  *
  * It never types, never composes, never sends, pays, deletes or posts (such a label promotes to the Mind, which asks
  * the owner), and never acts on a sensitive screen. Anything it can't finish promotes with what it did, so the next
- * mode continues. Pure.
+ * mode continues.
+ *
+ * Alpha 143: a move that "worked" is not done until the phone shows it. An opened app must be the one in front, a tap
+ * must change the screen; anything Instant can't prove goes up to Flash with what it did, never reported as done. Pure.
  */
 object InstantRun {
     const val MAX_MOVES = 3
     const val CALL_WINDOW_MS = 2_000L
+    /** How often, and how far apart, an open is checked before Instant gives it to Flash. */
+    const val PROOF_LOOKS = 3
+    const val PROOF_PAUSE_MS = 400L
 
     private val SHUTTER = Regex("(?i)\\b(shutter|take (a )?(photo|picture)|capture|photo button|camera button|sluiter|foto maken|neem (een )?foto|opname)\\b")
     private val CALL_BUTTON = Regex("(?i)^(call|dial|voice call|bellen|bel|audio call)$|\\bcall button\\b|\\bbelknop\\b")
@@ -62,7 +79,7 @@ object InstantRun {
     fun run(command: InstantCommand, hands: InstantHands, box: DecisionBox? = null, bar: Double = 0.9): InstantOutcome {
         val lines = mutableListOf<String>()
         var moves = 0
-        fun done() = InstantOutcome(true, lines.toList(), moves)
+        fun done(verified: Boolean = true) = InstantOutcome(true, lines.toList(), moves, verified = verified)
         fun promote(to: Mode, reason: String, candidates: List<String> = emptyList()) =
             InstantOutcome(false, lines.toList(), moves, Promotion(to, reason, candidates))
         fun step(move: InstantMove, line: String): Boolean {
@@ -75,7 +92,10 @@ object InstantRun {
         return when (command.intent) {
             InstantIntent.SWIPE, InstantIntent.SCROLL, InstantIntent.BACK, InstantIntent.HOME, InstantIntent.RECENTS -> {
                 val move = hands.gesture(command.intent, command.direction)
-                if (step(move, describe(command))) done() else promote(Mode.FLASH, "the ${command.intent.name.lowercase()} didn't happen: ${move.note}")
+                if (!step(move, describe(command))) return promote(Mode.FLASH, "the ${command.intent.name.lowercase()} didn't happen: ${move.note}")
+                // Nothing moved (the end of a list, Home on the home screen): done, said plainly, never counted as proof.
+                if (!move.changed) lines[lines.size - 1] = "${describe(command)}, but nothing on the screen moved"
+                done(verified = move.changed)
             }
             InstantIntent.TIMER -> if (step(hands.timer(command.seconds ?: 0), "set a timer")) done() else promote(Mode.MIND, "the timer couldn't be set")
             InstantIntent.ALARM -> if (step(hands.alarm(command.hour ?: -1, command.minute ?: -1), "set an alarm")) done() else promote(Mode.MIND, "the alarm couldn't be set")
@@ -86,10 +106,24 @@ object InstantRun {
             InstantIntent.MEDIA -> if (step(hands.media(command.direction ?: "play_pause"), "media: ${command.direction}")) done()
                 else promote(Mode.MIND, "the media key didn't work")
             InstantIntent.OPEN_APP -> {
-                val move = hands.openApp(command.target.orEmpty())
-                if (step(move, "opened ${command.targetLabel ?: command.target}")) done() else promote(Mode.FLASH, "the app didn't open: ${move.note}")
+                val pkg = command.target.orEmpty()
+                val name = command.targetLabel ?: pkg
+                val move = hands.openApp(pkg)
+                if (!step(move, "opened $name")) return promote(Mode.FLASH, "the app didn't open: ${move.note}")
+                when (val front = inFront(hands, pkg)) {
+                    null -> done()
+                    else -> {
+                        lines[lines.size - 1] = "asked the phone to open $name"
+                        promote(Mode.FLASH, "$name was asked to open, but the phone shows $front")
+                    }
+                }
             }
-            InstantIntent.CAMERA -> if (step(hands.camera(front = false), "opened the camera")) done() else promote(Mode.FLASH, "the camera didn't open")
+            InstantIntent.CAMERA -> {
+                val move = hands.camera(front = false)
+                if (!step(move, "opened the camera")) promote(Mode.FLASH, "the camera didn't open")
+                else if (!move.changed) promote(Mode.FLASH, "the camera was asked to open, but the screen didn't change")
+                else done()
+            }
             InstantIntent.TAP -> tap(command.target.orEmpty(), hands, lines, { moves++ }, ::promote) ?: done()
             InstantIntent.PHOTO, InstantIntent.SELFIE -> {
                 val selfie = command.intent == InstantIntent.SELFIE
@@ -97,12 +131,16 @@ object InstantRun {
                 val shutter = find(hands, box, bar, SHUTTER, "Which control takes the photo (the shutter)?") ?: return promote(Mode.FLASH, "couldn't find the camera's shutter")
                 if (moves >= MAX_MOVES) return promote(Mode.FLASH, "too many moves")
                 val move = hands.tapLabel(shutter)
-                if (step(move, "took the photo")) done() else promote(Mode.FLASH, "the shutter didn't work: ${move.note}")
+                if (!step(move, "took the photo")) promote(Mode.FLASH, "the shutter didn't work: ${move.note}")
+                else if (!move.changed) promote(Mode.FLASH, "the shutter was pressed, but nothing on the screen showed a photo was taken")
+                else done()
             }
             InstantIntent.CALL -> call(command, hands, box, bar, lines, { moves++ }, ::promote) ?: done()
             InstantIntent.ZOOM -> {
                 val move = hands.zoom(command.direction == "in")
-                if (step(move, describe(command))) done() else promote(Mode.FLASH, "the zoom didn't happen: ${move.note}")
+                if (!step(move, describe(command))) promote(Mode.FLASH, "the zoom didn't happen: ${move.note}")
+                else if (!move.changed) promote(Mode.FLASH, "the zoom didn't change the screen")
+                else done()
             }
             InstantIntent.DRAG -> drag(command, hands, lines, { moves++ }, ::promote) ?: done()
         }
@@ -119,6 +157,8 @@ object InstantRun {
         val move = hands.tapLabel(label)
         if (!move.ok) return promote(Mode.FLASH, "the tap on \"$label\" didn't happen: ${move.note}", emptyList())
         lines += "tapped \"$label\""
+        // A tap that changed nothing did nothing the owner can see: Flash looks at why.
+        if (!move.changed) return promote(Mode.FLASH, "the tap on \"$label\" changed nothing on the screen", emptyList())
         return null
     }
 
@@ -140,6 +180,7 @@ object InstantRun {
         val move = hands.drag(from, to)
         if (!move.ok) return promote(Mode.FLASH, "the drag didn't happen: ${move.note}", emptyList())
         lines += "moved \"$from\" to \"$to\""
+        if (!move.changed) return promote(Mode.FLASH, "the drag of \"$from\" changed nothing on the screen", emptyList())
         return null
     }
 
@@ -164,7 +205,27 @@ object InstantRun {
         val move = hands.tapLabel(button)
         if (!move.ok) return promote(Mode.FLASH, "the call button didn't work: ${move.note}", emptyList())
         lines += "called ${who.name}"
+        if (!move.changed) return promote(Mode.FLASH, "the call button was pressed, but the screen didn't change", emptyList())
         return null
+    }
+
+    /**
+     * Alpha 143: null when [pkg] is the app in front, else what the phone shows instead. It looks again a few times,
+     * since an app can take a moment to come up; a screen that can't be read, or doesn't say its app, is no proof.
+     */
+    private fun inFront(hands: InstantHands, pkg: String): String? {
+        var shown = "a screen that couldn't be read"
+        repeat(PROOF_LOOKS) { attempt ->
+            if (attempt > 0) hands.pause(PROOF_PAUSE_MS)
+            val screen = hands.look()
+            when {
+                screen == null -> Unit
+                screen.packageName.isBlank() -> shown = "a screen that doesn't say which app it is"
+                screen.packageName.equals(pkg, ignoreCase = true) -> return null
+                else -> shown = screen.app.ifBlank { screen.packageName }
+            }
+        }
+        return shown
     }
 
     /**
