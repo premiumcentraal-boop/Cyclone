@@ -823,7 +823,9 @@ object MindMissions {
                 )
             }
         } catch (error: Throwable) {
-            failure = error.message ?: error.javaClass.simpleName
+            // Alpha 141 follow-up: the failure's type and its root cause, so a class that failed to load names why.
+            failure = FailureText.describe(error)
+            traceId?.let { trace -> runCatching { AgentTraceRuntime.event(context, trace, "MISSION_FAILED", failure, code = "MISSION_FAILED", ok = false) } }
             save { it.copy(status = MissionStatus.FAILED, summary = "Cyclone could not run this mission: $failure", waitingFor = null) }
         } finally {
             finish(context, run, missions, traceId, ::save)

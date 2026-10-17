@@ -236,7 +236,7 @@ class MindLoop(
             Thread.currentThread().interrupt()
             MindToolResult("NOT RUN: the owner stopped the mission.", ok = false)
         } catch (error: Exception) {
-            MindToolResult.error("${call.name} failed inside Cyclone: ${error.message ?: error.javaClass.simpleName}")
+            MindToolResult.error("${call.name} failed inside Cyclone: ${com.cyclone.mobile.mind.mission.FailureText.describe(error)}")
         }
     }
 
