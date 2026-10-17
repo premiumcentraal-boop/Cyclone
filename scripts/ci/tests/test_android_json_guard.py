@@ -48,5 +48,15 @@ class AndroidJsonGuard(unittest.TestCase):
             self.assertIn(needle, (base / path).read_text(encoding="utf-8"), path)
 
 
+    def test_page_json_is_searched_as_the_page_showed_it(self):
+        """Android escapes '/' as "\\/" in toString(): searching a JSON object's text for a URL or host must undo it."""
+        import re
+        goal = (APP / "src/main/java/com/cyclone/mobile/agent/contract/GoalContract.kt").read_text(encoding="utf-8")
+        bare = re.findall(r'\$\{page\.page(?:Summary|Text|Evidence)\}|page\.page(?:Summary|Text|Evidence)\.toString\(\)', goal)
+        self.assertEqual(bare, [], "use .searchText() (agent/contract/JsonSearchText.kt)")
+        helper = (APP / "src/main/java/com/cyclone/mobile/agent/contract/JsonSearchText.kt").read_text(encoding="utf-8")
+        self.assertIn('toString().replace("\\\\/", "/")', helper)
+
+
 if __name__ == "__main__":
     unittest.main()
