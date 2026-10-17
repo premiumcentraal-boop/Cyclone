@@ -7,6 +7,8 @@ mission failed. Outside a character class, '{' must open a {n}, {n,} or {n,m} qu
 a literal brace is escaped.
 """
 from pathlib import Path
+import ctypes
+import ctypes.util
 import re
 import unittest
 
@@ -104,6 +106,38 @@ def stray_brace(pattern: str) -> int | None:
     return None
 
 
+def icu_compiler():
+    """Android's own regex engine (ICU's uregex_open), when libicu is on this machine; else None.
+
+    ICU suffixes every symbol with its major version (uregex_open_74), so the suffix is probed.
+    """
+    for name in (ctypes.util.find_library("icui18n"), "libicui18n.so"):
+        if not name:
+            continue
+        try:
+            lib = ctypes.CDLL(name)
+        except OSError:
+            continue
+        for version in range(50, 100):
+            opener = getattr(lib, f"uregex_open_{version}", None)
+            if opener is None:
+                continue
+            closer = getattr(lib, f"uregex_close_{version}")
+            opener.restype = ctypes.c_void_p
+
+            def compiles(pattern: str) -> int:
+                data = pattern.encode("utf-16-le")
+                buffer = ctypes.create_string_buffer(data, len(data) + 2)
+                error = ctypes.c_int(0)
+                handle = opener(buffer, len(data) // 2, 0, None, ctypes.byref(error))
+                if handle:
+                    closer(ctypes.c_void_p(handle))
+                return error.value  # > 0 is an ICU error (U_REGEX_RULE_SYNTAX = 66304, …)
+
+            return compiles
+    return None
+
+
 class AndroidRegexGuard(unittest.TestCase):
     def test_guard_knows_what_icu_rejects(self):
         self.assertIsNotNone(stray_brace(r"\{([a-z][a-z0-9_]{0,40})}"))
@@ -123,6 +157,18 @@ class AndroidRegexGuard(unittest.TestCase):
         self.assertGreater(len(found), 500)
         bad = [f"{where}: {value!r}" for where, value in found if stray_brace(value) is not None]
         self.assertEqual(bad, [], "escape literal braces as \\\\{ and \\\\} (Android's ICU regex rejects them)")
+
+
+    def test_every_regex_literal_compiles_with_androids_icu(self):
+        """Beyond braces: compile each literal with libicu itself, exactly as Android does (look-behind limits,
+        property names, set syntax, inline flags). Skipped only where libicu is missing."""
+        compiles = icu_compiler()
+        if compiles is None:
+            self.skipTest("libicu is not on this machine; the structural brace check above still runs")
+        self.assertNotEqual(compiles(r"\{([a-z]+)}"), 0, "the engine must reject what Android rejects")
+        self.assertEqual(compiles(r"\{([a-z]+)\}"), 0)
+        bad = [f"{where}: {value!r} (ICU error {code})" for where, value in literals() if (code := compiles(value)) > 0]
+        self.assertEqual(bad, [], "Android's ICU regex rejects these patterns")
 
 
 if __name__ == "__main__":
