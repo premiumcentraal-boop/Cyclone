@@ -8,7 +8,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Runs against Android's own org.json (src/testAndroidJson), where optString on a JSON null is "null". */
+/** Runs against Android's own org.json (the test-android-json module), where optString on a JSON null is "null". */
 class ModelJsonTest {
     @Test fun `on Android a JSON null reads as the word null, which is why model JSON drops nulls`() {
         val raw = JSONObject("""{"app":"WhatsApp","package":null}""")

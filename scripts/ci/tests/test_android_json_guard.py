@@ -3,21 +3,23 @@
 Unit tests run on the desktop JVM. They used JSON-java (org.json:json), which differs from the phone: optString on an
 explicit JSON null is "" there and "null" on Android, keys() order, escaping of '/', JSONObject(Map) with nulls.
 Code could pass every test and break on the phone (alpha 141 lesson). The app's unit tests now compile AOSP's own
-org.json from src/testAndroidJson; this guard keeps it that way.
+org.json from the test-android-json module; this guard keeps it that way.
 """
 from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 APP = ROOT / "apps/mobile/app"
-JSON = APP / "src/testAndroidJson/java/org/json"
+JSON = ROOT / "apps/mobile/test-android-json/src/main/java/org/json"
 
 
 class AndroidJsonGuard(unittest.TestCase):
     def test_tests_use_androids_org_json(self):
         gradle = (APP / "build.gradle.kts").read_text(encoding="utf-8")
         self.assertNotIn('"org.json:json', gradle, "JSON-java behaves differently from Android's org.json")
-        self.assertIn('getByName("test").java.srcDir("src/testAndroidJson/java")', gradle)
+        self.assertIn('testImplementation(project(":test-android-json"))', gradle)
+        settings = (ROOT / "apps/mobile/settings.gradle.kts").read_text(encoding="utf-8")
+        self.assertIn('include(":test-android-json")', settings)
         for name in ("JSON", "JSONArray", "JSONException", "JSONObject", "JSONStringer", "JSONTokener"):
             self.assertTrue((JSON / f"{name}.java").is_file(), name)
 

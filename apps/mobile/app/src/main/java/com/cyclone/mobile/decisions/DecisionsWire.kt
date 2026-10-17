@@ -164,7 +164,7 @@ object DecisionsWire {
 
     /** The answers to [questions], or null when the body is not a decisions answer at all. */
     fun parse(body: String?, questions: Map<String, DQuestion>): DReply? {
-        val json = runCatching { JSONObject(body ?: return null) }.getOrNull() ?: return null
+        val json = runCatching { com.cyclone.mobile.mind.ModelJson.parse(body ?: return null) }.getOrNull() ?: return null
         val answers = json.optJSONObject("answers") ?: return null
         val read = questions.mapNotNull { (name, q) -> answers.optJSONObject(name)?.let { a -> answer(a, q)?.let { name to it } } }.toMap()
         val usage = json.optJSONObject("usage")
