@@ -311,6 +311,7 @@ class OverlayChromeController(
 
     fun show(snapshot: OverlayChromeSnapshot) {
         runCatching { com.cyclone.mobile.ui.v32.ask.VisualQuality.load(service) }
+        runCatching { com.cyclone.mobile.ui.overlay.cy.CyLook.load(service) }
         onMain {
             latest = snapshot
             watchLockScreen()

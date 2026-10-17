@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -468,18 +469,22 @@ internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen
             CycloneTaskVisualState.WORKING -> {
                 GlassProgress(snapshot.progressFraction)
                 Spacer(Modifier.height(14.dp))
-                if (diversion != null) {
-                    // Plan 38 §4: a change of plan stays in the card: the old plan tucked, the branch, the new steps.
-                    PlanDiversionBlock(diversion)
-                } else {
-                    val steps = OverlayGlassCopy.steps(snapshot.milestones)
-                    if (steps.isEmpty()) StepRow(snapshot.currentMilestone ?: task.message, current = true)
-                    else steps.forEach { StepRow(it.label, current = it.state == SemanticStepState.ACTIVE || it.state == SemanticStepState.ACTION_NEEDED) }
+                CyBeside(com.cyclone.mobile.ui.overlay.cy.CyMood.WORK) {
+                    if (diversion != null) {
+                        // Plan 38 §4: a change of plan stays in the card: the old plan tucked, the branch, the new steps.
+                        PlanDiversionBlock(diversion)
+                    } else {
+                        val steps = OverlayGlassCopy.steps(snapshot.milestones)
+                        if (steps.isEmpty()) StepRow(snapshot.currentMilestone ?: task.message, current = true)
+                        else steps.forEach { StepRow(it.label, current = it.state == SemanticStepState.ACTIVE || it.state == SemanticStepState.ACTION_NEEDED) }
+                    }
                 }
             }
             CycloneTaskVisualState.ACTION_NEEDED -> {
                 (snapshot.supportingCopy ?: task.message).takeIf { it.isNotBlank() }?.let {
-                    Text(it, color = GlassMuted, fontSize = 15.sp, lineHeight = 21.sp)
+                    CyBeside(com.cyclone.mobile.ui.overlay.cy.CyMood.ASK) {
+                        Text(it, color = GlassMuted, fontSize = 15.sp, lineHeight = 21.sp)
+                    }
                 }
                 val takeOver = TaskFollowUpAction.TAKE_OVER in snapshot.followUps
                 val done = TaskFollowUpAction.CONTINUE in snapshot.followUps
@@ -494,7 +499,9 @@ internal fun WorkCard(task: WorkspaceTaskUi, diversion: PlanDiversion?, appsOpen
                 // What it did (or why it stopped) is the line; a tap unfolds the steps that got it there.
                 val outcome = (snapshot.outcomeCopy ?: snapshot.supportingCopy)?.takeIf { it.isNotBlank() }
                     ?: OverlayGlassCopy.chip(state)
-                OutcomeHistory(outcome, snapshot.milestones, failed = state == CycloneTaskVisualState.FAILED, startOpen = historyOpen)
+                CyBeside(com.cyclone.mobile.ui.overlay.cy.CyMoods.of(state)) {
+                    OutcomeHistory(outcome, snapshot.milestones, failed = state == CycloneTaskVisualState.FAILED, startOpen = historyOpen)
+                }
             }
         }
     }
@@ -520,12 +527,34 @@ internal fun OverlayForegroundCard(snapshot: OverlayChromeSnapshot, onMinimize: 
         Spacer(Modifier.height(14.dp))
         GlassProgress(null)
         Spacer(Modifier.height(14.dp))
-        StepRow(status, current = true)
+        CyBeside(com.cyclone.mobile.ui.overlay.cy.CyMood.WORK) { StepRow(status, current = true) }
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
             GlassCapsuleButton("Stop", false, onStop)
         }
     }
 }
+
+/**
+ * Alpha.135: Cy beside a block of a card, in the mood of the task. With Cy off it is just the block, so the card is the
+ * same as before. Cy sits top-left, at the height of the block's first line, and never makes the card taller.
+ */
+@Composable
+internal fun CyBeside(mood: com.cyclone.mobile.ui.overlay.cy.CyMood, content: @Composable () -> Unit) {
+    val cy by com.cyclone.mobile.ui.overlay.cy.CyLook.enabled.collectAsState()
+    if (!cy) {
+        content()
+        return
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Box(Modifier.padding(top = 2.dp, end = 12.dp)) {
+            com.cyclone.mobile.ui.overlay.cy.Cy(mood, CY_CARD_DP.dp)
+        }
+        Column(Modifier.weight(1f)) { content() }
+    }
+}
+
+/** Cy's body in a card: about two lines of text tall. */
+internal const val CY_CARD_DP = 34
 
 @Composable
 private fun StepRow(label: String, current: Boolean) {
@@ -637,7 +666,7 @@ internal fun WorkIsland(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            RingedLogo(appPackage, working)
+            RingedLogo(appPackage, working, paused)
             Column(
                 Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(VeilTint)
                     .clickable(onClickLabel = "Open the task", onClick = onOpen)
@@ -662,7 +691,7 @@ internal fun WorkIsland(
 }
 
 @Composable
-private fun RingedLogo(appPackage: String?, working: Boolean) {
+private fun RingedLogo(appPackage: String?, working: Boolean, paused: Boolean = false) {
     // Alpha.134: the ring turns (and asks for frames) only while the task works.
     val turn = if (working && !OverlayLite.active) rememberInfiniteTransition(label = "Island ring")
         .animateFloat(0f, 360f, infiniteRepeatable(tween(1_400, easing = LinearEasing)), label = "Ring") else null
@@ -676,7 +705,19 @@ private fun RingedLogo(appPackage: String?, working: Boolean) {
                 topLeft = Offset(stroke / 2, stroke / 2), size = Size(size.width - stroke, size.height - stroke))
         }
     }, contentAlignment = Alignment.Center) {
-        if (appPackage != null) AppLogo(appPackage, 32.dp) else CycloneMark(22)
+        val cy by com.cyclone.mobile.ui.overlay.cy.CyLook.enabled.collectAsState()
+        if (cy) {
+            // Alpha.135: Cy works inside the ring; the app it works in rides on its shoulder, so the island still says where.
+            Box(Modifier.size(42.dp)) {
+                com.cyclone.mobile.ui.overlay.cy.Cy(
+                    if (paused) com.cyclone.mobile.ui.overlay.cy.CyMood.PAUSE else if (working) com.cyclone.mobile.ui.overlay.cy.CyMood.WORK
+                    else com.cyclone.mobile.ui.overlay.cy.CyMood.IDLE,
+                    28.dp, Modifier.align(Alignment.Center), hands = false,
+                )
+                if (appPackage != null) AppLogo(appPackage, 17.dp, ring = false, modifier = Modifier.align(Alignment.BottomEnd)
+                    .border(1.5.dp, Color(0xFF0C0D10), RoundedCornerShape(5.dp)))
+            }
+        } else if (appPackage != null) AppLogo(appPackage, 32.dp) else CycloneMark(22)
     }
 }
 
@@ -693,6 +734,9 @@ internal fun OverlayOwnerCard(moment: OwnerMoment) {
     GlassCard {
         // The same header as the working card: the state on the left, the apps on the right.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Alpha.135: Cy looks up at you beside "Needs you" (waving: it waits for your answer).
+            val cy by com.cyclone.mobile.ui.overlay.cy.CyLook.enabled.collectAsState()
+            if (cy) com.cyclone.mobile.ui.overlay.cy.Cy(com.cyclone.mobile.ui.overlay.cy.CyMood.ASK, 26.dp)
             StatusChip(CycloneTaskVisualState.ACTION_NEEDED)
             Spacer(Modifier.weight(1f))
             DepthAppStack(apps, onClick = null)

@@ -817,6 +817,22 @@ internal fun ColumnScope.WorkingIndicatorSettings(context: Context) {
     var mode by remember { mutableStateOf(TraceFieldPrefs.mode(context)) }
     var style by remember { mutableStateOf(TraceFieldPrefs.style(context)) }
     var previewMessage by remember { mutableStateOf<String?>(null) }
+    // Alpha.135: Cy, Cyclone's character, in the overlay (first concept). Off brings back Cyclone's mark.
+    var cy by remember { mutableStateOf(com.cyclone.mobile.ui.overlay.cy.CyLook.also { it.load(context) }.enabled.value) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Cy", fontWeight = FontWeight.Bold)
+            Text(
+                "Cyclone's character in the overlay: it waits in the bubble, works in the island and looks up when it needs you.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = cy, onCheckedChange = {
+            cy = it
+            com.cyclone.mobile.ui.overlay.cy.CyLook.set(context, it)
+        })
+    }
     Text("Working indicator", fontWeight = FontWeight.Bold)
     Text(
         "Trace Field shows tiny digits under a soft lens that follows what Cyclone is looking at and tapping. It never covers your screen and is hidden from Cyclone's own screenshots.",
