@@ -552,7 +552,7 @@ and everything the owner sees.
 
 - [x] Checkpoint 1: foundation and crew (commit 0a959151, Mobile CI run 1505 green)
 - [x] Checkpoint 2: the minds (commit 45595c29, Mobile CI run 1506 green)
-- [ ] Checkpoint 3: the switch-over (commit 04ab7d8e; ticked once its Mobile CI is green)
+- [x] Checkpoint 3: the switch-over (commit 04ab7d8e, Mobile CI run 1508 green)
   - Built: OneMind runs every Flash and Mind mission (`MindMissions.runOneMind`); the Instant baton becomes the Score;
     steer, owner messages and Pause reach the Conductor; the Score is saved beside the journal (`MissionStore.saveScore`)
     and a resume reloads it; recipes (`mind/one/Recipes.kt`, `OneMindStore`); the card shows milestones, step line,
