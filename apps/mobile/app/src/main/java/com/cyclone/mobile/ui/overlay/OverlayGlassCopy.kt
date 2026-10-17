@@ -50,12 +50,32 @@ object OverlayGlassCopy {
         apps.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.joinToString(" → "),
     ).joinToString(" · ").uppercase()
 
-    /** The island's two lines: what Cyclone does now, and the task with its progress. */
+    /**
+     * The island's two lines: what Cyclone does now, and the task with its progress. Plan 70: a title that only names
+     * Cyclone ("Task in Cyclone Mind") says nothing, so the second line is then just the progress.
+     */
     fun island(current: String?, title: String, completed: Int, total: Int?): Pair<String, String> {
-        val now = current?.trim()?.takeIf { it.isNotEmpty() } ?: title
-        val progress = total?.takeIf { it > 0 }?.let { " · ${(completed + 1).coerceAtMost(it)} of $it" }.orEmpty()
-        return now to (title + progress)
+        val generic = title.isBlank() || GENERIC_TITLE in title
+        val now = current?.let(::label)?.takeIf { it.isNotEmpty() } ?: if (generic) "Working" else title
+        val count = total?.takeIf { it > 0 }?.let { "${(completed + 1).coerceAtMost(it)} of $it" }
+        return now to when {
+            !generic -> title + (count?.let { " · $it" }.orEmpty())
+            count != null -> count
+            else -> "Cyclone"
+        }
     }
+
+    private const val GENERIC_TITLE = "Cyclone Mind"
+
+    /** A step's words for the glass: without the marks a planner adds ("✓ ", "✗ ", "↳ "), which the row already draws. */
+    fun label(text: String): String {
+        var t = text.trim()
+        while (t.isNotEmpty() && t[0] in MARKS) t = t.drop(1).trim()
+        return t
+    }
+
+    private const val MARKS = "✓✗↳•·"
+
 
     /** The outcome line beside the pill when a move did not happen (never silent). */
     fun outcome(ui: PlaneUi): String? = ui.outcome?.trim()?.takeIf { it.isNotEmpty() }

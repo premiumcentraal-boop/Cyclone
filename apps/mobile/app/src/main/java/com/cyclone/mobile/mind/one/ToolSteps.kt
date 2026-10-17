@@ -40,7 +40,7 @@ object ToolSteps {
 
     private val INTEGER = setOf("hours", "minutes", "seconds", "hour", "minute", "duration_minutes", "reminder_minutes")
     private val BOOLEAN = setOf("all_day")
-    private val PLACEHOLDER = Regex("\\{([a-z][a-z0-9_]{0,40})}")
+    private val PLACEHOLDER = Regex("\\{([a-z][a-z0-9_]{0,40})\\}")
 
     /** The call for a direct step, or null when the step needs a screen decision. */
     fun direct(step: Step, score: Score): Call? {

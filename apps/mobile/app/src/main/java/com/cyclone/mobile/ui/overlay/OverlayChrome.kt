@@ -293,11 +293,25 @@ internal fun OverlayIdleHalo(
         pulseAlpha.animateTo(0f, tween(170))
     }
 
+    val cy by com.cyclone.mobile.ui.overlay.cy.CyLook.enabled.collectAsState()
     // Plan 27: a small, slightly oval, see-through glass bubble with a thin shine and Cyclone's mark; taps light it up.
     Box(
         modifier.size(OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp, OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp),
         contentAlignment = Alignment.Center,
     ) {
+        if (cy) {
+            // Alpha.139: Cy floats on its own (no bubble behind it); taps make it jump a little, like the bubble did.
+            com.cyclone.mobile.ui.overlay.cy.Cy(
+                if (state.activating) com.cyclone.mobile.ui.overlay.cy.CyMood.LISTEN else com.cyclone.mobile.ui.overlay.cy.CyMood.IDLE,
+                34.dp,
+                Modifier.graphicsLayer {
+                    scaleX = pulseScale.value
+                    scaleY = pulseScale.value
+                },
+                glow = true,
+            )
+            return@Box
+        }
         val response = pulseAlpha.value
         Box(
             Modifier.size(58.dp, 50.dp)
@@ -395,9 +409,31 @@ private fun ComposerPanel(
         task == null -> WorkIslandHold.End.STOPPED
         else -> WorkIslandHold.End.DONE
     }
-    val finishedIsland = islandHold.step(minimized, activeWork, task?.taskId ?: snapshot.sessionId.ifBlank { null },
+    // Plan 70: an Instant run whispers; it never leaves a finished island behind (its ending is the whisper's own).
+    val whispering = foregroundWorking && snapshot.whisper
+    // An Instant run (whisper or a call's cancel window) never leaves a finished island: its ending is its own.
+    val instantRun = RunPresentation.isInstant(snapshot.sessionId)
+    val finishedIsland = islandHold.step(minimized && !instantRun, activeWork, task?.taskId ?: snapshot.sessionId.ifBlank { null },
         task?.title, islandEnd, snapshot.composerText.isNotBlank(), closedIsland)
     val island = workingIsland || finishedIsland != null
+    // The whisper's last moment (a hop, or a few words), held for its own time, then the Ask bar again.
+    val latestEnding by RunPresentation.ending.collectAsState()
+    var shownEnding by remember { mutableStateOf<RunPresentation.Ending?>(null) }
+    var seenEnding by remember { mutableStateOf(RunPresentation.ending.value?.seq ?: 0L) }
+    LaunchedEffect(latestEnding?.seq) {
+        val e = latestEnding ?: return@LaunchedEffect
+        if (e.seq == seenEnding) return@LaunchedEffect
+        seenEnding = e.seq
+        shownEnding = e
+        kotlinx.coroutines.delay(RunPresentation.endMs(e))
+        if (shownEnding?.seq == e.seq) shownEnding = null
+    }
+    val ending = shownEnding?.takeIf { !activeWork && snapshot.composerText.isBlank() }
+    val face = when {
+        whispering || ending != null -> BarFace.WHISPER
+        island -> BarFace.ISLAND
+        else -> BarFace.BAR
+    }
     val mindTaskId = task?.taskId?.takeIf { it.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX) }
     // Plan 38: while a Mind mission runs, typed text + send offers Steer / Queue / Parallel for the task on this card
     // (D7), and the empty bar's button is the real pause (the mission holds at its next step) and the two-tap stop.
@@ -429,6 +465,8 @@ private fun ComposerPanel(
         }
     }
     val islandSnapshot = task?.let { remember(it) { com.cyclone.mobile.runtime.background.TaskPresentationProjector.project(it) } }
+    // Plan 70: while the mind is awake (OneMind's wake: a replan, a check), Cy thinks; the crew's work shows as working.
+    val thinking = snapshot.statusMessage == THINKING
     // After the owner moves the task behind the screen, the stack settles into the island (their home screen shows).
     val planeState by com.cyclone.mobile.runtime.plane.MissionPlanes.ui.collectAsState()
     val moveSeq = planeState?.moveSeq ?: 0L
@@ -468,13 +506,27 @@ private fun ComposerPanel(
         top = mindTaskId?.let { id -> { PlaneRow(id) } },
         composer = {
             AnimatedContent(
-                targetState = island,
+                targetState = face,
                 transitionSpec = { OverlayMotion.swap() },
                 contentAlignment = Alignment.BottomCenter,
-                label = "Ask bar or island",
-            ) { showIsland ->
+                label = "Ask bar, island or whisper",
+            ) { shown ->
+                val showIsland = shown == BarFace.ISLAND
                 val done = finishedIsland
-                if (showIsland && done != null) {
+                if (shown == BarFace.WHISPER) {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                        WhisperCapsule(
+                            appPackage = foregroundApp,
+                            ending = if (whispering) null else ending,
+                            taskKey = snapshot.sessionId,
+                            onPause = {
+                                if (OverlayGesturePassthrough.injectedRecently()) return@WhisperCapsule
+                                onAction(OverlayUserAction.TAKE_CONTROL)
+                            },
+                            onStop = { if (!OverlayGesturePassthrough.injectedRecently()) onAction(OverlayUserAction.STOP_TASK) },
+                        )
+                    }
+                } else if (showIsland && done != null) {
                     WorkIsland(
                         appPackage = if (task != null) WorkingApp.forTask(task.taskId, task.packageName) else foregroundApp,
                         lines = WorkIslandHold.lines(done),
@@ -509,6 +561,7 @@ private fun ComposerPanel(
                             else onAction(OverlayUserAction.TAKE_CONTROL)
                         },
                         onStop = { if (!OverlayGesturePassthrough.injectedRecently()) onAction(OverlayUserAction.STOP_TASK) },
+                        thinking = thinking,
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -580,7 +633,7 @@ private fun ComposerPanel(
             @Suppress("NAME_SHADOWING") val task = cardTask
             Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
                 when {
-                    task != null -> OverlayWorkCard(task, diversion, minimize)
+                    task != null -> OverlayWorkCard(task, diversion, thinking, minimize)
                     else -> OverlayForegroundCard(snapshot, minimize) { onAction(OverlayUserAction.STOP_TASK) }
                 }
             }
@@ -714,3 +767,9 @@ internal fun ScreenSharePill(state: com.cyclone.mobile.capture.ScreenShareState,
         }
     }
 }
+
+/** Plan 70: what the bar shows: the Ask bar, the island (a folded run), or an Instant run's whisper. */
+private enum class BarFace { BAR, ISLAND, WHISPER }
+
+/** The mission status while the mind is awake (MindMissions' onWake). */
+private const val THINKING = "Thinking"

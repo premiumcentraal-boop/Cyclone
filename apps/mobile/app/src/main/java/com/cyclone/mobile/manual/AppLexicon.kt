@@ -63,7 +63,7 @@ class AppLexicon private constructor(
         const val MAX_LABEL = 60
         const val MAX_WORDS = 6
         private val DIGITS = Regex("\\d[\\d.,\\s]*\\d|\\d")
-        private val PLACEHOLDER = Regex("%(\\d+\\$)?[-#+ 0,(]*\\d*(\\.\\d+)?[sdfi]|\\{\\d+}")
+        private val PLACEHOLDER = Regex("%(\\d+\\$)?[-#+ 0,(]*\\d*(\\.\\d+)?[sdfi]|\\{\\d+\\}")
 
         fun normalize(raw: String): String = raw.lowercase(Locale.ROOT)
             .replace('’', '\'').replace('‘', '\'').replace('“', '"').replace('”', '"')

@@ -83,6 +83,12 @@ internal data class PlanDiversion(
 ) {
     val title: String get() = "Plan diverted"
 
+    /**
+     * Plan 70: nothing to unfold (OneMind replans give no reason and keep no earlier plan): the change shows as one
+     * quiet line on the rail, no chevron and no panel.
+     */
+    val quiet: Boolean get() = reason == null && earlier.isEmpty() && dropped.isEmpty()
+
     /** The tucked line: what the earlier plan was, in a few words. */
     val tucked: String get() {
         val count = earlier.size.takeIf { it > 0 } ?: (done + dropped.size)
@@ -129,12 +135,13 @@ private val ForkHeight = 24.dp
  * in the same column, and the new steps hang from the fork on one lit rail, the current one turning.
  */
 @Composable
-internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = Modifier, maxNext: Int = 4, startOpen: Boolean = false) {
+internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = Modifier, maxNext: Int = 3, startOpen: Boolean = false) {
     var open by rememberSaveable(diversion.version) { mutableStateOf(startOpen) }
     val turn by animateFloatAsState(if (open) 180f else 0f, tween(220), label = "Diversion chevron")
     val draw = remember(diversion.version) { Animatable(0f) }
     LaunchedEffect(diversion.version) { draw.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
-    val tint = BranchWarm
+    // Plan 70: a change Cyclone made on its own is calm (it is how it works); one the owner made, or with a reason, is warm.
+    val tint = if (diversion.quiet && !diversion.steered) GlassMuted else BranchWarm
     val next = diversion.next.take(maxNext)
     val more = (diversion.next.size - maxNext).coerceAtLeast(0)
     val current = next.indexOfFirst { it.status == "doing" }.takeIf { it >= 0 } ?: next.indexOfFirst { it.status == "todo" }
@@ -143,20 +150,21 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
         // One short row: the switch and "Plan diverted". A tap shows why, and the plan it left.
         Row(
             Modifier.fillMaxWidth().height(ForkHeight).clip(RoundedCornerShape(12.dp))
-                .clickable(role = Role.Button, onClickLabel = if (open) "Hide why" else "Show why") { open = !open }
+                .then(if (diversion.quiet) Modifier else Modifier.clickable(role = Role.Button, onClickLabel = if (open) "Hide why" else "Show why") { open = !open })
                 .semantics(mergeDescendants = true) {
                     contentDescription = diversion.title
-                    stateDescription = if (open) "Details shown" else "Details hidden"
+                    if (!diversion.quiet) stateDescription = if (open) "Details shown" else "Details hidden"
                 },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             ForkGlyph(draw.value, tint)
-            Text(diversion.title, color = tint, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
-            Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(turn), tint = tint.copy(alpha = 0.7f))
+            Text(diversion.title, color = tint, fontSize = if (diversion.quiet) 13.5.sp else 14.5.sp,
+                fontWeight = if (diversion.quiet) FontWeight.Medium else FontWeight.SemiBold, maxLines = 1, softWrap = false)
+            if (!diversion.quiet) Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(turn), tint = tint.copy(alpha = 0.7f))
         }
         // Why, and the plan it left: only after a tap, as one soft panel in the words' column.
-        AnimatedVisibility(open, enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
+        AnimatedVisibility(open && !diversion.quiet, enter = OverlayMotion.unfold(), exit = OverlayMotion.fold()) {
             Column(
                 Modifier.padding(start = Lane + 10.dp, bottom = 8.dp).fillMaxWidth()
                     .padding(top = 2.dp, bottom = 4.dp),
@@ -216,7 +224,7 @@ internal fun PlanDiversionBlock(diversion: PlanDiversion, modifier: Modifier = M
                                 .border(1.3.dp, GlassMuted.copy(alpha = 0.55f), CircleShape))
                         }
                     }
-                    Text(step.text, Modifier.weight(1f), color = if (state == 1) GlassInk else if (state == 0) GlassDim else GlassMuted,
+                    Text(OverlayGlassCopy.label(step.text), Modifier.weight(1f), color = if (state == 1) GlassInk else if (state == 0) GlassDim else GlassMuted,
                         fontSize = 14.5.sp, fontWeight = if (state == 1) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

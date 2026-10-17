@@ -122,19 +122,50 @@ object OverlayChromeRuntime {
     /** A voice request in the last few seconds: the mission it starts shows minimized. Expires, so nothing lingers. */
     private val voiceOwned: Boolean get() = android.os.SystemClock.elapsedRealtime() - voiceOwnedAt < VOICE_OWNS_MS
 
-    fun missionWorking(sessionId: String, status: String? = null) {
+    /**
+     * Plan 70: the overlay is as big as the work. An Instant run ([RunPresentation.isInstant]) whispers: the bar folds to
+     * a small capsule with no card, unless it is [loud] (words the owner must see now: a call's cancel window). [fold]
+     * starts a run as the island (Flash); [missionGrow] opens its card if it becomes the Mind.
+     */
+    fun missionWorking(sessionId: String, status: String? = null, fold: Boolean = false, loud: Boolean = false) {
         foregroundTaskId = sessionId
+        val instant = RunPresentation.isInstant(sessionId)
+        var starting = false
         mutate { machine ->
+            val before = machine.snapshot()
+            val fresh = before.sessionId != sessionId || before.state != OverlayChromeState.WORKING
+            starting = fresh
             when (machine.state()) {
                 OverlayChromeState.IDLE, OverlayChromeState.DONE -> {
                     machine.startAnalysis(sessionId)
                     machine.enterWorking(sessionId)
-                    if (voiceOwned) machine.dispatch(OverlayUserAction.MINIMIZE)
                 }
                 OverlayChromeState.ANALYSIS, OverlayChromeState.LIVE -> machine.enterWorking(sessionId)
                 else -> Unit
             }
+            // Folded from its first frame (never a card flashing open): voice work, a Flash run, an Instant whisper.
+            if (fresh && (voiceOwned || fold || instant) && !machine.snapshot().minimized) machine.dispatch(OverlayUserAction.MINIMIZE)
+            machine.setWhisper(instant && !loud)
+            // An Instant run handed up to the Mind grows from its whisper into the card (a Flash one stays the island).
+            if (before.whisper && !instant && !fold && !voiceOwned && machine.snapshot().minimized) machine.dispatch(OverlayUserAction.ASK_CYCLONE)
             status?.let(machine::updateStatus)
+        }
+        if (fold && starting) autoFolded = sessionId
+    }
+
+    /** The run folded on its own ([missionWorking] fold); [missionGrow] opens it only while that still holds. */
+    @Volatile private var autoFolded: String? = null
+
+    /** Plan 70: a Flash run that became the Mind grows into its card, unless the owner moved it since. */
+    fun missionGrow(sessionId: String) {
+        if (autoFolded != sessionId) return
+        autoFolded = null
+        mutate { machine ->
+            // The chrome may still carry the Instant run's session the mission grew from, so the run is matched by autoFolded.
+            val s = machine.snapshot()
+            if (s.minimized && (s.state == OverlayChromeState.WORKING || s.state == OverlayChromeState.LIVE)) {
+                machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+            }
         }
     }
 
@@ -152,7 +183,13 @@ object OverlayChromeRuntime {
         DeviceState.setController(DeviceState.Controller.AGENT)
     }
 
-    fun missionFinished(sessionId: String, ok: Boolean, message: String) {
+    /**
+     * [ending]: an Instant run's last moment (plan 70): a hop when it worked, a few words when something didn't happen
+     * or there is an answer. Shown only when the run whispered.
+     */
+    fun missionFinished(sessionId: String, ok: Boolean, message: String, ending: Pair<Boolean, String?>? = null) {
+        if (ending != null && RunPresentation.isInstant(sessionId) && snapshot().sessionId == sessionId) RunPresentation.ended(ending.first, ending.second)
+        if (autoFolded == sessionId) autoFolded = null
         voiceOwnedAt = 0L
         GateShown.clear()
         com.cyclone.mobile.policy.ActionReason.clear()

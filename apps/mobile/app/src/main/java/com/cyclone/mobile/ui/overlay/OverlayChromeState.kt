@@ -72,4 +72,6 @@ data class OverlayChromeSnapshot(
     val voiceListening: Boolean = false,
     val voiceMessage: String? = null,
     val statusMessage: String? = null,
+    /** Plan 70: an Instant run whispers (the bar is a small capsule, no card). Off for every other run. */
+    val whisper: Boolean = false,
 )
