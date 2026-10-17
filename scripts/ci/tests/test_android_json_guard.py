@@ -30,5 +30,21 @@ class AndroidJsonGuard(unittest.TestCase):
         self.assertIn('return "null";', obj)
 
 
+    def test_model_output_drops_json_nulls_before_it_is_read(self):
+        """On Android optString(k) on a JSON null is "null": model JSON goes through ModelJson, which drops nulls."""
+        base = APP / "src/main/java/com/cyclone/mobile"
+        sites = {
+            "mind/MindConversation.kt": "ModelJson.parse(arguments",          # every Mind tool call's arguments
+            "mind/one/PlanLines.kt": "ModelJson.parse(text)",                 # OneMind and Flash plan lines
+            "ai/PageAgentProtocol.kt": "ModelJson.parse(stripFence(raw))",     # the page agent's actions
+            "voice/VoiceUnderstanding.kt": "ModelJson.parse(text.substring(",
+            "ai/OpenRouterQuickAgent.kt": "ModelJson.parse(repaired)",
+            "mind/modes/DecisionBox.kt": "ModelJson.parse(trimmed)",
+            "mind/pilot/Pilot.kt": "ModelJson.parse(trimmed)",
+        }
+        for path, needle in sites.items():
+            self.assertIn(needle, (base / path).read_text(encoding="utf-8"), path)
+
+
 if __name__ == "__main__":
     unittest.main()

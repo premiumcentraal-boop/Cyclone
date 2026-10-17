@@ -147,7 +147,7 @@ confidence: 0 to 1.
         val start = text.indexOf('{')
         val end = text.lastIndexOf('}')
         if (start < 0 || end <= start) return null
-        return runCatching { JSONObject(text.substring(start, end + 1)) }.getOrNull()
+        return runCatching { com.cyclone.mobile.mind.ModelJson.parse(text.substring(start, end + 1)) }.getOrNull()
     }
 
     const val MAX_GOAL_CHARS = 600

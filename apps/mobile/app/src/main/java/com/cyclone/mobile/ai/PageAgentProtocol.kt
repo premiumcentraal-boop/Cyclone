@@ -80,7 +80,7 @@ Schema:
 """.trimIndent()
 
     fun parse(raw: String): PageAgentDecision {
-        val json = JSONObject(stripFence(raw))
+        val json = com.cyclone.mobile.mind.ModelJson.parse(stripFence(raw))
         val actions = mutableListOf<PageAgentAction>()
         val array = json.optJSONArray("actions") ?: JSONArray()
         for (i in 0 until minOf(array.length(), 3)) {

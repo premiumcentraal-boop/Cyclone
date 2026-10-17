@@ -113,7 +113,7 @@ class OpenRouterQuickAgent(private val context: Context) {
             return@withContext completeTrace(traceId, result)
         }
         val repaired = BoundedJsonRepair.extractSingleObject(raw) ?: stripCodeFence(raw)
-        val proposal = runCatching { JSONObject(repaired) }.getOrElse {
+        val proposal = runCatching { com.cyclone.mobile.mind.ModelJson.parse(repaired) }.getOrElse {
             return@withContext completeTrace(traceId, QuickAgentResult(false, "The model returned invalid workflow JSON: ${it.message}", 1, config.model.id))
         }
         val result = AutomationRuntime.importAiProposal(context, proposal).fold(
@@ -158,7 +158,7 @@ class OpenRouterQuickAgent(private val context: Context) {
             .build()
         return http.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
-            val json = runCatching { JSONObject(text) }.getOrElse {
+            val json = runCatching { com.cyclone.mobile.mind.ModelJson.parse(text) }.getOrElse {
                 JSONObject().put("error", JSONObject().put("message", text.ifBlank { "HTTP ${response.code}" }))
             }
             if (!response.isSuccessful) {

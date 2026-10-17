@@ -558,7 +558,7 @@ object PilotWire {
     /** The answer of a chat completion: the message content as JSON. */
     fun parseChoice(body: String?): PilotAnswer? {
         val content = runCatching {
-            JSONObject(body ?: return null).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content")
+            com.cyclone.mobile.mind.ModelJson.parse(body ?: return null).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content")
         }.getOrNull() ?: return null
         val json = json(content) ?: return null
         val choice = json.optString("choice").trim().takeIf { it.isNotBlank() } ?: return null
@@ -641,9 +641,9 @@ object PilotWire {
     /** JSON from a model's text: plain, fenced, or the first object in the text. */
     private fun json(text: String): JSONObject? {
         val trimmed = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-        runCatching { return JSONObject(trimmed) }
+        runCatching { return com.cyclone.mobile.mind.ModelJson.parse(trimmed) }
         val start = trimmed.indexOf('{')
         val end = trimmed.lastIndexOf('}')
-        return if (start >= 0 && end > start) runCatching { JSONObject(trimmed.substring(start, end + 1)) }.getOrNull() else null
+        return if (start >= 0 && end > start) runCatching { com.cyclone.mobile.mind.ModelJson.parse(trimmed.substring(start, end + 1)) }.getOrNull() else null
     }
 }
