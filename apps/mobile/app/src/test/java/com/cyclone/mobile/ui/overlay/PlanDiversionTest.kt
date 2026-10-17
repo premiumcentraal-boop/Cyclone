@@ -46,7 +46,7 @@ class PlanDiversionTest {
     @Test fun theDiversionLivesInsideTheWorkingCardNotUnderIt() {
         val chrome = sequenceOf(File("src/main/java/com/cyclone/mobile/ui/overlay/OverlayChrome.kt"),
             File("apps/mobile/app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChrome.kt")).first { it.isFile }.readText()
-        assertTrue(chrome.contains("OverlayWorkCard(task, diversion, minimize)"))
+        assertTrue(chrome.contains("OverlayWorkCard(task, diversion, thinking, minimize)"))
         assertFalse(chrome.contains("CyclonePlanView(mission, compact = true"))
     }
 }

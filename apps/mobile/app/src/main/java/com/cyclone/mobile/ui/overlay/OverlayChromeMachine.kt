@@ -47,8 +47,15 @@ class OverlayChromeMachine(
             minimized = continuation && snapshot.minimized,
             launcherCollapsed = continuation && snapshot.launcherCollapsed,
             userPaused = false,
+            whisper = continuation && snapshot.whisper,
         )
         cycloneState.resumeAgent()
+    }
+
+    /** Plan 70: the run whispers (Instant) or speaks; only a working run can whisper. */
+    fun setWhisper(on: Boolean) {
+        val want = on && (snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE)
+        if (snapshot.whisper != want) snapshot = snapshot.copy(whisper = want)
     }
 
     /** Once per new task; later status updates must respect the user's manual collapse. */
@@ -113,6 +120,7 @@ class OverlayChromeMachine(
             composerText = "",
             voiceListening = false,
             voiceMessage = null,
+            whisper = false,
         )
     }
 
@@ -133,6 +141,7 @@ class OverlayChromeMachine(
             statusMessage = null,
             bullets = emptyList(),
             gateClass = null,
+            whisper = false,
         )
         emit(
             OverlayChromeEvent(

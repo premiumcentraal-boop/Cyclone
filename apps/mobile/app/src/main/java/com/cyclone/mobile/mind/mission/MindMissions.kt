@@ -637,7 +637,8 @@ object MindMissions {
             publishTask(context, taskId, mission0)
             MindMissionService.start(context, taskId, (workingMinutes(context) + 60) * 60_000L)
             DeviceState.setController(DeviceState.Controller.AGENT)
-            OverlayChromeRuntime.missionWorking(taskId, "Thinking")
+            // Plan 70: a Flash run starts as the island; the Mind opens its card.
+            OverlayChromeRuntime.missionWorking(taskId, "Thinking", fold = run.flash)
         } else {
             card(context, run) { it.copy(message = "Starting behind your screen.") }
         }
@@ -866,8 +867,14 @@ object MindMissions {
             com.cyclone.mobile.mind.one.OneMindStore.recipe(context, run.mission.goal)?.plan
         }.getOrNull() else null
         var lastPlan = ""
+        var grown = false
         val listener = object : com.cyclone.mobile.mind.one.ConductorListener {
             override fun onScore(score: com.cyclone.mobile.mind.one.Score) {
+                // Plan 70: a Flash run handed to the Mind grows into its card (once; the owner can fold it again).
+                if (run.flash && run.front && !grown && score.difficulty == com.cyclone.mobile.mind.one.Difficulty.MIND) {
+                    grown = true
+                    OverlayChromeRuntime.missionGrow(run.taskId)
+                }
                 com.cyclone.mobile.mind.one.OneMindLive.put(run.taskId, com.cyclone.mobile.mind.one.ScoreCard.summary(score, ledger))
                 val milestones = com.cyclone.mobile.mind.one.ScoreCard.milestones(score)
                 val index = com.cyclone.mobile.mind.one.ScoreCard.index(score)
