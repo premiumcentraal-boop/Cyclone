@@ -552,5 +552,22 @@ and everything the owner sees.
 
 - [x] Checkpoint 1: foundation and crew (commit 0a959151, Mobile CI run 1505 green)
 - [x] Checkpoint 2: the minds (commit 45595c29, Mobile CI run 1506 green)
-- [ ] Checkpoint 3: the switch-over
+- [ ] Checkpoint 3: the switch-over (commit 04ab7d8e; ticked once its Mobile CI is green)
+  - Built: OneMind runs every Flash and Mind mission (`MindMissions.runOneMind`); the Instant baton becomes the Score;
+    steer, owner messages and Pause reach the Conductor; the Score is saved beside the journal (`MissionStore.saveScore`)
+    and a resume reloads it; recipes (`mind/one/Recipes.kt`, `OneMindStore`); the card shows milestones, step line,
+    wakes and cost (`ScoreCard`); ask.status carries an optional validated `onemind` summary and Glass shows it;
+    Fast mode retired from Settings and missions, "Compact history at" added under Speed; the Lab record's
+    `metrics.onemind` holds the Score and ledger.
+  - Kept on the old Mind loop on purpose: account setup, sign-up mapping, and runs resumed from a journal written
+    before OneMind (they have no Score).
+  - Deferred (named, not silently dropped):
+    - pipelined boards (sending the next step's fused call while the current action settles);
+    - Instant as a literal one-step Conductor plan: Instant keeps its own fast engine and hands its baton into the
+      Score, so a promotion still keeps the same run;
+    - recipe lookup uses the normalised words only, not Triage's typed slots;
+    - `Expect.Setting` has no phone setting reader yet, so a setting postcondition is checked by VERIFY, not code;
+    - `recall` reopens folded history only within the running process (not after a resume).
+  - Compatibility: a PC gateway older than this build rejects ask.status while a OneMind run is live (the new
+    `onemind` key). The phone and PC must be updated together; say so in the release notes.
 - [ ] Checkpoint 4: release (alpha.138)
