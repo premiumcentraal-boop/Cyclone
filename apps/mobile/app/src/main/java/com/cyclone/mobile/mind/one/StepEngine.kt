@@ -40,8 +40,11 @@ sealed interface StepOutcome {
  * - **Rung 0, code:** direct actions (open an app, a link, settings, back, home, wait, typed tools) and targets that
  *   match exactly one control by label. No model call.
  * - **Rung 1, the fused call** (JEV ∥ OpenAI Decisions), with the careful-side rules of [FusedBoard.combine].
- * - **Rung 2, the same call with the screenshot,** when the tree is weak or rung 1 couldn't agree.
+ * - **Alpha 143 (plan 72): two that decide, one that proves.** The screenshot goes into the first call (OpenAI
+ *   Decisions sees it, JEV reads the text), so there is no second "now with the image" round: a movement makes at most
+ *   two deciding calls, and its proof rides in the next movement's call (or the DONE check at the end).
  * - Anything still unsure goes to the run's mind ([StepOutcome.NeedsMind]).
+ * - Every proven tap is remembered for its app ([memory]), and the run's last moves ride in each call.
  *
  * Every action goes through [hands] (the Mind's own toolbox), so every gate, approval and the vault stay exactly where
  * they are. Code decides risk ([com.cyclone.mobile.mind.pilot.Pilot.irreversible]); a decision model can only raise
@@ -55,7 +58,14 @@ class StepEngine(
     private val settings: SettingReader? = null,
     private val record: (kind: String, line: String) -> Unit = { _, _ -> },
     private val shadow: (StepScreen, Step) -> Unit = { _, _ -> },
+    private val memory: MoveMemory? = null,
 ) {
+    /** The run's last moves and whether each was proven, for the fused call (plan 72). */
+    private val moves = ArrayDeque<String>()
+
+    /** How many deciding calls (fused-board asks) this engine has made; each ask is one call per model. */
+    var asks = 0
+        private set
     /** The last step's postcondition when code couldn't settle it; the next fused call asks it as VERIFY. */
     var pendingVerify: Pair<Step, Expect>? = null
         private set
@@ -86,19 +96,16 @@ class StepEngine(
             }
         }
 
-        // Rungs 1 and 2: the fused call.
+        // Rung 1: one fused call per model, with the screenshot for the model that sees (plan 72). The screen is read
+        // again with the image, and the decision is made on that reading, so refs and image match.
         val tripwire = step.risk != Risk.UNDOABLE || step.action in TRIPWIRE_ACTIONS
-        var reading = ask(step, screen, score, tripwire, image = false)
-        var rung = 1
-        if ((reading == null || reading.next == FusedBoard.NEEDS_MIND) && (screen.weak || reading != null)) {
-            val seen = eyes.look(true)
-            if (seen?.imageDataUrl != null && !seen.sensitive) {
-                runCatching { shadow(seen, step) }
-                ask(step, seen, score, tripwire, image = true)?.let { reading = it; rung = 2 }
-            }
-        }
+        val fresh = runCatching { eyes.look(true) }.getOrNull()
+        if (fresh?.sensitive == true) return StepOutcome.NeedsMind(step, "sensitive", "A sensitive screen (password, code or a banking app): the crew stays off it")
+        val seen = fresh ?: screen
+        val image = seen.imageDataUrl != null
+        val reading = ask(step, seen, score, tripwire, image = image)
         val r = reading ?: return StepOutcome.NeedsMind(step, "no_answer", "The decision models gave no usable answer")
-        return decide(step, r, screen, score, rung, tripwire, popups)
+        return decide(step, r, seen, score, if (image) 2 else 1, tripwire, popups)
     }
 
     /** After a review at a barrier: carry out the move the step stopped at. */
@@ -149,7 +156,8 @@ class StepEngine(
         if ((r.divergence ?: 0) >= 2) return StepOutcome.NeedsMind(step, "divergence", "The run looks ${FusedBoard.DIVERGENCE[r.divergence!!].replace('_', ' ')}")
 
         return when (val next = r.next) {
-            null, FusedBoard.NEEDS_MIND -> StepOutcome.NeedsMind(step, "unsure", "The decision models weren't sure which control carries out the step")
+            null, FusedBoard.NEEDS_MIND -> StepOutcome.NeedsMind(step, "unsure", "The decision models weren't sure which control carries out the step" +
+                (r.doubt?.let { ": $it" }.orEmpty()))
             FusedBoard.STEP_DONE -> {
                 val verdict = step.expect?.let { ExpectCheck.check(it, screen, null, score.facts, settings) } ?: Verdict.UNKNOWN
                 if (verdict == Verdict.MISSED) StepOutcome.NeedsMind(step, "unsure", "Said done, but the step's check doesn't hold")
@@ -233,6 +241,15 @@ class StepEngine(
             is Breaker.Call.Stop, is Breaker.Call.CheckIn -> return StepOutcome.Halt(step, call)
             else -> Unit
         }
+        remember(describe(name, label, args), verdict, after)
+        // Plan 72: a proven tap teaches this app's memory; a tap that missed counts against what memory said.
+        if (label != null && name in LEARNED_ACTIONS && after != null) runCatching {
+            when (verdict) {
+                Verdict.HELD -> memory?.proven(before, label, after)
+                Verdict.MISSED -> memory?.failed(before, label)
+                Verdict.UNKNOWN -> Unit
+            }
+        }
         return when (verdict) {
             Verdict.MISSED -> StepOutcome.Missed(step, "Expected ${ExpectCheck.describe(expect!!)}, and it isn't so")
             Verdict.UNKNOWN -> { pendingVerify = expect?.let { step to it }; breaker.stepDone(); StepOutcome.Done(step, verdict, rung) }
@@ -242,14 +259,27 @@ class StepEngine(
 
     private fun ask(step: Step, screen: StepScreen, score: Score, tripwire: Boolean, image: Boolean): FusedBoard.Reading? {
         val milestone = score.plan?.milestones?.firstOrNull { m -> m.steps.any { it.id == step.id } }?.title.orEmpty()
+        val known = runCatching { memory?.known(screen) }.getOrNull().orEmpty()
         val ask = FusedBoard.Ask(score.goal.text, milestone, step, screen, FusedBoard.shortlist(screen, step), pendingVerify?.second,
-            score.orders, tripwire, image)
+            score.orders, tripwire, image, history = moves.toList(), known = known)
+        asks++
         val readings = runCatching { board.ask(FusedBoard.request(ask), ask) }.getOrDefault(emptyList())
         val pickRisk = readings.firstNotNullOfOrNull { r -> screen.controls.firstOrNull { it.ref == r.next } }?.let { riskOf(step, it.label) } ?: step.risk
         return FusedBoard.combine(readings, undoable = pickRisk == Risk.UNDOABLE)
     }
 
     // ---- code decisions ---------------------------------------------------------------------------------------------
+
+    /** One line per move for the next calls: what was done and whether the phone proved it. */
+    private fun remember(what: String, verdict: Verdict, after: StepScreen?) {
+        val proof = when (verdict) {
+            Verdict.HELD -> "proven"
+            Verdict.MISSED -> "didn't happen"
+            Verdict.UNKNOWN -> "not proven yet"
+        }
+        moves.addLast("$what → $proof" + (after?.let { " (now: ${it.appLabel}${it.pageKey.takeIf(String::isNotBlank)?.let { k -> ", page $k" }.orEmpty()})" }.orEmpty()))
+        while (moves.size > FusedBoard.MAX_HISTORY) moves.removeFirst()
+    }
 
     /** Alpha 143: the check a step implies when the plan wrote none. Null when the tool's own result is the proof. */
     private fun implied(name: String, args: JSONObject): Expect? = when (name) {
@@ -291,6 +321,8 @@ class StepEngine(
         val AUTO_DISMISS = setOf("cookie_banner", "rating_prompt", "update_prompt", "ad")
         /** Actions that always carry the risk questions, whatever the plan says. */
         val TRIPWIRE_ACTIONS = setOf("type_text", "press_enter")
+        /** Moves the app memory learns from: taps on a control, never typing. */
+        val LEARNED_ACTIONS = setOf("tap", "long_press", "double_tap")
         const val MAX_POPUPS_PER_STEP = 2
         private val FACT_NAME = Regex("^[a-z][a-z0-9_]{0,40}$")
     }

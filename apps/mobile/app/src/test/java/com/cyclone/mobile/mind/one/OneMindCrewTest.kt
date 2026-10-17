@@ -272,7 +272,8 @@ class OneMindCrewTest {
         val step = Step("s", "tap", target = "basket")
         var round = 0
         val hands = FakeHands()
-        val engine = StepEngine(Screens(banner, clean, clean, clean).eyes, { _, a ->
+        // The engine reads the screen, then again with its screenshot for the deciding call (plan 72).
+        val engine = StepEngine(Screens(banner, banner, clean, clean, clean).eyes, { _, a ->
             round++
             if (round == 1) listOf(FusedBoard.read(reply("e3", popup = "cookie_banner", dismiss = "e2"), a))
             else listOf(FusedBoard.read(reply("e3"), a))

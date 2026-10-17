@@ -114,7 +114,8 @@ object AndroidMinds {
     /** "Off" compacts only near the model's own limit. */
     const val OFF_TOKENS = 400_000
 
-    fun crew(toolbox: PhoneMindToolbox, key: String, ledger: Ledger, zdr: Boolean, breaker: Breaker, record: (String) -> Unit): Crew =
+    /** Plan 72: two that decide (the board), one that proves (the DONE board); no side calls per step. */
+    fun crew(toolbox: PhoneMindToolbox, key: String, ledger: Ledger, zdr: Boolean, breaker: Breaker, memory: MoveMemory?): Crew =
         EngineCrew(AndroidCrew.eyes(toolbox), AndroidCrew.board(key, ledger, zdr), AndroidCrew.doneBoard(key, ledger, zdr), toolbox, breaker,
-            shadow = AndroidCrew.visionShadow(key, ledger, record))
+            memory = memory)
 }

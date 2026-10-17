@@ -260,25 +260,40 @@ class RaceEngine(
         val models = race.providers
         // Two answers from one model (two phrasings) are needed to act early only when each model answers twice.
         val need = if (race.size > models.size) 2 else 1
+        // Plan 72: with one call per model, its second phrasing rides inside that call (the reordered questions).
+        val folded = race.size == models.size
         val result = race.run(
-            prompt = { lane -> Prompt(Triage.state(text, world, lane.variant), Triage.questions(world, text, lane.variant)) },
+            prompt = { lane ->
+                if (folded) Prompt(Triage.state(text, world, 0), Triage.questions(world, text, 0) + Triage.folded(world, text))
+                else Prompt(Triage.state(text, world, lane.variant), Triage.questions(world, text, lane.variant))
+            },
             stopEarly = { arrived ->
                 engine == DecisionEngine.SPRINT &&
-                    Ensemble.sprintEarly(arrived.mapNotNull { Ensemble.opinion(it, text, world, bar) }, need)?.also { early = it } != null
+                    Ensemble.sprintEarly(arrived.flatMap(::split).mapNotNull { Ensemble.opinion(it, text, world, bar) }, need)?.also { early = it } != null
             },
             // Every model has answered once: its second phrasing gets a short grace, not the full deadline.
             quorum = { arrived -> arrived.map { it.provider }.toSet().containsAll(models) },
         )
         val ms = (System.nanoTime() - started) / 1_000_000
-        val opinions = result.decided.mapNotNull { Ensemble.opinion(it, text, world, bar) }
+        val opinions = result.decided.flatMap(::split).mapNotNull { Ensemble.opinion(it, text, world, bar) }
         val route = early?.let { it.route.copy(why = "${it.lane} was sure of it first, none disagreed, and it is easy to undo: ${it.route.why}") }
             ?: Ensemble.combine(Ensemble.perModel(opinions))
         result.all.thenAccept { all -> runCatching { record(recordOf(atMs, all, route, early?.lane, text, world, bar)) } }
         return route.copy(by = Decider.DECISIONS, decision = Ensemble.guessOf(route, opinions), decideMs = ms)
     }
 
+    /**
+     * One arrival as the phrasings it answered: the plain one, and the folded second phrasing when the call carried it.
+     * Both keep the model's lane, so [Ensemble.merge] treats them as one model's two answers.
+     */
+    private fun split(a: Arrival): List<Arrival> {
+        val answer = a.answer ?: return listOf(a)
+        val second = Triage.unfold(answer.reply) ?: return listOf(a)
+        return listOf(a.copy(answer = answer.copy(reply = Triage.plain(answer.reply))), a.copy(answer = answer.copy(reply = second), variant = 1))
+    }
+
     private fun recordOf(atMs: Long, all: List<Arrival>, chosen: Route, early: String?, text: String, world: GrammarWorld, bar: Double): EngineRecord {
-        val lanes = all.map { a ->
+        val lanes = all.flatMap(::split).map { a ->
             val op = Ensemble.opinion(a, text, world, bar)
             LaneRecord(a.provider, a.ms, answered = op != null, mode = op?.route?.mode?.name?.lowercase(),
                 action = op?.route?.let { Ensemble.actionOf(it) }, copy = a.variant)

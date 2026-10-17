@@ -100,6 +100,26 @@ class EnsembleTest {
                        done: CountDownLatch? = null) =
         RaceEngine(kind, DecisionRace(lanes.toList(), deadline, graceMs = 600), record = { records += it; done?.countDown() })
 
+    /** A reply that also answers the folded second phrasing (plan 72), as a model asked once with both would. */
+    private fun folded(first: DReply, second: DReply): DReply = first.copy(answers = first.answers +
+        second.answers.filterKeys { it in Triage.REORDERED }.mapKeys { Triage.FOLDED + it.key })
+
+    @Test fun `one call per model carries its second phrasing, and a model that answers two ways is not sure`() {
+        var asked: Map<String, com.cyclone.mobile.decisions.DQuestion>? = null
+        val spy = Lane("jev#0", TypedBox { _, q -> asked = q; TypedAnswer(folded(camera, camera), 20) }, "jev", 0)
+        val agree = RaceEngine(DecisionEngine.CONSENSUS, DecisionRace(listOf(spy, lane("openai", 30, folded(camera, camera))), 800))
+        assertEquals(Mode.INSTANT, agree.decide("open camera", world, 0.85).mode)
+        assertTrue(asked!!.keys.containsAll(listOf("capability", "rev_capability", "target", "rev_target")))
+        // The reversed list changed one model's mind: not sure, so not Instant.
+        val split = RaceEngine(DecisionEngine.CONSENSUS, DecisionRace(listOf(lane("jev", 20, folded(camera, volume)),
+            lane("openai", 30, folded(camera, camera))), 800))
+        assertEquals(Mode.FLASH, split.decide("open camera", world, 0.85).mode)
+        // Sprint never acts early on a model that answered two ways.
+        val sprint = RaceEngine(DecisionEngine.SPRINT, DecisionRace(listOf(lane("jev", 20, folded(camera, volume)),
+            lane("openai", 300, folded(camera, camera))), 800))
+        assertNotEquals(Mode.INSTANT, sprint.decide("open camera", world, 0.85).mode)
+    }
+
     @Test fun `consensus waits for both, sprint acts on the first two sure easy-to-undo answers`() {
         val c = engine(DecisionEngine.CONSENSUS, lane("jev", 50, camera), lane("openai", 400, camera))
         val started = System.nanoTime()

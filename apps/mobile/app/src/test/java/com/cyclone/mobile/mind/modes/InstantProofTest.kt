@@ -49,6 +49,14 @@ class InstantProofTest {
         assertNotEquals(Mode.ANSWER, home.mode)
     }
 
+    @Test fun `a home screen app Android names counts as home, whatever it is called`() {
+        val oneUi = launcher.copy(foreground = "com.example.homeapp")
+        assertNull(ModeRouter.missingApp("open snapchat", oneUi))
+        com.cyclone.mobile.mind.HomeSafety.registerHomes(setOf("com.example.homeapp"))
+        assertEquals(Mode.ANSWER, ModeRouter.missingApp("open snapchat", oneUi)?.mode)
+        assertTrue(com.cyclone.mobile.mind.HomeSafety.isLauncher("com.google.android.apps.nexuslauncher"))
+    }
+
     @Test fun `on the home screen open X never taps a label, it opens an app or goes up`() {
         assertEquals(InstantIntent.OPEN_APP, ModeRouter.stage0("open instagram", launcher)!!.command!!.intent)
         assertEquals(InstantIntent.OPEN_APP, ModeRouter.stage0("open instagram", instagram)!!.command!!.intent)

@@ -118,7 +118,7 @@ OneMind is the only engine for Flash and Mind. Watch the task card: milestones, 
 | 8.3 | A Mind task, e.g. "find Anna in WhatsApp and open her chat" | No step, search or target reads "null" in the run's steps | UNVERIFIED |
 | 8.4 | Install over 141 with `adb install -r`, `adb logcat -s PackageManager PackageInstaller` running | Installs; if not, the `INSTALL_FAILED_…` code names why | UNVERIFIED |
 
-## alpha.143 · Prove it did it (plan 71)
+## alpha.143 · Prove it did it (plans 71 and 72)
 
 | # | Steps | Expected | Result |
 |---|---|---|---|
@@ -127,3 +127,6 @@ OneMind is the only engine for Flash and Mind. Watch the task card: milestones, 
 | 9.3 | From the home screen, ask "open snapchat" (not installed) | "I don't see Snapchat on this phone." | UNVERIFIED |
 | 9.4 | "open WhatsApp" from the home screen | Opens at once (Instant), done only once WhatsApp is in front | UNVERIFIED |
 | 9.5 | "scroll down" at the end of a list | Says nothing moved, and isn't counted as a success | UNVERIFIED |
+| 9.6 | A Flash task in an app Cyclone hasn't used, e.g. "open Spotify and go to my library" | Done only on the library page; the run trace shows two decision answers per step and one done check | UNVERIFIED |
+| 9.7 | Run 9.2 twice | The second run's steps say "Learned in this app before"; `Cyclone Brain/Moves/com.instagram.android.json` holds labels only | UNVERIFIED |
+

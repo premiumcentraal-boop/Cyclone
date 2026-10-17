@@ -158,6 +158,15 @@ object CycloneModes {
         ModeRouter.route(text, world, facts(context), settings.speed, null, bar, phone, null, early)
     }
 
+    /** Plan 72: Android's own list of home screen apps, read once, so "is the home screen in front" never guesses. */
+    fun registerHomes(context: Context) {
+        if (com.cyclone.mobile.mind.HomeSafety.homes.isNotEmpty()) return
+        runCatching {
+            context.packageManager.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_HOME), 0).mapNotNull { it.activityInfo?.packageName }.toSet()
+        }.getOrNull()?.let(com.cyclone.mobile.mind.HomeSafety::registerHomes)
+    }
+
     private fun run(context: Context, request: String, settings: ModeSettings, voice: Boolean, reply: (ModeResult) -> Unit) {
         val running = Running("instant-${UUID.randomUUID()}")
         current = running
@@ -174,6 +183,7 @@ object CycloneModes {
         // Voice keeps the screen (alpha.78): its own panel shows the work and speaks the result, so the Ask chrome stays out.
         val chrome = !voice
         val device = com.cyclone.mobile.mind.mission.AndroidMindDevice(context)
+        registerHomes(context)
         var confirmWindow: (String, Long) -> Boolean = { _, _ -> false }
         val hands = AndroidInstantHands(context, request, device, { text, ms -> confirmWindow(text, ms) }, { running.stopped })
         var handedOver = false
