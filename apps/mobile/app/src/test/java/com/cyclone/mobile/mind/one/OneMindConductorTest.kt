@@ -335,6 +335,41 @@ class OneMindConductorTest {
         assertEquals(RunEnd.DONE, conductor(ScriptedModel(twoSteps + "\n{\"done\":{\"shows\":\"On my way\"}}"), FakeCrew().apply { verdict = Verdict.HELD; doneYes = null }).run().end)
     }
 
+    @Test fun `an app that is open is not a goal that is done`() {
+        // The owner's case: "open Instagram and then my profile" planned as one open_app with done {"app":"Instagram"}.
+        val half = """
+            {"step":"open_app","args":{"app":"Instagram"},"expect":{"app":"Instagram"}}
+            {"done":{"app":"Instagram"}}
+        """.trimIndent()
+        val finish = """{"decision":"finish","summary":"Opened Instagram."}"""
+        // Code says the app is open; nobody answered the DONE question: not done.
+        val silent = conductor(ScriptedModel(half, finish, finish), FakeCrew().apply { verdict = Verdict.HELD; doneYes = null }).run()
+        assertEquals(RunEnd.UNCONFIRMED, silent.end)
+        // The DONE question sees the home page and says no: not done.
+        assertEquals(RunEnd.UNCONFIRMED, conductor(ScriptedModel(half, finish, finish), FakeCrew().apply { verdict = Verdict.HELD; doneYes = 0.1 }).run().end)
+        // A yes from the DONE question is needed, and enough.
+        assertEquals(RunEnd.DONE, conductor(ScriptedModel(half), FakeCrew().apply { verdict = Verdict.HELD; doneYes = 0.9 }).run().end)
+    }
+
+    @Test fun `the finish rule`() {
+        val app = Expect.AppIs("Instagram")
+        val page = Expect.All(listOf(app, Expect.Control("Edit profile")))
+        assertFalse(Conductor.strong(app))
+        assertFalse(Conductor.strong(Expect.Changed))
+        assertTrue(Conductor.strong(page))
+        assertFalse(Conductor.doneConfirmed(Verdict.MISSED, true, 1.0))
+        assertTrue(Conductor.doneConfirmed(Verdict.HELD, true, null))
+        assertFalse(Conductor.doneConfirmed(Verdict.HELD, true, 0.2))
+        assertFalse(Conductor.doneConfirmed(Verdict.HELD, false, null))
+        assertTrue(Conductor.doneConfirmed(Verdict.HELD, false, FusedBoard.YES))
+        assertFalse(Conductor.doneConfirmed(Verdict.UNKNOWN, false, 0.6))
+        assertTrue(Conductor.doneConfirmed(Verdict.UNKNOWN, false, FusedBoard.SURE))
+        // The DONE question sees the controls, so a page is told apart by them.
+        val req = FusedBoard.doneRequest("open my profile", emptyList(), emptyList(),
+            StepScreen("com.instagram.android", "Instagram", controls = listOf(StepControl("e1", "Edit profile")), texts = listOf("anna")))
+        assertTrue(req.state.any { it is com.cyclone.mobile.decisions.DPart.Text && it.text.contains("Controls: Edit profile") })
+    }
+
     @Test fun `the same trigger three times asks the owner, who can stop or keep going`() {
         val plan = """{"milestone":"m"}
             {"step":"tap","target":"Stubborn"}""".trimIndent()

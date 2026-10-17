@@ -247,6 +247,25 @@ class OneMindCrewTest {
         assertTrue(then is StepOutcome.PreviousMissed && then.step.id == "s1")
     }
 
+    @Test fun `a step the plan gave no check must still show it happened`() {
+        val launcher = StepScreen("com.google.android.apps.nexuslauncher", "Pixel Launcher", "home", "h1", listOf(StepControl("e1", "Instagram")))
+        val insta = StepScreen("com.instagram.android", "Instagram", "feed", "i1", listOf(StepControl("e1", "Profile")), listOf("For you"))
+        // open_app without an expect: the app must be the one in front, not just "the tool said ok".
+        val open = Step("s1", "open_app", args = mapOf("app" to "Instagram"))
+        assertTrue(StepEngine(Screens(launcher, launcher).eyes, { _, _ -> emptyList() }, FakeHands()).run(open, score(open)) is StepOutcome.Missed)
+        val opened = StepEngine(Screens(launcher, insta).eyes, { _, _ -> emptyList() }, FakeHands()).run(open, score(open))
+        assertTrue(opened is StepOutcome.Done && opened.verdict == Verdict.HELD)
+        // A tap without an expect that changed nothing missed.
+        val still = object : MindToolbox {
+            override fun specs(): List<MindToolSpec> = emptyList()
+            override fun execute(call: MindToolCall, arguments: JSONObject) = MindToolResult("ok", changedScreen = false)
+        }
+        val tap = Step("s2", "tap", target = "Profile")
+        assertTrue(StepEngine(Screens(insta, insta).eyes, { _, _ -> emptyList() }, still).run(tap, score(tap)) is StepOutcome.Missed)
+        val profile = insta.copy(pageKey = "profile", fingerprint = "p1", texts = listOf("Edit profile"))
+        assertTrue(StepEngine(Screens(insta, profile).eyes, { _, _ -> emptyList() }, still).run(tap, score(tap)) is StepOutcome.Done)
+    }
+
     @Test fun `popups close by themselves, branches skip, risky surprises stop`() {
         val banner = StepScreen("com.shop", "Shop", "home", "f1", listOf(StepControl("e1", "Accept all"), StepControl("e2", "Reject"), StepControl("e3", "Cart")))
         val clean = banner.copy(fingerprint = "f2", controls = listOf(StepControl("e3", "Cart"), StepControl("e4", "Menu")))

@@ -540,18 +540,22 @@ class Conductor(
 
     // ---- the finish -------------------------------------------------------------------------------------------------
 
-    /** Plan 69 §4.4 DONE: code's predicate first, then the DONE question. Doubt means not done. */
+    /**
+     * Plan 69 §4.4 DONE: code's predicate first, then the DONE question. Doubt means not done.
+     *
+     * Alpha 143: a predicate that only says "the app is open" or "the screen changed" can't prove a goal like "open my
+     * profile in Instagram" (the app was open on its home page), so it never finishes alone: the DONE question must
+     * answer yes. Only a predicate that names what the goal shows (text, a control, a field, a setting, a fact) may
+     * finish when no decision model answered.
+     */
     private fun finish(summary: String?) {
         awaitFeed()
         awaitGlance()
         val screen = runCatching { crew.look(false) }.getOrNull()
-        val code = score.plan?.done?.let { e -> runCatching { crew.check(e, score) }.getOrDefault(Verdict.UNKNOWN) } ?: Verdict.UNKNOWN
+        val predicate = score.plan?.done
+        val code = predicate?.let { e -> runCatching { crew.check(e, score) }.getOrDefault(Verdict.UNKNOWN) } ?: Verdict.UNKNOWN
         val yes = runCatching { crew.done(score, screen) }.getOrNull()
-        val confirmed = when (code) {
-            Verdict.MISSED -> false
-            Verdict.HELD -> yes == null || yes >= FusedBoard.YES
-            Verdict.UNKNOWN -> yes != null && yes >= FusedBoard.SURE
-        }
+        val confirmed = doneConfirmed(code, predicate?.let(::strong) == true, yes)
         if (confirmed) {
             score = score.event("done", "Done, and checked", clock())
             end(RunEnd.DONE, summary ?: report())
@@ -567,6 +571,7 @@ class Conductor(
     }
 
     /** The end report, built by code from milestones and facts. */
+
     private fun report(): String {
         val done = score.plan?.milestones?.filter { it.state == MilestoneState.DONE }?.map { it.title }.orEmpty()
         return if (done.isEmpty()) "Done." else "Done: ${done.joinToString(", ")}."
@@ -850,5 +855,26 @@ class Conductor(
         const val KEEP_RECENT = 6
         const val GLANCE_POLL_MS = 200L
         const val PAUSE_POLL_MS = 250L
+
+        /**
+         * Alpha 143, the finish rule. [code] is the plan's done predicate checked by code, [strong] whether that
+         * predicate names what the goal shows, [yes] the DONE question's careful yes (null: nobody answered).
+         * - a code miss is never done;
+         * - a strong predicate that holds is done unless the DONE question says no;
+         * - a weak one that holds ("the app is open") needs an answered yes;
+         * - no predicate, or one code can't judge, needs a sure yes.
+         */
+        fun doneConfirmed(code: Verdict, strong: Boolean, yes: Double?): Boolean = when (code) {
+            Verdict.MISSED -> false
+            Verdict.HELD -> if (strong) yes == null || yes >= FusedBoard.YES else yes != null && yes >= FusedBoard.YES
+            Verdict.UNKNOWN -> yes != null && yes >= FusedBoard.SURE
+        }
+
+        /** True when [e] names something the goal shows, not just where the phone is. */
+        fun strong(e: Expect): Boolean = when (e) {
+            is Expect.Shows, is Expect.Control, is Expect.FieldHas, is Expect.Setting, is Expect.HasFact -> true
+            is Expect.All -> e.parts.any(::strong)
+            is Expect.AppIs, is Expect.Absent, Expect.Focused, Expect.Changed, is Expect.Described -> false
+        }
     }
 }

@@ -114,7 +114,16 @@ object ModeRouter {
         "maps|kaart|chat|conversation|gesprek|inbox|mail|email|drawer|menu|store|play store|app store|search|zoek|" +
         // Plan 58 (golden set): kinds of app and pointers, never one app's name ("open music", "the bank app", "the second one").
         "music|muziek|bank|agenda|calendar|kalender|notes?|notities?|news|nieuws|weather|weer|games?|spelletjes?|videos?|" +
-        "one|first|second|third|last|next|this|that|eerste|tweede|derde|laatste|volgende|deze|die)\\b")
+        "one|first|second|third|last|next|this|that|eerste|tweede|derde|laatste|volgende|deze|die|" +
+        // Alpha 143: places inside an app ("open my profile" in Instagram), never an app of their own.
+        "profiel|profile|account|orders?|bestellingen|cart|winkelwagen|basket|mandje|messages?|berichten|dms?|direct|feed|" +
+        "stories|story|reels?|likes?|followers?|following|volgers|volgend|saved|opgeslagen|bookmarks?|favorites?|favourites?|" +
+        "favorieten|history|geschiedenis|library|bibliotheek|playlists?|afspeellijsten?|wallet|payments?|betalingen|" +
+        "subscriptions?|abonnementen?|explore|ontdekken|friends?|vrienden|groups?|groepen|posts?|contacts?|contacten|calls?|" +
+        "oproepen|chats|status|updates|channels?|kanalen|tabs?|home|start|inbox|notifications|activity|activiteit|" +
+        "for you|voor jou|trending|shorts|watch later|later bekijken|downloads|wishlist|verlanglijst)\\b")
+    /** "my profile", "your settings": a possessive means a place of the owner's inside an app, not an app's name. */
+    private val POSSESSIVE = Regex("(?i)^(?:please\\s+)?(?:open|launch|pull up|bring up|open up|fire up)\\s+(?:my|mijn|your|je|jouw|our|ons|onze)\\s+")
 
     /** Stage 0: a clear command or a local answer, or null. */
     fun stage0(text: String, world: GrammarWorld, facts: LocalFacts = LocalFacts()): Route? {
@@ -127,11 +136,20 @@ object ModeRouter {
         }
     }
 
-    /** "open X" where X is clearly an app name and nothing on this phone resembles it. */
+    /**
+     * "open X" where X is clearly an app name and nothing on this phone resembles it.
+     *
+     * Alpha 143: "it isn't on this phone" is a claim, so it needs proof. It is never said for "my X" (a place of the
+     * owner's), for a place inside an app ("profile", "orders"), for something on the screen, or while an app other than
+     * the home screen is in front (X may well be a place in that app). Then a higher mode looks instead.
+     */
     fun missingApp(text: String, world: GrammarWorld): Route? {
         if (world.apps.size < 5) return null // the app list wasn't read: never claim something is missing
+        if (world.foreground != null && !com.cyclone.mobile.mind.HomeSafety.isLauncher(world.foreground)) return null
+        if (POSSESSIVE.containsMatchIn(text.trim())) return null
         val name = OPEN_ONLY.matchEntire(text.trim())?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() } ?: return null
         if (name.split(' ').size > 3 || NOT_AN_APP.containsMatchIn(name) || SECOND_CLAUSE.containsMatchIn(name)) return null
+        if (world.labels.any { InstantGrammar.similarity(name, it) >= 0.5 || InstantGrammar.normalize(it).contains(InstantGrammar.normalize(name)) }) return null
         val wanted = InstantGrammar.normalize(name)
         // Plan 58 (golden set): an abbreviation ("yt", "ig") or the start of an app's name ("insta") may well be there.
         if (wanted.replace(" ", "").length <= 3) return null
@@ -241,6 +259,13 @@ object ModeRouter {
      */
     fun route(text: String, world: GrammarWorld, facts: LocalFacts, speed: Speed, box: DecisionBox?, bar: Double,
               phone: PhoneDecider? = null, triage: TypedBox? = null, engine: EngineDecider? = null): Route {
+        val route = decide(text, world, facts, speed, box, bar, phone, triage, engine)
+        // Alpha 143: whoever decided, an Instant route must cover the whole request; the grammar's matches are exact.
+        return if (route.by == Decider.GRAMMAR) route else Coverage.check(route, text, world)
+    }
+
+    private fun decide(text: String, world: GrammarWorld, facts: LocalFacts, speed: Speed, box: DecisionBox?, bar: Double,
+                       phone: PhoneDecider?, triage: TypedBox?, engine: EngineDecider?): Route {
         if (speed == Speed.MIND) return Route(Mode.MIND, "Speed is set to Always Mind", by = Decider.SETTING, decision = guessOf(Mode.MIND))
         stage0(text, world, facts)?.let { r ->
             return r.copy(by = if (r.mode == Mode.ANSWER) Decider.ANSWER else Decider.GRAMMAR, decision = guessOf(r.mode, r.command))

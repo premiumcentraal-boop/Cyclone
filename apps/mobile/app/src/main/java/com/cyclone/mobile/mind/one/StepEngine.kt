@@ -219,9 +219,13 @@ class StepEngine(
                 else -> run(step, score)
             }
         }
+        // Alpha 143: a step the plan gave no check still has to show it happened: an opened app is the one in front, a
+        // tap changed the screen. "The tool said ok" is not proof.
+        val expect = step.expect ?: implied(name, args)
         val verdict = when {
             after == null -> Verdict.UNKNOWN
-            step.expect != null -> ExpectCheck.check(step.expect, after, before, score.facts, settings)
+            expect == Expect.Changed && step.expect == null && result.changedScreen -> Verdict.HELD
+            expect != null -> ExpectCheck.check(expect, after, before, score.facts, settings)
             result.changedScreen -> Verdict.HELD
             else -> Verdict.UNKNOWN
         }
@@ -230,8 +234,8 @@ class StepEngine(
             else -> Unit
         }
         return when (verdict) {
-            Verdict.MISSED -> StepOutcome.Missed(step, "Expected ${ExpectCheck.describe(step.expect!!)}, and it isn't so")
-            Verdict.UNKNOWN -> { pendingVerify = step.expect?.let { step to it }; breaker.stepDone(); StepOutcome.Done(step, verdict, rung) }
+            Verdict.MISSED -> StepOutcome.Missed(step, "Expected ${ExpectCheck.describe(expect!!)}, and it isn't so")
+            Verdict.UNKNOWN -> { pendingVerify = expect?.let { step to it }; breaker.stepDone(); StepOutcome.Done(step, verdict, rung) }
             Verdict.HELD -> { breaker.stepDone(); StepOutcome.Done(step, verdict, rung) }
         }
     }
@@ -246,6 +250,13 @@ class StepEngine(
     }
 
     // ---- code decisions ---------------------------------------------------------------------------------------------
+
+    /** Alpha 143: the check a step implies when the plan wrote none. Null when the tool's own result is the proof. */
+    private fun implied(name: String, args: JSONObject): Expect? = when (name) {
+        "open_app" -> args.optString("app").trim().takeIf { it.isNotBlank() && it != "null" }?.let { Expect.AppIs(it) }
+        "tap", "long_press", "double_tap" -> Expect.Changed
+        else -> null
+    }
 
     /** The one control whose label is the step's target, or contains it when no other control does. */
     private fun codeTarget(step: Step, screen: StepScreen): StepControl? {

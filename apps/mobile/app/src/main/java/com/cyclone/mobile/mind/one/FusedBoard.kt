@@ -16,6 +16,7 @@ import com.cyclone.mobile.decisions.DReply
 object FusedBoard {
     const val MAX_CONTROLS = 25
     const val MAX_TEXT_LINES = 40
+    const val MAX_DONE_CONTROLS = 30
 
     /** Verbs a step can answer besides a control. */
     const val STEP_DONE = "step_done"
@@ -176,10 +177,17 @@ object FusedBoard {
             add(DPart.Text("Goal: $goal"))
             if (finished.isNotEmpty()) add(DPart.Text("Milestones finished:\n" + finished.joinToString("\n") { "- $it" }))
             if (facts.isNotEmpty()) add(DPart.Text("Facts found:\n" + facts.takeLast(20).joinToString("\n") { "- ${it.name} = ${it.value.take(80)}" }))
-            screen?.let { add(DPart.Text("Screen now: ${it.appLabel}\n" + it.texts.take(MAX_TEXT_LINES).joinToString("\n"))) }
+            // Alpha 143: the controls too ("Edit profile", a selected tab): a page is often told apart by them, not its text.
+            screen?.let { s ->
+                val controls = s.controls.map { it.label }.filter { it.isNotBlank() }.distinct().take(MAX_DONE_CONTROLS)
+                add(DPart.Text("Screen now: ${s.appLabel}\n" + s.texts.take(MAX_TEXT_LINES).joinToString("\n") +
+                    if (controls.isEmpty()) "" else "\nControls: " + controls.joinToString(", ")))
+            }
         }
         val questions = linkedMapOf<String, DQuestion>(
-            "done" to DQuestion.Noul("Has the goal been fully achieved, as far as the screen and the facts show?", "fully achieved", "not (fully) achieved"),
+            "done" to DQuestion.Noul("Has every part of the goal been achieved, as far as the screen and the facts show? An app " +
+                "that is open on the wrong page (its home page when the goal names a page in it) is not achieved.", "fully achieved",
+                "not (fully) achieved"),
         )
         return Request(state, questions, emptyMap())
     }

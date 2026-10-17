@@ -144,9 +144,9 @@ object CycloneModes {
         // The same world the request will see: run() reads the screen when a box may be asked or the words need labels.
         val box = com.cyclone.mobile.mind.decide.Decisions.box(context)
         val device = com.cyclone.mobile.mind.mission.AndroidMindDevice(context)
-        val screen = if (device.blocker() == null && (box != null || InstantGrammar.needsScreen(text)))
+        val screen = if (device.blocker() == null && (box != null || InstantGrammar.needsScreen(text) || InstantGrammar.opens(text)))
             runCatching { AndroidInstantHands(context, text, device, { _, _ -> false }, { false }).look() }.getOrNull() else null
-        val world = GrammarWorld(screen?.labels.orEmpty(), device.apps().map { it.label to it.packageName })
+        val world = GrammarWorld(screen?.labels.orEmpty(), device.apps().map { it.label to it.packageName }, screen?.packageName?.takeIf { it.isNotBlank() })
         val phone = runCatching { com.cyclone.mobile.mind.decide.PhoneBrain.peek(context, settings.phoneModel, bar) }.getOrNull()
         val early = EngineDecider { t, w, b ->
             speculation.prime(t, w, b) { ticket ->
@@ -188,10 +188,12 @@ object CycloneModes {
             // Decisions go to the one decision provider (plan 58: JEV or OpenAI Decisions, a setting).
             val box = if (settings.speed == Speed.AUTO) com.cyclone.mobile.mind.decide.Decisions.box(context) else null
             val blocker = device.blocker()
-            // The screen is read only when the command needs its labels ("tap Pokémon GO") or Auto may ask a box; a
-            // gesture or an app to open reads it once, right before the move.
-            val screen = if (blocker == null && (box != null || InstantGrammar.needsScreen(request))) trace.time("read the screen") { hands.look() } else null
-            val world = GrammarWorld(screen?.labels.orEmpty(), device.apps().map { it.label to it.packageName })
+            // The screen is read only when the command needs its labels ("tap Pokémon GO"), opens something (alpha 143:
+            // the router must know which app is in front before it says X isn't here) or Auto may ask a box; a gesture
+            // reads it once, right before the move.
+            val screen = if (blocker == null && (box != null || InstantGrammar.needsScreen(request) || InstantGrammar.opens(request)))
+                trace.time("read the screen") { hands.look() } else null
+            val world = GrammarWorld(screen?.labels.orEmpty(), device.apps().map { it.label to it.packageName }, screen?.packageName?.takeIf { it.isNotBlank() })
             val phone = if (settings.speed == Speed.AUTO) runCatching {
                 com.cyclone.mobile.mind.decide.PhoneBrain.decider(context, settings.phoneModel, fast.sureness.bar)
             }.getOrNull() else null
@@ -277,7 +279,13 @@ object CycloneModes {
                             done(ModeResult(Mode.INSTANT, "Cancelled.", true))
                         }
                         else -> {
-                            learn(if (outcome.done) com.cyclone.mobile.mind.decide.Outcome.VERIFIED else com.cyclone.mobile.mind.decide.Outcome.FAILED)
+                            // Alpha 143: only what the phone showed teaches Replay and the phone model; a done nothing proved
+                            // (a scroll at the end of a list) teaches nothing.
+                            learn(when {
+                                outcome.done && outcome.verified -> com.cyclone.mobile.mind.decide.Outcome.VERIFIED
+                                outcome.done -> com.cyclone.mobile.mind.decide.Outcome.NONE
+                                else -> com.cyclone.mobile.mind.decide.Outcome.FAILED
+                            })
                             // Plan 70: done is a hop, no words; what didn't happen says so in a few words.
                             if (chrome) OverlayChromeRuntime.missionFinished(running.id, true, InstantCopy.done(outcome),
                                 ending = outcome.done to (if (outcome.done) null else InstantCopy.done(outcome)))

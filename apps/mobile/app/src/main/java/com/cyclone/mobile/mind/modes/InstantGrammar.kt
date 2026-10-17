@@ -1,5 +1,6 @@
 package com.cyclone.mobile.mind.modes
 
+import com.cyclone.mobile.mind.HomeSafety
 import com.cyclone.mobile.voice.VoiceIntents
 import java.text.Normalizer
 
@@ -32,8 +33,12 @@ data class InstantCommand(
     val minute: Int? = null,
 )
 
-/** What the phone offers the grammar right now: the labels on screen and the installed apps (label to package). */
-data class GrammarWorld(val labels: List<String> = emptyList(), val apps: List<Pair<String, String>> = emptyList())
+/**
+ * What the phone offers the grammar right now: the labels on screen and the installed apps (label to package).
+ * [foreground] is the package in front when the screen was read (null when it wasn't).
+ */
+data class GrammarWorld(val labels: List<String> = emptyList(), val apps: List<Pair<String, String>> = emptyList(),
+                        val foreground: String? = null)
 
 sealed class GrammarResult {
     data class Match(val command: InstantCommand) : GrammarResult()
@@ -93,10 +98,15 @@ object InstantGrammar {
         }
         OPEN.matchEntire(t)?.let { m ->
             val wanted = m.groupValues[3].removeSuffix(" app").trim()
-            return pick(wanted, world.apps.map { it.first }, InstantIntent.OPEN_APP, text) { label ->
+            val app = pick(wanted, world.apps.map { it.first }, InstantIntent.OPEN_APP, text) { label ->
                 val pkg = world.apps.first { it.first == label }.second
                 InstantCommand(InstantIntent.OPEN_APP, text, target = pkg, targetLabel = label)
             }
+            if (app != GrammarResult.None) return app
+            // Alpha 143: no app by that name, but inside an app "open my profile" is a place in it: the control on this
+            // screen with that name, tapped (and proven) like "tap Profile".
+            if (world.foreground == null || HomeSafety.isLauncher(world.foreground)) return GrammarResult.None
+            return pick(wanted, world.labels, InstantIntent.TAP, text) { label -> InstantCommand(InstantIntent.TAP, text, target = label, targetLabel = label) }
         }
         DRAG.matchEntire(t)?.let { m ->
             val from = m.groupValues[2].trim()
@@ -135,6 +145,12 @@ object InstantGrammar {
      * read the screen before routing. Gestures, apps, the camera and calls read it once, right before the move.
      */
     fun needsScreen(text: String): Boolean = words(text).joinToString(" ").let { TAP.matches(it) || DRAG.matches(it) }
+
+    /**
+     * Alpha 143: "open X" reads the screen too, so the router knows which app is in front: inside an app X may be a
+     * place in it ("open my profile"), and "X isn't on this phone" is only said from the home screen.
+     */
+    fun opens(text: String): Boolean = OPEN.matches(words(text).joinToString(" "))
 
     /** While the owner is still talking: what the command is becoming, so the phone can get ready (plan 42 §5.2). */
     fun prefix(text: String): InstantIntent? {
