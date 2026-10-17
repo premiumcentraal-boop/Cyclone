@@ -241,7 +241,7 @@ object LegacyAutomationCapsuleAdapter {
 
     private val FIELD_NAME = Regex("[a-z][A-Za-z0-9_.-]*")
     private val PACKAGE_NAME = Regex("[a-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+")
-    private val INPUT_REFERENCE = Regex("\\$\\{([a-z][A-Za-z0-9_.-]*)}")
+    private val INPUT_REFERENCE = Regex("\\$\\{([a-z][A-Za-z0-9_.-]*)\\}")
     private val INPUT_FRAGMENT = Regex("\\$\\{")
     private val SUPPORTED_PHONE_TOOLS = setOf(
         "phone.back",
