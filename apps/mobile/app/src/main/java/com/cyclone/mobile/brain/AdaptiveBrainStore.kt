@@ -84,7 +84,9 @@ object AdaptiveBrainRuntime {
         if (initialized) return
         store = AdaptiveBrainStore(context.applicationContext)
         store.refreshAppInventory()
-        store.writeMirror()
+        // Alpha 144: the mirror reads every path and skill; it is written off the main thread (this runs from onCreate).
+        val created = store
+        Thread({ runCatching { created.writeMirror() } }, "cyclone-brain-mirror").apply { isDaemon = true }.start()
         initialized = true
         UserMdRuntime.initialize(context.applicationContext)
     }
@@ -465,12 +467,14 @@ class AdaptiveBrainStore(private val context: Context) : SQLiteOpenHelper(contex
         return out
     }
 
-    fun listMicroSkills(limit: Int = 160): List<BrainMicroSkill> {
+    fun listMicroSkills(limit: Int = 160): List<BrainMicroSkill> = queryMicroSkills(null, null, limit.coerceIn(1, 500))
+
+    private fun queryMicroSkills(where: String?, args: Array<String>?, limit: Int): List<BrainMicroSkill> {
         val out = mutableListOf<BrainMicroSkill>()
         readableDatabase.query(
             "micro_skills",
             arrayOf("signature", "name", "tool", "params_json", "goal_hints", "from_package", "from_fingerprint", "to_package", "to_fingerprint", "success_count", "failure_count", "confidence", "source", "last_used_at"),
-            null, null, null, null, "confidence DESC, last_used_at DESC", limit.coerceIn(1, 500).toString(),
+            where, args, null, null, "confidence DESC, last_used_at DESC", limit.toString(),
         ).use { c ->
             while (c.moveToNext()) out += BrainMicroSkill(
                 c.getString(0), c.getString(1), c.getString(2), c.getString(3), c.getString(4),
@@ -482,9 +486,11 @@ class AdaptiveBrainStore(private val context: Context) : SQLiteOpenHelper(contex
         return out
     }
 
-    fun listPaths(limit: Int = 100): List<BrainPathMemory> {
+    fun listPaths(limit: Int = 100): List<BrainPathMemory> = queryPaths(null, null, limit.coerceIn(1, 300))
+
+    private fun queryPaths(where: String?, args: Array<String>?, limit: Int): List<BrainPathMemory> {
         val out = mutableListOf<BrainPathMemory>()
-        readableDatabase.query("learned_paths", arrayOf("signature", "goal_key", "skills_json", "success_count", "failure_count", "confidence", "last_used_at"), null, null, null, null, "confidence DESC, last_used_at DESC", limit.coerceIn(1, 300).toString()).use { c ->
+        readableDatabase.query("learned_paths", arrayOf("signature", "goal_key", "skills_json", "success_count", "failure_count", "confidence", "last_used_at"), where, args, null, null, "confidence DESC, last_used_at DESC", limit.toString()).use { c ->
             while (c.moveToNext()) out += BrainPathMemory(c.getString(0), c.getString(1), jsonStrings(c.getString(2)), c.getInt(3), c.getInt(4), c.getDouble(5), c.getLong(6))
         }
         return out
@@ -653,8 +659,13 @@ class AdaptiveBrainStore(private val context: Context) : SQLiteOpenHelper(contex
         }
     }
 
-    private fun microSkill(signature: String): BrainMicroSkill? = listMicroSkills(500).firstOrNull { it.signature == signature }
-    private fun path(signature: String): BrainPathMemory? = listPaths(300).firstOrNull { it.signature == signature }
+    /**
+     * Alpha 144: one row by its key. These loaded and sorted up to 500 rows to find one, on every step (and on the main
+     * thread at start-up through writeMirror): Cyclone's care report named this line in four freezes on the owner's
+     * phone. A skill outside the top 500 was also never found, so its counts were reset. `signature` is the primary key.
+     */
+    private fun microSkill(signature: String): BrainMicroSkill? = queryMicroSkills("signature=?", arrayOf(signature), 1).firstOrNull()
+    private fun path(signature: String): BrainPathMemory? = queryPaths("signature=?", arrayOf(signature), 1).firstOrNull()
 
     private fun appLabel(packageName: String?): String? {
         if (packageName.isNullOrBlank()) return null

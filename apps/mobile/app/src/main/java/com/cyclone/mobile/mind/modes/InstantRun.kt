@@ -8,7 +8,12 @@ import com.cyclone.mobile.mind.pilot.Pilot
  */
 data class InstantScreen(val app: String, val labels: List<String>, val sensitive: Boolean = false, val image: String? = null,
                          val packageName: String = "")
-data class InstantMove(val ok: Boolean, val changed: Boolean, val note: String)
+/**
+ * [changed]: the screen moved at all (enough for a swipe, a zoom, a scroll). [proven] (alpha 144): what the owner can see
+ * changed: another app, another screen or dialog, a switch or field. A tap or a drag must be proven; on a live feed the
+ * screen always "changed" (field test 143: "Tapped Profile" while the feed stayed).
+ */
+data class InstantMove(val ok: Boolean, val changed: Boolean, val note: String, val proven: Boolean = changed)
 data class InstantContact(val name: String, val numbers: List<String>)
 
 /** Why Instant stopped and where the run goes next. */
@@ -157,8 +162,9 @@ object InstantRun {
         val move = hands.tapLabel(label)
         if (!move.ok) return promote(Mode.FLASH, "the tap on \"$label\" didn't happen: ${move.note}", emptyList())
         lines += "tapped \"$label\""
-        // A tap that changed nothing did nothing the owner can see: Flash looks at why.
-        if (!move.changed) return promote(Mode.FLASH, "the tap on \"$label\" changed nothing on the screen", emptyList())
+        // A tap that changed nothing the owner can see did nothing: Flash looks at why. Alpha 144: a feed moving on its
+        // own is not it changing.
+        if (!move.proven) return promote(Mode.FLASH, "the tap on \"$label\" changed nothing on the screen", emptyList())
         return null
     }
 
@@ -180,7 +186,7 @@ object InstantRun {
         val move = hands.drag(from, to)
         if (!move.ok) return promote(Mode.FLASH, "the drag didn't happen: ${move.note}", emptyList())
         lines += "moved \"$from\" to \"$to\""
-        if (!move.changed) return promote(Mode.FLASH, "the drag of \"$from\" changed nothing on the screen", emptyList())
+        if (!move.proven) return promote(Mode.FLASH, "the drag of \"$from\" changed nothing on the screen", emptyList())
         return null
     }
 

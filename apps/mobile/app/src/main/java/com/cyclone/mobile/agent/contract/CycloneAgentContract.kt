@@ -125,6 +125,13 @@ data class AgentStateDelta(
     val semanticStateChanges: List<String>,
     val goalLabelAppeared: Boolean,
     val summary: String,
+    /**
+     * Alpha 144: what the owner could see change, or null when nothing did: another app in front, another screen (a new
+     * tab, page or dialog: [com.cyclone.mobile.applearner.PageContext.screenIdentity]), or a switch, field or focus that
+     * changed state. A live feed's own motion (autoplay, new rows) is not proof: on Instagram's feed the page key changed
+     * by itself, so a tap on Profile that did nothing was reported done (field test 143).
+     */
+    val screenProof: String? = null,
 )
 
 data class AgentLearningResult(

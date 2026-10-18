@@ -42,6 +42,13 @@ data class PageContext(
     val isNew: Boolean = false,
     // Transient capture provenance; the learned page store does not persist this as current state.
     val observation: com.cyclone.mobile.runtime.session.ObservationIdentity? = null,
+    /**
+     * Alpha 144: which screen this is, from what stays put: the app, the window class, the selected tab, the title, and
+     * the controls outside scrolling content (with their selected or checked state). A live feed (autoplay, new posts,
+     * a refreshing story tray) keeps it; opening another tab, page or dialog changes it. [pageKey] hashes every row's
+     * text and position, so on a feed it changes by itself and can't prove a tap (field test 143). Blank when unknown.
+     */
+    val screenIdentity: String = "",
 ) {
     fun toAgentJson(goal: String? = null, maxControls: Int = 36): JSONObject = JSONObject()
         .put("protocol", "cyclone-page-context-v28")
@@ -421,6 +428,7 @@ object PageSignatureEngine {
             }
         }
 
+        val screenIdentity = screenIdentity(packageName, className, selectedTab, paneTitle, nodes)
         val compactStructure = structuralParts.distinct().take(180).joinToString("\n")
         val identityMix = listOf(selectedTab, paneTitle, firstHeading).filter { it.isNotBlank() }.joinToString("|")
         val structuralKey = sha256("$packageName|${className.orEmpty()}|$identityMix|$compactStructure").take(28)
@@ -448,8 +456,49 @@ object PageSignatureEngine {
             firstSeenAt = now,
             lastSeenAt = now,
             isNew = true,
+            screenIdentity = screenIdentity,
         )
     }
+
+    /**
+     * Alpha 144: see [PageContext.screenIdentity]. Only visible nodes outside every scrollable container count, as their
+     * id, role, a short label (any script; digits masked, so counters and clocks don't move it) and selected/checked
+     * state. With almost nothing fixed on the screen (a page that is all one list), the whole structure stands in.
+     */
+    private fun screenIdentity(packageName: String, className: String?, selectedTab: String, paneTitle: String, nodes: JSONArray): String {
+        val scrollers = (0 until nodes.length()).mapNotNull { nodes.optJSONObject(it) }
+            .filter { it.optBoolean("scrollable") && it.optString("path").isNotBlank() }
+            .map { it.optString("path").trimEnd('/') + "/" }
+        val fixed = mutableListOf<String>()
+        for (i in 0 until minOf(nodes.length(), 450)) {
+            val node = nodes.optJSONObject(i) ?: continue
+            if (!node.optBoolean("visibleToUser", true)) continue
+            val path = node.optString("path")
+            if (path.isNotBlank() && scrollers.any { path.startsWith(it) }) continue
+            val resource = node.optString("resourceId").substringAfterLast('/').lowercase(Locale.US)
+            val role = node.optString("role").ifBlank { node.optString("class").substringAfterLast('.') }.lowercase(Locale.US)
+            if (node.optBoolean("scrollable")) { fixed += "scroll|$resource|$role"; continue }
+            val label = identityLabel(node.optString("text").ifBlank { node.optString("contentDescription") })
+            if (resource.isBlank() && label.isBlank()) continue
+            val state = buildString {
+                if (node.optBoolean("selected")) append('s')
+                if (node.optBoolean("checked")) append('c')
+            }
+            fixed += "$resource|$role|$label|$state"
+        }
+        val parts = fixed.distinct()
+        if (parts.count { !it.startsWith("scroll|") } < 2) return ""
+        return sha256("$packageName|${className.orEmpty()}|${identityLabel(selectedTab)}|${identityLabel(paneTitle)}|" +
+            parts.sorted().take(160).joinToString("\n")).take(24)
+    }
+
+    /** A label as identity sees it: any script, lowercased, digits masked, short. */
+    private fun identityLabel(value: String): String = value.trim().lowercase(Locale.ROOT)
+        .replace(digits, "#")
+        .replace(whitespace, " ")
+        .take(40)
+
+    private val digits = Regex("\\d+")
 
     fun normalizeLabel(value: String): String {
         val lower = value.lowercase(Locale.US)

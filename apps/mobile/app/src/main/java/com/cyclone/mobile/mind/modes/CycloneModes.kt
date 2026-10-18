@@ -44,6 +44,9 @@ data class ModeResult(
     val promoted: Boolean = false,
     /** Alpha.78: what the run did, stage by stage with its time ("route instant swipe 2 ms", "swipe 640 ms ok"). */
     val steps: List<String> = emptyList(),
+    /** Alpha 144: why the run went up, and the mission it became (for ask.status). */
+    val handoverWhy: String? = null,
+    val taskId: String? = null,
 )
 
 /**
@@ -100,9 +103,11 @@ object CycloneModes {
     fun handle(context: Context, request: String, attachment: com.cyclone.mobile.ui.overlay.TaskAttachment? = null,
                voice: Boolean = false, done: (ModeResult) -> Unit = {}) {
         val app = context.applicationContext
-        if (MindMissions.live.value != null) {
+        MindMissions.live.value?.let { live ->
             AskLedger.routed(request, "mind", "mission", "a mission is running: the request goes to it", 0)
             if (!MindMissions.start(app, request, attachment)) MindMissions.offer(app, request)
+            // Alpha 144: the request ends with the mission it went to, instead of staying "running" for good.
+            AskLedger.handed(request, "mind", "a mission was running", taskId = (MindMissions.live.value ?: live).let { "mission-${it.id}" })
             done(ModeResult(Mode.MIND, null, true, promoted = true))
             return
         }
@@ -176,7 +181,7 @@ object CycloneModes {
         val done: (ModeResult) -> Unit = { result ->
             trace.finish(result)
             // A request handed to Flash or the Mind keeps running as that mission; ask.status reads it from the task.
-            if (result.promoted) AskLedger.handed(request, result.mode.name.lowercase())
+            if (result.promoted) AskLedger.handed(request, result.mode.name.lowercase(), result.handoverWhy, result.taskId)
             else AskLedger.finished(request, result.mode.name.lowercase(), result.ok, result.say)
             reply(result.copy(steps = trace.steps))
         }
@@ -347,7 +352,12 @@ object CycloneModes {
         current?.let { OverlayChromeRuntime.detachMission(it) }
         val started = MindMissions.start(context, request, attachment, handover = baton?.note(), flash = mode == Mode.FLASH)
         if (!started) MindMissions.offer(context, request)
-        done(ModeResult(if (mode == Mode.FLASH) Mode.FLASH else Mode.MIND, null, true, promoted = true))
+        val lane = if (mode == Mode.FLASH) Mode.FLASH else Mode.MIND
+        // Only a mission this request started is its own; a request queued behind another mission isn't that one's.
+        val taskId = if (started) MindMissions.live.value?.let { "mission-${it.id}" } else null
+        // The handle() paths (an attachment, Always Mind) never pass through run()'s done: write the hand-over here too.
+        if (baton == null) AskLedger.handed(request, lane.name.lowercase(), taskId = taskId)
+        done(ModeResult(lane, null, true, promoted = true, handoverWhy = baton?.reason, taskId = taskId))
     }
 
     /** "Calling Mam in 2 s": the owner can stop it (the Stop button or "no"); silence lets it go ahead. */

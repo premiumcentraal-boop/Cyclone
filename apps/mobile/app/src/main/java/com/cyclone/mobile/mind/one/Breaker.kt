@@ -56,8 +56,12 @@ class Breaker {
         return if (mindRepeats >= 2) Call.CheckIn("the same step keeps failing: $key") else Call.Go
     }
 
-    /** A step of the plan was completed: progress for every counter. */
-    fun stepDone() { actionsSinceProgress = 0; sameAction = 0; lastAction = null; mindRepeats = 0; lastMindProposal = null }
+    /**
+     * A step of the plan was completed: progress for every counter. Alpha 144: that includes the same-trigger counts, so
+     * "happened 3 times without progress" means without progress (three misses with finished steps between them asked
+     * the owner before). The wakes in the milestone stay counted: [SPIRAL_WAKES] is the backstop.
+     */
+    fun stepDone() { actionsSinceProgress = 0; sameAction = 0; lastAction = null; mindRepeats = 0; lastMindProposal = null; triggerCounts.clear() }
 
     /** A milestone was completed: the wake counters start again. */
     fun milestoneDone() { wakesThisMilestone = 0; triggerCounts.clear(); stepDone() }

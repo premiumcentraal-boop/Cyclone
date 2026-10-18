@@ -48,15 +48,21 @@ object SemanticCaptureBoundary {
      */
     fun <T> captureRetrying(surface: () -> ObservationSurface, semantic: () -> T,
         image: (() -> JSONObject)? = null, clock: () -> Long = { android.os.SystemClock.uptimeMillis() },
-        settle: () -> Unit = {}, tolerateContentChange: Boolean = false, attempts: Int = 3, budgetMs: Long = 600): CapturedSemantic<T> {
+        settle: () -> Unit = {}, tolerateContentChange: Boolean = false, attempts: Int = 3, budgetMs: Long = 900,
+        tolerateOnLastTry: Boolean = true): CapturedSemantic<T> {
         val first = clock()
         var tries = 0
         while (true) {
             tries++
+            // Alpha 144: a feed that never goes quiet (autoplay, a refreshing tray) changed under every read, and each one
+            // cost the Mind a whole turn (field test 143: 5-7 per Instagram run). The last try accepts a read during which
+            // only the content moved; the window set, size, rotation, scope, profile and session must still hold, and
+            // every tap is revalidated by the executor anyway.
+            val last = tries >= attempts || clock() - first >= budgetMs
             try {
-                return capture(surface, semantic, image, clock, settle, tolerateContentChange)
+                return capture(surface, semantic, image, clock, settle, tolerateContentChange || (tolerateOnLastTry && last))
             } catch (changed: CaptureChanged) {
-                if (tries >= attempts || clock() - first >= budgetMs) throw changed
+                if (last) throw changed
             }
         }
     }

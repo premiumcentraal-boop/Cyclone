@@ -989,6 +989,9 @@ object MindMissions {
             }, mission.summary.take(500), mission.turns)
         }
         inbox.withdrawMission(run.id)
+        // Alpha 144: the ask.start request this mission carried ends with it (it used to read "running" for good).
+        runCatching { com.cyclone.mobile.mind.modes.AskLedger.missionEnded(run.taskId, ok, mission.summary.take(240).ifBlank { null },
+            cancelled = mission.status == MissionStatus.CANCELLED) }
         val wasFront = run.front
         if (wasFront) {
             finishTask(context, run.taskId, mission)

@@ -192,9 +192,12 @@ object Ensemble {
     /** Every model's merged opinion, one per model. */
     fun perModel(opinions: List<Opinion>): List<Opinion> = opinions.groupBy { it.lane }.values.mapNotNull { merge(it) }
 
+    /** Why a route went up when no model answered within the deadline (the router may still settle it, alpha 144). */
+    const val NO_ANSWER = "no decision model answered in time"
+
     /** One opinion per model, combined. */
     fun combine(opinions: List<Opinion>): Route {
-        if (opinions.isEmpty()) return Route(Mode.FLASH, "no decision model answered in time")
+        if (opinions.isEmpty()) return Route(Mode.FLASH, NO_ANSWER)
         if (opinions.size == 1) return single(opinions.first())
         val routes = opinions.map { it.route }
         return when {

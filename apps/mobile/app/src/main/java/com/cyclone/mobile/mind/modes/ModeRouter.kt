@@ -175,7 +175,8 @@ object ModeRouter {
 
     /** The rules: which requests must go to the Mind (or at least Flash), whatever a box says. */
     fun forced(text: String, world: GrammarWorld): Route? {
-        val apps = world.apps.map { it.first }.filter { it.length >= 3 && InstantGrammar.normalize(text).contains(InstantGrammar.normalize(it)) }.distinct()
+        // Alpha 144: whole words, the longest name first, an app's maker part of it ("google maps" is one app).
+        val apps = AppNames.mentioned(text, world.apps).map { it.first }
         return when {
             MIND_WORDS.containsMatchIn(text) -> Route(Mode.MIND, "it writes, pays, deletes or touches an account")
             apps.size >= 2 -> Route(Mode.MIND, "it spans several apps (${apps.joinToString()})")
@@ -301,7 +302,19 @@ object ModeRouter {
         // Plan 63: a decision engine (Consensus or Sprint) races both decision models; it comes after the grammar, the rules
         // and the phone model, so it can only decide what they leave open.
         if (engine != null) {
-            runCatching { engine.decide(text, world, bar) }.getOrNull()?.let { return it.copy(shadow = shadow) }
+            runCatching { engine.decide(text, world, bar) }.getOrNull()?.let { r ->
+                // Alpha 144: no model in time is not a decision. When the phone model has a guess for an action that is
+                // easy to undo, that guess is done (Instant proves the result and goes up if it fails), so the route
+                // doesn't depend on how fast the network was today.
+                if (r.why.endsWith(Ensemble.NO_ANSWER) && phone != null && shadow != null && phone.mayAct && shadow.mode == "instant" &&
+                    shadow.intent in REVERSIBLE && shadow.confidence >= NO_ANSWER_GUESS && plainNow(text)) {
+                    fromGuess(shadow, text, world)?.let { g ->
+                        return g.copy(why = "no decision model answered in time; the phone's own guess, easy to undo", by = Decider.PHONE,
+                            decision = shadow, decideMs = r.decideMs, shadow = shadow)
+                    }
+                }
+                return r.copy(shadow = shadow)
+            }
             return Route(Mode.FLASH, "the decision engine failed", by = Decider.FALLBACK, decision = guessOf(Mode.FLASH), shadow = shadow)
         }
         if (box == null) return Route(Mode.MIND, "no decision provider is reachable", by = Decider.FALLBACK, decision = guessOf(Mode.MIND), shadow = shadow)
@@ -329,6 +342,9 @@ object ModeRouter {
     fun plainNow(text: String): Boolean = InstantGrammar.normalize(text).split(' ').count { it.isNotBlank() } <= 7 && !LATER.containsMatchIn(text)
 
     /** Actions that are easy to undo and touch nothing of the owner's: the phone model may do them when it is sure. */
+    /** Alpha 144: how sure the phone model must be to act on an easy-to-undo action when no decision model answered. */
+    const val NO_ANSWER_GUESS = 0.6
+
     val REVERSIBLE = setOf("swipe_up", "swipe_down", "swipe_left", "swipe_right", "scroll_up", "scroll_down", "back", "home",
         "recents", "flashlight_on", "flashlight_off", "volume_up", "volume_down", "media_play_pause", "media_next", "open_app", "camera")
 

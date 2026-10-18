@@ -33,6 +33,37 @@ class PageAwarenessEngineTest {
         assertNotEquals(settings.pageKey, details.pageKey)
     }
 
+    /** Alpha 144: an Instagram-like feed: a fixed tab bar and a scrolling list of posts that change by themselves. */
+    private fun feed(posts: List<String>, profileSelected: Boolean): JSONObject {
+        val nodes = JSONArray()
+            .put(node("com.instagram.android:id/action_bar_title", "Instagram", "text", false, "0/0"))
+            .put(node("com.instagram.android:id/feed_list", "", "list", false, "0/1").put("scrollable", true))
+        posts.forEachIndexed { i, p -> nodes.put(node("com.instagram.android:id/row_user", p, "button", true, "0/1/$i")) }
+        listOf("Home", "Reels", "Profile").forEachIndexed { i, tab ->
+            nodes.put(node("com.instagram.android:id/${tab.lowercase()}_tab", tab, "tab", true, "0/2/$i")
+                .put("selected", if (tab == "Profile") profileSelected else tab == "Home"))
+        }
+        return JSONObject().put("package", "com.instagram.android").put("class", "com.instagram.mainactivity.MainActivity").put("nodes", nodes)
+    }
+
+    @Test
+    fun aFeedThatMovesByItselfKeepsItsScreenIdentityAnotherTabDoesNot() {
+        val before = PageSignatureEngine.fromSnapshot(feed(listOf("anna liked this", "ben · 3 min"), profileSelected = false))
+        val moved = PageSignatureEngine.fromSnapshot(feed(listOf("carl posted", "dina · 4 min", "sponsored"), profileSelected = false))
+        val profile = PageSignatureEngine.fromSnapshot(feed(listOf("anna liked this"), profileSelected = true))
+        assertTrue(before.screenIdentity.isNotBlank())
+        // The page key moved with the feed: it could never prove a tap (field test 143).
+        assertNotEquals(before.pageKey, moved.pageKey)
+        assertEquals(before.screenIdentity, moved.screenIdentity)
+        assertNotEquals(before.screenIdentity, profile.screenIdentity)
+        // Any script counts, and a counter doesn't move it.
+        val arabic = PageSignatureEngine.fromSnapshot(feed(listOf("x"), false).also { it.getJSONArray("nodes").getJSONObject(0).put("text", "الملف 3") })
+        val arabic2 = PageSignatureEngine.fromSnapshot(feed(listOf("y"), false).also { it.getJSONArray("nodes").getJSONObject(0).put("text", "الملف 4") })
+        val other = PageSignatureEngine.fromSnapshot(feed(listOf("x"), false).also { it.getJSONArray("nodes").getJSONObject(0).put("text", "الإعدادات") })
+        assertEquals(arabic.screenIdentity, arabic2.screenIdentity)
+        assertNotEquals(arabic.screenIdentity, other.screenIdentity)
+    }
+
     @Test
     fun sensitiveActionParamsAreRedacted() {
         val raw = JSONObject()

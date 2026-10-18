@@ -451,6 +451,7 @@ class PhoneMindToolbox(
             appLabel = label ?: page.packageName,
             pageKey = page.pageKey,
             fingerprint = page.structuralKey + "|" + page.contentKey,
+            identity = page.legacyPage?.screenIdentity.orEmpty(),
             controls = bound.map { ref ->
                 com.cyclone.mobile.mind.one.StepControl(ref.ref, ref.label, ref.role, ref.editable,
                     focused = ref.editable && controlsById[ref.elementId]?.evidence?.optBoolean("focused") == true,
@@ -590,8 +591,11 @@ class PhoneMindToolbox(
         val app = appLabel(page.packageName) ?: page.packageName
         val map = maps.map(page.packageName)
             ?: return MindToolResult.error("There is no learned map for $app yet. Find the way yourself.")
-        val target = map.find(wanted) ?: return MindToolResult.error("\"$wanted\" is not a screen on the map of $app. Known: " +
-            map.screens.take(20).joinToString(", ") { "${it.handle} ${it.title}" } + ".")
+        val target = map.find(wanted) ?: return MindToolResult.error(
+            // Alpha 144: field test 143 passed the goal ("the owner's profile") as a screen. Say what go_to takes.
+            (if (wanted.trim().split(Regex("\\s+")).size > 3) "go_to takes a screen from the map (a handle like s3), not a goal. " else "") +
+                "\"$wanted\" is not a screen on the map of $app. Use one of: " +
+                map.screens.take(20).joinToString(", ") { "${it.handle} ${it.title}" } + ". To reach something else, tap its control on the screen.")
         val port = object : com.cyclone.mobile.mind.map.MapWalkPort {
             override fun currentPageKey(): String? = screen?.legacyPage?.pageKey
             override fun press(label: String, role: String?): com.cyclone.mobile.mind.map.MapPress {
@@ -1073,13 +1077,12 @@ class PhoneMindToolbox(
     private fun openApp(requested: String, resume: Boolean = false): MindToolResult {
         if (requested.isBlank()) return MindToolResult.error("app is required (a name or a package).")
         val apps = device.apps()
-        val wanted = requested.trim().lowercase()
-        val exact = apps.firstOrNull { it.packageName.equals(requested.trim(), true) }
-            ?: apps.filter { it.label.equals(requested.trim(), true) }.singleOrNull()
-        val app = exact ?: apps.filter { it.label.lowercase().contains(wanted) || wanted.contains(it.label.lowercase()) && it.label.length >= 3 }
-            .let { matches -> matches.singleOrNull() ?: if (matches.size > 1) return MindToolResult(
-                "Several installed apps match \"$requested\": ${matches.take(10).joinToString { "${it.label} (${it.packageName})" }}. " +
-                    "Call open_app with the exact package.", "open_app \"$requested\": ambiguous", ok = false) else null }
+        // Alpha 144: one resolver for every surface. "Google Maps" is Maps (its maker's word), not Maps and Google.
+        val resolution = com.cyclone.mobile.mind.modes.AppNames.resolve(requested, apps.map { it.label to it.packageName })
+        if (resolution.app == null && resolution.candidates.size > 1) return MindToolResult(
+            "Several installed apps match \"$requested\": ${resolution.candidates.joinToString { "${it.first} (${it.second})" }}. " +
+                "Call open_app with the exact package.", "open_app \"$requested\": ambiguous", ok = false)
+        val app = resolution.app?.let { (_, pkg) -> apps.firstOrNull { it.packageName == pkg } }
         if (app == null) return MindToolResult(
             "\"$requested\" is not installed on this phone (or has no launcher icon). apps_list shows what is installed; " +
                 "to install an app, open its Play Store page with open_link market://details?id=<package> or search the Play Store.",
@@ -1094,11 +1097,16 @@ class PhoneMindToolbox(
     private fun openLink(raw: String): MindToolResult {
         var url = raw.trim()
         if (url.isBlank()) return MindToolResult.error("url is required.")
-        if (!url.contains(":") ) url = "https://$url"
-        val scheme = url.substringBefore(':').lowercase()
-        if (scheme !in setOf("http", "https", "geo", "mailto", "tel", "sms", "market")) {
-            return MindToolResult.error("Only http, https, geo, mailto, tel, sms and market links can be opened.")
+        // Alpha 144: field test 143 used open_link to move inside an app. Words aren't a link, and an app's own scheme
+        // (instagram://) isn't one Cyclone opens: say what to do instead.
+        val inside = "open_link opens websites, Play Store pages, maps and mail/phone/sms composers, not places inside an app. " +
+            "To move inside the app, tap its control on the screen (or go_to with a map handle)."
+        if (!url.contains(":")) {
+            if (url.any { it.isWhitespace() } || !url.contains('.')) return MindToolResult.error(inside)
+            url = "https://$url"
         }
+        val scheme = url.substringBefore(':').lowercase()
+        if (scheme !in setOf("http", "https", "geo", "mailto", "tel", "sms", "market")) return MindToolResult.error(inside)
         return act("phone.launch_intent", JSONObject().put("uri", url), "Opened $url")
     }
 
@@ -1332,7 +1340,8 @@ class PhoneMindToolbox(
         // Plan 21 (Hands): a tap that opened the keyboard changes nothing the fingerprint sees, but it is progress.
         val focus = if (ok && tool in TAP_TOOLS) focusedField() else null
         val text = focus?.let { result.text.replaceFirst(header, "$header $it") } ?: result.text
-        return result.copy(text = text, ok = ok, changedScreen = changesScreen && ok || tool in NAVIGATION || focus != null, ownerWaitMs = waited)
+        return result.copy(text = text, ok = ok, changedScreen = changesScreen && ok || tool in NAVIGATION || focus != null, ownerWaitMs = waited,
+            screenProof = if (!ok) null else envelope?.delta?.screenProof ?: focus?.let { "a text box has focus" })
     }
 
     /** "The text box e5 "Message" has focus (keyboard open)." when an editable holds input focus on the new screen. */
@@ -1361,7 +1370,9 @@ class PhoneMindToolbox(
                     "before sending."
             tool == "phone.type" && message.orEmpty().contains("TYPE_METHOD=paste") -> "$done (pasted)."
             tool == "phone.type" -> "$done."
-            envelope.pageChanged -> "$done. The screen changed."
+            envelope.delta.screenProof != null -> "$done. The screen changed."
+            // Alpha 144: a feed that moves by itself is not the action working; the model must not take it as proof.
+            envelope.pageChanged -> "$done, but only moving content changed: this is still the same screen."
             else -> "$done$UNCHANGED"
         }
     }
@@ -2322,7 +2333,7 @@ class PhoneMindToolbox(
             MindToolSpec("go_to", "Walk to a screen of the current app using its learned map (shown as \"Map of …\" once you are in a learned app), " +
                 "or do an ability from the app's manual (handles like a3 from abilities_find or the manual lines). Cyclone taps the known way itself, " +
                 "checking the screen after every step, and stops if anything differs. It never chooses, types or confirms: that stays yours.",
-                objectSchema("screen" to string("A screen handle from the map, like s3, or its name."),
+                objectSchema("screen" to string("A screen handle from the map, like s3 (or its title exactly as the map shows it). Not a goal."),
                     "ability" to string("An ability handle from the manual, like a3."))),
             MindToolSpec("abilities_find", "Search the app's manual for things you can do that fit a goal, with the path and how sure the manual is. " +
                 "Cheaper than exploring: use it first in an app that has a manual.",
@@ -2369,7 +2380,7 @@ class PhoneMindToolbox(
             MindToolSpec("wait", "Wait for the phone (loading, a countdown), optionally until some text appears, then read the screen.",
                 objectSchema("seconds" to integer("How long to wait at most.", 1, 30), "until_text" to string("Stop waiting as soon as this text is on screen."))),
             MindToolSpec("open_app", "Open an installed app by name or package.", objectSchema("app" to string("App name or package."), required = listOf("app"))),
-            MindToolSpec("open_link", "Open a link: a website (https://…), a Play Store page (market://details?id=<package>), a map (geo:…), or a mail/phone/sms composer.",
+            MindToolSpec("open_link", "Open a link: a website (https://…), a Play Store page (market://details?id=<package>), a map (geo:…), or a mail/phone/sms composer. Not for moving inside an app.",
                 objectSchema("url" to string("The link."), required = listOf("url"))),
             MindToolSpec("open_settings", "Open a page of Android Settings directly.",
                 objectSchema("page" to string("Which page.", PhoneSettingsPages.pages.keys.toList()),

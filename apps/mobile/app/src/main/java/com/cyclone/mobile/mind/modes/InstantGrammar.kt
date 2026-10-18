@@ -98,6 +98,10 @@ object InstantGrammar {
         }
         OPEN.matchEntire(t)?.let { m ->
             val wanted = m.groupValues[3].removeSuffix(" app").trim()
+            // Alpha 144: the app's exact name, perhaps with its maker ("google maps" → Maps), before any likeness.
+            AppNames.resolve(wanted, world.apps, strict = true).app?.let { (label, pkg) ->
+                return GrammarResult.Match(InstantCommand(InstantIntent.OPEN_APP, text, target = pkg, targetLabel = label))
+            }
             val app = pick(wanted, world.apps.map { it.first }, InstantIntent.OPEN_APP, text) { label ->
                 val pkg = world.apps.first { it.first == label }.second
                 InstantCommand(InstantIntent.OPEN_APP, text, target = pkg, targetLabel = label)
@@ -235,7 +239,8 @@ object InstantGrammar {
     // ---- calls, apps, taps -------------------------------------------------------------------------------------------
 
     private val CALL = Regex("^(call|phone|ring|bel|bellen)(?: to| naar)? (.+)$")
-    private val OPEN = Regex("^(open|launch|start|go to|ga naar|openen)( the| my| de| mijn)? (.+)$")
+    // Alpha 144: the same verbs the router's "not on this phone" check knows ("pull up google maps").
+    private val OPEN = Regex("^(open|launch|start|go to|ga naar|openen|pull up|bring up|open up|fire up)( the| my| de| mijn)? (.+)$")
     private val TAP = Regex("^(tap|click|press|klik|druk|tik|select)(?: on| op)?( the| de| het)? (.+)$")
     // Plan 52 run 6: "drag Holiday.pdf to Documents", "sleep foto naar Album".
     private val DRAG = Regex("^(drag|sleep|verplaats)(?: the| de| het)? (.+?) (?:to|onto|into|naar|op|in)(?: the| de| het)? (.+)$")

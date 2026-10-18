@@ -64,7 +64,9 @@ object Coverage {
     private fun targetWords(command: InstantCommand): Targets {
         val names = listOfNotNull(command.targetLabel, command.destination) +
             (if (command.intent == InstantIntent.TAP || command.intent == InstantIntent.DRAG) listOfNotNull(command.target) else emptyList())
-        val words = names.flatMap { InstantGrammar.normalize(it).split(' ') }.filter { it.isNotBlank() }.distinct()
+        // Alpha 144: an opened app's own package words ("google" for com.google.android.apps.maps) are its name too.
+        val maker = if (command.intent == InstantIntent.OPEN_APP) command.target?.let(AppNames::packageWords).orEmpty() else emptySet()
+        val words = (names.flatMap { InstantGrammar.normalize(it).split(' ') } + maker).filter { it.isNotBlank() }.distinct()
         return Targets(words, names.map { InstantGrammar.normalize(it).replace(" ", "") })
     }
 

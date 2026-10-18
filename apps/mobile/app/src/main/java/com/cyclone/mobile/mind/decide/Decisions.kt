@@ -175,10 +175,15 @@ object Decisions {
     const val TRIAGE_DEADLINE_MS = 1_200L
 
     /**
-     * Plan 63: how long an engine waits for both decision models. Measured medians are 0.2–0.55 s with tails to ~0.9 s
-     * (plan 62 §1); a later answer is no answer, and the other model decides under the one-answer rule.
+     * Plan 63: how long an engine waits for both decision models; a later answer is no answer, and the other model
+     * decides under the one-answer rule.
+     *
+     * Alpha 144: 2.5 s, as [ROUTING_DEADLINE_MS]. At 1.5 s, field test 143 saw 5 of 19 routed requests end with no model
+     * in time (every one at 1500-1503 ms, after plan 72 folded the second phrasing into each call), so the same sentence
+     * went Instant one time and Flash the next: the route was a race against the clock. A model that answers sooner
+     * still decides sooner; this only stops a slower network from changing what Cyclone does.
      */
-    const val ENGINE_DEADLINE_MS = 1_500L
+    const val ENGINE_DEADLINE_MS = 2_500L
     /** How many phrasings of the question each model is asked per decision (1 or 2, at most [com.cyclone.mobile.mind.modes.Triage.VARIANTS]). */
     const val ENGINE_PHRASINGS = 1
 

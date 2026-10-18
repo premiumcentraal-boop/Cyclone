@@ -155,7 +155,9 @@ class PhoneModelTest {
         assertNull(ModeRouter.missingApp("open wifi settings", many))
         assertNull(ModeRouter.missingApp("open google keep", many))
         assertNull(ModeRouter.missingApp("open snapchat", GrammarWorld(apps = apps.take(2))))
-        for (phrase in listOf("pull up telegram", "kill the flashlight", "turn the sound down a notch", "take me to the home screen")) {
+        // Alpha 144: "pull up X" is the grammar's own now (exact, no model at all).
+        assertEquals(Decider.GRAMMAR, ModeRouter.route("pull up telegram", many, facts, Speed.AUTO, noCall, 0.8, decider(emptySet())).by)
+        for (phrase in listOf("kill the flashlight", "turn the sound down a notch", "take me to the home screen")) {
             val r = ModeRouter.route(phrase, many, facts, Speed.AUTO, noCall, 0.8, decider(emptySet()))
             assertEquals(phrase, Decider.PHONE, r.by)
             assertEquals(phrase, Mode.INSTANT, r.mode)

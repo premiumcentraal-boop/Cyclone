@@ -283,7 +283,7 @@ internal object GatewayV33ActionAdapter {
         com.cyclone.mobile.agent.settle.SettleBudgets.attach(context.filesDir)
         val budgetKey = params.optString("package").ifBlank { before?.page?.packageName.orEmpty() }
         val outcome = com.cyclone.mobile.agent.settle.SettleController.run(
-            beforeFingerprint = before?.payload?.optString("accessibilityFingerprint"),
+            beforeFingerprint = before?.let(::settleFingerprint),
             budget = com.cyclone.mobile.agent.settle.SettleBudgets.budgetFor(budgetKey,
                 com.cyclone.mobile.agent.settle.SettleBudget(fastMs = pageTransitionSettleMs(tool))),
             capture = capture,
@@ -309,6 +309,15 @@ internal object GatewayV33ActionAdapter {
         return outcome.value
     }
 
+    /**
+     * Alpha 144: what "the screen is still moving" compares. The screen's identity, not every pixel of text: a feed that
+     * autoplays, or a chat list whose times and typing dots change, was "moving" for the whole 8 s extension after every
+     * tap and launch (field test 143: open WhatsApp 11 s, tap Profile 5 s). Without an identity, the full fingerprint.
+     */
+    internal fun settleFingerprint(observation: GatewayObservation): String =
+        observation.page.screenIdentity.takeIf { it.isNotBlank() }?.let { "${observation.page.packageName}|$it" }
+            ?: observation.payload.optString("accessibilityFingerprint").ifBlank { observation.page.pageKey }
+
     internal fun settleSample(observation: GatewayObservation, launch: Boolean): com.cyclone.mobile.agent.settle.SettleSample {
         val elements = observation.elements.values.map { element ->
             Triple(element.role, element.evidence.optString("resourceId"), element.label)
@@ -319,7 +328,7 @@ internal object GatewayV33ActionAdapter {
         }
         return com.cyclone.mobile.agent.settle.SettleSample(
             packageName = observation.page.packageName,
-            fingerprint = observation.payload.optString("accessibilityFingerprint").ifBlank { observation.page.pageKey },
+            fingerprint = settleFingerprint(observation),
             actionableControls = actionable,
             loadingEvidence = com.cyclone.mobile.agent.settle.ScreenStateClassifier.loadingEvidence(
                 observation.page.packageName, elements, actionable, launch),

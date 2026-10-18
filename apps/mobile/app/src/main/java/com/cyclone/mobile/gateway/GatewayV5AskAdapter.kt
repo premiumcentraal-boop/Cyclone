@@ -75,7 +75,10 @@ internal object GatewayV5AskAdapter {
             throw GatewayProtocolException("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
         }
         if (busy()) {
-            throw GatewayProtocolException("ASK_BUSY", "The phone is already running a task.")
+            // Alpha 144: say what is in the way and what to do (field test 143 saw a bare "rejected" five times).
+            val running = runCatching { currentTask() }.getOrNull()?.title?.takeIf { it.isNotBlank() }?.take(80)
+            throw GatewayProtocolException("ASK_BUSY", "The phone is running another task" + (running?.let { ": \"$it\"" }.orEmpty()) +
+                ". Try again when it ends, or stop it first.")
         }
         // Alpha 91: every request gets an id; ask.status {requestId} says which lane took it and how it ended.
         val requestId = AskLedger.begin(goal)
@@ -93,9 +96,14 @@ internal object GatewayV5AskAdapter {
         val entry = requestOf(args) ?: AskLedger.latest()
         val snapshot = currentTask()
         // A request Instant, Answer or Ignore took has no task: the previous task is not shown as if it were this one.
-        val own = entry == null || entry.lane == null || entry.lane in MISSION_LANES
+        // Alpha 144: nor is it for a request still waiting to be routed (its first poll read the last task's "failed"),
+        // or for a mission request whose own mission is known and isn't this snapshot.
+        val own = entry == null || (entry.lane in MISSION_LANES && (entry.taskId == null || snapshot?.taskId == entry.taskId))
         val base = if (snapshot == null || !own) idle() else snapshotJson(snapshot)
-        return base.put("request", entry?.let(::entryJson) ?: JSONObject.NULL)
+        val request = entry?.let(::entryJson)
+        // The mission is waiting for the owner (a question, the owner's turn, a pause): its request says so too.
+        if (request != null && own && entry?.state == "running" && base.optString("state") == "action-needed") request.put("state", "action-needed")
+        return base.put("request", request ?: JSONObject.NULL)
     }
 
     /** Stops what [requestId] (or the latest request) started: its Instant run, or its Flash/Mind task through Task Kit. */
@@ -107,7 +115,7 @@ internal object GatewayV5AskAdapter {
             return JSONObject().put("cancelled", false).put("detail", "That request already ended.").put("request", entryJson(entry))
         }
         val stopped = if (entry.lane in MISSION_LANES) {
-            currentTask()?.taskId?.let(stopTask) == true
+            (entry.taskId ?: currentTask()?.taskId)?.let(stopTask) == true
         } else {
             stopInstant()
             true
