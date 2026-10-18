@@ -175,7 +175,7 @@ object StartPolicy {
         if (f.targetCompat.needsScreen && f.override != PlaneOverride.BACKGROUND) return StartPlan.Screen("${f.appLabel.replaceFirstChar { it.uppercase() }} ${f.targetCompat.why}.")
         val wanted = f.override == PlaneOverride.BACKGROUND || f.mode == PlaneMode.BACKGROUND ||
             f.driverMode || f.ownerBusyElsewhere || f.longTask
-        if (!wanted) return StartPlan.Screen("You are not using your phone, so Cyclone works where you can watch.")
+        if (!wanted) return StartPlan.Screen("Cyclone works on your screen, where you can watch.")
         if (!f.backgroundReady) {
             val why = f.backgroundBlocker ?: "Background work is not available right now."
             // Waiting cannot fix a stopped helper; only asking or the screen can.

@@ -154,6 +154,8 @@ class Conductor(
     private var currentMilestone: String? = null
     private var milestoneStartIndex = 1
     private val reviewed = HashSet<String>()
+    /** Alpha 144: milestones whose recovery ladder already ran (once each). */
+    private val recovered = HashSet<String>()
     private val askedOnce = HashSet<String>()
     private val detours = ArrayDeque<Plan>()
     private var glance: PendingGlance? = null
@@ -306,6 +308,19 @@ class Conductor(
 
     /** The owner sees one approval per consequential move from the code gates; here a run only checks it's not stuck. */
     private fun checkIn(reason: String) {
+        // Alpha 144: first the recovery ladder (close what is in the way, Back, reopen the app), once per milestone. The
+        // owner is asked only when that changed nothing.
+        val milestone = currentStep()?.let { milestoneOf(it.id)?.id } ?: ""
+        if (milestone !in recovered) {
+            recovered += milestone
+            val done = runCatching { crew.recover() }.getOrNull()
+            drainCrew()
+            if (done != null) {
+                breaker.checkedIn()
+                score = score.event("recover", "Stuck on $reason; got unstuck: $done", clock())
+                return
+            }
+        }
         score = score.event("check_in", "Asked the owner: stuck on $reason", clock())
         listener.onNotice(OneMindPrompt.checkIn(reason))
         when (val answer = runCatching { owner.checkIn(reason) }.getOrDefault(CheckIn.Stop)) {

@@ -164,7 +164,8 @@ internal class AndroidInstantHands(
     private fun move(envelope: AgentActionEnvelope): InstantMove {
         page = null
         val ok = envelope.androidExecutionOk && envelope.executorReportedOk
-        return InstantMove(ok, envelope.pageChanged, envelope.safeMessage ?: envelope.errorClass.name.lowercase().replace('_', ' '))
+        return InstantMove(ok, envelope.pageChanged, envelope.safeMessage ?: envelope.errorClass.name.lowercase().replace('_', ' '),
+            proven = envelope.delta.screenProof != null)
     }
 
     companion object {

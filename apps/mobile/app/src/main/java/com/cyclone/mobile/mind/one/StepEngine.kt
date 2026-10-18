@@ -232,12 +232,13 @@ class StepEngine(
         val expect = step.expect ?: implied(name, args)
         val verdict = when {
             after == null -> Verdict.UNKNOWN
-            expect == Expect.Changed && step.expect == null && result.changedScreen -> Verdict.HELD
+            // Alpha 144: "a tap is the kind of tool that changes screens" is not proof; what the phone showed is.
+            expect == Expect.Changed && step.expect == null && result.screenProof != null -> Verdict.HELD
             expect != null -> ExpectCheck.check(expect, after, before, score.facts, settings)
             result.changedScreen -> Verdict.HELD
             else -> Verdict.UNKNOWN
         }
-        when (val call = breaker.action(key, before.pageKey, progressed = verdict == Verdict.HELD || result.changedScreen)) {
+        when (val call = breaker.action(key, before.pageKey, progressed = verdict == Verdict.HELD || (expect == null && result.changedScreen))) {
             is Breaker.Call.Stop, is Breaker.Call.CheckIn -> return StepOutcome.Halt(step, call)
             else -> Unit
         }

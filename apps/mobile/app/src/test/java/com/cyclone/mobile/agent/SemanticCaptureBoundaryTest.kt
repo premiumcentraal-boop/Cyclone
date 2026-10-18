@@ -48,18 +48,35 @@ class SemanticCaptureBoundaryTest {
         assertEquals(2, traversals); assertEquals(2, settles)
     }
 
-    @Test fun aScreenThatKeepsChangingStillFailsAfterTheRetriesOrTheBudget() {
+    @Test fun aScreenWhoseContentNeverHoldsStillIsReadOnTheLastTry() {
+        // Alpha 144: an autoplay feed changes its content during every read; the last try accepts it (field test 143).
         var stamp = initial; var traversals = 0; var now = 0L
+        val captured = SemanticCaptureBoundary.captureRetrying({ stamp }, { traversals++; stamp = stamp.copy(revision = stamp.revision + 1); "tree" },
+            clock = { now += 10; now })
+        assertEquals("tree", captured.semantic)
+        assertEquals(3, traversals)
+        // A caller can still ask for the strict read.
+        stamp = initial; traversals = 0; now = 0L
         try {
             SemanticCaptureBoundary.captureRetrying({ stamp }, { traversals++; stamp = stamp.copy(revision = stamp.revision + 1); "tree" },
+                clock = { now += 10; now }, tolerateOnLastTry = false)
+            fail("A strict read accepted a screen that never holds still")
+        } catch (_: CaptureChanged) { }
+        assertEquals(3, traversals)
+    }
+
+    @Test fun aWindowThatKeepsChangingStillFailsAfterTheRetriesOrTheBudget() {
+        var stamp = initial; var traversals = 0; var now = 0L
+        try {
+            SemanticCaptureBoundary.captureRetrying({ stamp }, { traversals++; stamp = stamp.copy(windowSignature = "w$traversals"); "tree" },
                 clock = { now += 10; now })
-            fail("A screen that never holds still was accepted")
+            fail("A window set that never holds still was accepted")
         } catch (_: CaptureChanged) { }
         assertEquals(3, traversals)
         stamp = initial; traversals = 0; now = 0L
         try {
-            SemanticCaptureBoundary.captureRetrying({ stamp }, { traversals++; stamp = stamp.copy(revision = stamp.revision + 1); "tree" },
-                clock = { now += 400; now })
+            SemanticCaptureBoundary.captureRetrying({ stamp }, { traversals++; stamp = stamp.copy(windowSignature = "w$traversals"); "tree" },
+                clock = { now += 1_000; now })
             fail("Retried past the time budget")
         } catch (_: CaptureChanged) { }
         assertEquals(1, traversals)

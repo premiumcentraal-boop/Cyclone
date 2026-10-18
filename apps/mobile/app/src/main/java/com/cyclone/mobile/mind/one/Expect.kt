@@ -20,6 +20,8 @@ data class StepScreen(
     val imageDataUrl: String? = null,
     /** A password or code field, or a keep-off app: nothing leaves the phone and no model decides here. */
     val sensitive: Boolean = false,
+    /** Alpha 144: which screen this is, ignoring a feed's own motion ([com.cyclone.mobile.applearner.PageContext.screenIdentity]). */
+    val identity: String = "",
 ) {
     fun allText(): List<String> = texts + controls.map { it.label } + controls.mapNotNull { it.value }
 }
@@ -75,6 +77,11 @@ object ExpectCheck {
         is Expect.FieldHas -> if (now.controls.any { it.editable && it.value?.let { v -> contains(v, e.text) } == true }) Verdict.HELD else Verdict.UNKNOWN
         Expect.Changed -> when {
             before == null -> Verdict.UNKNOWN
+            // Alpha 144: another screen, or a field that took the keyboard; a feed moving by itself is not a change.
+            before.packageName != now.packageName -> Verdict.HELD
+            before.identity.isNotBlank() && now.identity.isNotBlank() ->
+                if (before.identity != now.identity || (now.controls.any { it.editable && it.focused } && before.controls.none { it.editable && it.focused })) Verdict.HELD
+                else Verdict.MISSED
             before.fingerprint.isNotBlank() && now.fingerprint.isNotBlank() -> if (before.fingerprint != now.fingerprint) Verdict.HELD else Verdict.MISSED
             else -> if (before.pageKey != now.pageKey || before.allText() != now.allText()) Verdict.HELD else Verdict.MISSED
         }

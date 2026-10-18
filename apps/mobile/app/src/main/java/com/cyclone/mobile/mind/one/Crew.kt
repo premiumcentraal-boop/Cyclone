@@ -21,6 +21,8 @@ interface Crew {
     fun undo(moves: Int)
     /** What the crew recorded since the last call (kind, line); "fact:<name>" kinds carry a fact's value. */
     fun drain(): List<Pair<String, String>> = emptyList()
+    /** Alpha 144: the [Recovery] ladder before a check-in; what it did, or null when nothing helped. */
+    fun recover(): String? = null
 }
 
 /** The DONE call: one Decisions request answered by every usable provider. */
@@ -63,6 +65,12 @@ class EngineCrew(
     }
 
     override fun drain(): List<Pair<String, String>> = buildList { while (true) add(recorded.poll() ?: break) }
+
+    override fun recover(): String? {
+        val done = Recovery({ look(false) }, { name, args -> hands.execute(MindToolCall("recover-${++undoCalls}", name, args.toString()), args) }).attempt()
+        recorded += "recover" to (done?.let { "Got unstuck: $it" } ?: "Tried to get unstuck (close, Back, reopen): nothing changed")
+        return done
+    }
 
     companion object { const val MAX_UNDO = 6 }
 }

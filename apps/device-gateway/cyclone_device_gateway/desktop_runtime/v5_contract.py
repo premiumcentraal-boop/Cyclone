@@ -2706,9 +2706,11 @@ class V5ContractService:
                 "SEALED_REJECTED": RuntimeErrorCode.SEALED_REJECTED,
                 "KEY_UNAVAILABLE": RuntimeErrorCode.KEY_UNAVAILABLE,
             }
+            # Alpha 144: the phone's own reason ("The phone is running another task…"), not a bare "rejected".
+            reason = getattr(exc, "message", None)
             raise DesktopRuntimeError(
                 mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE),
-                f"Android rejected {op}.",
+                f"Android rejected {op}: {reason}" if reason else f"Android rejected {op}.",
                 retryable=phone_errors.retryable(exc.code),
             ) from exc
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:

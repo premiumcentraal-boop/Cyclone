@@ -245,15 +245,27 @@ class DesktopAgentService:
             "elementId": str(result.get("elementId") or element_id[:500]),
         }
 
+    # Alpha 144: a page record older than this is read again from the phone. Field test 143 got the Settings page
+    # back while Instagram was open: the phone's own runs never update the PC's record.
+    CURRENT_PAGE_FRESH_MS = 3_000
+
     def current_page(self, device_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         identity = self._execution_identity(payload)
         key = history_key(device_id, identity)
         with self._lock:
             latest = next((item for item in reversed(self._history[key]) if item.get("kind") == "observation"), None)
-        if latest is None:
-            return self.observe(device_id, payload=payload)
+        age = None if latest is None else max(0, now_ms() - int(latest.get("at") or 0))
+        if latest is None or age > self.CURRENT_PAGE_FRESH_MS:
+            try:
+                fresh = self.observe(device_id, payload=payload)
+                return {**fresh, "observedAtMs": now_ms(), "ageMs": 0, "stale": False}
+            except DesktopRuntimeError:
+                if latest is None:
+                    raise
         session = self._paired(device_id)
-        return {**self._operation_context(session, device_id, "current_page"), "page": latest}
+        # The phone couldn't be read now: the last record, marked with its age so no client takes it for the screen now.
+        return {**self._operation_context(session, device_id, "current_page"), "page": latest,
+                "observedAtMs": latest.get("at"), "ageMs": age, "stale": age > self.CURRENT_PAGE_FRESH_MS}
 
     def page_history(self, device_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         session = self._paired(device_id)

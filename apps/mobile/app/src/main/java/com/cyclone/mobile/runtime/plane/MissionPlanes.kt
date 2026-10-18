@@ -395,7 +395,9 @@ class MissionPlaneSession internal constructor(
             override = compat.override(pkg),
             backgroundReady = blocker == null,
             backgroundBlocker = blocker,
-            ownerBusyElsewhere = ownerBusy(foreground),
+            // Alpha 144: the app the task works in is not "elsewhere": asking from inside Instagram to do something in
+            // Instagram sent the run looking for a background screen and showed the owner the Background Check advice.
+            ownerBusyElsewhere = ownerBusy(foreground) && foreground != pkg,
             targetCompat = compat.status(pkg, MissionPlanes.versionOf(context, pkg)),
             needsHands = HANDS.containsMatchIn(goal),
             holder = holder,

@@ -27,6 +27,8 @@ object AskLedger {
         val ok: Boolean? = null,
         val say: String? = null,
         val cancelled: Boolean = false,
+        /** Alpha 144: the mission ("mission-<id>") a handed-over request became; it finishes the request when it ends. */
+        val taskId: String? = null,
     ) {
         /** waiting (not routed yet), running, done, failed or cancelled. */
         val state: String get() = when {
@@ -62,10 +64,23 @@ object AskLedger {
             replace(entry.copy(lane = entry.lane ?: lane, routedAtMs = entry.routedAtMs ?: nowMs, finishedAtMs = nowMs, ok = ok, say = say?.take(240)))
         }
 
-    /** The run went up to a Flash or Mind mission: the lane says so, and the request keeps running as that mission. */
-    fun handed(text: String, lane: String, nowMs: Long = System.currentTimeMillis()) =
+    /**
+     * The run went up to a Flash or Mind mission: the lane says so, and the request keeps running as that mission.
+     * Alpha 144: [why] is why it went up (the router's "a clear command" no longer stands beside lane "flash"), and
+     * [taskId] the mission it became, which finishes the request ([missionEnded]): it used to stay "running" for good.
+     */
+    fun handed(text: String, lane: String, why: String? = null, taskId: String? = null, nowMs: Long = System.currentTimeMillis()) =
         update(text, nowMs, Long.MAX_VALUE) { it.finishedAtMs == null && !it.cancelled }?.let { entry ->
-            replace(entry.copy(lane = lane, routedAtMs = entry.routedAtMs ?: nowMs))
+            replace(entry.copy(lane = lane, routedAtMs = entry.routedAtMs ?: nowMs,
+                why = why?.let { "handed up to $lane: $it" }?.take(160) ?: entry.why, taskId = taskId ?: entry.taskId))
+        }
+
+    /** Alpha 144: the mission [taskId] ended; every request it carried is done, failed or cancelled with it. */
+    fun missionEnded(taskId: String, ok: Boolean, say: String?, cancelled: Boolean = false, nowMs: Long = System.currentTimeMillis()) =
+        synchronized(lock) {
+            entries.filter { it.taskId == taskId && it.finishedAtMs == null && !it.cancelled }.forEach { entry ->
+                replace(entry.copy(finishedAtMs = nowMs, ok = ok, say = say?.take(240), cancelled = cancelled))
+            }
         }
 
     fun cancel(requestId: String, nowMs: Long = System.currentTimeMillis()): Entry? = synchronized(lock) {

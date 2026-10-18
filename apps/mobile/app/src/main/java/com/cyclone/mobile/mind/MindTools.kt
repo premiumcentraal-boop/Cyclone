@@ -57,6 +57,8 @@ data class MindToolResult(
     val ownerWaitMs: Long = 0,
     /** Moves made from the learned map without a model decision (go_to). */
     val mapMoves: Int = 0,
+    /** Alpha 144: what the owner could see change after this action, or null ([com.cyclone.mobile.agent.contract.AgentStateDelta.screenProof]). */
+    val screenProof: String? = null,
 ) {
     companion object {
         fun error(message: String) = MindToolResult("ERROR: $message", "ERROR: ${message.take(160)}", ok = false)

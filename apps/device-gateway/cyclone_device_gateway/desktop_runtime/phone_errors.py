@@ -18,6 +18,8 @@ DISCONNECTED_MESSAGE = "Phone disconnected from Cyclone Gateway."
 TRANSIENT_CODES = frozenset({
     "PHONE_APP_BUSY", "STALE_OBSERVATION", "FOREGROUND_REQUIRED", "PHONE_LOCKED",
     "OBSERVATION_CHANGED_DURING_CAPTURE", "DISPLAY_GONE",
+    # Alpha 144: another task is running; the request can be sent again when it ends.
+    "ASK_BUSY",
 })
 
 

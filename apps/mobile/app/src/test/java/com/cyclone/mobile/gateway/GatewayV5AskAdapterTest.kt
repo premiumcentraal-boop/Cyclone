@@ -138,6 +138,54 @@ class GatewayV5AskAdapterTest {
         assertFalse(status.keys().asSequence().any { it.contains("secret", ignoreCase = true) })
     }
 
+    private fun task(id: String, state: TaskConsumerState) = TaskPresentationSnapshot(
+        taskId = id, app = "Instagram", packageName = "com.instagram.android", title = "Open my profile", state = state,
+        currentMilestone = null, milestones = emptyList(), completedMilestones = emptyList(), completedCount = 0, totalCount = 0,
+        progressFraction = 0f, supportingCopy = null, outcomeCopy = null, followUps = emptyList(),
+    )
+
+    @Test
+    fun aNewRequestNeverShowsTheTaskBeforeItAndEndsWithItsOwnMission() {
+        // Field test 143 (B5): the first poll of a new request read the last task's "failed".
+        val ledger = com.cyclone.mobile.mind.modes.AskLedger
+        snapshot = task("mission-old", TaskConsumerState.FAILED)
+        val id = GatewayV5AskAdapter.start(JSONObject().put("goal", "open my profile")).getString("requestId")
+        val first = GatewayV5AskAdapter.status(JSONObject().put("requestId", id))
+        assertEquals("idle", first.getString("state"))
+        assertEquals("waiting", first.getJSONObject("request").getString("state"))
+        // B3: handed up to Flash, it says why; B4: it ends with its own mission, not "running" for good.
+        ledger.routed("open my profile", "instant", "grammar", "a clear command", 0)
+        ledger.handed("open my profile", "flash", "the tap on \"Profile\" changed nothing on the screen", taskId = "mission-new")
+        snapshot = task("mission-new", TaskConsumerState.WORKING)
+        val running = GatewayV5AskAdapter.status(JSONObject().put("requestId", id))
+        assertEquals("flash", running.getJSONObject("request").getString("lane"))
+        assertTrue(running.getJSONObject("request").getString("why").startsWith("handed up to flash: the tap"))
+        assertEquals("running", running.getJSONObject("request").getString("state"))
+        // Another mission's snapshot is not this request's.
+        snapshot = task("mission-other", TaskConsumerState.FAILED)
+        assertEquals("idle", GatewayV5AskAdapter.status(JSONObject().put("requestId", id)).getString("state"))
+        ledger.missionEnded("mission-new", ok = true, say = "Opened your profile.")
+        val done = GatewayV5AskAdapter.status(JSONObject().put("requestId", id)).getJSONObject("request")
+        assertEquals("done", done.getString("state"))
+        assertEquals("Opened your profile.", done.getString("say"))
+        // Stopping goes to the request's own mission, through Task Kit.
+        val again = GatewayV5AskAdapter.start(JSONObject().put("goal", "open reels")).getString("requestId")
+        ledger.routed("open reels", "flash", "rules", "more than one step", 0)
+        ledger.handed("open reels", "flash", taskId = "mission-reels")
+        assertTrue(GatewayV5AskAdapter.cancel(JSONObject().put("requestId", again)).getBoolean("cancelled"))
+        assertEquals(listOf("mission-reels"), stopped)
+    }
+
+    @Test
+    fun aBusyPhoneSaysWhatIsInTheWay() {
+        // Field test 143 (B6): five requests came back as a bare "rejected".
+        busy = true
+        snapshot = task("mission-1", TaskConsumerState.WORKING)
+        val refused = runCatching { GatewayV5AskAdapter.start(JSONObject().put("goal", "open clock")) }.exceptionOrNull() as GatewayProtocolException
+        assertEquals("ASK_BUSY", refused.code)
+        assertTrue(refused.message!!, refused.message!!.contains("Open my profile") && refused.message!!.contains("Try again"))
+    }
+
     @Test
     fun askOpsAreAdvertisedAndOnlyStatusIsReadOnly() {
         assertTrue(GatewayProtocol.operations.containsAll(setOf("ask.start", "ask.status")))

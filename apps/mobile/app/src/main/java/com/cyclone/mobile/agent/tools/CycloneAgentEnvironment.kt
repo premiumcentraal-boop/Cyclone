@@ -683,14 +683,35 @@ class CycloneAgentEnvironment internal constructor(
                 add("accessibility fingerprint changed")
             }
         }
+        val proof = screenProof(before, after, packageChanged, pageChanged, semanticChanges)
         return AgentStateDelta(
             pageChanged,
             packageChanged,
             accessibilityChanged,
             semanticChanges,
             goalAppeared,
-            pieces.joinToString("; ").ifBlank { "No semantic delta proven." },
+            pieces.joinToString("; ").ifBlank { "No semantic delta proven." } + if (proof == null && pageChanged) " (content only; not proof)" else "",
+            screenProof = proof,
         )
+    }
+
+    /** Alpha 144: see [AgentStateDelta.screenProof]. Without a screen identity on both sides, the page key stands in. */
+    private fun screenProof(
+        before: GatewayObservation,
+        after: GatewayObservation,
+        packageChanged: Boolean,
+        pageChanged: Boolean,
+        semanticChanges: List<String>,
+    ): String? {
+        if (packageChanged) return "another app is in front"
+        val was = before.page.screenIdentity
+        val now = after.page.screenIdentity
+        if (was.isNotBlank() && now.isNotBlank()) {
+            if (was != now) return "another screen is showing"
+        } else if (pageChanged) {
+            return "the page changed"
+        }
+        return semanticChanges.firstOrNull { it in PROOF_STATES }?.let { "a control changed state (${it.lowercase().replace('_', ' ')})" }
     }
 
     private fun failureEnvelope(
@@ -978,6 +999,12 @@ class CycloneAgentEnvironment internal constructor(
         value?.let { JSONArray(it.toString()) } ?: JSONArray()
 
     companion object {
+        /**
+         * Alpha 144: state changes that prove a tap on their own: a switch or box flipped, a field took focus or text.
+         * A selection change doesn't: a feed's carousel dots and story rings change selection by themselves (tabs are
+         * covered by the screen identity).
+         */
+        private val PROOF_STATES = setOf("CHECKED_STATE_CHANGED", "FOCUSED_STATE_CHANGED", "EDITABLE_TEXT_CHANGED")
         private const val DEFAULT_LOCATE_LIMIT = 8
         private const val DEFAULT_SEARCH_LIMIT = 20
         private const val PAGE_CARD_GOAL_CANDIDATES = 10

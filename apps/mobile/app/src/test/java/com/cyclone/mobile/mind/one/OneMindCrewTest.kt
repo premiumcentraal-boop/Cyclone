@@ -176,7 +176,9 @@ class OneMindCrewTest {
         override fun specs(): List<MindToolSpec> = emptyList()
         override fun execute(call: MindToolCall, arguments: JSONObject): MindToolResult {
             calls += call.name to arguments
-            return if (fail) MindToolResult.error("nope") else MindToolResult("ok", changedScreen = call.name != "type_text")
+            // A phone whose screen does change after a move: alpha 144 takes the proof, not the tool's kind, as the change.
+            return if (fail) MindToolResult.error("nope") else MindToolResult("ok", changedScreen = call.name != "type_text",
+                screenProof = if (call.name != "type_text") "another screen is showing" else null)
         }
     }
 

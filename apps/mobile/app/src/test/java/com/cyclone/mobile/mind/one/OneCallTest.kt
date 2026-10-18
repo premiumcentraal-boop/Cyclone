@@ -82,7 +82,9 @@ class OneCallTest {
     private class Hands(val changes: Boolean = true) : MindToolbox {
         val calls = mutableListOf<String>()
         override fun specs(): List<MindToolSpec> = emptyList()
-        override fun execute(call: MindToolCall, arguments: JSONObject): MindToolResult { calls += call.name; return MindToolResult("ok", changedScreen = changes) }
+        // [changes]: the phone showed the move happen (alpha 144: its proof, not the tool's kind, is the change).
+        override fun execute(call: MindToolCall, arguments: JSONObject): MindToolResult { calls += call.name
+            return MindToolResult("ok", changedScreen = changes, screenProof = if (changes) "another screen is showing" else null) }
     }
 
     private class Seq(vararg screens: StepScreen) {

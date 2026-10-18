@@ -32,9 +32,15 @@ class BridgeProtocolError(BridgeError):
 
 
 class BridgeOperationError(BridgeError):
-    def __init__(self, code: str):
+    """The phone refused an operation. ``message`` is the phone's own short reason, made safe to show (alpha 144)."""
+
+    MAX_MESSAGE = 240
+
+    def __init__(self, code: str, message: str | None = None):
         super().__init__(code)
         self.code = code
+        clean = " ".join("".join(ch if ch.isprintable() else " " for ch in str(message or "")).split())
+        self.message = clean[: self.MAX_MESSAGE] or None
 
 
 class CycloneBridgeClient:
@@ -112,7 +118,8 @@ class CycloneBridgeClient:
             error = response.get("error")
             raw_code = str(error.get("code") or "").upper() if isinstance(error, dict) else ""
             code = raw_code if ERROR_CODE_PATTERN.fullmatch(raw_code) else "EXECUTION_FAILED"
-            raise BridgeOperationError(code)
+            message = error.get("message") if isinstance(error, dict) else None
+            raise BridgeOperationError(code, message if isinstance(message, str) else None)
         result = response.get("result") or {}
         if not isinstance(result, dict):
             raise BridgeProtocolError("Android bridge result must be an object")
