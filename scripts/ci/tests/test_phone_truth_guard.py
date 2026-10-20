@@ -47,7 +47,9 @@ class PhoneTruthGuard(unittest.TestCase):
         self.assertIn("Pilot.irreversible", recovery)
         conductor = src("mind/one/Conductor.kt")
         check_in = conductor[conductor.index("private fun checkIn("):]
-        self.assertLess(check_in.index("crew.recover()"), check_in.index("owner.checkIn(reason)"))
+        # Plan 74 (alpha 149): recovery still runs first; a stuck run then hands over or stops honestly, never a card.
+        self.assertLess(check_in.index("crew.recover()"), check_in.index('end(RunEnd.GAVE_UP, "Couldn'))
+        self.assertNotIn("owner.checkIn(", check_in)
         self.assertIn("triggerCounts.clear() }", src("mind/one/Breaker.kt").split("fun stepDone()")[1].split("\n")[0])
 
     def test_a_request_follows_its_own_mission(self):

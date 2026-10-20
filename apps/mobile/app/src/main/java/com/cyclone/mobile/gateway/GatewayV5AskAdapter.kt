@@ -74,12 +74,8 @@ internal object GatewayV5AskAdapter {
         if (humanHasControl()) {
             throw GatewayProtocolException("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
         }
-        if (busy()) {
-            // Alpha 144: say what is in the way and what to do (field test 143 saw a bare "rejected" five times).
-            val running = runCatching { currentTask() }.getOrNull()?.title?.takeIf { it.isNotBlank() }?.take(80)
-            throw GatewayProtocolException("ASK_BUSY", "The phone is running another task" + (running?.let { ": \"$it\"" }.orEmpty()) +
-                ". Try again when it ends, or stop it first.")
-        }
+        // Plan 75 alpha 149: a request while a task runs is queued behind it (MissionQueue, "Runs next"), not refused. The
+        // queue's own limit still says so when it's full (the request is then steered into the running task, as before).
         // Alpha 91: every request gets an id; ask.status {requestId} says which lane took it and how it ended.
         val requestId = AskLedger.begin(goal)
         submit(goal)

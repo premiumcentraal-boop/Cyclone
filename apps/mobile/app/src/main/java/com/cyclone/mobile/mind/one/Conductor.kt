@@ -381,13 +381,15 @@ class Conductor(
                 return
             }
         }
-        score = score.event("check_in", "Asked the owner: stuck on $reason", clock())
-        listener.onNotice(OneMindPrompt.checkIn(reason))
-        when (val answer = waiting { runCatching { owner.checkIn(reason) }.getOrDefault(CheckIn.Stop) }) {
-            CheckIn.KeepGoing -> { breaker.checkedIn(); score = score.event("owner", "The owner said keep going", clock()) }
-            CheckIn.Stop -> end(RunEnd.STOPPED, "Stopped at the check-in: stuck on $reason.")
-            is CheckIn.Steer -> { breaker.checkedIn(); steer(answer.text) }
+        // Plan 74 (alpha 149): stuck is never a card. A Flash run hands over to the captain (once); otherwise the run stops
+        // honestly, saying where it got stuck and that it can be continued. No owner question for "I am stuck".
+        if (NeedGate.raisesCard(NeedKind.STUCK)) return
+        score = score.event("stuck", "Stuck on $reason", clock())
+        if (profile.difficulty == Difficulty.FLASH) {
+            handover("stuck on $reason")
+            if (handedOver) { breaker.checkedIn(); return }
         }
+        end(RunEnd.GAVE_UP, "Couldn't finish: stuck on $reason. Continue to try again.")
     }
 
     // ---- milestones ---------------------------------------------------------------------------------------------------
@@ -660,6 +662,15 @@ class Conductor(
         val key = InstantGrammar.normalize(question)
         if (!reply.consent && askedOnce.add(key)) {
             apply(think(WakeKind.CONSULT, "ask", "You wanted to ask the owner: $question", notes = listOf(OneMindPrompt.ASK_HINT)), step)
+            return
+        }
+        // Plan 74 (alpha 149): a clarification between choices is settled by assuming the first, and saying so; no card.
+        val kind = NeedGate.kindOf(reply.consent, reply.choices)
+        if (!NeedGate.raisesCard(kind)) {
+            val assumed = reply.choices.first { it.isNotBlank() }
+            score = score.event("assumed", "Assumed \"$assumed\" for: ${question.take(120)}", clock())
+            listener.onNotice("Assumed \"$assumed\" (change it in the task): ${question.take(120)}")
+            apply(think(WakeKind.CONSULT, "assumed", "You asked \"$question\"; Cyclone assumed \"$assumed\". The owner can change it; carry on with it."), step)
             return
         }
         score = score.event("ask", "Asked the owner: ${question.take(160)}", clock())
