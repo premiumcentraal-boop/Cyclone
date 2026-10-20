@@ -81,10 +81,13 @@ data class Profile(
     val compacts: Boolean,
     /** Flash: the plan streams into action. */
     val streams: Boolean,
+    /** Plan 75 alpha 147: a barrier waits for the first officer's check; a doubt goes to the captain (Flash). */
+    val barrierReview: Boolean = false,
 ) {
     companion object {
         val MIND = Profile(Difficulty.MIND, null, null, null, reviews = true, compacts = true, streams = false)
-        val FLASH = Profile(Difficulty.FLASH, maxReplans = 3, maxSteps = 12, maxSurprises = 2, reviews = false, compacts = false, streams = true)
+        val FLASH = Profile(Difficulty.FLASH, maxReplans = 3, maxSteps = 12, maxSurprises = 2, reviews = false, compacts = false, streams = true,
+            barrierReview = true)
     }
 }
 
@@ -143,6 +146,8 @@ class Conductor(
     private val workingMs: Long? = null,
     /** Working time a resumed run already spent. */
     spentMs: Long = 0L,
+    /** Plan 75 alpha 147: the first officer's model for a Flash run (null: the captain answers everything, as before). */
+    private val firstOfficer: ((Effort) -> MindModel)? = null,
 ) {
     private var profile = profile
     var score: Score = (start ?: Score.start(runId, profile.difficulty, goalText, clock())).copy(difficulty = profile.difficulty)
@@ -178,7 +183,26 @@ class Conductor(
     private var waitedMs = 0L
 
     /** The model for [effort]: the selected one, or the backup once the run switched to it. */
-    private fun mind(effort: Effort): MindModel = (if (switched) backup else null)?.invoke(effort) ?: brain(effort)
+    /** Plan 75 alpha 147: the officer's model once built; set aside when it failed (the captain answers from then on). */
+    private var officerModel: MindModel? = null
+    private var officerFailed = false
+    /** Plan 75 alpha 147: the done check the run started with. A re-plan keeps it (the contract). */
+    private var contractDone: Expect? = score.plan?.done
+    /** Plan 75 alpha 147: the last answer read came from the officer, and for which wake. */
+    private var lastAnswerFromOfficer = false
+    private var lastAnswerKind: WakeKind? = null
+
+    /** The model that answers a wake of [kind]: the officer for a Flash run's plan, consults and glances, else the captain. */
+    private fun modelFor(kind: WakeKind): MindModel {
+        val officer = firstOfficer
+        if (officer != null && profile.difficulty == Difficulty.FLASH && FirstOfficer.answers(kind) && !officerFailed) {
+            return officerModel ?: officer(Effort.LOW).also { officerModel = it }
+        }
+        return captain(kind.effort)
+    }
+
+    /** The captain: the owner's model at [effort], or the backup once the run switched to it. */
+    private fun captain(effort: Effort): MindModel = (if (switched) backup else null)?.invoke(effort) ?: brain(effort)
 
     /** Working time so far: the run's time less what it spent waiting on the owner. */
     fun workedMs(): Long = (clock() - startedAt - waitedMs).coerceAtLeast(0L)
@@ -198,6 +222,7 @@ class Conductor(
                 wake(WakeKind.REPLAN, "resumed", "The run was interrupted and resumed: the phone may have changed since", null, screen = true)
             }
             recipe != null -> {
+                contractDone = recipe.done
                 score = score.replan(recipe.copy(milestones = recipe.milestones.map { m ->
                     m.copy(state = MilestoneState.TODO, steps = m.steps.map { it.copy(state = StepState.TODO) })
                 })).event("recipe", "Started from a recipe: this request ran this way before and was checked", clock())
@@ -313,13 +338,22 @@ class Conductor(
     /** Plan 69 §5.4: no work crosses a barrier while a review is open. */
     private fun barrier(o: StepOutcome.AtBarrier) {
         val milestone = milestoneOf(o.step.id)
-        if (profile.reviews) {
+        if (profile.reviews || profile.barrierReview) {
             if (awaitGlance()) return
             if (milestone != null && milestone.id !in reviewed) {
                 reviewed += milestone.id
                 val reply = think(WakeKind.GLANCE, "barrier", "The next move ${o.label?.let { "(\"$it\") " }.orEmpty()}isn't easy to undo: " +
                     "the crew waits here until you say continue", screen = true)
-                if (reply.kind != WakeReply.Kind.CONTINUE) { retry(o.step); apply(reply, o.step); return }
+                if (reply.kind != WakeReply.Kind.CONTINUE) {
+                    retry(o.step)
+                    // Plan 75 alpha 147: a Flash run's officer that doubts the move hands the decision to the captain.
+                    if (!profile.reviews) {
+                        wake(WakeKind.REPLAN, "barrier_doubt", "The first officer doubts the move at the barrier: " +
+                            reply.why.ifBlank { "it may not be what the goal asked for" }, o.step, screen = true)
+                        return
+                    }
+                    apply(reply, o.step); return
+                }
                 applyNotes(reply)
             }
         }
@@ -427,7 +461,7 @@ class Conductor(
 
     /** The first call of a run, and of a handover: a plan must come back. */
     private fun plan(kind: WakeKind, trigger: String, reason: String, notes: List<String> = emptyList()) {
-        val model = mind(kind.effort)
+        val model = modelFor(kind)
         if (profile.streams && model is StreamingMindModel) { streamPlan(model, kind, trigger, reason, notes); return }
         var reply = think(kind, trigger, reason, screen = true, notes = notes)
         if (reply.plan == null && reply.kind in NEEDS_A_PLAN) {
@@ -482,12 +516,14 @@ class Conductor(
         var failures = 0
         var waits = 0
         while (true) {
-            val model = mind(kind.effort)
+            val model = modelFor(kind)
             if (owner.cancelled()) end(RunEnd.CANCELLED, "Stopped by the owner.")
             val started = clock()
             try {
                 val reply = model.complete(request())
                 record(kind, model, reply, clock() - started, ok = true)
+                lastAnswerFromOfficer = model === officerModel
+                lastAnswerKind = kind
                 return reply
             } catch (error: MindModelError.Cancelled) {
                 end(RunEnd.CANCELLED, "Stopped by the owner.")
@@ -499,12 +535,19 @@ class Conductor(
                 val canSwitch = !switched && backup != null
                 val hopeless = error is MindModelError.RateLimited || error is MindModelError.Fatal || error is MindModelError.ToolsUnsupported
                 when {
+                    // Plan 75 alpha 147: the officer can't answer: the captain takes over at once, for the rest of the run.
+                    officerModel != null && model === officerModel && !officerFailed -> {
+                        officerFailed = true
+                        failures = 0
+                        score = score.event("model", "The first officer couldn't answer; the captain takes over: $why", clock())
+                        listener.onNotice("The first officer couldn't answer; the captain takes over: $why")
+                    }
                     !hopeless && failures < 2 -> listener.onNotice("${model.label} didn't answer; asking again: $why")
                     canSwitch -> {
                         switched = true
                         failures = 0
                         conversation.forgetReasoning()
-                        val next = mind(kind.effort)
+                        val next = captain(kind.effort)
                         score = score.event("model", "Switched to the backup model ${next.label}: ${model.label} couldn't answer", clock())
                         listener.onNotice("Switched from ${model.label} to ${next.label}: $why")
                     }
@@ -534,7 +577,8 @@ class Conductor(
     private fun record(kind: WakeKind, model: MindModel, reply: MindModelReply?, ms: Long, ok: Boolean) {
         ledger.add(LedgerEntry(clock(), if (profile.difficulty == Difficulty.FLASH) "flash" else "mind", model.id,
             inputTokens = reply?.usage?.promptTokens ?: 0, outputTokens = reply?.usage?.completionTokens ?: 0,
-            costUsd = reply?.usage?.costUsd ?: 0.0, ms = ms, ok = ok, stage = kind.name.lowercase()))
+            costUsd = reply?.usage?.costUsd ?: 0.0, ms = ms, ok = ok,
+            stage = (if (model === officerModel) "officer_" else "") + kind.name.lowercase()))
         score = score.event("ledger", "${kind.name.lowercase()} call: ${model.label}${if (ok) "" else " (failed)"}", clock())
     }
 
@@ -548,8 +592,20 @@ class Conductor(
                 WakeReply.Kind.SKIP -> step?.let { score = score.mark(it.id, StepState.SKIPPED).event("skip", "Skipped ${line(it)}", clock(), it.id) }
                 WakeReply.Kind.ADJUST -> { countReplan(); adjust(reply.plan!!) }
                 WakeReply.Kind.REPLAN -> {
+                    val plan = reply.plan!!
+                    val before = score.plan
+                    // Plan 75 alpha 147: the officer re-plans its own milestone; anything wider goes to the captain.
+                    if (lastAnswerFromOfficer && lastAnswerKind != WakeKind.PLAN && before != null &&
+                        !FirstOfficer.keepsMilestones(before, plan, before.current()?.first?.id)) {
+                        score = score.event("officer", "The first officer's plan reached beyond this milestone; the captain decides", clock())
+                        wake(WakeKind.REPLAN, "officer_scope", "The first officer's plan changed more than the current milestone. Plan the whole run again.", step, screen = true)
+                        return
+                    }
                     if (score.plan != null) countReplan()
-                    score = score.replan(reply.plan!!).event("plan", "Plan version ${(score.plan?.version ?: 0) + 1}: ${reply.why.ifBlank { "new plan" }}", clock())
+                    // Plan 75 alpha 147: the contract. A plan keeps the done check the run started with.
+                    val fixed = contractDone?.let { plan.copy(done = it) } ?: plan
+                    contractDone = contractDone ?: fixed.done
+                    score = score.replan(fixed).event("plan", "Plan version ${(score.plan?.version ?: 0) + 1}: ${reply.why.ifBlank { "new plan" }}", clock())
                     currentMilestone = null
                 }
                 WakeReply.Kind.DETOUR -> detour(reply)
@@ -742,7 +798,7 @@ class Conductor(
         val pending = PendingGlance()
         glance = pending
         movesSinceGlance.clear()
-        val model = mind(Effort.LOW)
+        val model = modelFor(WakeKind.GLANCE)
         val request = request()
         glanceRunner {
             val started = clock()
@@ -853,7 +909,7 @@ class Conductor(
         if (f.open) return
         syncFeed()
         feed = null
-        val model = mind(WakeKind.PLAN.effort)
+        val model = modelFor(WakeKind.PLAN)
         val raw = f.reply
         if (raw == null) {
             record(WakeKind.PLAN, model, null, clock() - f.started, ok = false)
@@ -867,6 +923,8 @@ class Conductor(
             return
         }
         record(WakeKind.PLAN, model, raw, clock() - f.started, ok = true)
+        lastAnswerFromOfficer = model === officerModel
+        lastAnswerKind = WakeKind.PLAN
         conversation.add(MindMessage.Assistant(raw.text, raw.toolCalls, raw.reasoningDetails))
         val reply = WakeReply.from(f.draft)
         applyNotes(reply)

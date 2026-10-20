@@ -15,6 +15,13 @@ enum class FastSureness(val wire: String, val label: String, val bar: Double) {
  */
 object FastMode {
     private const val PREFS = "cyclone_fast"
+    /** Plan 75 alpha 147: the first officer's model, the latest DeepSeek Flash (OpenRouter's alias moves with each new Flash). */
+    const val OFFICER_DEFAULT = "~deepseek/deepseek-flash-latest"
+
+    /** The first officer's model: the owner's choice in [PREFS] "officer_model", else [OFFICER_DEFAULT]. */
+    fun officerModel(context: Context): String =
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("officer_model", null)
+            ?.trim()?.takeIf { it.isNotBlank() } ?: OFFICER_DEFAULT
 
     fun sureness(context: Context): FastSureness =
         FastSureness.of(context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("sureness", null))
