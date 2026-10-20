@@ -44,7 +44,8 @@ class CyTest {
         // No window, no capture flag, no touch of its own: Cy is drawing inside surfaces that already exist.
         listOf("WindowManager", "FLAG_SECURE", "clickable", "pointerInput").forEach { assertFalse(it, it in cy) }
         assertTrue("Lite draws Cy still", "OverlayLite.active" in cy)
-        val stack = File(root, "OverlayGlassStack.kt").readText()
+        // Keep the source guard identical on Windows CRLF and CI's LF checkout.
+        val stack = File(root, "OverlayGlassStack.kt").readText().replace("\r\n", "\n")
         val chrome = File(root, "OverlayChrome.kt").readText()
         // Each place Cy appears keeps the old look when the owner turns Cy off.
         assertTrue("CyLook.enabled" in stack && "else if (appPackage != null) AppLogo(appPackage, 32.dp) else CycloneMark(22)" in stack)

@@ -3,13 +3,13 @@
 # to get unstuck before it asks, ask.status follows its own mission, a busy feed is read instead of retried away, and
 # the brain store stops freezing the phone (plan 73). On alpha.143 dev1. Phone and PC. Physical acceptance UNVERIFIED.
 schema = 1
-product_version = "5.0.0-alpha.144.dev1"
+product_version = "5.0.0-alpha.144.dev2"
 channel = "development"
-android_version_code = 298
+android_version_code = 299
 python_version = "5.0.0-alpha.144.dev1"
 
 [components]
-mobile = "5.0.0-alpha.144.dev1"
+mobile = "5.0.0-alpha.144.dev2"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"

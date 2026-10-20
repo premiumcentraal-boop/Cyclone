@@ -26,8 +26,9 @@ object ProfileConfigStore {
         val file = AtomicFile(File(dir, key.storageKey() + ".json"))
         if (json == null) { file.delete(); return }
         check(dir.isDirectory || dir.mkdirs())
-        if (!file.baseFile.exists() && dir.listFiles().orEmpty().count { it.extension == "json" } >= 256) {
-            throw ConnectorException("BAD_REQUEST", "At most 256 config tuples per connector installation.")
+        if (!file.baseFile.exists()) {
+            val records = dir.listFiles() ?: throw java.io.IOException("Config inventory could not be read.")
+            ProfileConfigCapacity.check(records.count { it.extension == "json" }, replacing = false)
         }
         val out = file.startWrite()
         try { out.write(json.toByteArray(Charsets.UTF_8)); file.finishWrite(out) }

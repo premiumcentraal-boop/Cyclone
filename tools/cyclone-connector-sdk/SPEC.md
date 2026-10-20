@@ -238,7 +238,7 @@ size only, never keys or behavior. Whole Binder requests are limited to 64 KiB a
 credentials in this generic settings store; it is not a vault. No blob or config reference reaches logs, models,
 Glass or the PC. `state` is `unknown` (default), `ready`, `degraded` or `failed`.
 
-The provider persists atomically in Cyclone's private `noBackupFilesDir`, with at most 256 tuples per connector
+The provider persists atomically in Cyclone's private `noBackupFilesDir`, with at most 8192 tuples per connector
 installation. `storageKey` is lowercase SHA-256 of UTF-8 `profileId + "\n" + androidUserId + "\n" + packageName`.
 It is a logical identity, not a path into Cyclone. Renames and updates preserve it. Revocation/uninstall removes the
 namespace; permanent profile deletion or removal of a package from the registry removes its tuples. Trashing and
