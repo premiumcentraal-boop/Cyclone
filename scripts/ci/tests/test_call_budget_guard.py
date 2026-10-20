@@ -39,8 +39,10 @@ class CallBudgetGuard(unittest.TestCase):
         self.assertIn("FusedBoard.textOnly(", board, "the model that reads text only gets no image")
 
     def test_one_call_proves(self):
+        # Plan 75 alpha 148: the DONE check asks every usable model once, in one race (the careful yes counts).
         done = function(read("mind/one/AndroidCrew.kt"), "    fun doneBoard(")
-        self.assertIn("listOfNotNull(", done, "the DONE check asks one model")
+        self.assertIn("DecisionRace(lanes, DONE_DEADLINE_MS)", done, "the DONE check races every usable model")
+        self.assertNotIn("listOfNotNull(", done, "not one model only")
 
     def test_the_router_asks_each_model_once_with_its_second_phrasing_inside(self):
         decisions = read("mind/decide/Decisions.kt")

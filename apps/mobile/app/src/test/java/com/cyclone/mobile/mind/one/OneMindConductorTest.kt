@@ -358,7 +358,10 @@ class OneMindConductorTest {
         assertFalse(Conductor.strong(Expect.Changed))
         assertTrue(Conductor.strong(page))
         assertFalse(Conductor.doneConfirmed(Verdict.MISSED, true, 1.0))
-        assertTrue(Conductor.doneConfirmed(Verdict.HELD, true, null))
+        // Plan 75 alpha 148: no model's answer: a strong proof must hold again on a fresh read, not just once.
+        assertFalse(Conductor.doneConfirmed(Verdict.HELD, true, null))
+        assertFalse(Conductor.doneConfirmed(Verdict.HELD, true, null, again = Verdict.UNKNOWN))
+        assertTrue(Conductor.doneConfirmed(Verdict.HELD, true, null, again = Verdict.HELD))
         assertFalse(Conductor.doneConfirmed(Verdict.HELD, true, 0.2))
         assertFalse(Conductor.doneConfirmed(Verdict.HELD, false, null))
         assertTrue(Conductor.doneConfirmed(Verdict.HELD, false, FusedBoard.YES))
