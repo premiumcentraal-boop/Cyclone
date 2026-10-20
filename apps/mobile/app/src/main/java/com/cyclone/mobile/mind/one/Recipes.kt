@@ -24,7 +24,14 @@ data class Recipe(val key: String, val goal: String, val plan: Plan, val runs: I
 object Recipes {
     const val MAX = 200
 
-    fun key(goal: String): String = Replay.keyOf(goal)
+    /**
+     * Plan 75 alpha 148: a recipe is found by the goal's meaning-bearing words, so "open my profile" and "open the profile"
+     * share one recipe. The filler words are dropped; the other words (including an app's name) still tell requests apart.
+     */
+    fun key(goal: String): String = Replay.keyOf(goal).split(' ').filter { it.isNotBlank() && it !in FILLER }.joinToString(" ")
+
+    private val FILLER = setOf("my", "mijn", "the", "het", "de", "a", "an", "een", "please", "alstublieft", "to", "naar", "for", "voor",
+        "on", "op", "in", "of", "van", "me", "mij")
 
     /** The recipe a finished run leaves, or null when it may not leave one. */
     fun compile(score: Score, end: RunEnd, atMs: Long, previous: Recipe?): Recipe? {

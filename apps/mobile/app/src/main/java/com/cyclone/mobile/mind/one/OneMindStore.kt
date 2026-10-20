@@ -23,7 +23,10 @@ object OneMindStore {
         runCatching { file(context).takeIf { it.isFile }?.readText()?.let { Recipes.decode(JSONArray(it)) } }.getOrNull().orEmpty()
     }
 
-    fun recipe(context: Context, goal: String): Recipe? = recipes(context)[Recipes.key(goal)]
+    /** Plan 75 alpha 148: recipes saved under the old key (the exact words) still replay. */
+    fun recipe(context: Context, goal: String): Recipe? = recipes(context).let { book ->
+        book[Recipes.key(goal)] ?: book[com.cyclone.mobile.mind.decide.Replay.keyOf(goal)]
+    }
 
     /** A finished run updates the book: a verified run writes its recipe, a miss on one drops it. */
     fun afterRun(context: Context, score: Score, end: RunEnd, usedRecipe: Boolean) = synchronized(lock) {

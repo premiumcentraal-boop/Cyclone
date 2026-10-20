@@ -689,7 +689,14 @@ class Conductor(
         val predicate = score.plan?.done
         val code = predicate?.let { e -> runCatching { crew.check(e, score) }.getOrDefault(Verdict.UNKNOWN) } ?: Verdict.UNKNOWN
         val yes = runCatching { crew.done(score, screen) }.getOrNull()
-        val confirmed = doneConfirmed(code, predicate?.let(::strong) == true, yes)
+        // Plan 75 alpha 148: no model answered and the proof is strong: the proof must hold again on a fresh read, after a
+        // short settle, before the run may finish without a model's yes.
+        val strongProof = predicate?.let(::strong) == true
+        val again = if (code == Verdict.HELD && strongProof && yes == null) {
+            sleep(DONE_SETTLE_MS)
+            runCatching { crew.check(predicate!!, score) }.getOrNull()
+        } else null
+        val confirmed = doneConfirmed(code, strongProof, yes, again)
         if (confirmed) {
             score = score.event("done", "Done, and checked", clock())
             end(RunEnd.DONE, summary ?: report())
@@ -992,6 +999,8 @@ class Conductor(
         /** Plan 75: how often, and how long at most, a rate limit is waited out once no backup is left. */
         const val MAX_RATE_WAITS = 2
         const val MAX_RATE_WAIT_MS = 5_000L
+        /** Plan 75 alpha 148: how long a strong proof waits before it is read again, when no model answered. */
+        const val DONE_SETTLE_MS = 400L
         const val GLANCE_POLL_MS = 200L
         const val PAUSE_POLL_MS = 250L
 
@@ -1003,9 +1012,10 @@ class Conductor(
          * - a weak one that holds ("the app is open") needs an answered yes;
          * - no predicate, or one code can't judge, needs a sure yes.
          */
-        fun doneConfirmed(code: Verdict, strong: Boolean, yes: Double?): Boolean = when (code) {
+        fun doneConfirmed(code: Verdict, strong: Boolean, yes: Double?, again: Verdict? = null): Boolean = when (code) {
             Verdict.MISSED -> false
-            Verdict.HELD -> if (strong) yes == null || yes >= FusedBoard.YES else yes != null && yes >= FusedBoard.YES
+            // Plan 75 alpha 148: a strong proof with no model's answer needs to hold again on a fresh read (see finish).
+            Verdict.HELD -> if (strong) (yes?.let { it >= FusedBoard.YES } ?: (again == Verdict.HELD)) else yes != null && yes >= FusedBoard.YES
             Verdict.UNKNOWN -> yes != null && yes >= FusedBoard.SURE
         }
 

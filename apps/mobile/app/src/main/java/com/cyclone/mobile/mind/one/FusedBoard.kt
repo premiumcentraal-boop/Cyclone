@@ -291,7 +291,9 @@ object FusedBoard {
         val words = com.cyclone.mobile.mind.modes.InstantGrammar.normalize(step.target.orEmpty()).split(' ').filter { it.length > 2 }.toSet()
         fun score(c: StepControl): Int {
             val label = com.cyclone.mobile.mind.modes.InstantGrammar.normalize(c.label)
-            return words.count { label.contains(it) } * 10 + (if (c.editable && step.action == "type_text") 5 else 0)
+            // Plan 75 alpha 148: a control that plays the role the target names ("Profiel" for "mijn profiel") ranks as a word match.
+            val role = if (ControlRoles.matches(step.target.orEmpty(), c)) 8 else 0
+            return words.count { label.contains(it) } * 10 + role + (if (c.editable && step.action == "type_text") 5 else 0)
         }
         val ranked = screen.controls.withIndex().sortedWith(compareByDescending<IndexedValue<StepControl>> { score(it.value) }.thenBy { it.index })
         return ranked.take(MAX_CONTROLS).sortedBy { it.index }.map { it.value }

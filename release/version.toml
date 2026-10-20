@@ -1,29 +1,29 @@
-# Cyclone V5 alpha.147 dev1: the first officer (plan 75, third release). A Flash run's fast model (the latest DeepSeek Flash by
-# default) writes its plan, answers its consults and checks barriers; the captain re-plans. A re-plan from the officer may
-# change only its own milestone, and no re-plan changes the done check the run started with. A doubt at a barrier goes to
-# the captain. On alpha.146 dev1. Phone and PC. Physical UNVERIFIED.
+# Cyclone V5 alpha.148 dev1: one proof, two models, meaning (plan 75, fourth release). The DONE check is answered by every
+# usable decision model in one race (the careful yes counts); a strong proof that no model answered must hold again on a
+# fresh read; control roles in English and Dutch order the choices the models make; recipes are found by their words.
+# On alpha.147 dev1. Phone and PC. Physical UNVERIFIED.
 schema = 1
-product_version = "5.0.0-alpha.147.dev1"
+product_version = "5.0.0-alpha.148.dev1"
 channel = "development"
-android_version_code = 301
-python_version = "5.0.0-alpha.147.dev1"
+android_version_code = 302
+python_version = "5.0.0-alpha.148.dev1"
 
 [components]
-mobile = "5.0.0-alpha.147.dev1"
+mobile = "5.0.0-alpha.148.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
 glass = "1.0.0-alpha.68"
-device_gateway = "5.0.0-alpha.147.dev1"
-mcp = "5.0.0-alpha.147.dev1"
+device_gateway = "5.0.0-alpha.148.dev1"
+mcp = "5.0.0-alpha.148.dev1"
 
 [release]
-previous_mobile_version = "5.0.0-alpha.146.dev1"
+previous_mobile_version = "5.0.0-alpha.147.dev1"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha147-first-officer"
+candidate_generation = "cyclone-v5-alpha148-one-proof"

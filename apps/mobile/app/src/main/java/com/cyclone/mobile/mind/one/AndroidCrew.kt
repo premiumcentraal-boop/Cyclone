@@ -93,16 +93,18 @@ object AndroidCrew {
     }
 
     /**
-     * The DONE check (plan 69 §4.4), plan 72's one that proves: a single call, to the model that sees the screenshot
-     * (OpenAI Decisions), or to JEV with the text when that model isn't usable. Counted in the ledger.
+     * The DONE check (plan 69 §4.4). Plan 75 alpha 148: every usable decision model answers it in one race, each with the
+     * screenshot only if it reads images, and the careful (lowest) yes counts ([FusedBoard.doneRead]). Before, one model
+     * answered it while the comments said every model did.
      */
     fun doneBoard(key: String, ledger: Ledger, zdr: Boolean, clock: () -> Long = System::currentTimeMillis): DoneBoard = DoneBoard { request ->
-        val usable = DecisionProvider.entries.filter { it.usable }
-        val providers = listOfNotNull(usable.firstOrNull { it.vision } ?: usable.firstOrNull())
+        val providers = DecisionProvider.entries.filter { it.usable }
         if (providers.isEmpty()) return@DoneBoard emptyList()
         val lanes = providers.map { Lane(it.wire, ProviderTypedBox(key, it, DONE_DEADLINE_MS, "done", zdr), it.wire) }
-        val sees = providers.single().vision
-        DecisionRace(lanes, DONE_DEADLINE_MS).run(prompt = { Prompt(if (sees) request.state else FusedBoard.textOnly(request.state), request.questions) }).decided.mapNotNull { arrival ->
+        DecisionRace(lanes, DONE_DEADLINE_MS).run(prompt = { lane ->
+            val sees = providers.firstOrNull { it.wire == lane.provider }?.vision == true
+            Prompt(if (sees) request.state else FusedBoard.textOnly(request.state), request.questions)
+        }).decided.mapNotNull { arrival ->
             val answer = arrival.answer
             val provider = providers.firstOrNull { it.wire == arrival.provider }
             ledger.add(LedgerEntry(clock(), "decisions", answer?.reply?.model ?: provider?.model.orEmpty(),
