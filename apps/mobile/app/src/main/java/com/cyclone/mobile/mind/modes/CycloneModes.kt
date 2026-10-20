@@ -51,7 +51,7 @@ data class ModeResult(
 
 /**
  * Plan 42 (M3): the one entry for requests. The router picks the lowest mode that can do it; Instant runs here; Flash
- * and Mind are Mind missions (Flash is a quick one that plans for the Pilot), started with the baton when Instant
+ * and Mind are Mind missions (Flash is OneMind's quick profile), started with the baton when Instant
  * handed over. Only [handle] starts a mission for a request; surfaces never call MindMissions.start themselves.
  */
 object CycloneModes {
@@ -144,8 +144,7 @@ object CycloneModes {
     private fun primeNow(context: Context, text: String) {
         val settings = settings(context)
         if (settings.speed != Speed.AUTO || settings.engine == DecisionEngine.CLASSIC || MindMissions.live.value != null) return
-        val fast = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
-        val bar = fast.sureness.bar
+        val bar = com.cyclone.mobile.mind.pilot.FastMode.sureness(context).bar
         // The same world the request will see: run() reads the screen when a box may be asked or the words need labels.
         val box = com.cyclone.mobile.mind.decide.Decisions.box(context)
         val device = com.cyclone.mobile.mind.mission.AndroidMindDevice(context)
@@ -178,11 +177,18 @@ object CycloneModes {
         OverlayChromeRuntime.attachMission(running)
         // Alpha.78: every run is timed and logged to the run history, stage by stage.
         val trace = ModesTrace(context, request, voice)
+        // Plan 75: this request's own decision calls, counted until it is done or handed over.
+        val tally = CallTally().also { CallTally.current = it }
         val done: (ModeResult) -> Unit = { result ->
             trace.finish(result)
+            val calls = tally.close()
+            if (CallTally.current === tally) CallTally.current = null
+            val record = runCatching {
+                RunRecord.build(trace.elapsedMs, trace.stages.toList(), calls, end = if (result.promoted) "handed_up" else if (result.ok) "done" else "failed")
+            }.getOrNull()
             // A request handed to Flash or the Mind keeps running as that mission; ask.status reads it from the task.
-            if (result.promoted) AskLedger.handed(request, result.mode.name.lowercase(), result.handoverWhy, result.taskId)
-            else AskLedger.finished(request, result.mode.name.lowercase(), result.ok, result.say)
+            if (result.promoted) AskLedger.handed(request, result.mode.name.lowercase(), result.handoverWhy, result.taskId, record = record)
+            else AskLedger.finished(request, result.mode.name.lowercase(), result.ok, result.say, record = record)
             reply(result.copy(steps = trace.steps))
         }
         // Voice keeps the screen (alpha.78): its own panel shows the work and speaks the result, so the Ask chrome stays out.
@@ -198,8 +204,8 @@ object CycloneModes {
         var routed: Route? = null
         var learnBar = 0.8
         try {
-            val fast = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
-            learnBar = fast.sureness.bar
+            val bar = com.cyclone.mobile.mind.pilot.FastMode.sureness(context).bar
+            learnBar = bar
             // Decisions go to the one decision provider (plan 58: JEV or OpenAI Decisions, a setting).
             val box = if (settings.speed == Speed.AUTO) com.cyclone.mobile.mind.decide.Decisions.box(context) else null
             val blocker = device.blocker()
@@ -207,10 +213,10 @@ object CycloneModes {
             // the router must know which app is in front before it says X isn't here) or Auto may ask a box; a gesture
             // reads it once, right before the move.
             val screen = if (blocker == null && (box != null || InstantGrammar.needsScreen(request) || InstantGrammar.opens(request)))
-                trace.time("read the screen") { hands.look() } else null
+                trace.time("read the screen", "read") { hands.look() } else null
             val world = GrammarWorld(screen?.labels.orEmpty(), device.apps().map { it.label to it.packageName }, screen?.packageName?.takeIf { it.isNotBlank() })
             val phone = if (settings.speed == Speed.AUTO) runCatching {
-                com.cyclone.mobile.mind.decide.PhoneBrain.decider(context, settings.phoneModel, fast.sureness.bar)
+                com.cyclone.mobile.mind.decide.PhoneBrain.decider(context, settings.phoneModel, bar)
             }.getOrNull() else null
             // Plan 63: the decision engine. Consensus and Sprint race both decision models; Classic is alpha.123's one model,
             // where Triage replaces Board 0 only when its switch is on and the watch asks the other model beside it.
@@ -221,17 +227,17 @@ object CycloneModes {
                     save = { r -> com.cyclone.mobile.mind.decide.EngineStore.save(context, r) })
             } else null
             val triage = if (settings.speed == Speed.AUTO && classic) com.cyclone.mobile.mind.decide.Decisions.triage(context) else null
-            val route = trace.time("route") { ModeRouter.route(request, world, facts(context), settings.speed, box, fast.sureness.bar, phone, triage, engine) }
+            val route = trace.time("route", "route") { ModeRouter.route(request, world, facts(context), settings.speed, box, bar, phone, triage, engine) }
             routed = route
             // Plan 58: in Classic, the provider that isn't deciding answers the same questions beside it, never acting. The
             // engines already ask both.
             if (settings.speed == Speed.AUTO && classic) runCatching {
-                com.cyclone.mobile.mind.decide.DecisionWatch.watch(context, request, world, route, settings, fast.sureness.bar)
+                com.cyclone.mobile.mind.decide.DecisionWatch.watch(context, request, world, route, settings, bar)
             }
             AskLedger.routed(request, route.mode.name.lowercase(), route.by.name.lowercase(), route.why, route.decideMs)
             // Alpha 91: the phone decided at once; JEV answers the same question in the background now and then, so its
             // agreement and its speed keep being measured without making the owner wait.
-            if (route.by == com.cyclone.mobile.mind.decide.Decider.PHONE && box != null && phone?.audit == true) audit(context, request, world, box, route, fast.sureness.bar)
+            if (route.by == com.cyclone.mobile.mind.decide.Decider.PHONE && box != null && phone?.audit == true) audit(context, request, world, box, route, bar)
             trace.step("decided by ${route.by.name.lowercase()}" + (if (route.decideMs > 0) " in ${route.decideMs} ms" else "") +
                 (route.shadow?.let { " · phone model: ${it.mode}${if (it.intent != "none") " ${it.intent}" else ""}" }.orEmpty()))
             learn = { outcome ->
@@ -243,7 +249,7 @@ object CycloneModes {
                         decideMs = route.decideMs, shadow = route.shadow, outcome = outcome,
                         provider = if (route.by != com.cyclone.mobile.mind.decide.Decider.DECISIONS) null
                             else if (classic) com.cyclone.mobile.mind.decide.Decisions.active().name else settings.engine.name,
-                    ), fast.sureness.bar)
+                    ), bar)
                 }
             }
             trace.step("routed to ${route.mode.name.lowercase()}" + (route.command?.let { " (${it.intent.name.lowercase()}${it.direction?.let { d -> " $d" }.orEmpty()})" }.orEmpty()) + ": ${route.why}")
@@ -272,7 +278,7 @@ object CycloneModes {
                     // Plan 63: in the engines, Instant's follow-up questions (the shutter, the call button) go to OpenAI Decisions
                     // with the screenshot; Classic keeps the one provider.
                     val sight = if (classic) box else com.cyclone.mobile.mind.decide.Decisions.sight(context) ?: box
-                    val outcome = trace.time(InstantCopy.working(command)) { InstantRun.run(command, hands, sight, fast.sureness.bar) }
+                    val outcome = trace.time(InstantCopy.working(command), "instant") { InstantRun.run(command, hands, sight, bar) }
                     val promotion = outcome.promotion
                     when {
                         // Stopped by the owner (Stop, "no", or a newer request): nothing more happens.

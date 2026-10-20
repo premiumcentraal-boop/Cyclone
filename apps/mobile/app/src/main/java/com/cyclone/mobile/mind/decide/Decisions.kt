@@ -137,7 +137,11 @@ object Decisions {
         if (breaker.open()) return null
         val result = DecisionsHttp.post(key, body, title, deadlineMs, url)
         breaker.record(result)
-        log(CallRecord.of(System.currentTimeMillis(), provider.wire, board, result))
+        val record = CallRecord.of(System.currentTimeMillis(), provider.wire, board, result)
+        log(record)
+        // Plan 75: the request being routed counts its own calls (router boards, Instant's follow-ups, the watch).
+        com.cyclone.mobile.mind.modes.CallTally.current?.add(
+            com.cyclone.mobile.mind.modes.RunRecord.Call(board, provider.model, record.ms, 0, record.cost ?: 0.0, record.ok))
         return result
     }
 

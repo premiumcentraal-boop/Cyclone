@@ -42,7 +42,7 @@ object PortableSettings {
         carry("cyclone_ui", "The look", keys = setOf("visual_quality")),
         carry("cyclone_hands", "Hands: style, handedness, typos"),
         carry("cyclone_modes", "Modes: speed, listening, silent success, phone model"),
-        carry("cyclone_fast", "Fast Path: route, models, sureness"),
+        carry("cyclone_fast", "How sure Cyclone must be to act"),
         carry("cyclone_planes", "Planes: mode, fallback, background"),
         carry("cyclone_setup_cards", "Setup cards already seen", sets = setOf("seen", "asked")),
         carry("cyclone_user_md", "Owner notes: on/off", keys = setOf("enabled")),

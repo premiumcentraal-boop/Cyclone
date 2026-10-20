@@ -146,6 +146,8 @@ internal object GatewayV5AskAdapter {
         .put("routedAtMs", entry.routedAtMs ?: JSONObject.NULL)
         .put("finishedAtMs", entry.finishedAtMs ?: JSONObject.NULL)
         .put("say", entry.say ?: JSONObject.NULL)
+        // Plan 75: where the request's time and money went (stage times, calls by rung, how moves were decided); numbers only.
+        .put("record", entry.record ?: JSONObject.NULL)
 
     internal fun snapshotJson(snapshot: TaskPresentationSnapshot): JSONObject = JSONObject()
         .put("taskId", snapshot.taskId.take(120))

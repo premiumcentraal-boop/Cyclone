@@ -17,12 +17,12 @@ def read(path: Path) -> str:
 def test_the_workspace_adds_no_tools_only_optional_arguments():
     toolbox = read(MIND / "PhoneMindToolbox.kt")
     specs = toolbox[toolbox.index("val SPECS: List<MindToolSpec> = listOf("):]
-    # 39 tools, plus plan 41's pilot, which is offered only when Fast mode is on (see test_pilot_guard.py), and plan 43's
+    # 39 tools (plan 41's pilot was removed in alpha 145, plan 75), plus plan 43's
     # signup_page / signup_final / signup_done, offered only in a sign-up mapping mission, and T7's setup_page /
     # setup_done, offered only in an Account Setup run, and alpha 92's tap_sequence (one form fill in one call), and plan
     # 48's port_send / port_wait, offered only while the owner's PC is connected (see test_ports_run4_guard.py), and plan
     # 52 run 6's double_tap / drag / zoom / draw (phone-planned gestures).
-    assert len(re.findall(r'MindToolSpec\("[a-z_]+"', specs)) == 52
+    assert len(re.findall(r'MindToolSpec\("[a-z_]+"', specs)) == 51
     extend = read(WORKSPACE / "WorkspaceSpecs.kt")
     assert 'MindToolSpec("' not in extend, "the workspace must not define tools of its own"
     assert "MindToolSpec(spec.name, spec.description, parameters)" in extend

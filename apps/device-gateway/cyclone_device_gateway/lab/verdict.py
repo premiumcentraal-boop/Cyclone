@@ -86,6 +86,33 @@ def _text_match(check: dict[str, Any], text: str) -> bool:
     return any(map(hit, needles)) if "any" in check else all(map(hit, needles))
 
 
+def _page(check: dict[str, Any], measure: Measure) -> CheckResult:
+    """Plan 75: the page by meaning (view ids, what is selected, the activity), so a check holds in any language."""
+    parts: list[bool] = []
+    detail: list[str] = []
+    if "ids" in check or "selected" in check:
+        screen = measure.screen()
+        if isinstance(screen, _Unavailable):
+            return CheckResult("page", None, f"screen unavailable: {screen.reason}")
+        if "ids" in check:
+            have = set(screen.ids)
+            hits = [i for i in check["ids"] if i in have]
+            parts.append(bool(hits) if check.get("match", "any") == "any" else len(hits) == len(check["ids"]))
+            detail.append(f"{len(hits)} of {len(check['ids'])} ids")
+        if "selected" in check:
+            chosen = [v.lower() for v in screen.selected]
+            hits = [w for w in check["selected"] if any(w.lower() == c or w.lower() in c for c in chosen)]
+            parts.append(bool(hits) if check.get("match", "any") == "any" else len(hits) == len(check["selected"]))
+            detail.append(f"{len(hits)} selected")
+    if "activity" in check:
+        activity = measure.get("activity", measure.probe.foreground_activity)
+        if isinstance(activity, _Unavailable) or activity is None:
+            return CheckResult("page", None, "activity unavailable")
+        parts.append(re.search(check["activity"], activity) is not None)
+        detail.append(f"activity {activity}")
+    return CheckResult("page", all(parts), ", ".join(detail))
+
+
 def evaluate_check(check: dict[str, Any], facts: TrialFacts, measure: Measure) -> CheckResult:
     kind = check["check"]
     record = facts.record
@@ -122,6 +149,8 @@ def evaluate_check(check: dict[str, Any], facts: TrialFacts, measure: Measure) -
         if isinstance(screen, _Unavailable):
             return CheckResult("screen", None, f"screen unavailable: {screen.reason}")
         return CheckResult("screen", _text_match(check, screen.joined()), f"{len(screen.texts)} texts on {screen.package}")
+    if kind == "page":
+        return _page(check, measure)
     if kind == "setting":
         value = measure.get(f"setting:{check['namespace']}/{check['key']}", lambda: measure.probe.setting(check["namespace"], check["key"]))
         if isinstance(value, _Unavailable):

@@ -199,6 +199,8 @@ class OneMindCrewTest {
         val engine = StepEngine(Screens(list, chat).eyes, board, hands)
         val out = engine.run(open, score(open))
         assertTrue(out is StepOutcome.Done && out.verdict == Verdict.HELD && out.rung == 0)
+        // Plan 75: the run record counts it as settled by code, with a read before and after.
+        assertEquals(1, engine.stats.byCode); assertEquals(0, engine.stats.asked); assertEquals(2, engine.stats.reads)
         val tap = Step("s2", "tap", target = "search")
         val out2 = StepEngine(Screens(list, chat).eyes, board, hands).run(tap, score(tap))
         assertTrue(out2 is StepOutcome.Done)
@@ -217,6 +219,7 @@ class OneMindCrewTest {
         val split = StepEngine(Screens(two).eyes, { _, a -> listOf(FusedBoard.read(reply("e1"), a), FusedBoard.read(reply("e2"), a)) }, FakeHands())
         val out = split.run(step, score(step))
         assertTrue(out is StepOutcome.NeedsMind && out.trigger == "unsure")
+        assertEquals(1, split.stats.asked); assertEquals(1, split.stats.splits); assertEquals(0, agree.stats.splits)
     }
 
     @Test fun `code raises risk, and a gated move stops at a barrier until the conductor says go`() {
@@ -298,7 +301,7 @@ class OneMindCrewTest {
 
     private fun two() = StepScreen("com.notes", "Notes", "n", "f1", listOf(StepControl("e1", "Note body", "edit", editable = true), StepControl("e2", "Title", "edit", editable = true)))
 
-    // ---- the wire and the vision shadow ---------------------------------------------------------------------------------
+    // ---- the wire ----------------------------------------------------------------------------------------------------------
 
     @Test fun `box questions go on the wire and come back as edges, never as a tap`() {
         val q = mapOf("where" to DQuestion.Box("the shutter"), "present" to DQuestion.Noul("is it there", "yes", "no"))
@@ -312,12 +315,5 @@ class OneMindCrewTest {
         assertEquals(0.5, box.centerX, 1e-9); assertTrue(box.plausible)
         assertNull(DecisionsWire.parse("""{"answers":{"where":{"type":"box","box":{"top":1.4,"bottom":0.6,"left":0.45,"right":0.55}}}}""", q)!!.answers["where"])
 
-        val shot = chat.copy(imageDataUrl = img)
-        val req = VisionShadow.request(shot, Step("s", "tap", target = "the shutter"))!!
-        assertTrue("where" in req.questions)
-        assertNull(VisionShadow.request(shot.copy(sensitive = true), Step("s", "tap", target = "x")))
-        val reading = VisionShadow.Reading(0.95, "one", box)
-        assertTrue(reading.wouldTap)
-        assertTrue(VisionShadow.line(Step("s", "tap", target = "the shutter"), reading).contains("not tapped"))
     }
 }

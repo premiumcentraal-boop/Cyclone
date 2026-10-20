@@ -80,6 +80,10 @@ ASK_REQUEST_KEYS = frozenset({
     "requestId", "state", "lane", "decider", "why", "decideMs", "startedAtMs", "routedAtMs", "finishedAtMs", "say",
 })
 ASK_REQUEST_STATES = frozenset({"waiting", "running", "done", "failed", "cancelled"})
+# Plan 75 (alpha 145): where a request's time and money went. Numbers under fixed names only; older phones omit it.
+ASK_RECORD_ENDS = frozenset({"done", "failed", "handed_up", "unconfirmed", "gave_up", "stopped", "cancelled"})
+ASK_RECORD_MAX_DEPTH = 4
+ASK_RECORD_MAX_KEYS = 40
 # Plan 69: a OneMind run's card summary (counts and lines only, never screen text). Older phones omit it.
 ASK_ONEMIND_KEYS = frozenset({
     "difficulty", "goalVersion", "planVersion", "milestones", "step", "wakes", "wakeLines", "calls", "costUsd",
@@ -443,12 +447,40 @@ def _validate_ask_foreground(args: dict[str, Any]) -> None:
 def _validate_ask_request(value: Any) -> None:
     if value is None:
         return
-    if not isinstance(value, dict) or set(value) != ASK_REQUEST_KEYS or not ASK_REQUEST_ID.match(str(value.get("requestId"))) \
+    if not isinstance(value, dict) or set(value) not in (ASK_REQUEST_KEYS, ASK_REQUEST_KEYS | {"record"}) \
+            or not ASK_REQUEST_ID.match(str(value.get("requestId"))) \
             or value.get("state") not in ASK_REQUEST_STATES or (value.get("lane") is not None and value["lane"] not in ASK_LANES):
         raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask request record is malformed.")
     for key in ("why", "say", "decider"):
         if value.get(key) is not None and (not isinstance(value[key], str) or len(value[key]) > 240):
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask request record is malformed.")
+    _validate_ask_run_record(value.get("record"))
+
+
+def _validate_ask_run_record(value: Any) -> None:
+    """Plan 75: the run record holds counts, times and cost under short fixed names, and one end word. Never text."""
+    def bad() -> DesktopRuntimeError:
+        return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android ask run record is malformed.")
+
+    def walk(node: Any, depth: int) -> None:
+        if not isinstance(node, dict) or depth > ASK_RECORD_MAX_DEPTH or len(node) > ASK_RECORD_MAX_KEYS:
+            raise bad()
+        for key, item in node.items():
+            if not isinstance(key, str) or not SLOT.match(key):
+                raise bad()
+            if isinstance(item, dict):
+                walk(item, depth + 1)
+            elif key == "end" and depth == 0:
+                if item is not None and item not in ASK_RECORD_ENDS:
+                    raise bad()
+            elif item is None or isinstance(item, bool):
+                continue
+            elif not isinstance(item, (int, float)) or item < 0:
+                raise bad()
+
+    if value is None:
+        return
+    walk(value, 0)
 
 
 def _validate_ask_onemind(value: Any) -> None:

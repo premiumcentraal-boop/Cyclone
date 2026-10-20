@@ -18,6 +18,9 @@ internal class ModesTrace(private val context: Context, request: String, voice: 
     }.getOrNull()
 
     val steps: List<String> get() = lines.toList()
+    /** Plan 75: the timed stages under fixed names, for the run record (never the step's own words). */
+    val stages = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Long>>()
+    val elapsedMs: Long get() = SystemClock.elapsedRealtime() - started
 
     fun step(text: String, ok: Boolean? = null) {
         val line = "+${SystemClock.elapsedRealtime() - started} ms · $text"
@@ -25,10 +28,12 @@ internal class ModesTrace(private val context: Context, request: String, voice: 
         id?.let { runCatching { com.cyclone.mobile.ai.AgentTraceRuntime.store.append(it, "MODES", line, code = "modes.step", ok = ok) } }
     }
 
-    fun <T> time(what: String, block: () -> T): T {
+    fun <T> time(what: String, stage: String? = null, block: () -> T): T {
         val t = SystemClock.elapsedRealtime()
         val result = block()
-        step("$what: ${SystemClock.elapsedRealtime() - t} ms", (result as? InstantOutcome)?.let { it.done || it.cancelled })
+        val ms = SystemClock.elapsedRealtime() - t
+        stage?.let { stages += it to ms }
+        step("$what: $ms ms", (result as? InstantOutcome)?.let { it.done || it.cancelled })
         return result
     }
 

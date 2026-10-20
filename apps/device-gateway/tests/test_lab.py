@@ -618,3 +618,40 @@ def test_the_contract_lets_the_lab_steer_but_never_with_a_secret():
                 lambda: svc.lab_answer("phone-1", "m1abcdefgh", "steer", text="")):
         with pytest.raises(DesktopRuntimeError):
             bad()
+
+
+# ---- plan 75: checks by meaning -----------------------------------------------------------------------------------
+
+PROFILE_UIA = """<?xml version='1.0'?><hierarchy>
+<node text="Mijn profiel" content-desc="" resource-id="com.instagram.android:id/action_bar_title" class="android.widget.TextView" package="com.instagram.android" clickable="false" enabled="true" focusable="false" scrollable="false" selected="false" bounds="[0,0][1,1]"/>
+<node text="" content-desc="Profiel" resource-id="com.instagram.android:id/profile_tab" class="android.widget.FrameLayout" package="com.instagram.android" clickable="true" enabled="true" focusable="true" scrollable="false" selected="true" bounds="[0,0][1,1]"/>
+<node text="" content-desc="Home" resource-id="com.instagram.android:id/feed_tab" class="android.widget.FrameLayout" package="com.instagram.android" clickable="true" enabled="true" focusable="true" scrollable="false" selected="false" bounds="[0,0][1,1]"/>
+</hierarchy>"""
+
+
+def test_plan75_a_page_check_reads_the_screen_by_meaning_in_any_language():
+    adb = FakeAdb()
+    adb.uia = PROFILE_UIA
+    adb.foreground = "com.instagram.android"
+    screen = PhoneProbe(adb).screen_text()
+    assert "profile_tab" in screen.ids
+    assert "profile_tab" in screen.selected and "feed_tab" not in screen.selected
+    from cyclone_device_gateway.lab.verdict import evaluate_check
+    measure = Measure(PhoneProbe(adb))
+    facts = TrialFacts(_record())
+    # The selected tab says "profile" whatever the labels' language; a page id that isn't there fails.
+    assert evaluate_check({"check": "page", "selected": ["profile_tab"]}, facts, measure).ok is True
+    assert evaluate_check({"check": "page", "selected": ["feed_tab"]}, facts, measure).ok is False
+    assert evaluate_check({"check": "page", "ids": ["profile_tab", "edit_profile"], "match": "all"}, facts, measure).ok is False
+    assert evaluate_check({"check": "page", "activity": r"^com\.instagram\.android/"}, facts, measure).ok is True
+
+
+def test_plan75_page_checks_are_validated_like_every_other_check():
+    base = {"id": "insta.profile", "title": "Profile", "goal": "open my profile on Instagram", "category": "navigate",
+            "suites": ["smoke"]}
+    ok = parse_mission({**base, "checks": [{"check": "page", "selected": ["profile_tab"], "activity": "instagram"}]})
+    assert ok.checks[0]["check"] == "page"
+    for bad in ({"check": "page"}, {"check": "page", "ids": ["profile tab; rm -rf"]}, {"check": "page", "ids": ["a"], "match": "most"},
+                {"check": "page", "activity": "("}, {"check": "page", "selected": ["x"], "words": ["y"]}):
+        with pytest.raises(MissionError):
+            parse_mission({**base, "checks": [bad]})

@@ -28,4 +28,19 @@ class DecisionLabReportTest {
         assertEquals(1, bin.getInt("right"))
         assertFalse(report.toString().contains("electricity"))
     }
+
+    @Test fun `two providers on the same requests, how often they agree, are right together, and who wins a split`() {
+        val jev = listOf(LabSample(camera, "instant", 300), LabSample(pay, "flash", 300), LabSample(dark, "instant", 300))
+        val openai = listOf(LabSample(camera, "instant", 900), LabSample(pay, "flash", 900), LabSample(dark, "flash", 900))
+        val pair = DecisionLabReport.pair("jev", jev, "openai", openai, 9L)
+        assertEquals(3, pair.getInt("bothAnswered"))
+        assertEquals(2, pair.getInt("agreed"))
+        assertEquals(1, pair.getInt("agreedRight"))
+        // Both sent "pay the electricity bill" too low: the number that must be zero.
+        assertEquals("g002", pair.getJSONArray("agreedRiskyUnder").getString(0))
+        assertEquals(1, pair.getInt("split"))
+        assertEquals(0, pair.getJSONObject("splitRight").getInt("jev"))
+        assertEquals(1, pair.getJSONObject("splitRight").getInt("openai"))
+        assertFalse(pair.toString().contains("electricity"))
+    }
 }

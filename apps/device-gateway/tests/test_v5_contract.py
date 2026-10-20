@@ -531,6 +531,27 @@ def test_alpha91_ask_defaults_to_the_main_screen_and_reads_one_request_back():
         assert str(caught.value.code) == "PROTOCOL_MISMATCH"
 
 
+RUN_RECORD = {"totalMs": 6200, "stages": {"route": 310, "instant": 5100}, "end": "handed_up", "recipe": False, "asks": 0,
+              "calls": {"count": 2, "costUsd": 0.0004, "byRung": {"race": {"calls": 2, "failed": 0, "p50Ms": 300, "maxMs": 410,
+                                                                         "inputTokens": 0, "costUsd": 0.0004}}},
+              "moves": None, "wakes": {}}
+
+
+def test_plan75_ask_status_carries_a_run_record_of_numbers_only():
+    svc, _ = _ask_service({**ASK_STATUS, "request": {**REQUEST, "record": RUN_RECORD}})
+    status = svc.forward("phone-1", "ask.status", {"requestId": "req-0123abcd-456"})
+    assert status["request"]["record"]["stages"]["route"] == 310
+    older, _ = _ask_service({**ASK_STATUS, "request": REQUEST})
+    assert "record" not in older.forward("phone-1", "ask.status", {})["request"]
+    for bad in ({**RUN_RECORD, "end": "sent a message to Anna"}, {**RUN_RECORD, "stages": {"route": "fast"}},
+                {**RUN_RECORD, "note": "screen text"}, {**RUN_RECORD, "calls": {"count": -1}},
+                {**RUN_RECORD, "stages": {"what the owner typed": 1}}, {"a": {"b": {"c": {"d": {"e": {"f": 1}}}}}}):
+        broken, _ = _ask_service({**ASK_STATUS, "request": {**REQUEST, "record": bad}})
+        with pytest.raises(DesktopRuntimeError) as caught:
+            broken.forward("phone-1", "ask.status", {})
+        assert str(caught.value.code) == "PROTOCOL_MISMATCH"
+
+
 ONEMIND = {"difficulty": "mind", "goalVersion": 1, "planVersion": 2,
            "milestones": [{"title": "Open the invoice", "state": "done"}, {"title": "Pay it", "state": "running"}],
            "step": "Tapping \"Pay\"", "wakes": 2, "wakeLines": ["Replan: the app opened on the wrong account"],

@@ -23,6 +23,8 @@ interface Crew {
     fun drain(): List<Pair<String, String>> = emptyList()
     /** Alpha 144: the [Recovery] ladder before a check-in; what it did, or null when nothing helped. */
     fun recover(): String? = null
+    /** Plan 75: how the crew's moves were decided so far, for the run record (null: not counted). */
+    fun stats(): com.cyclone.mobile.mind.modes.RunRecord.Moves? = null
 }
 
 /** The DONE call: one Decisions request answered by every usable provider. */
@@ -36,11 +38,10 @@ class EngineCrew(
     private val hands: MindToolbox,
     breaker: Breaker,
     private val settings: SettingReader? = null,
-    shadow: (StepScreen, Step) -> Unit = { _, _ -> },
     memory: MoveMemory? = null,
 ) : Crew {
     private val recorded = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, String>>()
-    private val engine = StepEngine(eyes, board, hands, breaker, settings, record = { kind, line -> recorded += kind to line }, shadow = shadow,
+    private val engine = StepEngine(eyes, board, hands, breaker, settings, record = { kind, line -> recorded += kind to line },
         memory = memory)
     private var undoCalls = 0
 
@@ -71,6 +72,8 @@ class EngineCrew(
         recorded += "recover" to (done?.let { "Got unstuck: $it" } ?: "Tried to get unstuck (close, Back, reopen): nothing changed")
         return done
     }
+
+    override fun stats(): com.cyclone.mobile.mind.modes.RunRecord.Moves = engine.stats
 
     companion object { const val MAX_UNDO = 6 }
 }

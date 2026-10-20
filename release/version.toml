@@ -1,29 +1,29 @@
-# Cyclone V5 alpha.144 dev1: field test 143, fixed at the root. A tap is proven by the screen's identity (a live feed
-# moving by itself is not proof), the route no longer depends on the clock, "google maps" is one app, a stuck run tries
-# to get unstuck before it asks, ask.status follows its own mission, a busy feed is read instead of retried away, and
-# the brain store stops freezing the phone (plan 73). On alpha.143 dev1. Phone and PC. Physical acceptance UNVERIFIED.
+# Cyclone V5 alpha.145 dev1: measure and harden (plan 75, first release). Every request records where its time and
+# money went (ask.status "record"); a OneMind run moves to the owner's backup model instead of failing and keeps to the
+# owner's working time; the retired Pilot and the unused vision shadow are gone; the decisions Lab tests both models on
+# the same requests; Lab "page" checks read the screen by meaning. On alpha.144 dev1. Phone and PC. Physical UNVERIFIED.
 schema = 1
-product_version = "5.0.0-alpha.144.dev1"
+product_version = "5.0.0-alpha.145.dev1"
 channel = "development"
-android_version_code = 298
-python_version = "5.0.0-alpha.144.dev1"
+android_version_code = 299
+python_version = "5.0.0-alpha.145.dev1"
 
 [components]
-mobile = "5.0.0-alpha.144.dev1"
+mobile = "5.0.0-alpha.145.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
 glass = "1.0.0-alpha.68"
-device_gateway = "5.0.0-alpha.144.dev1"
-mcp = "5.0.0-alpha.144.dev1"
+device_gateway = "5.0.0-alpha.145.dev1"
+mcp = "5.0.0-alpha.145.dev1"
 
 [release]
-previous_mobile_version = "5.0.0-alpha.143.dev1"
+previous_mobile_version = "5.0.0-alpha.144.dev1"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha144-field-test-143"
+candidate_generation = "cyclone-v5-alpha145-measure-and-harden"

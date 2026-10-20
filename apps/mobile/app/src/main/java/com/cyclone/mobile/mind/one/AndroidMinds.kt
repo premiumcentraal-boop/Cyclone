@@ -48,7 +48,7 @@ object AndroidMinds {
                 .put(JSONObject().put("role", "user").put("content", material))
             val reply = runCatching { model.complete(MindModelRequest(messages, emptyList(), true, LUNA_MS)) }.getOrNull()
             ledger.add(LedgerEntry(clock(), "luna", LUNA, reply?.usage?.promptTokens ?: 0, 0, reply?.usage?.completionTokens ?: 0,
-                reply?.usage?.costUsd ?: 0.0, clock() - started, reply != null))
+                reply?.usage?.costUsd ?: 0.0, clock() - started, reply != null, stage = "compact"))
             reply?.text?.trim()?.takeIf { it.isNotBlank() }
         }
     }

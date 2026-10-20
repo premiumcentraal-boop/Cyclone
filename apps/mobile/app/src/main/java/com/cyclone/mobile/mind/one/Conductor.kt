@@ -134,6 +134,15 @@ class Conductor(
     /** What the first briefing also carries: memory, recent missions, an attachment, the Instant baton. */
     opening: List<String> = emptyList(),
     private val sleep: (Long) -> Unit = { Thread.sleep(it) },
+    /**
+     * Plan 75 (alpha 145): the owner's backup model, used from the first call the selected model can't answer until the
+     * run ends. Null: the selected model only, as before.
+     */
+    private val backup: ((Effort) -> MindModel)? = null,
+    /** Plan 75: the owner's working time for this run (time waiting on the owner and paused doesn't count). Null: none. */
+    private val workingMs: Long? = null,
+    /** Working time a resumed run already spent. */
+    spentMs: Long = 0L,
 ) {
     private var profile = profile
     var score: Score = (start ?: Score.start(runId, profile.difficulty, goalText, clock())).copy(difficulty = profile.difficulty)
@@ -162,6 +171,22 @@ class Conductor(
     private val movesSinceGlance = mutableListOf<String>()
     private var feed: Feed? = null
     private var depth = 0
+    /** Plan 75: true once the run moved to the backup model; it stays there. */
+    private var switched = false
+    private val startedAt = clock() - spentMs
+    /** Time spent waiting for the owner (a check-in, a question) or paused: not working time. */
+    private var waitedMs = 0L
+
+    /** The model for [effort]: the selected one, or the backup once the run switched to it. */
+    private fun mind(effort: Effort): MindModel = (if (switched) backup else null)?.invoke(effort) ?: brain(effort)
+
+    /** Working time so far: the run's time less what it spent waiting on the owner. */
+    fun workedMs(): Long = (clock() - startedAt - waitedMs).coerceAtLeast(0L)
+
+    private inline fun <T> waiting(block: () -> T): T {
+        val from = clock()
+        try { return block() } finally { waitedMs += clock() - from }
+    }
 
     private class End(val outcome: ConductorOutcome) : RuntimeException(null, null, false, false)
 
@@ -191,6 +216,7 @@ class Conductor(
         while (true) {
             if (owner.cancelled()) end(RunEnd.CANCELLED, "Stopped by the owner.")
             holdWhilePaused()
+            outOfTime()
             steers()
             pollGlance()
             owner.messages().filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.let { said ->
@@ -223,7 +249,7 @@ class Conductor(
         if (!owner.paused()) return
         score = score.event("pause", "Paused by the owner", clock())
         publish()
-        while (owner.paused() && !owner.cancelled()) sleep(PAUSE_POLL_MS)
+        waiting { while (owner.paused() && !owner.cancelled()) sleep(PAUSE_POLL_MS) }
         if (owner.cancelled()) end(RunEnd.CANCELLED, "Stopped by the owner.")
         score = score.event("pause", "Resumed", clock())
     }
@@ -323,7 +349,7 @@ class Conductor(
         }
         score = score.event("check_in", "Asked the owner: stuck on $reason", clock())
         listener.onNotice(OneMindPrompt.checkIn(reason))
-        when (val answer = runCatching { owner.checkIn(reason) }.getOrDefault(CheckIn.Stop)) {
+        when (val answer = waiting { runCatching { owner.checkIn(reason) }.getOrDefault(CheckIn.Stop) }) {
             CheckIn.KeepGoing -> { breaker.checkedIn(); score = score.event("owner", "The owner said keep going", clock()) }
             CheckIn.Stop -> end(RunEnd.STOPPED, "Stopped at the check-in: stuck on $reason.")
             is CheckIn.Steer -> { breaker.checkedIn(); steer(answer.text) }
@@ -401,7 +427,7 @@ class Conductor(
 
     /** The first call of a run, and of a handover: a plan must come back. */
     private fun plan(kind: WakeKind, trigger: String, reason: String, notes: List<String> = emptyList()) {
-        val model = brain(kind.effort)
+        val model = mind(kind.effort)
         if (profile.streams && model is StreamingMindModel) { streamPlan(model, kind, trigger, reason, notes); return }
         var reply = think(kind, trigger, reason, screen = true, notes = notes)
         if (reply.plan == null && reply.kind in NEEDS_A_PLAN) {
@@ -445,10 +471,18 @@ class Conductor(
         return WakeReply.read(reply.text, goalText, "w$wakes.")
     }
 
+    /**
+     * One mind call, with recovery (plan 75, alpha 145): a transient failure or a slow answer is asked again once; a
+     * model that can't answer (twice, rate-limited or refusing the request) hands the run to the owner's backup model,
+     * which keeps it to the end; with no backup left, a rate limit is waited out (its Retry-After, at most
+     * [MAX_RATE_WAIT_MS], [MAX_RATE_WAITS] times). Only then does the run fail.
+     */
     private fun call(kind: WakeKind): MindModelReply {
-        val model = brain(kind.effort)
         var lastError: Exception? = null
-        repeat(2) { attempt ->
+        var failures = 0
+        var waits = 0
+        while (true) {
+            val model = mind(kind.effort)
             if (owner.cancelled()) end(RunEnd.CANCELLED, "Stopped by the owner.")
             val started = clock()
             try {
@@ -459,11 +493,40 @@ class Conductor(
                 end(RunEnd.CANCELLED, "Stopped by the owner.")
             } catch (error: Exception) {
                 lastError = error
+                failures++
                 record(kind, model, null, clock() - started, ok = false)
-                listener.onNotice("${model.label} didn't answer${if (attempt == 0) "; asking again" else ""}: ${com.cyclone.mobile.mind.mission.FailureText.describe(error)}")
+                val why = com.cyclone.mobile.mind.mission.FailureText.describe(error)
+                val canSwitch = !switched && backup != null
+                val hopeless = error is MindModelError.RateLimited || error is MindModelError.Fatal || error is MindModelError.ToolsUnsupported
+                when {
+                    !hopeless && failures < 2 -> listener.onNotice("${model.label} didn't answer; asking again: $why")
+                    canSwitch -> {
+                        switched = true
+                        failures = 0
+                        conversation.forgetReasoning()
+                        val next = mind(kind.effort)
+                        score = score.event("model", "Switched to the backup model ${next.label}: ${model.label} couldn't answer", clock())
+                        listener.onNotice("Switched from ${model.label} to ${next.label}: $why")
+                    }
+                    error is MindModelError.RateLimited && waits < MAX_RATE_WAITS -> {
+                        waits++
+                        val wait = error.retryAfterMs.coerceIn(1_000L, MAX_RATE_WAIT_MS)
+                        listener.onNotice("${model.label} is rate-limited; waiting ${wait / 1000} s.")
+                        sleep(wait)
+                    }
+                    else -> end(RunEnd.FAILED, "${model.label} could not answer: ${lastError.message ?: "no reply"}")
+                }
             }
         }
-        end(RunEnd.FAILED, "${model.label} could not answer: ${lastError?.message ?: "no reply"}")
+    }
+
+    /** Plan 75: the owner's working time is used up: an honest stop that can be continued, never a silent one. */
+    private fun outOfTime() {
+        val limit = workingMs ?: return
+        if (workedMs() < limit) return
+        val minutes = (limit / 60_000L).coerceAtLeast(1L)
+        score = score.event("time", "Working time used up ($minutes min)", clock())
+        end(RunEnd.GAVE_UP, "Used the $minutes minutes of working time before finishing. ${report()}")
     }
 
     private fun request() = MindModelRequest(conversation.toWire(true), if (usedWheel) wheel?.specs().orEmpty() else emptyList(), true, callMs)
@@ -471,7 +534,7 @@ class Conductor(
     private fun record(kind: WakeKind, model: MindModel, reply: MindModelReply?, ms: Long, ok: Boolean) {
         ledger.add(LedgerEntry(clock(), if (profile.difficulty == Difficulty.FLASH) "flash" else "mind", model.id,
             inputTokens = reply?.usage?.promptTokens ?: 0, outputTokens = reply?.usage?.completionTokens ?: 0,
-            costUsd = reply?.usage?.costUsd ?: 0.0, ms = ms, ok = ok))
+            costUsd = reply?.usage?.costUsd ?: 0.0, ms = ms, ok = ok, stage = kind.name.lowercase()))
         score = score.event("ledger", "${kind.name.lowercase()} call: ${model.label}${if (ok) "" else " (failed)"}", clock())
     }
 
@@ -544,7 +607,7 @@ class Conductor(
             return
         }
         score = score.event("ask", "Asked the owner: ${question.take(160)}", clock())
-        val answer = runCatching { owner.ask(question, reply.choices) }.getOrNull()
+        val answer = waiting { runCatching { owner.ask(question, reply.choices) }.getOrNull() }
         if (answer == null) {
             if (owner.cancelled()) end(RunEnd.CANCELLED, "Stopped by the owner.")
             end(RunEnd.STOPPED, "Waiting for the owner: $question")
@@ -679,7 +742,7 @@ class Conductor(
         val pending = PendingGlance()
         glance = pending
         movesSinceGlance.clear()
-        val model = brain(Effort.LOW)
+        val model = mind(Effort.LOW)
         val request = request()
         glanceRunner {
             val started = clock()
@@ -790,7 +853,7 @@ class Conductor(
         if (f.open) return
         syncFeed()
         feed = null
-        val model = brain(WakeKind.PLAN.effort)
+        val model = mind(WakeKind.PLAN.effort)
         val raw = f.reply
         if (raw == null) {
             record(WakeKind.PLAN, model, null, clock() - f.started, ok = false)
@@ -868,6 +931,9 @@ class Conductor(
         const val MAX_DETOURS = 3
         const val MAX_DEPTH = 8
         const val KEEP_RECENT = 6
+        /** Plan 75: how often, and how long at most, a rate limit is waited out once no backup is left. */
+        const val MAX_RATE_WAITS = 2
+        const val MAX_RATE_WAIT_MS = 5_000L
         const val GLANCE_POLL_MS = 200L
         const val PAUSE_POLL_MS = 250L
 

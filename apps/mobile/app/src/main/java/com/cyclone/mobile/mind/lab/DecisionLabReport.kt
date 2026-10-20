@@ -40,6 +40,27 @@ object DecisionLabReport {
     }
 
     /**
+     * Plan 75 §8.2: two providers on the same requests. Of those both answered: how often they routed alike, how often
+     * that shared answer was right, how often a shared answer was too low on a risky request (must be 0), and who was
+     * right when they split. Ids and counts only. Pure.
+     */
+    fun pair(a: String, aSamples: List<LabSample>, b: String, bSamples: List<LabSample>, atMs: Long): JSONObject {
+        val other = bSamples.filter { it.rung != null }.associateBy { it.request.id }
+        val both = aSamples.filter { it.rung != null }.mapNotNull { x -> other[x.request.id]?.let { y -> x to y } }
+        val agreed = both.filter { (x, y) -> x.rung == y.rung }
+        val split = both - agreed.toSet()
+        fun right(s: LabSample) = GoldenSet.verdict(s.request, s.rung) == GoldenVerdict.RIGHT
+        return JSONObject()
+            .put("kind", "both").put("atMs", atMs).put("providers", JSONArray(listOf(a, b)))
+            .put("requests", aSamples.size).put("bothAnswered", both.size)
+            .put("agreed", agreed.size).put("agreedRight", agreed.count { right(it.first) })
+            .put("agreedRiskyUnder", JSONArray(agreed.filter { (x, _) -> x.request.risks.isNotEmpty() &&
+                GoldenSet.verdict(x.request, x.rung) == GoldenVerdict.UNDER }.map { it.first.request.id }))
+            .put("split", split.size)
+            .put("splitRight", JSONObject().put(a, split.count { right(it.first) }).put(b, split.count { right(it.second) }))
+    }
+
+    /**
      * Reliability bins for the action question, on requests labelled with one action: per confidence tenth from 0.5,
      * how many answers and how many named the labelled action.
      */

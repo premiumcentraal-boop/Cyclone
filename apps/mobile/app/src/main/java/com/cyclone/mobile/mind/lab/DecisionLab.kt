@@ -39,18 +39,45 @@ object DecisionLab {
         return true
     }
 
+    /**
+     * Plan 75 (alpha 145): every usable provider on the same golden set, one after the other, then the comparison the
+     * step board depends on: how often the two agree, how often they're right when they do, and who is right when they
+     * split. False when a run is already going or there is no key. [done] gets the comparison.
+     */
+    fun startAll(context: Context, done: (JSONObject?) -> Unit = {}): Boolean {
+        val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return false
+        val providers = DecisionProvider.entries.filter { it.usable }
+        if (providers.size < 2 || !running.compareAndSet(false, true)) return false
+        val app = context.applicationContext
+        Decisions.refresh(app)
+        Thread({
+            val report = runCatching {
+                val runs = providers.map { p -> p to samples(app, key, p) }
+                runs.forEach { (p, list) -> save(app, p.wire, DecisionLabReport.build(p.wire, p.model, System.currentTimeMillis(), list)) }
+                DecisionLabReport.pair(runs[0].first.wire, runs[0].second, runs[1].first.wire, runs[1].second, System.currentTimeMillis())
+                    .also { save(app, BOTH, it) }
+            }.getOrNull()
+            running.set(false)
+            done(report)
+        }, "cyclone-decision-lab").start()
+        return true
+    }
+
     private fun run(context: Context, key: String, provider: DecisionProvider): JSONObject {
+        val report = DecisionLabReport.build(provider.wire, provider.model, System.currentTimeMillis(), samples(context, key, provider))
+        save(context, provider.wire, report)
+        return report
+    }
+
+    private fun samples(context: Context, key: String, provider: DecisionProvider): List<LabSample> {
         val requests = GoldenSet.parse(context.assets.open(GoldenSet.ASSET).bufferedReader().use { it.readText() })
             .filter { it.tag !in GoldenSet.ON_PHONE_TAGS && it.rung != "answer" }
         val pool = Executors.newFixedThreadPool(PARALLEL)
-        val samples = try {
+        return try {
             pool.invokeAll(requests.map { r -> Callable { ask(key, provider, r) } }).map { it.get() }
         } finally {
             pool.shutdown()
         }
-        val report = DecisionLabReport.build(provider.wire, provider.model, System.currentTimeMillis(), samples)
-        save(context, provider, report)
-        return report
     }
 
     private fun ask(key: String, provider: DecisionProvider, request: GoldenRequest): LabSample {
@@ -71,14 +98,14 @@ object DecisionLab {
         }
     }
 
-    /** The last report per provider ({"jev": {...}, "openai": {...}}). */
+    /** The last report per provider ({"jev": {...}, "openai": {...}}), and the last comparison of both ("both"). */
     fun reports(context: Context): JSONObject = runCatching {
         JSONObject(file(context).takeIf { it.isFile }?.readText() ?: "{}")
     }.getOrDefault(JSONObject())
 
-    private fun save(context: Context, provider: DecisionProvider, report: JSONObject) = synchronized(this) {
+    private fun save(context: Context, name: String, report: JSONObject) = synchronized(this) {
         runCatching {
-            val all = reports(context).put(provider.wire, report)
+            val all = reports(context).put(name, report)
             val target = file(context)
             target.parentFile?.mkdirs()
             val temp = File(target.parentFile, target.name + ".tmp")
@@ -88,6 +115,8 @@ object DecisionLab {
     }
 
     private fun file(context: Context) = File(File(context.applicationContext.filesDir, "decide"), FILE)
+
+    const val BOTH = "both"
 
     /** The Lab scores at the router's careful bar. */
     private const val BAR = 0.9

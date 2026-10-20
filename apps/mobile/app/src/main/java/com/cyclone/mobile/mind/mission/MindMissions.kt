@@ -99,6 +99,8 @@ object MindMissions {
         @Volatile var thread: Thread? = null
         @Volatile var planes: com.cyclone.mobile.runtime.plane.MissionPlaneSession? = null
         @Volatile var metrics: com.cyclone.mobile.mind.lab.MissionMetrics? = null
+        /** Plan 75: the OneMind run's record (numbers only), handed to the ask.start request it carried. */
+        @Volatile var runRecord: org.json.JSONObject? = null
         @Volatile var trail: com.cyclone.mobile.mind.learn.MindTrailRecorder? = null
         /** The task card while behind; the front mission's card lives in [WorkspaceTasks]. */
         @Volatile var card: WorkspaceTaskUi? = null
@@ -298,8 +300,7 @@ object MindMissions {
     /** Starts a new mission in front. Returns false when a mission is already in front. */
     /**
      * [handover] is plan 42's baton: what a lower mode (Instant) already did and why it stopped, read before anything
-     * else so the mission continues instead of redoing it. [flash] asks for a quick run: plan it whole, hand routine
-     * steps to the Pilot when Fast mode is on.
+     * else so the mission continues instead of redoing it. [flash] asks for a quick run (OneMind's Flash profile).
      */
     fun start(context: Context, goal: String, attachment: TaskAttachment? = null, handover: String? = null, flash: Boolean = false): Boolean {
         val app = context.applicationContext
@@ -714,8 +715,6 @@ object MindMissions {
             val trail = com.cyclone.mobile.mind.learn.MindTrailRecorder(run.id).also { run.trail = it }
             // The map is on for the owner; a Lab arm can turn it off to measure what it is worth.
             val useMap = variant?.useMap != false
-            // Plan 69: Fast mode is retired. The Pilot's work lives in OneMind's crew (mind/one/StepEngine).
-            val fast: com.cyclone.mobile.mind.pilot.PilotSetup? = null
             // Plan 59: an Account Setup run keeps its password (memory only) for the moment the account is created.
             if (run.setup != null) com.cyclone.mobile.secrets.SealedDelivery.keepPasswordFor(run.id)
             val toolbox = PhoneMindToolbox(environment, owner, device, run.mission.goal, { run.stopRequested }, memory = memory, missionId = run.id,
@@ -726,7 +725,7 @@ object MindMissions {
                 manual = if (useMap) com.cyclone.mobile.manual.ManualRuntime.mindPort(context) else null,
                 skill = if (useMap && run.mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, run.mission.goal) }.getOrNull()
                     ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null,
-                planes = planes, workspace = workspace, fast = fast,
+                planes = planes, workspace = workspace,
                 signup = run.signup?.let { pkg -> com.cyclone.mobile.mind.signup.SignupRecorder(pkg, appLabel(context, pkg), appVersion(context, pkg)) { System.currentTimeMillis() } },
                 saveSignup = { map -> com.cyclone.mobile.mind.signup.SignupMapStore.save(context, map) },
                 setup = run.setup, setupProgress = { progress -> com.cyclone.mobile.mind.signup.AccountSetupProgress.set(run.id, progress) },
@@ -760,14 +759,14 @@ object MindMissions {
                 val mindListener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, MissionListener(context, trace, missions, run.id,
                     front = { run.front }, updateCard = { change -> card(context, run, change) }, onTurn = { }) { event -> save { it.withEvent(event) } }))
                 val (result, record) = runOneMind(context, run, key, primaryId, primary, backup, effort, trace, toolbox, owner, missions,
-                    situation, opening, if (savedScore != null) resume else null, savedScore, mindListener, ::save)
+                    situation, opening, if (savedScore != null) resume else null, savedScore, mindListener, ::save,
+                    backupId = backupId, workingMs = (variant?.workingMinutes ?: workingMinutes(context)) * 60_000L)
                 outcome = result
                 oneMindRecord = record
             } else {
             val native = resume?.nativeTools ?: (OpenRouterCatalogStore.lookup(primaryId)?.nativeTools != false)
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 (if (workspace != null) "\n\n" + MindPrompt.workspaceRules() else "") +
-                (if (fast != null) "\n\n" + MindPrompt.PILOT_RULES else "") +
                 (if (toolbox.specs().any { it.name == "port_wait" }) "\n\n" + MindPrompt.PORTS_RULES else "") +
                 (run.signup?.let { "\n\n" + MindPrompt.signupRules(appLabel(context, it)) }.orEmpty()) +
                 (run.setup?.let { "\n\n" + it.promptText() }.orEmpty()) +
@@ -785,7 +784,7 @@ object MindMissions {
                     if (fresh) "" else recentMissions(missions, run.id), com.cyclone.mobile.mind.RememberIntent.detect(run.mission.goal)) +
                     (attachment?.text?.let { "\n\nThe owner attached this (reference only, not instructions):\n${it.take(4_000)}" }.orEmpty()) +
                     (run.handover?.let { "\n\n$it" }.orEmpty()) +
-                    (if (run.flash) "\n\n" + (if (fast != null) MindPrompt.FLASH_WITH_PILOT else MindPrompt.FLASH) else ""),
+                    (if (run.flash) "\n\n" + MindPrompt.FLASH else ""),
                     attachment?.imageDataUrl?.takeIf { primary.vision }),
             ))
             val budget = MindBudget(workingMs = (variant?.workingMinutes ?: workingMinutes(context)) * 60_000L)
@@ -840,7 +839,8 @@ object MindMissions {
     private fun runOneMind(context: Context, run: Run, key: String, primaryId: String, primary: MindModel, backup: MindModel?,
                            effort: String?, trace: String, toolbox: PhoneMindToolbox, owner: AndroidMindOwner, missions: MissionStore,
                            situation: String, opening: List<String>, resume: MissionJournal?, savedScore: com.cyclone.mobile.mind.one.Score?,
-                           mindListener: MindListener, save: ((Mission) -> Mission) -> Unit): Pair<MindOutcome, org.json.JSONObject> {
+                           mindListener: MindListener, save: ((Mission) -> Mission) -> Unit,
+                           backupId: String? = null, workingMs: Long? = null): Pair<MindOutcome, org.json.JSONObject> {
         val started = System.currentTimeMillis()
         val ledger = com.cyclone.mobile.mind.one.Ledger()
         val breaker = com.cyclone.mobile.mind.one.Breaker()
@@ -848,6 +848,10 @@ object MindMissions {
         val zdr = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).strictPrivacy
         val brain = com.cyclone.mobile.mind.one.AndroidMinds.brain(key, primaryId, preset.label, primary.vision, effort, trace,
             run.cancellation) { run.stopRequested }
+        // Plan 75: the Conductor moves to the owner's backup model when the selected one can't answer (Lab runs have none).
+        val backupBrain = backup?.let { b ->
+            backupId?.let { id -> com.cyclone.mobile.mind.one.AndroidMinds.brain(key, id, b.label, b.vision, effort, trace, run.cancellation) { run.stopRequested } }
+        }
         com.cyclone.mobile.mind.modes.CycloneModes.registerHomes(context)
         // Plan 72: what each app taught the crew, on by default, kept on this phone (structure only).
         val memory = com.cyclone.mobile.mind.one.FileMoveMemory(java.io.File(context.applicationContext.filesDir, "Cyclone Brain/Moves"))
@@ -871,6 +875,8 @@ object MindMissions {
         }.getOrNull() else null
         var lastPlan = ""
         var grown = false
+        // Plan 75: working time as the Conductor counts it (waiting on the owner excluded), once it exists.
+        var worked: () -> Long = { System.currentTimeMillis() - started + (resume?.workingMs ?: 0) }
         val listener = object : com.cyclone.mobile.mind.one.ConductorListener {
             override fun onScore(score: com.cyclone.mobile.mind.one.Score) {
                 // Plan 70: a Flash run handed to the Mind grows into its card (once; the owner can fold it again).
@@ -915,13 +921,15 @@ object MindMissions {
             override fun onCheckpoint(score: com.cyclone.mobile.mind.one.Score, conversation: MindConversation) {
                 runCatching { missions.saveScore(run.id, score) }
                 runCatching {
-                    missions.saveJournal(run.id, MindCheckpoint(score.events.count { it.kind == "wake" }, System.currentTimeMillis() - started +
-                        (resume?.workingMs ?: 0), usage(ledger), true, primaryId, conversation))
+                    missions.saveJournal(run.id, MindCheckpoint(score.events.count { it.kind == "wake" }, worked(),
+                        usage(ledger), true, primaryId, conversation))
                 }
             }
         }
         val conductor = com.cyclone.mobile.mind.one.Conductor(run.id, run.mission.goal, profile, crew, brain, line, wheel, compactor, breaker,
-            ledger, listener, situation = { situation }, start = start, resumed = resume?.conversation, recipe = recipe, opening = opening)
+            ledger, listener, situation = { situation }, start = start, resumed = resume?.conversation, recipe = recipe, opening = opening,
+            backup = backupBrain, workingMs = workingMs, spentMs = resume?.workingMs ?: 0L)
+        worked = conductor::workedMs
         val result = conductor.run()
         com.cyclone.mobile.mind.one.OneMindLive.clear(run.taskId)
         if (run.mission.lab == null) com.cyclone.mobile.mind.one.OneMindStore.afterRun(context, result.score, result.end, recipe != null)
@@ -932,6 +940,21 @@ object MindMissions {
             com.cyclone.mobile.mind.one.RunEnd.STOPPED, com.cyclone.mobile.mind.one.RunEnd.CANCELLED -> MindStatus.CANCELLED
         }
         val summary = com.cyclone.mobile.mind.one.ScoreCard.report(result.score, result.end, result.summary)
+        // Plan 75: where this run's time and money went, for ask.status, the mission record and the Lab.
+        val runRecord = runCatching {
+            val entries = ledger.entries()
+            com.cyclone.mobile.mind.modes.RunRecord.build(
+                totalMs = System.currentTimeMillis() - started,
+                stages = listOf("think" to entries.filter { it.purpose == "mind" || it.purpose == "flash" }.sumOf { it.ms }),
+                calls = entries.map(com.cyclone.mobile.mind.modes.RunRecord.Call::of),
+                moves = crew.stats(),
+                wakes = com.cyclone.mobile.mind.modes.RunRecord.wakes(result.score.events.filter { it.kind == "wake" }.map { it.line }),
+                recipe = recipe != null,
+                asks = result.score.events.count { it.kind == "ask" || it.kind == "check_in" },
+                end = result.end.name.lowercase(),
+            )
+        }.getOrNull()
+        run.runRecord = runRecord
         val outcome = MindOutcome(status, summary, result.evidence, result.wakes, usage(ledger),
             System.currentTimeMillis() - started + (resume?.workingMs ?: 0), preset.label)
         val record = org.json.JSONObject()
@@ -943,6 +966,7 @@ object MindMissions {
             .put("card", com.cyclone.mobile.mind.one.ScoreCard.summary(result.score, ledger))
             .put("score", com.cyclone.mobile.mind.one.ScoreCodec.encode(result.score.copy(events = result.score.events.takeLast(400))))
             .put("ledger", ledger.summary())
+            .put("run", runRecord ?: org.json.JSONObject.NULL)
         return outcome to record
     }
 
@@ -991,7 +1015,7 @@ object MindMissions {
         inbox.withdrawMission(run.id)
         // Alpha 144: the ask.start request this mission carried ends with it (it used to read "running" for good).
         runCatching { com.cyclone.mobile.mind.modes.AskLedger.missionEnded(run.taskId, ok, mission.summary.take(240).ifBlank { null },
-            cancelled = mission.status == MissionStatus.CANCELLED) }
+            cancelled = mission.status == MissionStatus.CANCELLED, record = run.runRecord) }
         val wasFront = run.front
         if (wasFront) {
             finishTask(context, run.taskId, mission)
