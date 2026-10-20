@@ -926,9 +926,13 @@ object MindMissions {
                 }
             }
         }
+        // Plan 75 alpha 147: a Flash run's first officer is the fast model (DeepSeek Flash by default); it plans, consults and
+        // checks barriers, and the captain re-plans. A Mind run has none.
+        val officer = if (run.flash) com.cyclone.mobile.mind.one.AndroidMinds.brain(key, com.cyclone.mobile.mind.pilot.FastMode.officerModel(context),
+            "First officer", false, "low", trace, run.cancellation) { run.stopRequested } else null
         val conductor = com.cyclone.mobile.mind.one.Conductor(run.id, run.mission.goal, profile, crew, brain, line, wheel, compactor, breaker,
             ledger, listener, situation = { situation }, start = start, resumed = resume?.conversation, recipe = recipe, opening = opening,
-            backup = backupBrain, workingMs = workingMs, spentMs = resume?.workingMs ?: 0L)
+            backup = backupBrain, workingMs = workingMs, spentMs = resume?.workingMs ?: 0L, firstOfficer = officer)
         worked = conductor::workedMs
         val result = conductor.run()
         com.cyclone.mobile.mind.one.OneMindLive.clear(run.taskId)
