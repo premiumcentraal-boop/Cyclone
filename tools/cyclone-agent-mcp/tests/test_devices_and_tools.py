@@ -290,7 +290,7 @@ def test_lab_tools_start_experiments_and_report_failures_compactly():
     gateway = _LabGateway()
     tools = PhoneTools(gateway=gateway)
     started = tools.call("phone_lab_start", {"device_id": "phone-1", "name": "marks", "missions": ["nav.home"],
-                                             "variants": [{"name": "A"}, {"name": "B", "marks": False}], "repetitions": 2})
+                                             "variants": [{"name": "A"}, {"name": "B", "marks": False}, {"name": "C", "skills": False}], "repetitions": 2})
     assert started["status"] == "running"
     report = tools.call("phone_lab_report", {"experiment_id": "exp-20260925-120000-abcd"})
     assert "trials" not in report and report["failures"][0]["category"] == "false_success"

@@ -1,0 +1,535 @@
+[
+  {
+    "id": "tb.ig.maps.reels",
+    "title": "Instagram map: reels",
+    "goal": "Open Reels in Instagram",
+    "category": "instagram",
+    "suites": [
+      "ig-maps"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Reels"
+        ]
+      }
+    ],
+    "notes": "Plain goal, no built-in skill. Read-only. Checks use chrome words only; never content."
+  },
+  {
+    "id": "tb.ig.maps.messages-requests",
+    "title": "Instagram map: messages-requests",
+    "goal": "See message requests in Instagram",
+    "category": "instagram",
+    "suites": [
+      "ig-maps"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Requests"
+        ]
+      }
+    ],
+    "notes": "Plain goal, no built-in skill. Read-only. Checks use chrome words only; never content."
+  },
+  {
+    "id": "tb.ig.maps.messages-primary",
+    "title": "Instagram map: messages-primary",
+    "goal": "Open my Primary messages in Instagram",
+    "category": "instagram",
+    "suites": [
+      "ig-maps"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Primary",
+          "General",
+          "Requests"
+        ]
+      }
+    ],
+    "notes": "Plain goal, no built-in skill. Read-only. Checks use chrome words only; never content."
+  },
+  {
+    "id": "tb.ig.maps.messages-general",
+    "title": "Instagram map: messages-general",
+    "goal": "Show my General messages in Instagram",
+    "category": "instagram",
+    "suites": [
+      "ig-maps"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "page",
+        "selected": [
+          "General"
+        ]
+      }
+    ],
+    "notes": "Plain goal, no built-in skill. Read-only. Checks use chrome words only; never content."
+  },
+  {
+    "id": "tb.ig.maps.profile-tagged",
+    "title": "Instagram map: profile-tagged",
+    "goal": "Show the Tagged posts on my Instagram profile",
+    "category": "instagram",
+    "suites": [
+      "ig-maps"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "page",
+        "selected": [
+          "Tagged"
+        ]
+      }
+    ],
+    "notes": "Plain goal, no built-in skill. Read-only. Checks use chrome words only; never content."
+  },
+  {
+    "id": "tb.ig.maps.followers",
+    "title": "Instagram map: followers",
+    "goal": "Show the list of people who follow me on Instagram",
+    "category": "instagram",
+    "suites": [
+      "ig-maps"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 8,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Remove"
+        ]
+      }
+    ],
+    "notes": "Plain goal, no built-in skill. Read-only. Checks use chrome words only; never content."
+  },
+  {
+    "id": "tb.ig.maps.close-friends",
+    "title": "Instagram map: close-friends",
+    "goal": "Open my Close friends list in Instagram",
+    "category": "instagram",
+    "suites": [
+      "ig-maps"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 8,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Close friends"
+        ]
+      }
+    ],
+    "notes": "Plain goal, no built-in skill. Read-only. Checks use chrome words only; never content."
+  },
+  {
+    "id": "tb.ig.maps.own-profile",
+    "title": "Instagram map: own-profile",
+    "goal": "Open my own Instagram profile",
+    "category": "instagram",
+    "suites": [
+      "ig-maps"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Edit profile",
+          "Share profile"
+        ]
+      }
+    ],
+    "notes": "Plain goal, no built-in skill. Read-only. Checks use chrome words only; never content."
+  },
+  {
+    "id": "tb.ig.skill.profile",
+    "title": "Instagram skill: profile",
+    "goal": "Instagram skill: Open my Instagram profile. Open Instagram and its Profile tab. Verify my own profile header. Do not edit anything or open suggested accounts.",
+    "category": "instagram",
+    "suites": [
+      "ig-skills"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Edit profile",
+          "Share profile"
+        ]
+      }
+    ],
+    "notes": "Built-in read-only skill goal, copied from InstagramSkills.kt. Read-only."
+  },
+  {
+    "id": "tb.ig.skill.profile-editor",
+    "title": "Instagram skill: profile-editor",
+    "goal": "Instagram skill: Open Instagram profile editing. Open my Instagram Profile > Edit profile. Inspect the visible field labels without typing, changing my picture or submitting changes.",
+    "category": "instagram",
+    "suites": [
+      "ig-skills"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Username",
+          "Bio"
+        ]
+      }
+    ],
+    "notes": "Built-in read-only skill goal, copied from InstagramSkills.kt. Read-only."
+  },
+  {
+    "id": "tb.ig.skill.search-accounts",
+    "title": "Instagram skill: search-accounts",
+    "goal": "Instagram skill: Search Instagram accounts. Open Instagram Search and explore > Search, search for instagram, then Accounts. Verify the query and results; do not follow, message or choose an ambiguous account.",
+    "category": "instagram",
+    "suites": [
+      "ig-skills"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 8,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Accounts"
+        ]
+      }
+    ],
+    "notes": "{query} is fixed to 'instagram' (an official public account). Nothing is followed or opened."
+  },
+  {
+    "id": "tb.ig.skill.saved",
+    "title": "Instagram skill: saved",
+    "goal": "Instagram skill: Open Instagram saved items. Open Instagram own Profile > Options > Saved. Verify the Saved categories; do not save, unsave or create a collection.",
+    "category": "instagram",
+    "suites": [
+      "ig-skills"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "all": [
+          "Collections",
+          "Series"
+        ]
+      }
+    ],
+    "notes": "Built-in read-only skill goal, copied from InstagramSkills.kt. Read-only."
+  },
+  {
+    "id": "tb.ig.skill.share-profile",
+    "title": "Instagram skill: share-profile",
+    "goal": "Instagram skill: Show my Instagram profile QR. Open Instagram own Profile > Share profile. Verify the QR/profile sharing screen. Do not send, download, copy or scan anything.",
+    "category": "instagram",
+    "suites": [
+      "ig-skills"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "QR code"
+        ]
+      }
+    ],
+    "notes": "Built-in read-only skill goal, copied from InstagramSkills.kt. Read-only."
+  },
+  {
+    "id": "tb.ig.skill.settings",
+    "title": "Instagram skill: settings",
+    "goal": "Instagram skill: Open Instagram settings. Open Instagram own Profile > Options > Settings and activity. Verify the settings menu. Do not toggle anything, add an account or log out.",
+    "category": "instagram",
+    "suites": [
+      "ig-skills"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Account Center",
+          "Your activity"
+        ]
+      }
+    ],
+    "notes": "Built-in read-only skill goal, copied from InstagramSkills.kt. Read-only."
+  },
+  {
+    "id": "tb.ig.skill.requests",
+    "title": "Instagram skill: requests",
+    "goal": "Instagram skill: Check Instagram message requests. Open Instagram Message > Requests; dismiss an optional privacy notice with Not now, then Hidden requests. Report folder availability without accepting, deleting or sending anything.",
+    "category": "instagram",
+    "suites": [
+      "ig-skills"
+    ],
+    "apps": [
+      "com.instagram.android"
+    ],
+    "setup": [
+      {
+        "do": "force_stop",
+        "package": "com.instagram.android"
+      },
+      {
+        "do": "home"
+      }
+    ],
+    "minutes": 6,
+    "checks": [
+      {
+        "check": "foreground",
+        "package": "com.instagram.android"
+      },
+      {
+        "check": "screen",
+        "any": [
+          "Hidden requests",
+          "Requests"
+        ]
+      }
+    ],
+    "notes": "Built-in read-only skill goal, copied from InstagramSkills.kt. Read-only."
+  }
+]

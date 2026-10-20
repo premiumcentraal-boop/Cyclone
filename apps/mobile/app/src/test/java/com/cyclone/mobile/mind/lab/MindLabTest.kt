@@ -41,6 +41,7 @@ class MindLabTest {
             JSONObject().put("name", "A").put("useMap", "on"),
             JSONObject().put("name", "A").put("promptAddendum", "x".repeat(MindLabVariant.MAX_ADDENDUM + 1)),
             JSONObject().put("name", "A").put("promptAddendum", "use password: hunter2"),
+            JSONObject().put("name", "A").put("skills", "off"),
         ).forEach { assertTrue(it.toString(), MindLabVariant.parse(it).isFailure) }
         assertTrue(MindLabVariant.parse(null).isFailure)
     }
@@ -108,5 +109,15 @@ class MindLabTest {
         org.junit.Assert.assertEquals("background",
             MindLabVariant.parse(org.json.JSONObject().put("name", "a").put("plane", "background")).getOrThrow().plane)
         org.junit.Assert.assertTrue(MindLabVariant.parse(org.json.JSONObject().put("name", "a").put("plane", "sideways")).isFailure)
+    }
+
+    @Test fun theSkillsKnobDefaultsToOnAndTheNoSkillsArmSaysSo() {
+        val plain = MindLabVariant.parse(JSONObject().put("name", "A")).getOrThrow()
+        assertTrue("today's behaviour is the default: the reviewed routes are on", plain.skills)
+        val noSkills = MindLabVariant.parse(JSONObject().put("name", "no skills").put("skills", false)).getOrThrow()
+        assertFalse(noSkills.skills)
+        assertEquals(false, noSkills.toJson().getBoolean("skills"))
+        assertEquals("the no-skills arm survives the trip through the store", noSkills, MindLabVariant.parse(noSkills.toJson()).getOrThrow())
+        assertTrue("skills is a Lab knob the phone accepts", "skills" in MindLabVariant.KEYS)
     }
 }

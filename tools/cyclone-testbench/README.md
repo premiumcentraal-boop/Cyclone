@@ -4,7 +4,7 @@ Round-the-clock testing of Cyclone on a real phone, built on Cyclone Lab: missio
 "judgement" suite), a rotation that re-checks what broke, redacted reports and one findings ledger shared between
 Claude sessions.
 
-- People: read [GUIDE.md](GUIDE.md).
+- People: read [GUIDE.md](GUIDE.md). Research on the app map, owner memory and built-in skills: `cyclone-testbench research plan`.
 - Claude: the skill is [.claude/skills/cyclone-testing/SKILL.md](../../.claude/skills/cyclone-testing/SKILL.md).
 - A new PC session starts from [HANDOFF.md](HANDOFF.md).
 

@@ -34,6 +34,7 @@ from typing import Any
 from . import findings as ledger_ops
 from . import preflight as preflight_ops
 from . import profiles as profile_ops
+from . import research as research_ops
 from .gateway import Gateway, GatewayError, find_connection
 from .report import dashboard, render, summarize
 from .results import Results, now_ms
@@ -459,6 +460,51 @@ def cmd_task(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_research_plan(args: argparse.Namespace) -> int:
+    for phase in [args.phase] if args.phase else list(research_ops.PHASES):
+        _out(research_ops.plan_text(phase, reps=args.reps) + "\n")
+    return 0
+
+
+def cmd_research_start(args: argparse.Namespace) -> int:
+    gw = _gateway(args)
+    res = _results(args)
+    suite = research_ops.PHASES[args.phase]["suite"]
+    wanted = {m["id"] for m in research_ops.pack_missions(suite)}
+    installed = [m["id"] for m in _catalog(gw).get("missions") or [] if suite in (m.get("suites") or [])]
+    absent = sorted(wanted - set(installed))
+    if absent:
+        _out(f"✗ Not on Cyclone yet: {', '.join(absent)}. Run `cyclone-testbench install` first.")
+        return 1
+    arms = research_ops.arms_for(args.phase)
+    body = {"deviceId": _pick_device(gw, args.device), "name": f"research · {args.phase}", "missions": installed,
+            "variants": arms, "repetitions": args.reps}
+    experiment = gw.post("/v1/lab/experiments", body)
+    exp_id = experiment.get("id")
+    pending = res.read_jsonl("pending.jsonl")
+    res.write_jsonl("pending.jsonl", pending + [{"experimentId": exp_id, "slot": f"research:{args.phase}", "startedAt": now_ms()}])
+    _out(f"Started {exp_id}: {len(installed)} missions × {len(arms)} arms × {args.reps} reps")
+    _out(f"When it finishes: cyclone-testbench research report --name {args.phase} {exp_id}")
+    return 0
+
+
+def cmd_research_report(args: argparse.Namespace) -> int:
+    gw = _gateway(args)
+    res = _results(args)
+    name = research_ops.check_name(args.name)
+    payloads = [gw.get(f"/v1/lab/experiments/{research_ops.check_experiment_id(exp_id)}") for exp_id in args.experiments]
+    text = research_ops.build_report(name, payloads)
+    folder = res.root / "research"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{name}.md"
+    path.write_text(text, encoding="utf-8")
+    _out(f"Report: {path}")
+    for line in text.splitlines():
+        if line.startswith(("**SAFETY", "Safety failures", "False successes")):
+            _out(line)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cyclone-testbench", description="Round-the-clock Cyclone testing on a real phone.")
     parser.add_argument("--url", help="gateway URL (default: what `cyclone` saved, else http://127.0.0.1:8765)")
@@ -532,6 +578,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("task")
     p.add_argument("task")
     p.set_defaults(fn=cmd_task)
+    p = sub.add_parser("research", help="ablation research: the app map, owner memory and built-in skills, on the phone")
+    research_sub = p.add_subparsers(dest="action", required=True)
+    rp = research_sub.add_parser("plan", help="print a phase's design (no phone needed)")
+    rp.add_argument("--phase", choices=sorted(research_ops.PHASES), help="one phase (default: both)")
+    rp.add_argument("--reps", type=int, default=3)
+    rp.set_defaults(fn=cmd_research_plan)
+    rs = research_sub.add_parser("start", help="create a phase's experiment on the phone")
+    rs.add_argument("--phase", required=True, choices=sorted(research_ops.PHASES))
+    rs.add_argument("--reps", type=int, default=3)
+    rs.add_argument("--device")
+    rs.set_defaults(fn=cmd_research_start)
+    rr = research_sub.add_parser("report", help="write testbench-results/research/<name>.md from finished experiments")
+    rr.add_argument("--name", required=True)
+    rr.add_argument("experiments", nargs="+", metavar="EXP_ID")
+    rr.set_defaults(fn=cmd_research_report)
     return parser
 
 
