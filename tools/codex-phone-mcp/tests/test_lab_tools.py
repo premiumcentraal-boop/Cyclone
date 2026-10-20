@@ -70,6 +70,11 @@ class LabToolTests(unittest.TestCase):
         self.assertEqual(self.call("phone_lab_report", {})["experiments"][0]["id"], EXP)
         self.assertEqual(self.call("phone_lab_stop", {"experiment_id": EXP})["state"], "stopping")
 
+    def test_a_no_skills_arm_is_forwarded_unchanged(self):
+        arms = [{"name": "A"}, {"name": "no skills", "skills": False}]
+        self.call("phone_lab_start", {"device_id": "dev_a", "name": "skills", "missions": ["settings.wifi"], "variants": arms})
+        self.assertEqual(self.gateway.calls[-1], ("start", "dev_a", "skills", ["settings.wifi"], arms, 1))
+
     def test_bad_arguments_never_reach_the_gateway(self):
         for args in (
             {"device_id": "dev_a", "name": "x", "missions": ["BAD ID"]},

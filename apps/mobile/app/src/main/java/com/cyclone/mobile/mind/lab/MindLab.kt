@@ -41,6 +41,12 @@ data class MindLabVariant(
     val plane: String? = null,
     /** Plan 37: classic or workspace context. Null keeps lab runs classic, so older experiments measure the same thing. */
     val context: String? = null,
+    /**
+     * Built-in tested Android skills (the reviewed Instagram routes): their guidance in the prompt and their route advice
+     * from abilities_find. False is the no-skills arm: the model gets the owner's app map and memory as set, but no
+     * reviewed route. A goal worded as a skill still runs; only the guidance is withheld. True keeps today's behaviour.
+     */
+    val skills: Boolean = true,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
@@ -53,9 +59,10 @@ data class MindLabVariant(
         .put("useMap", useMap)
         .put("plane", plane ?: JSONObject.NULL)
         .put("context", context ?: JSONObject.NULL)
+        .put("skills", skills)
 
     companion object {
-        val KEYS = setOf("name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane", "context")
+        val KEYS = setOf("name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane", "context", "skills")
         const val CLASSIC = "classic"
         const val WORKSPACE = "workspace"
         val CONTEXTS = setOf(CLASSIC, WORKSPACE)
@@ -90,7 +97,7 @@ data class MindLabVariant(
             val context = json.optNullableString("context")
             require(context == null || context in CONTEXTS) { "variant.context must be classic or workspace." }
             MindLabVariant(name, model, effort, minutes, json.optBooleanStrict("marks", true), json.optBooleanStrict("freshMemory", true), addendum,
-                json.optBooleanStrict("useMap", true), plane, context)
+                json.optBooleanStrict("useMap", true), plane, context, json.optBooleanStrict("skills", true))
         }
 
         private fun JSONObject.optNullableString(key: String): String? =

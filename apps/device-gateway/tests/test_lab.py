@@ -468,6 +468,17 @@ def test_the_map_knob_is_a_known_boolean_variant_field():
         validate_variants([{"name": "bad", "useMap": "off"}])
 
 
+def test_the_skills_knob_is_a_known_boolean_variant_field_and_is_never_auto_filled():
+    from cyclone_device_gateway.lab.runner import VARIANT_KEYS, LabError, validate_variants
+    arms = validate_variants([{"name": "skills on"}, {"name": "skills off", "skills": False}])
+    # An absent key is not sent: an older phone refuses unknown keys, so the PC only sends what the caller set.
+    assert arms[0] == {"name": "skills on"}
+    assert arms[1]["skills"] is False
+    assert "skills" in VARIANT_KEYS
+    with pytest.raises(LabError):
+        validate_variants([{"name": "bad", "skills": "off"}])
+
+
 def test_the_map_suite_is_the_navigation_heavy_subset():
     missions = builtin_missions()
     mapped = [m for m in missions if "map" in m.suites]

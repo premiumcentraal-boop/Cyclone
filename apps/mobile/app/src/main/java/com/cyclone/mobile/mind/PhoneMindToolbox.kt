@@ -74,6 +74,11 @@ class PhoneMindToolbox(
      * uses this phone's number (`codes.AutoCodePolicy`); null (Lab missions) keeps the Secrets Card for every code.
      */
     private val codes: MindCodes? = null,
+    /**
+     * Lab skills knob: false withholds the built-in tested Android route advice (Instagram) from abilities_find. True
+     * keeps it, as every owner run does. The prompt's skill guidance is decided where the prompt is built.
+     */
+    private val nativeSkills: Boolean = true,
 ) : MindToolbox {
     /** The phone the Mind acts on; swapped by [rebind] when the mission changes plane. */
     @Volatile private var env: CycloneAgentEnvironmentApi = env
@@ -502,7 +507,7 @@ class PhoneMindToolbox(
 
     private fun abilitiesFind(goalText: String, app: String): MindToolResult {
         if (goalText.isBlank()) return MindToolResult.error("goal is required: what you want to do in the app, in plain words.")
-        val nativeAdvice = if ((app.takeIf { it.isNotBlank() }?.let(::resolvePackage) ?: currentPackage()) == com.cyclone.mobile.market.InstagramSkills.PACKAGE)
+        val nativeAdvice = if (nativeSkills && (app.takeIf { it.isNotBlank() }?.let(::resolvePackage) ?: currentPackage()) == com.cyclone.mobile.market.InstagramSkills.PACKAGE)
             com.cyclone.mobile.market.InstagramSkills.advice(goalText) else null
         val (packageName, view) = manualFor(app)
             // Alpha 109: a missing manual is a fact, not a failed action (it counted toward the lab's early stop).

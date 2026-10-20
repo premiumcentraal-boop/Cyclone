@@ -27,12 +27,13 @@ from .verdict import Measure, TrialFacts, judge
 
 EXPERIMENT_ID = re.compile(r"^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$")
 VARIANT_NAME = re.compile(r"^[A-Za-z0-9 ._-]{1,40}$")
-VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane", "context"})
+VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane", "context", "skills"})
 #: Plan 26: where the mission works; absent keeps lab runs on the screen.
 PLANES = frozenset({"automatic", "screen", "background"})
 #: Plan 37: the context a mission runs with; absent keeps lab runs classic.
 CONTEXTS = frozenset({"classic", "workspace"})
-BOOLEAN_KNOBS = ("marks", "freshMemory", "useMap")
+#: Alpha 151: skills false withholds the built-in tested Android routes (Instagram). Absent means the phone's default (on).
+BOOLEAN_KNOBS = ("marks", "freshMemory", "useMap", "skills")
 MAX_TRIALS = 600
 POLL_SECONDS = 2.0
 
@@ -77,7 +78,7 @@ def validate_variants(raw: Any) -> list[dict[str, Any]]:
         if not isinstance(variant, dict) or not set(variant) <= VARIANT_KEYS or not isinstance(variant.get("name"), str):
             raise LabError("A variant has a name and only known knobs.")
         if any(key in variant and not isinstance(variant[key], bool) for key in BOOLEAN_KNOBS):
-            raise LabError("marks, freshMemory and useMap are true or false.")
+            raise LabError("marks, freshMemory, useMap and skills are true or false.")
         if "plane" in variant and variant["plane"] is not None and variant["plane"] not in PLANES:
             raise LabError("plane is automatic, screen or background.")
         if "context" in variant and variant["context"] is not None and variant["context"] not in CONTEXTS:

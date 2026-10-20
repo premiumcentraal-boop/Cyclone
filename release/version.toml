@@ -1,29 +1,29 @@
-# Cyclone V5 alpha.150 dev1: the captain's background check on Flash (plan 75, last release of the plan). A Flash run's
-# milestones are checked by the captain in the background, as Mind's glances are; the first officer never answers a
-# glance. The Lab gate table in the release notes is NOT measured here: it needs the Lab on a phone. On alpha.149 dev1.
-# Phone and PC. Physical UNVERIFIED.
+# Cyclone V5 alpha.151 dev1: the Lab measures the owner's features. A `skills` variant knob turns off the built-in tested
+# Android skills (Instagram first), beside the existing useMap (the app map) and freshMemory (remembering) knobs; the
+# testbench runs the Instagram app-map research. Nothing here is measured on a phone: the Lab needs the Pixel.
+# Phone, gateway and MCP. Physical UNVERIFIED.
 schema = 1
-product_version = "5.0.0-alpha.150.dev1"
+product_version = "5.0.0-alpha.151.dev1"
 channel = "development"
-android_version_code = 304
-python_version = "5.0.0-alpha.150.dev1"
+android_version_code = 305
+python_version = "5.0.0-alpha.151.dev1"
 
 [components]
-mobile = "5.0.0-alpha.150.dev1"
+mobile = "5.0.0-alpha.151.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
 glass = "1.0.0-alpha.68"
-device_gateway = "5.0.0-alpha.150.dev1"
-mcp = "5.0.0-alpha.150.dev1"
+device_gateway = "5.0.0-alpha.151.dev1"
+mcp = "5.0.0-alpha.151.dev1"
 
 [release]
-previous_mobile_version = "5.0.0-alpha.149.dev1"
+previous_mobile_version = "5.0.0-alpha.150.dev1"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha150-captain-glances"
+candidate_generation = "cyclone-v5-alpha151-lab-skills-knob"

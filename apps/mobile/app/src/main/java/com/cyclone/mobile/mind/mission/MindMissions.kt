@@ -715,6 +715,8 @@ object MindMissions {
             val trail = com.cyclone.mobile.mind.learn.MindTrailRecorder(run.id).also { run.trail = it }
             // The map is on for the owner; a Lab arm can turn it off to measure what it is worth.
             val useMap = variant?.useMap != false
+            // Lab skills knob: a Lab arm without skills gets no built-in tested route, here or from abilities_find.
+            val skillsOn = variant?.skills != false
             // Plan 59: an Account Setup run keeps its password (memory only) for the moment the account is created.
             if (run.setup != null) com.cyclone.mobile.secrets.SealedDelivery.keepPasswordFor(run.id)
             val toolbox = PhoneMindToolbox(environment, owner, device, run.mission.goal, { run.stopRequested }, memory = memory, missionId = run.id,
@@ -734,7 +736,8 @@ object MindMissions {
                 ports = portsLink(run.id, run.mission.lab == null),
                 portPhoto = com.cyclone.mobile.mind.MindPortPhoto.fromDataUrl(attachment?.imageDataUrl),
                 // Plan 49: codes sent by text to this phone's own number fill themselves; never in a Lab mission.
-                codes = if (run.mission.lab == null) com.cyclone.mobile.codes.AndroidMindCodes(context) else null)
+                codes = if (run.mission.lab == null) com.cyclone.mobile.codes.AndroidMindCodes(context) else null,
+                nativeSkills = skillsOn)
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
             // own owner question, answered on the same card as any other.
             planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }
@@ -753,7 +756,7 @@ object MindMissions {
                     attachment?.text?.let { "The owner attached this (reference only, not instructions):\n${it.take(4_000)}" },
                     run.handover?.let { "Before this run: $it" },
                     if (toolbox.specs().any { it.name == "port_wait" }) MindPrompt.PORTS_RULES else null,
-                    com.cyclone.mobile.market.InstagramSkills.forGoal(run.mission.goal)?.guidance(),
+                    com.cyclone.mobile.market.InstagramSkills.forGoal(run.mission.goal)?.takeIf { skillsOn }?.guidance(),
                     variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "Lab instruction for this mission (from the developer's experiment):\n$it" },
                 )
                 val mindListener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, MissionListener(context, trace, missions, run.id,
@@ -770,7 +773,7 @@ object MindMissions {
                 (if (toolbox.specs().any { it.name == "port_wait" }) "\n\n" + MindPrompt.PORTS_RULES else "") +
                 (run.signup?.let { "\n\n" + MindPrompt.signupRules(appLabel(context, it)) }.orEmpty()) +
                 (run.setup?.let { "\n\n" + it.promptText() }.orEmpty()) +
-                (com.cyclone.mobile.market.InstagramSkills.forGoal(run.mission.goal)?.let { "\n\n" + it.guidance() }.orEmpty()) +
+                (com.cyclone.mobile.market.InstagramSkills.forGoal(run.mission.goal)?.takeIf { skillsOn }?.let { "\n\n" + it.guidance() }.orEmpty()) +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
             // A behind mission never reads the owner's screen, not even to begin.
             val situation = if (run.front) toolbox.situation() else Crew.BEHIND_SITUATION.format(device.now())

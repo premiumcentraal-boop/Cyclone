@@ -170,6 +170,51 @@ Not allowed: CAPTCHA solving, throwaway mass sign-ups, or accounts you don't own
   Wi-Fi names and account names never leave the Lab.
 - The testbench only talks to the gateway on this PC (`127.0.0.1`).
 
+## Research: the app map, owner memory and built-in skills
+
+The research asks whether three things help Cyclone on the same missions: the **app map** (the learned screens and
+doors of an app, the map card and the walker), **owner memory** (what Cyclone remembers of you and of recent missions)
+and the **built-in skill** (the reviewed Android routes that ship with Cyclone; Instagram today). Each arm sets all three
+knobs explicitly. The phone defaults a knob a variant leaves out, and for memory that default is fresh (no owner
+memory), so the research never leaves one out. The skill knob needs phone alpha 151 or later.
+
+| Phase | Suite | Arms | The question |
+|---|---|---|---|
+| `no-skills` | `ig-maps` (8 missions) | map on or off × memory fresh or owner | Do the map and memory help with no skill at all? |
+| `skills` | `ig-skills` (8 missions) | skill on or off × map on or off, fresh memory | Does the reviewed skill help, with and without the map? |
+
+```
+cyclone-testbench research plan                       # the design; no phone needed
+cyclone-testbench research start --phase no-skills --reps 3
+cyclone-testbench watch <experiment id>               # until it finishes
+cyclone-testbench research report --name no-skills <experiment id>
+```
+
+The report is written to `testbench-results/research/<name>.md`. It gives, first, the Lab defaults and the safety
+count (it must be 0; anything else is a loud banner). Then per phase: each arm's pass rate with a 95% Wilson interval,
+median time, turns and cost; each factor pooled across its arms, with the difference on the Newcombe interval and a
+two-sided Fisher exact p; and the repeats, the first run of a mission against later runs of the same mission. Infra and
+skipped runs are counted apart and never enter a rate.
+
+Two things to keep in mind when you read it:
+- With the map on, the Lab learns each mission when it ends, so later repeats start from what earlier ones saw. The
+  repeats table measures that effect; it is not a pure memory effect.
+- A difference counts when its interval leaves zero and the Fisher p is under 0.05. With a few dozen runs per side the
+  intervals are wide; say so before you act on a small gap.
+
+The Instagram pack (`missions/testbench-instagram.json`) is read-only:
+- No goal sends, posts, follows, likes, comments, deletes, pays or changes a setting. The Review-only post stops before
+  Share. The report flags every post-review run that does not end on the review screen, so you can check the account.
+- Left out on purpose: account setup (it creates accounts), comments (they need an open post), and the stock automation
+  skills in the phone's source (cold DMs, reels following, reels warmup). Those message or follow people.
+- The `ig-skills` goals are copied from the phone's own source (`InstagramSkills.kt`). Four placeholders are filled with
+  fixed values: `{media}` "the newest photo in my Gallery", `{caption}` "Cyclone lab test, do not share", `{mode}`
+  "Review only", `{query}` "instagram". The pack test checks each goal against the source.
+- Use a test account wherever you can. Read-only runs still open the account, and Instagram may ask it to verify itself.
+
+What is not checked yet: the chrome words the checks read ("Remove" on the followers list, "QR code", "Your activity")
+have not been seen on a real screen, and nothing here has run on a phone. The report only reads what the phone recorded.
+
 ## Costs and wear
 
 Every mission is a real model run on your OpenRouter key, usually a few cents. The report shows the average cost
@@ -184,5 +229,9 @@ fine.
 - Code: `cyclone_testbench/` uses only the standard library.
 - Tests:
   - `tests/test_testbench.py` covers the ledger, rotation, redaction, reports and pack safety.
+  - `tests/test_instagram_pack.py` checks the Instagram pack: every mission parses with the gateway, goals are read-only,
+    the skill goals match the phone's source, and the checks name only chrome words.
+  - `tests/test_research.py` covers the statistics, the explicit-knob rule, the arm design, the report on synthetic runs
+    and the CLI wiring (with a fake gateway).
   - `apps/device-gateway/tests/test_testbench_lab.py` drives the real Lab routes and runner on a fake phone through
     the CLI.
