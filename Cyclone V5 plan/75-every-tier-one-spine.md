@@ -289,10 +289,14 @@ starts with the Lab numbers of the one before.
 
 ## 10. Choices to make, and the defaults
 
-1. **The Flash model.** Chosen by the Lab in 145 from fast models with strict JSON on OpenRouter, measured from the
-   phone for time to first token, output speed, JSON validity and pick accuracy. Candidates: Gemini 3.8 Flash and GLM
-   5.3 Flash (already in the model registry), Nemotron 3.5 Lightning, gpt-oss-120b. Default until measured: Gemini 3.8
-   Flash. The owner can change it in Settings → Model & intelligence (the old Fast-mode row, repurposed).
+1. **The Flash model: the latest DeepSeek Flash (the owner's choice).** The first officer uses
+   `~deepseek/deepseek-flash-latest`, OpenRouter's alias for DeepSeek's newest Flash. Today that is the
+   `deepseek-v4.1-flash` line: text and images, strict JSON (`response_format` and structured outputs), from $0.056
+   per million input tokens. The alias moves with each new Flash, so the run record names the model that actually
+   answered, and a Lab result always belongs to one snapshot (`deepseek/deepseek-v4.1-flash-1017` at the time of
+   writing). The Lab in 145–146 measures it from the phone (time to first token, output speed, JSON validity, pick
+   accuracy). Gemini 3.8 Flash and GLM 5.3 Flash are measured beside it, as fallbacks only. The owner can change the
+   model in Settings → Model & intelligence (the old Fast-mode row, repurposed).
 2. **Cost ceiling per request.** Default $0.02, shown in the run record; a run that would pass it asks the captain to
    finish within it or ends honestly.
 3. **Strict privacy.** When it is on, every rung (decision models, first officer, captain) is sent to zero-retention
