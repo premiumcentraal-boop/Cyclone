@@ -46,7 +46,7 @@ class RunRecordGuard(unittest.TestCase):
         self.assertIn("error.retryAfterMs.coerceIn(1_000L, MAX_RATE_WAIT_MS)", call)
         self.assertIn("const val MAX_RATE_WAIT_MS = 5_000L", conductor)
         # Working time is the owner's limit, and waiting on the owner doesn't use it up.
-        self.assertIn("waiting { runCatching { owner.checkIn(reason) }", conductor)
+        # Plan 74 (alpha 149): a stuck run no longer asks the owner (no check-in); the question to the owner is for facts only.
         self.assertIn("waiting { runCatching { owner.ask(question, reply.choices) }", conductor)
         missions = read("mind/mission/MindMissions.kt")
         self.assertIn("backup = backupBrain, workingMs = workingMs", missions)

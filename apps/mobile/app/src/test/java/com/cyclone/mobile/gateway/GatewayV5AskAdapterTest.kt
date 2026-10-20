@@ -96,15 +96,19 @@ class GatewayV5AskAdapterTest {
 
     @Test
     fun busyHumanAndMissingOverlayAreRefusedNotQueuedSilently() {
+        // Plan 75 alpha 149: a busy phone queues the request behind the task instead of refusing it.
         busy = true
-        assertEquals("ASK_BUSY", code { GatewayV5AskAdapter.start(foreground().put("goal", "open clock")) })
+        submitted.clear()
+        val queued = GatewayV5AskAdapter.start(foreground().put("goal", "open clock"))
+        assertTrue(queued.getBoolean("accepted"))
+        assertEquals(listOf("open clock"), submitted)
         busy = false
         human = true
         assertEquals("HUMAN_HAS_CONTROL", code { GatewayV5AskAdapter.start(foreground().put("goal", "open clock")) })
         human = false
         overlay = false
         assertEquals("OVERLAY_UNAVAILABLE", code { GatewayV5AskAdapter.start(foreground().put("goal", "open clock")) })
-        assertTrue(submitted.isEmpty())
+        assertEquals("only the queued request reached the phone", listOf("open clock"), submitted)
     }
 
     @Test
@@ -177,13 +181,15 @@ class GatewayV5AskAdapterTest {
     }
 
     @Test
-    fun aBusyPhoneSaysWhatIsInTheWay() {
-        // Field test 143 (B6): five requests came back as a bare "rejected".
+    fun aBusyPhoneQueuesTheRequestAndSaysWhatIsInTheWay() {
+        // Field test 143 (B6): five requests came back as a bare "rejected". Plan 75 alpha 149: now they queue behind the task.
         busy = true
         snapshot = task("mission-1", TaskConsumerState.WORKING)
-        val refused = runCatching { GatewayV5AskAdapter.start(JSONObject().put("goal", "open clock")) }.exceptionOrNull() as GatewayProtocolException
-        assertEquals("ASK_BUSY", refused.code)
-        assertTrue(refused.message!!, refused.message!!.contains("Open my profile") && refused.message!!.contains("Try again"))
+        submitted.clear()
+        val accepted = GatewayV5AskAdapter.start(JSONObject().put("goal", "open clock"))
+        assertTrue(accepted.getBoolean("accepted"))
+        assertEquals(listOf("open clock"), submitted)
+        assertTrue(accepted.getString("requestId").startsWith("req-"))
     }
 
     @Test

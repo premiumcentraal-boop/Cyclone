@@ -373,21 +373,17 @@ class OneMindConductorTest {
         assertTrue(req.state.any { it is com.cyclone.mobile.decisions.DPart.Text && it.text.contains("Controls: Edit profile") })
     }
 
-    @Test fun `the same trigger three times asks the owner, who can stop or keep going`() {
+    @Test fun `the same trigger three times is never a card, a Mind run stops honestly`() {
+        // Plan 74 (alpha 149): stuck is never an owner card. The run says where it got stuck and can be continued.
         val plan = """{"milestone":"m"}
             {"step":"tap","target":"Stubborn"}""".trimIndent()
         val stuck = FakeCrew { s, _ -> StepOutcome.NeedsMind(s, "unsure", "can't tell") }
         val owner = FakeOwner(checkIn = CheckIn.Stop)
         val out = conductor(ScriptedModel(plan, "{\"decision\":\"continue\"}", "{\"decision\":\"continue\"}"), stuck, owner).run()
-        assertEquals(RunEnd.STOPPED, out.end)
-        assertEquals(1, owner.checkIns.size)
-        assertTrue(owner.checkIns.single().contains("unsure"))
-
-        val keep = FakeOwner(checkIn = CheckIn.KeepGoing)
-        val healed = FakeCrew { s, n -> if (n <= 3) StepOutcome.NeedsMind(s, "unsure", "can't tell") else StepOutcome.Done(s, Verdict.HELD, 0) }
-        val out2 = conductor(ScriptedModel(plan, "{\"decision\":\"continue\"}", "{\"decision\":\"continue\"}", "{\"decision\":\"continue\"}"), healed, keep).run()
-        assertEquals(RunEnd.DONE, out2.end)
-        assertEquals(1, keep.checkIns.size)
+        assertEquals(RunEnd.GAVE_UP, out.end)
+        assertTrue("no owner question", owner.checkIns.isEmpty())
+        assertTrue(out.summary.contains("Couldn't finish") && out.summary.contains("unsure"))
+        assertTrue(out.score.events.any { it.kind == "stuck" })
     }
 
     @Test fun `four wakes in a milestone tell the mind to change approach`() {
