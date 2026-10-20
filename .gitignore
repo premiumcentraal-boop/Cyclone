@@ -63,3 +63,6 @@ test-results/
 
 # VMOS live test output (scripts/pc/cloud_probe.py): raw provider answers, never committed
 cloud-probe/
+
+# Night loop runtime state, journals and cycle reports (local to the operator PC)
+night-loop/
