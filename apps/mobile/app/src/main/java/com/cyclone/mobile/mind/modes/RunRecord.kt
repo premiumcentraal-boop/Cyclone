@@ -26,12 +26,18 @@ object RunRecord {
         /** Calls no decision model answered in time. */
         val noAnswer: Int = 0,
         val reads: Int = 0,
+        /** Plan 75 alpha 146: reads not taken because the read after the last move was still fresh. */
+        val reused: Int = 0,
+        /** Plan 75 alpha 146: follow-up questions asked on a split, and how many of them settled the move. */
+        val settles: Int = 0,
+        val settled: Int = 0,
         val readMs: Long = 0,
         val decideMs: Long = 0,
         val actMs: Long = 0,
     ) {
         fun json(): JSONObject = JSONObject().put("byCode", byCode).put("asked", asked).put("splits", splits).put("doubts", doubts)
-            .put("noAnswer", noAnswer).put("reads", reads).put("readMs", readMs).put("decideMs", decideMs).put("actMs", actMs)
+            .put("noAnswer", noAnswer).put("reads", reads).put("reused", reused).put("settles", settles)
+            .put("settled", settled).put("readMs", readMs).put("decideMs", decideMs).put("actMs", actMs)
     }
 
     /** One model call, from a run's ledger or the router's tally. */

@@ -32,7 +32,8 @@ class CallBudgetGuard(unittest.TestCase):
 
     def test_the_step_board_asks_each_model_once(self):
         crew = read("mind/one/AndroidCrew.kt")
-        board = function(crew, "    fun board(")
+        # Plan 75 alpha 146: the lanes are built in race(), which board() calls.
+        board = function(crew, "    fun board(") + function(crew, "    private fun race(")
         self.assertIn("providers.map { Lane(", board, "one lane per model")
         self.assertNotIn("variant", board)
         self.assertIn("FusedBoard.textOnly(", board, "the model that reads text only gets no image")

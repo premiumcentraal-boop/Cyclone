@@ -41,6 +41,9 @@ object FusedBoard {
     const val NEEDS_MIND = "needs_mind"
     private val VERBS = listOf(STEP_DONE, SCROLL_DOWN, SCROLL_UP, BACK, WAIT, NEEDS_MIND)
 
+    /** Whether [word] is one of the verbs a step can answer besides a control (plan 75 alpha 146: used by the settle path). */
+    fun isVerb(word: String): Boolean = word in VERBS
+
     val BLOCKERS = listOf("none", "login", "permission", "error", "paywall", "dialog")
     val POPUPS = listOf("none", "cookie_banner", "rating_prompt", "permission_prompt", "update_prompt", "ad", "other")
     val DIVERGENCE = listOf("on_course", "minor_doubt", "likely_off", "off_course")

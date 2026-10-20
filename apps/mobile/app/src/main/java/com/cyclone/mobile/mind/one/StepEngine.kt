@@ -83,7 +83,7 @@ class StepEngine(
     fun run(step: Step, score: Score): StepOutcome = run(step, score, popups = 0)
 
     private fun run(step: Step, score: Score, popups: Int): StepOutcome {
-        val screen = read { eyes.look(false) } ?: return StepOutcome.NeedsMind(step, "unreadable", "The screen could not be read")
+        val screen = takeObserved() ?: read { eyes.look(false) } ?: return StepOutcome.NeedsMind(step, "unreadable", "The screen could not be read")
         if (screen.sensitive) return StepOutcome.NeedsMind(step, "sensitive", "A sensitive screen (password, code or a banking app): the crew stays off it")
 
         // Rung 0: direct actions need no screen decision.
@@ -223,6 +223,7 @@ class StepEngine(
         // A tool step can keep its result as a fact (plan 69 §4.6: "as" names it); the value is the tool's own text.
         if (result.ok) step.args["as"]?.takeIf { FACT_NAME.matches(it) }?.let { record("fact:$it", result.text.take(Score.MAX_FACT)) }
         val after = read { eyes.look(false) }
+        observed = after?.let { it to now() }
         val key = "$name:${label ?: args.optString("app", args.optString("url", ""))}"
         if (!result.ok) {
             return when (val call = breaker.action(key, before.pageKey, progressed = false)) {
@@ -269,6 +270,41 @@ class StepEngine(
         }
     }
 
+    /**
+     * Plan 75 alpha 146: the screen read right after the last move is the screen the next move starts from, so it is used
+     * once instead of being read again (a read is a few hundred ms). Only while it is fresh: a move waits at most
+     * [OBSERVED_MAX_AGE_MS] for the decision, and anything older is read again.
+     */
+    private var observed: Pair<StepScreen, Long>? = null
+
+    private fun takeObserved(): StepScreen? {
+        val (screen, at) = observed ?: return null
+        observed = null
+        if (now() - at > OBSERVED_MAX_AGE_MS) return null
+        stats = stats.copy(reused = stats.reused + 1)
+        return screen
+    }
+
+    /**
+     * Plan 75 alpha 146 (R1.5): the models split on an easy-to-undo move. One short follow-up asks only the disputed
+     * controls, with the same screenshot, and its pick is used only when it is clean and sure. The other answers of the
+     * first call (orders, plan fit, risks) are kept; only the pick changes. Anything else is no settle: the mind decides.
+     */
+    private fun settle(combined: FusedBoard.Reading, ask: FusedBoard.Ask, readings: List<FusedBoard.Reading>): FusedBoard.Reading? {
+        val picks = readings.mapNotNull { it.next }.filter { !FusedBoard.isVerb(it) && it != FusedBoard.NEEDS_MIND }.distinct()
+        val disputed = ask.screen.controls.filter { it.ref in picks }
+        if (picks.size < 2 || disputed.size < 2) return null
+        val narrow = ask.copy(candidates = disputed)
+        stats = stats.copy(settles = stats.settles + 1)
+        val follow = FusedBoard.combine(runCatching { board.ask(FusedBoard.request(narrow), narrow) }.getOrDefault(emptyList()), undoable = true)
+            ?: return null
+        val pick = follow.next ?: return null
+        if (FusedBoard.isVerb(pick) || pick == FusedBoard.NEEDS_MIND) return null
+        if (follow.nextSure < SETTLE_SURE || follow.doubt != null || disputed.none { it.ref == pick }) return null
+        stats = stats.copy(settled = stats.settled + 1)
+        return combined.copy(next = pick, nextSure = follow.nextSure, doubt = null)
+    }
+
     private fun ask(step: Step, screen: StepScreen, score: Score, tripwire: Boolean, image: Boolean): FusedBoard.Reading? {
         val milestone = score.plan?.milestones?.firstOrNull { m -> m.steps.any { it.id == step.id } }?.title.orEmpty()
         val known = runCatching { memory?.known(screen) }.getOrNull().orEmpty()
@@ -278,12 +314,17 @@ class StepEngine(
         val deciding = now()
         val readings = runCatching { board.ask(FusedBoard.request(ask), ask) }.getOrDefault(emptyList())
         val pickRisk = readings.firstNotNullOfOrNull { r -> screen.controls.firstOrNull { it.ref == r.next } }?.let { riskOf(step, it.label) } ?: step.risk
-        val combined = FusedBoard.combine(readings, undoable = pickRisk == Risk.UNDOABLE)
+        val undoable = pickRisk == Risk.UNDOABLE
+        val combined = FusedBoard.combine(readings, undoable = undoable)
+        val split = readings.size > 1 && readings.map { it.next }.distinct().size > 1
         stats = stats.copy(asked = stats.asked + 1, decideMs = stats.decideMs + (now() - deciding),
             noAnswer = stats.noAnswer + if (readings.isEmpty()) 1 else 0,
-            splits = stats.splits + if (readings.size > 1 && readings.map { it.next }.distinct().size > 1) 1 else 0,
+            splits = stats.splits + if (split) 1 else 0,
             doubts = stats.doubts + if (readings.any { it.doubt != null }) 1 else 0)
-        return combined
+        // Only an easy-to-undo move without a tripwire may be settled by a follow-up; the strict rule stays for the rest.
+        val reading = combined ?: return null
+        if (split && reading.next == FusedBoard.NEEDS_MIND && undoable && !tripwire) settle(reading, ask, readings)?.let { return it }
+        return reading
     }
 
     // ---- code decisions ---------------------------------------------------------------------------------------------
@@ -342,6 +383,10 @@ class StepEngine(
         /** Moves the app memory learns from: taps on a control, never typing. */
         val LEARNED_ACTIONS = setOf("tap", "long_press", "double_tap")
         const val MAX_POPUPS_PER_STEP = 2
+        /** Plan 75 alpha 146: how sure the follow-up must be to settle a split on an easy-to-undo move. */
+        const val SETTLE_SURE = 0.8
+        /** Plan 75 alpha 146: how old a read after a move may be and still start the next move. */
+        const val OBSERVED_MAX_AGE_MS = 2_000L
         private val FACT_NAME = Regex("^[a-z][a-z0-9_]{0,40}$")
     }
 }
