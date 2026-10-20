@@ -83,11 +83,13 @@ data class Profile(
     val streams: Boolean,
     /** Plan 75 alpha 147: a barrier waits for the first officer's check; a doubt goes to the captain (Flash). */
     val barrierReview: Boolean = false,
+    /** Plan 75 alpha 150: the captain reviews a Flash run's chosen milestones in the background, as Mind's glances do. */
+    val glances: Boolean = false,
 ) {
     companion object {
         val MIND = Profile(Difficulty.MIND, null, null, null, reviews = true, compacts = true, streams = false)
         val FLASH = Profile(Difficulty.FLASH, maxReplans = 3, maxSteps = 12, maxSurprises = 2, reviews = false, compacts = false, streams = true,
-            barrierReview = true)
+            barrierReview = true, glances = true)
     }
 }
 
@@ -401,7 +403,7 @@ class Conductor(
         surprises = 0
         minorDoubts = 0
         // Code forces a review before any milestone that sends, pays or deletes (plan 69 §5.3).
-        if (profile.reviews && consequential(m) && m.id !in reviewed) {
+        if ((profile.reviews || profile.glances) && consequential(m) && m.id !in reviewed) {
             reviewed += m.id
             startGlance("forced_review", "The next milestone \"${m.title}\" sends, pays or deletes: look before the crew gets there", forced = true)
         }
@@ -414,9 +416,9 @@ class Conductor(
         currentMilestone = null
         breaker.milestoneDone()
         score = score.event("milestone", "✓ ${m.title}", clock())
-        if (profile.reviews) awaitGlance()
+        if (profile.reviews || profile.glances) awaitGlance()
         if (profile.compacts && compactor.due(conversation, atBoundary = true)) compact(conversation.size())
-        if (profile.reviews && m.review && !StandingOrders.quiet(score)) startGlance("review", "Milestone \"${m.title}\" is done", forced = false)
+        if ((profile.reviews || profile.glances) && m.review && !StandingOrders.quiet(score)) startGlance("review", "Milestone \"${m.title}\" is done", forced = false)
     }
 
     private fun consequential(m: Milestone): Boolean = m.steps.any { s ->
@@ -816,14 +818,15 @@ class Conductor(
         val pending = PendingGlance()
         glance = pending
         movesSinceGlance.clear()
-        val model = modelFor(WakeKind.GLANCE)
+        // Plan 75 alpha 150: a glance is the captain's review, in the background; the first officer answers the barrier check instead.
+        val model = captain(Effort.LOW)
         val request = request()
         glanceRunner {
             val started = clock()
             val reply = runCatching { model.complete(request) }.getOrNull()
             pending.finish((reply?.let { WakeReply.read(it.text, goalText, "g$wakes.") } ?: WakeReply(WakeReply.Kind.CONTINUE, "the glance failed")) to reply)
             ledger.add(LedgerEntry(clock(), "mind", model.id, reply?.usage?.promptTokens ?: 0, 0, reply?.usage?.completionTokens ?: 0,
-                reply?.usage?.costUsd ?: 0.0, clock() - started, reply != null))
+                reply?.usage?.costUsd ?: 0.0, clock() - started, reply != null, stage = "glance"))
         }
     }
 
