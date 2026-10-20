@@ -64,9 +64,18 @@ class ScreenText:
     """Visible text of the foreground app, without Cyclone's own overlay (its summary must not score itself)."""
     package: str | None
     texts: list[str] = field(default_factory=list)
+    #: Plan 75: the screen by meaning, the same in every language: resource ids (the part after ":id/"), and the ids and
+    #: words of the selected or checked nodes (a selected tab, a switch that is on).
+    ids: list[str] = field(default_factory=list)
+    selected: list[str] = field(default_factory=list)
 
     def joined(self) -> str:
         return "\n".join(self.texts)
+
+
+def resource_name(resource_id: str) -> str:
+    """The language-free name of a view: "com.instagram.android:id/profile_tab" -> "profile_tab"."""
+    return resource_id.split(":id/", 1)[-1].strip() if resource_id else ""
 
 
 def _package(value: str) -> str:
@@ -121,6 +130,8 @@ class PhoneProbe:
             raise ProbeError("screen unavailable: the dump was empty")
         nodes = normalize_xml(xml)["nodes"]
         texts: list[str] = []
+        ids: list[str] = []
+        selected: list[str] = []
         packages: dict[str, int] = {}
         for node in nodes:
             if node["package"] == CYCLONE_PACKAGE:
@@ -129,8 +140,22 @@ class PhoneProbe:
             for value in (node["text"], node["content_desc"]):
                 if value and value.strip():
                     texts.append(value.strip())
+            rid = resource_name(node.get("resource_id", ""))
+            if rid:
+                ids.append(rid)
+            if node.get("selected") or node.get("checked"):
+                selected.extend(v.strip() for v in (rid, node["text"], node["content_desc"]) if v and v.strip())
         main = max(packages, key=packages.get) if packages else None
-        return ScreenText(main, texts)
+        return ScreenText(main, texts, ids, selected)
+
+    def foreground_activity(self) -> str | None:
+        """Plan 75: the resumed activity's component ("com.android.settings/.SubSettings"), for a page check."""
+        text = self.adb.shell("dumpsys", "activity", "activities", timeout=15)
+        for pattern in (r"topResumedActivity=.*? ([A-Za-z0-9_.]+/[A-Za-z0-9_.$]+)", r"mResumedActivity: .*? ([A-Za-z0-9_.]+/[A-Za-z0-9_.$]+)"):
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1)
+        return None
 
     def setting(self, namespace: str, key: str) -> str | None:
         ns, name = _setting(namespace, key)

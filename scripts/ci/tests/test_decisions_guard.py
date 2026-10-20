@@ -42,10 +42,10 @@ class DecisionsGuard(unittest.TestCase):
         modes = read("mind/modes/CycloneModes.kt")
         self.assertIn("com.cyclone.mobile.mind.decide.Decisions.box(context)", modes)
         self.assertFalse((MOBILE / "mind/modes/OpenRouterDecisionBox.kt").exists())
+        # Plan 75: the Pilot's own decision route is gone (alpha 145); no file keeps a private decisions endpoint.
         fast = read("mind/pilot/FastMode.kt")
-        self.assertIn("com.cyclone.mobile.mind.decide.Decisions.active()", fast)
-        self.assertIn("com.cyclone.mobile.mind.decide.Decisions.call(key, provider,", fast)
         self.assertNotRegex(fast, r'"https://openrouter\.ai/api/alpha/decisions"')
+        self.assertNotIn("OpenRouterPilotDecider", fast)
         # The decision model is not a free text field any more.
         settings = read("ui/overlay/CycloneAiSettingsActivity.kt")
         self.assertNotIn("fast.copy(decisionModel", settings)

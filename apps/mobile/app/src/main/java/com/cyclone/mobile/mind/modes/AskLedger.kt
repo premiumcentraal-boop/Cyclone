@@ -29,6 +29,8 @@ object AskLedger {
         val cancelled: Boolean = false,
         /** Alpha 144: the mission ("mission-<id>") a handed-over request became; it finishes the request when it ends. */
         val taskId: String? = null,
+        /** Plan 75: where the request's time and money went ([RunRecord]); the mission's part joins it when it ends. */
+        val record: org.json.JSONObject? = null,
     ) {
         /** waiting (not routed yet), running, done, failed or cancelled. */
         val state: String get() = when {
@@ -59,9 +61,11 @@ object AskLedger {
      * The request's run ended. A request that went on as a Flash or Mind mission ends here as "handed over"; the
      * mission itself is then read from the task snapshot.
      */
-    fun finished(text: String, lane: String, ok: Boolean, say: String?, nowMs: Long = System.currentTimeMillis()) =
+    fun finished(text: String, lane: String, ok: Boolean, say: String?, nowMs: Long = System.currentTimeMillis(),
+                 record: org.json.JSONObject? = null) =
         update(text, nowMs, Long.MAX_VALUE) { it.finishedAtMs == null && !it.cancelled }?.let { entry ->
-            replace(entry.copy(lane = entry.lane ?: lane, routedAtMs = entry.routedAtMs ?: nowMs, finishedAtMs = nowMs, ok = ok, say = say?.take(240)))
+            replace(entry.copy(lane = entry.lane ?: lane, routedAtMs = entry.routedAtMs ?: nowMs, finishedAtMs = nowMs, ok = ok, say = say?.take(240),
+                record = record ?: entry.record))
         }
 
     /**
@@ -69,17 +73,21 @@ object AskLedger {
      * Alpha 144: [why] is why it went up (the router's "a clear command" no longer stands beside lane "flash"), and
      * [taskId] the mission it became, which finishes the request ([missionEnded]): it used to stay "running" for good.
      */
-    fun handed(text: String, lane: String, why: String? = null, taskId: String? = null, nowMs: Long = System.currentTimeMillis()) =
+    fun handed(text: String, lane: String, why: String? = null, taskId: String? = null, nowMs: Long = System.currentTimeMillis(),
+               record: org.json.JSONObject? = null) =
         update(text, nowMs, Long.MAX_VALUE) { it.finishedAtMs == null && !it.cancelled }?.let { entry ->
             replace(entry.copy(lane = lane, routedAtMs = entry.routedAtMs ?: nowMs,
-                why = why?.let { "handed up to $lane: $it" }?.take(160) ?: entry.why, taskId = taskId ?: entry.taskId))
+                why = why?.let { "handed up to $lane: $it" }?.take(160) ?: entry.why, taskId = taskId ?: entry.taskId,
+                record = record ?: entry.record))
         }
 
     /** Alpha 144: the mission [taskId] ended; every request it carried is done, failed or cancelled with it. */
-    fun missionEnded(taskId: String, ok: Boolean, say: String?, cancelled: Boolean = false, nowMs: Long = System.currentTimeMillis()) =
+    fun missionEnded(taskId: String, ok: Boolean, say: String?, cancelled: Boolean = false, nowMs: Long = System.currentTimeMillis(),
+                     record: org.json.JSONObject? = null) =
         synchronized(lock) {
             entries.filter { it.taskId == taskId && it.finishedAtMs == null && !it.cancelled }.forEach { entry ->
-                replace(entry.copy(finishedAtMs = nowMs, ok = ok, say = say?.take(240), cancelled = cancelled))
+                replace(entry.copy(finishedAtMs = nowMs, ok = ok, say = say?.take(240), cancelled = cancelled,
+                    record = RunRecord.merge(entry.record, record)))
             }
         }
 

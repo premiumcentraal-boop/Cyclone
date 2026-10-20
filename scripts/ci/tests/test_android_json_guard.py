@@ -42,7 +42,6 @@ class AndroidJsonGuard(unittest.TestCase):
             "voice/VoiceUnderstanding.kt": "ModelJson.parse(text.substring(",
             "ai/OpenRouterQuickAgent.kt": "ModelJson.parse(repaired)",
             "mind/modes/DecisionBox.kt": "ModelJson.parse(trimmed)",
-            "mind/pilot/Pilot.kt": "ModelJson.parse(trimmed)",
         }
         for path, needle in sites.items():
             self.assertIn(needle, (base / path).read_text(encoding="utf-8"), path)

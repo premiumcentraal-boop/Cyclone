@@ -12,8 +12,9 @@ import com.cyclone.mobile.mind.modes.Prompt
 
 /**
  * Plan 69 checkpoint 1: the crew's phone side. The eyes are the Mind's own toolbox (same refs as its tools); the
- * board races every usable decision provider on the fused call (images only to providers that take them); the vision
- * shadow asks JEV's Box on the side and only records. Every call is counted in the run's ledger.
+ * board races every usable decision provider on the fused call (images only to providers that take them). Every call is
+ * counted in the run's ledger. Plan 75 (alpha 145): the unused vision shadow (JEV's Box on the side) is gone; it would
+ * have sent screenshots to a text-only model outside zero-retention routing.
  */
 object AndroidCrew {
     /** The fused call's deadline: a step waits at most this long for its decision. */
@@ -37,7 +38,8 @@ object AndroidCrew {
             val answer = arrival.answer
             val provider = providers.firstOrNull { it.wire == arrival.provider }
             ledger.add(LedgerEntry(clock(), "decisions", answer?.reply?.model ?: provider?.model.orEmpty(),
-                inputTokens = answer?.reply?.inputTokens ?: 0, costUsd = answer?.reply?.cost ?: 0.0, ms = arrival.ms, ok = answer != null))
+                inputTokens = answer?.reply?.inputTokens ?: 0, costUsd = answer?.reply?.cost ?: 0.0, ms = arrival.ms, ok = answer != null,
+                stage = "step"))
             answer?.let { FusedBoard.read(it.reply, ask) }
         }
     }
@@ -56,29 +58,12 @@ object AndroidCrew {
             val answer = arrival.answer
             val provider = providers.firstOrNull { it.wire == arrival.provider }
             ledger.add(LedgerEntry(clock(), "decisions", answer?.reply?.model ?: provider?.model.orEmpty(),
-                inputTokens = answer?.reply?.inputTokens ?: 0, costUsd = answer?.reply?.cost ?: 0.0, ms = arrival.ms, ok = answer != null))
+                inputTokens = answer?.reply?.inputTokens ?: 0, costUsd = answer?.reply?.cost ?: 0.0, ms = arrival.ms, ok = answer != null,
+                stage = "done"))
             answer?.reply
         }
     }
 
     /** The done check may take a little longer than a step: nothing waits on it but the finish. */
     const val DONE_DEADLINE_MS = 4_000L
-
-    /** JEV's Box on the side, off the step's path: it records where it would tap and never taps. */
-    fun visionShadow(key: String, ledger: Ledger, record: (String) -> Unit, clock: () -> Long = System::currentTimeMillis): (StepScreen, Step) -> Unit =
-        { screen, step ->
-            VisionShadow.request(screen, step)?.let { req ->
-                DecisionRace.POOL.execute {
-                    runCatching {
-                        val body = DecisionsWire.body(DecisionProvider.JEV.model, req.state, req.questions)
-                        val result = Decisions.call(key, DecisionProvider.JEV, body, "Cyclone OneMind", "vision_shadow", 8_000)
-                        val ok = result as? DecisionsResult.Ok
-                        val reply = ok?.let { DecisionsWire.parse(it.body, req.questions) }
-                        ledger.add(LedgerEntry(clock(), "decisions", reply?.model ?: DecisionProvider.JEV.model,
-                            inputTokens = reply?.inputTokens ?: 0, costUsd = reply?.cost ?: 0.0, ms = ok?.ms ?: 0, ok = reply != null))
-                        reply?.let { record(VisionShadow.line(step, VisionShadow.read(it))) }
-                    }
-                }
-            }
-        }
 }

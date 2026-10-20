@@ -252,7 +252,7 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 }
                 if (modes.speed == com.cyclone.mobile.mind.modes.Speed.AUTO) {
                     // Alpha 89: the phone model, taught by JEV. It acts only on actions it has earned (98% agreement with JEV).
-                    val bar = remember { com.cyclone.mobile.mind.pilot.FastMode.settings(context).sureness.bar }
+                    val bar = remember { com.cyclone.mobile.mind.pilot.FastMode.sureness(context).bar }
                     val stats = remember(modes.phoneModel) {
                         runCatching { com.cyclone.mobile.mind.decide.PhoneBrain.stats(context, bar, modes.phoneModel) }.getOrNull()
                     }
@@ -319,6 +319,15 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                                 }
                                 labNote = if (started) "Testing ${provider.label} on 300 labelled requests…" else "A test is already running, or there's no OpenRouter key."
                             }) { Text("Test ${provider.label}") }
+                        }
+                        // Plan 75: both on the same requests, and how often they agree (what the step board relies on).
+                        if (com.cyclone.mobile.mind.decide.DecisionProvider.entries.count { it.usable } > 1) {
+                            androidx.compose.material3.OutlinedButton(onClick = {
+                                val started = com.cyclone.mobile.mind.lab.DecisionLab.startAll(context) { report ->
+                                    labNote = report?.let { labLine(it) } ?: "The test didn't finish. Try again."
+                                }
+                                labNote = if (started) "Testing both decision models on the same 300 requests…" else "A test is already running, or there's no OpenRouter key."
+                            }) { Text("Test both") }
                         }
                     }
                     Text(labNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -949,6 +958,13 @@ private fun labSummary(stats: org.json.JSONObject?): String {
 }
 
 private fun labLine(report: org.json.JSONObject): String {
+    if (report.optString("kind") == "both") {
+        val answered = report.optInt("bothAnswered")
+        val agreed = report.optInt("agreed")
+        val pct = if (answered > 0) "${agreed * 100 / answered}% agreed" else "no answers"
+        val right = if (agreed > 0) " · ${report.optInt("agreedRight") * 100 / agreed}% right when they agree" else ""
+        return "Both: $pct$right · ${report.optInt("split")} splits · ${report.optJSONArray("agreedRiskyUnder")?.length() ?: 0} risky too low together"
+    }
     val score = report.optJSONObject("score")
     val accuracy = score?.optDouble("accuracy")?.takeIf { !it.isNaN() }?.let { "${(it * 100).toInt()}% right" } ?: "no answers"
     val risky = score?.optJSONArray("riskyUnder")?.length() ?: 0

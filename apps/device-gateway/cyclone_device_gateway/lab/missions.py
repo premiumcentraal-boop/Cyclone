@@ -15,7 +15,10 @@ MISSION_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 SUITE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
 SETUP_STEPS = frozenset({"home", "force_stop", "setting", "night_mode", "dnd", "lab_file", "launch"})
 CHECKS = frozenset({"status", "foreground", "screen", "setting", "night_mode", "answer", "answer_probe", "owner", "approval", "lab_file",
-                    "timer"})
+                    "timer", "page"})
+#: Plan 75: a page check reads the screen by meaning: view ids, what is selected, the activity. Ids are view names.
+PAGE_ID = re.compile(r"^[A-Za-z0-9_.]{1,80}$")
+PAGE_FORMS = ("ids", "selected", "activity")
 ANSWER_PROBES = frozenset({"wifi_ssid", "prop", "google_account", "battery", "setting"})
 STATUSES = frozenset({"completed", "gave_up", "failed", "cancelled", "paused", "interrupted"})
 EXPECTS = frozenset({"done", "boundary"})
@@ -116,6 +119,22 @@ def _validate_check(check: Any, mission: str) -> dict[str, Any]:
                 raise _fail(mission, f"{kind} regex is invalid") from exc
         else:
             _text_list(check[forms[0]], mission, forms[0])
+    elif kind == "page":
+        forms = [k for k in PAGE_FORMS if k in check]
+        if not forms or set(check) - {"check", "match", *PAGE_FORMS}:
+            raise _fail(mission, "page check needs ids, selected and/or activity")
+        if check.get("match", "any") not in {"any", "all"}:
+            raise _fail(mission, "page check match is any or all")
+        for form in ("ids", "selected"):
+            if form in check:
+                _text_list(check[form], mission, form)
+                if form == "ids" and not all(PAGE_ID.match(v) for v in check[form]):
+                    raise _fail(mission, "page ids are view names like profile_tab")
+        if "activity" in check:
+            try:
+                re.compile(check["activity"])
+            except (re.error, TypeError) as exc:
+                raise _fail(mission, "page activity regex is invalid") from exc
     elif kind == "setting":
         _validate_setting(check, mission, write=False)
         if len([k for k in ("equals", "not", "gt") if k in check]) != 1:

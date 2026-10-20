@@ -19,13 +19,10 @@ class LunaBoxGuard(unittest.TestCase):
             self.assertIn(shape, wire)
         self.assertIn('Regex("^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")', wire)
         # No caller keeps the old guessing reader or sends a `choices` array to the decisions endpoint.
-        for path in ("mind/modes/DecisionBox.kt", "mind/pilot/Pilot.kt", "voice/JevShadow.kt"):
+        for path in ("mind/modes/DecisionBox.kt", "voice/JevShadow.kt"):
             text = read(path)
             self.assertNotIn('listOf("answers", "decisions", "results", "output")', text, path)
             self.assertIn("DecisionsWire", text, path)
-        pilot = read("mind/pilot/Pilot.kt")
-        decisions_body = pilot[pilot.index("fun decisionsBody("):pilot.index("fun parseDecisions(")]
-        self.assertNotIn('"choices"', decisions_body)
 
     def test_triage_can_only_make_a_request_more_careful(self):
         router = read("mind/modes/ModeRouter.kt")

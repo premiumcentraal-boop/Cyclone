@@ -53,11 +53,6 @@ class PhoneMindToolbox(
      */
     private val workspace: com.cyclone.mobile.mind.workspace.MissionWorkspace? = null,
     /**
-     * Plan 41, Fast mode: the Pilot. With it, the Mind gets the `pilot` tool and a fast model carries out the steps it
-     * hands over, deciding itself when to hand one back. Null (Fast mode off) keeps the toolbox exactly as before.
-     */
-    private val fast: com.cyclone.mobile.mind.pilot.PilotSetup? = null,
-    /**
      * Plan 43 (T6): a sign-up mapping mission. With it the Mind records each sign-up page (labels and kinds, never
      * values) and asks the owner before the control that creates the account. [saveSignup] keeps the finished map.
      */
@@ -104,7 +99,6 @@ class PhoneMindToolbox(
     override fun specs(): List<MindToolSpec> = SPECS.filter { spec ->
         when (spec.name) {
             "go_to" -> maps != null || manual != null
-            "pilot" -> fast != null
             in SIGNUP_TOOLS -> signup != null
             in SETUP_TOOLS -> setup != null
             in MANUAL_TOOLS -> manual != null
@@ -270,7 +264,6 @@ class PhoneMindToolbox(
         "set_alarm" -> setAlarm(arguments)
         "apps_list" -> appsList(arguments.optString("query"))
         "go_to" -> arguments.optString("ability").takeIf { it.isNotBlank() }?.let(::goToAbility) ?: goTo(arguments.optString("screen"))
-        "pilot" -> pilotRun(arguments)
         "port_send" -> portSend(arguments)
         "port_wait" -> portWait(arguments)
         "abilities_find" -> abilitiesFind(arguments.optString("goal"), arguments.optString("app"))
@@ -744,73 +737,6 @@ class PhoneMindToolbox(
             profile = saved?.first))
         return MindToolResult(if (created) "Recorded: the account exists${handle?.let { " as $it" }.orEmpty()}. ${saved?.second.orEmpty()} Finish the mission now."
             else "Recorded: the account was not created. Finish the mission now and say why.", "setup done")
-    }
-
-    // ---- plan 41: Fast mode, the Pilot ------------------------------------------------------------------------------
-
-    /**
-     * Runs the steps the Mind handed over with a fast model: one move per fast decision, through the same act path
-     * (approvals, secret rules, settle) as the Mind's own taps. The fast model may hand a step back at any move; the
-     * harness hands back when it is unsure, refused or stuck. The Mind then gets the record and the real screen.
-     */
-    private fun pilotRun(arguments: JSONObject): MindToolResult {
-        val setup = fast ?: return MindToolResult.error("Fast mode is off.")
-        val steps = com.cyclone.mobile.mind.pilot.Pilot.steps(arguments)
-        if (steps.isEmpty()) return MindToolResult.error("steps is required: 1–${com.cyclone.mobile.mind.pilot.Pilot.MAX_STEPS} steps, each {do, expect, text}.")
-        fun moved(result: MindToolResult): com.cyclone.mobile.mind.pilot.PilotMove {
-            val header = result.text.lineSequence().firstOrNull().orEmpty()
-            return com.cyclone.mobile.mind.pilot.PilotMove(result.ok, result.ok && !header.contains("did not visibly change"), header, result.ownerWaitMs)
-        }
-        val hands = object : com.cyclone.mobile.mind.pilot.PilotHands {
-            override fun look(withImage: Boolean): com.cyclone.mobile.mind.pilot.PilotLook? {
-                var image: String? = null
-                if (withImage) {
-                    val observed = env.observeWithImage(goal)
-                    val page = observed.page ?: return null
-                    val bound = bind(page)
-                    image = observed.image?.optString("pngBase64")?.takeIf { it.isNotBlank() }?.let { png -> prepareShot(page, bound, png, observed.image!!) }
-                } else if (!fresh || screen == null) env.observe(goal).page?.let(::bind)
-                val page = screen ?: return null
-                val bound = refs.all()
-                val app = appLabel(page.packageName) ?: page.packageName
-                // Code decides what is sensitive, never a model: secret fields on screen, or an app kept out of Fast mode.
-                val secretField = bound.any { it.password || (it.editable && sensitive(it.label)) }
-                val sensitiveScreen = secretField || com.cyclone.mobile.mind.pilot.Pilot.keepOff(page.packageName, app)
-                return com.cyclone.mobile.mind.pilot.PilotLook(
-                    com.cyclone.mobile.mind.pilot.PilotScreen(app, page.legacyPage?.title?.takeIf { it.isNotBlank() }, MindScreen.textLines(page).take(40),
-                        bound.map { com.cyclone.mobile.mind.pilot.PilotControl(it.ref, it.label, it.role, it.editable, it.password || sensitive(it.label)) },
-                        weak = !page.treeUseful || bound.isEmpty(), sensitive = sensitiveScreen),
-                    if (sensitiveScreen) null else image)
-            }
-
-            override fun tap(ref: String): com.cyclone.mobile.mind.pilot.PilotMove {
-                val target = refs.resolve(ref) ?: return com.cyclone.mobile.mind.pilot.PilotMove(false, false, "Not done: $ref is not on the screen")
-                return moved(act("phone.click", JSONObject().put("elementId", target.elementId), "Pilot: tapped ${target.ref} \"${target.label}\"", target))
-            }
-
-            override fun type(ref: String, text: String) = moved(this@PhoneMindToolbox.typeText(JSONObject().put("ref", ref).put("text", text)))
-            override fun scroll(down: Boolean) = moved(this@PhoneMindToolbox.scroll(JSONObject().put("direction", if (down) "down" else "up")))
-            override fun back() = moved(act("phone.back", JSONObject(), "Pilot: pressed Back"))
-            // Tool moves use only the plan's own app, link and field: the rapid model never names them.
-            override fun openApp(app: String) = moved(this@PhoneMindToolbox.openApp(app, false))
-            override fun openLink(url: String) = moved(this@PhoneMindToolbox.openLink(url))
-            override fun waitFor(seconds: Int) = moved(this@PhoneMindToolbox.waitFor(JSONObject().put("seconds", seconds.coerceIn(1, 5))))
-            override fun pressEnter(fieldLabel: String): com.cyclone.mobile.mind.pilot.PilotMove {
-                val field = refs.all().firstOrNull { it.editable && !it.password && it.label == fieldLabel }
-                    ?: return com.cyclone.mobile.mind.pilot.PilotMove(false, false, "Not done: the field \"$fieldLabel\" is not on the screen")
-                return moved(act("phone.submit_text", JSONObject().put("elementId", field.elementId), "Pilot: pressed Enter in ${field.ref} \"${field.label}\"", field))
-            }
-            override fun stopped(): Boolean = cancelled()
-        }
-        val outcome = com.cyclone.mobile.mind.pilot.Pilot.run(goal, steps, hands, setup.decider, setup.settings, setup.advisor)
-        val report = com.cyclone.mobile.mind.pilot.Pilot.report(setup.model, setup.settings, steps, outcome)
-        owner.status(if (outcome.handBack == null) "Fast run done: ${outcome.moves} moves" else "Fast run: back to the smart model")
-        val now = observeAndRender(null)
-        val back = outcome.handBack
-        val brief = "Pilot: ${outcome.moves} ${if (outcome.moves == 1) "move" else "moves"}, ${outcome.stepsDone}/${steps.size} steps" +
-            (back?.let { " — handed back (${it.reason.replace('_', ' ')})" } ?: "")
-        return MindToolResult("$report\n\n${now.text}", brief.take(200), ok = back == null, imageDataUrl = now.imageDataUrl,
-            changedScreen = outcome.moves > 0, ownerWaitMs = outcome.ownerWaitMs)
     }
 
     /** Marks refs on the screenshot and records its size so tap_point can map its pixels back to the screen. */
@@ -2218,7 +2144,7 @@ class PhoneMindToolbox(
         /** Tools that need a usable screen; memory, planning, questions and finishing work with the phone locked. */
         private val PHONE_TOOLS = setOf("screen_read", "screen_look", "screen_find", "tap", "tap_sequence", "tap_point", "long_press", "type_text",
             "press_enter", "scroll", "swipe", "double_tap", "drag", "zoom", "draw", "back", "home", "wait", "open_app", "open_link", "open_settings", "set_timer",
-            "set_alarm", "vault_fill", "open_notification", "go_to", "pilot", "port_send", "port_wait")
+            "set_alarm", "vault_fill", "open_notification", "go_to", "port_send", "port_wait")
         /** Read-only manual tools: offered only when the mission has the App Manual. */
         private val MANUAL_TOOLS = setOf("abilities_find", "how_to_find")
         /** Plan 43 T6: offered only in a sign-up mapping mission. */
@@ -2286,20 +2212,6 @@ class PhoneMindToolbox(
                 "calculator, a row of options. Stops at the first tap that doesn't go through. Use refs from the latest screen.",
                 objectSchema("refs" to array("The refs to tap, in order (1 to $MAX_SEQUENCE), e.g. [\"e12\", \"e13\", \"e20\"].", string("A ref like e12.")),
                     required = listOf("refs"))),
-            MindToolSpec("pilot", "Fast mode: give Cyclone's rapid runner your whole plan for the run, every step you imagine, in order. " +
-                "A rapid model carries it out move by move in about a second each (taps, typing your exact text, Enter, scrolling, Back, " +
-                "opening the step's app or link, waiting) and does the low-risk moves itself. While it runs, you are asked short questions " +
-                "in the background to check the rest of the plan and to fix it when the screen doesn't match. Mark every step that can't " +
-                "be taken back (a send, payment, delete or post) with risk=irreversible: those still need the owner's approval, and an " +
-                "unmarked one stops the runner. You get the record and the real screen back when the plan is done or needs you.",
-                objectSchema("steps" to array("The whole plan: 1 to 20 steps, in order.", objectSchema(
-                    "do" to string("The step in plain words, e.g. \"open the chat with lo.06\"."),
-                    "expect" to string("What is true when the step is done, e.g. \"the chat with lo.06 is open\"."),
-                    "text" to string("Only for a typing step: the exact text to type."),
-                    "app" to string("Only for a step that opens an app: its name, e.g. \"Instagram\"."),
-                    "link" to string("Only for a step that opens a link: the https:// or market:// link."),
-                    "risk" to string("irreversible for a send, payment, delete or post; leave out otherwise.", listOf("irreversible")),
-                    required = listOf("do"))), required = listOf("steps"))),
             MindToolSpec("signup_page", "Sign-up mapping: record the sign-up page on screen before you continue from it. List every field " +
                 "the page asks for: its label as shown, its kind, whether it is required, the format hint the app shows, and a picker's " +
                 "options. Never the value you type or were given: the map is a template for the next accounts.",

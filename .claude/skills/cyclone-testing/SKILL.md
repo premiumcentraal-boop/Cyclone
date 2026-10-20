@@ -91,7 +91,10 @@ the phone, never Cyclone's own claim.
 - `id`: `tb.gen.<yyyymmdd>.<short-name>`. `suites`: `["generated", "<area>"]`. Never reuse an id.
 - **Checks you can use:** `status`, `foreground`, `screen` (any / all / regex), `setting` (allowlisted keys only),
   `night_mode`, `timer`, `answer`, `answer_probe` (battery, Wi-Fi name, Google account, prop, setting), `owner`
-  (asked true/false), `approval` (requested true/false), `lab_file`.
+  (asked true/false), `approval` (requested true/false), `lab_file`, and since alpha 145 `page` (by meaning, the same in
+  every language: `ids` view names like `profile_tab`, `selected` the selected tab or a switch that is on, `activity` a
+  regex on the activity; `match` any/all). Prefer `page`, `foreground` and `setting` over `screen` words: a words check
+  breaks on another language or app version.
 - **Setup steps:** `home`, `force_stop`, `launch`, `setting`, `night_mode`, `dnd`, `lab_file`.
 - **Owner script:** `reply` (answer to a question), `fill` (field values, `*` for any), `steer` (change the task after
   N turns). Unscripted questions are declined; approvals are always declined.

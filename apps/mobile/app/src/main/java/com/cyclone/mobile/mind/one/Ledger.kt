@@ -18,6 +18,8 @@ data class LedgerEntry(
     val costUsd: Double = 0.0,
     val ms: Long = 0,
     val ok: Boolean = true,
+    /** Plan 75: which rung made the call ("step", "done", or the wake: "plan", "consult"…); null for older rows. */
+    val stage: String? = null,
 )
 
 class Ledger(entries: List<LedgerEntry> = emptyList()) {
@@ -43,6 +45,7 @@ class Ledger(entries: List<LedgerEntry> = emptyList()) {
     @Synchronized fun encode(): JSONArray = JSONArray(list.map { e ->
         JSONObject().put("at", e.atMs).put("p", e.purpose).put("m", e.model).put("in", e.inputTokens).put("c", e.cachedTokens)
             .put("out", e.outputTokens).put("usd", e.costUsd).put("ms", e.ms).put("ok", e.ok)
+            .apply { e.stage?.let { put("s", it) } }
     })
 
     companion object {
@@ -52,7 +55,8 @@ class Ledger(entries: List<LedgerEntry> = emptyList()) {
             a?.optJSONObject(i)?.let { o ->
                 runCatching {
                     LedgerEntry(o.getLong("at"), o.getString("p"), o.optString("m"), o.optInt("in"), o.optInt("c"), o.optInt("out"),
-                        o.optDouble("usd", 0.0), o.optLong("ms"), o.optBoolean("ok", true))
+                        o.optDouble("usd", 0.0), o.optLong("ms"), o.optBoolean("ok", true),
+                        o.optString("s").takeIf { it.isNotBlank() })
                 }.getOrNull()
             }
         })

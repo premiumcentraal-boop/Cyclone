@@ -57,9 +57,18 @@ class StepEngine(
     private val breaker: Breaker = Breaker(),
     private val settings: SettingReader? = null,
     private val record: (kind: String, line: String) -> Unit = { _, _ -> },
-    private val shadow: (StepScreen, Step) -> Unit = { _, _ -> },
     private val memory: MoveMemory? = null,
+    private val now: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
+    /** Plan 75 (alpha 145): how this run's moves were decided and where their time went, for the run record. */
+    @Volatile var stats = com.cyclone.mobile.mind.modes.RunRecord.Moves()
+        private set
+
+    private fun <T> read(block: () -> T): T {
+        val from = now()
+        try { return block() } finally { val ms = now() - from; stats = stats.copy(reads = stats.reads + 1, readMs = stats.readMs + ms) }
+    }
+
     /** The run's last moves and whether each was proven, for the fused call (plan 72). */
     private val moves = ArrayDeque<String>()
 
@@ -74,7 +83,7 @@ class StepEngine(
     fun run(step: Step, score: Score): StepOutcome = run(step, score, popups = 0)
 
     private fun run(step: Step, score: Score, popups: Int): StepOutcome {
-        val screen = eyes.look(false) ?: return StepOutcome.NeedsMind(step, "unreadable", "The screen could not be read")
+        val screen = read { eyes.look(false) } ?: return StepOutcome.NeedsMind(step, "unreadable", "The screen could not be read")
         if (screen.sensitive) return StepOutcome.NeedsMind(step, "sensitive", "A sensitive screen (password, code or a banking app): the crew stays off it")
 
         // Rung 0: direct actions need no screen decision.
@@ -99,7 +108,7 @@ class StepEngine(
         // Rung 1: one fused call per model, with the screenshot for the model that sees (plan 72). The screen is read
         // again with the image, and the decision is made on that reading, so refs and image match.
         val tripwire = step.risk != Risk.UNDOABLE || step.action in TRIPWIRE_ACTIONS
-        val fresh = runCatching { eyes.look(true) }.getOrNull()
+        val fresh = runCatching { read { eyes.look(true) } }.getOrNull()
         if (fresh?.sensitive == true) return StepOutcome.NeedsMind(step, "sensitive", "A sensitive screen (password, code or a banking app): the crew stays off it")
         val seen = fresh ?: screen
         val image = seen.imageDataUrl != null
@@ -206,12 +215,14 @@ class StepEngine(
 
     private fun act(step: Step, name: String, args: JSONObject, before: StepScreen, score: Score, rung: Int, label: String?,
                     retryStep: Boolean = false): StepOutcome {
+        val acting = now()
         val result: MindToolResult = runCatching { hands.execute(MindToolCall(id(), name, args.toString()), args) }
             .getOrElse { MindToolResult.error(it.message ?: "the action failed") }
+        stats = stats.copy(actMs = stats.actMs + (now() - acting), byCode = stats.byCode + if (rung == 0) 1 else 0)
         record("act", "${describe(name, label, args)} (rung $rung)" + if (result.ok) "" else " — failed: ${result.brief}")
         // A tool step can keep its result as a fact (plan 69 §4.6: "as" names it); the value is the tool's own text.
         if (result.ok) step.args["as"]?.takeIf { FACT_NAME.matches(it) }?.let { record("fact:$it", result.text.take(Score.MAX_FACT)) }
-        val after = eyes.look(false)
+        val after = read { eyes.look(false) }
         val key = "$name:${label ?: args.optString("app", args.optString("url", ""))}"
         if (!result.ok) {
             return when (val call = breaker.action(key, before.pageKey, progressed = false)) {
@@ -264,9 +275,15 @@ class StepEngine(
         val ask = FusedBoard.Ask(score.goal.text, milestone, step, screen, FusedBoard.shortlist(screen, step), pendingVerify?.second,
             score.orders, tripwire, image, history = moves.toList(), known = known)
         asks++
+        val deciding = now()
         val readings = runCatching { board.ask(FusedBoard.request(ask), ask) }.getOrDefault(emptyList())
         val pickRisk = readings.firstNotNullOfOrNull { r -> screen.controls.firstOrNull { it.ref == r.next } }?.let { riskOf(step, it.label) } ?: step.risk
-        return FusedBoard.combine(readings, undoable = pickRisk == Risk.UNDOABLE)
+        val combined = FusedBoard.combine(readings, undoable = pickRisk == Risk.UNDOABLE)
+        stats = stats.copy(asked = stats.asked + 1, decideMs = stats.decideMs + (now() - deciding),
+            noAnswer = stats.noAnswer + if (readings.isEmpty()) 1 else 0,
+            splits = stats.splits + if (readings.size > 1 && readings.map { it.next }.distinct().size > 1) 1 else 0,
+            doubts = stats.doubts + if (readings.any { it.doubt != null }) 1 else 0)
+        return combined
     }
 
     // ---- code decisions ---------------------------------------------------------------------------------------------

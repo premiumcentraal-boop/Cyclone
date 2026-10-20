@@ -35,7 +35,7 @@ object AppHealth {
     }
 
     private fun decisions(context: Context): JSONObject? = runCatching {
-        val bar = com.cyclone.mobile.mind.pilot.FastMode.settings(context).sureness.bar
+        val bar = com.cyclone.mobile.mind.pilot.FastMode.sureness(context).bar
         val use = com.cyclone.mobile.mind.modes.CycloneModes.settings(context).phoneModel
         com.cyclone.mobile.mind.decide.PhoneBrain.stats(context, bar, use)
             .put("speed", com.cyclone.mobile.mind.modes.CycloneModes.settings(context).speed.wire)

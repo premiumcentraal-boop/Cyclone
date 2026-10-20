@@ -19,6 +19,7 @@ def normalize_xml(xml_text: str) -> dict[str, Any]:
             "clickable": a.get("clickable") == "true", "enabled": a.get("enabled") == "true",
             "focusable": a.get("focusable") == "true", "scrollable": a.get("scrollable") == "true",
             "bounds": a.get("bounds", ""),
+            "selected": a.get("selected") == "true", "checked": a.get("checked") == "true",
         })
     return {"source": "UIAUTOMATOR", "captured_at": time.time(), "raw_xml": xml_text, "nodes": nodes}
 
