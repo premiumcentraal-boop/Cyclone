@@ -16,6 +16,9 @@ data class WorkspaceTarget(val appPackage: String, val androidUserId: Int, val d
 
 /** All callers, including PhoneToolExecutor, use this SAME monitor for the entire mutation. */
 class WorkspaceEngine(private val persist: (List<Workspace>) -> Unit = {}) {
+    private val mutableRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val revision: kotlinx.coroutines.flow.StateFlow<Long> = mutableRevision
+    private fun changed() { mutableRevision.value += 1 }
     val mutationLock = Any()
     private val registry = linkedMapOf<String, Workspace>()
     private val armed = ArrayDeque<String>()
@@ -36,17 +39,28 @@ class WorkspaceEngine(private val persist: (List<Workspace>) -> Unit = {}) {
         check(workspace.id != selected) { "Pause and clear selection before editing this workspace" }
         val updated = registry.toMutableMap().apply { put(workspace.id, workspace.copy(state = WorkspaceState.idle)) }
         persist(updated.values.toList())
-        registry.clear(); registry.putAll(updated)
+        registry.clear(); registry.putAll(updated); changed()
     }
     private fun state(id: String, value: WorkspaceState) { registry[id]?.let { registry[id] = it.copy(state = value) } }
-    private fun revoke() { lease = null; generation++ }
+    private fun revoke() { lease = null; generation++; changed() }
     fun pause() = synchronized(mutationLock) { revoke(); selected?.let { state(it, WorkspaceState.paused) } }
     fun clearSelection() = synchronized(mutationLock) { pause(); selected = null; armed.clear() }
+    /** Close exactly one task and invalidate its lease without dropping other armed jobs. */
+    fun closeTask(id: String, expectedGeneration: Long) = synchronized(mutationLock) {
+        if (selected == id) {
+            check(lease == null || lease?.generation == expectedGeneration) { "STALE_WORKSPACE: task identity changed" }
+            revoke()
+            selected = null
+            state(id, WorkspaceState.idle)
+        }
+        armed.remove(id)
+        changed()
+    }
     fun arm(id: String) = synchronized(mutationLock) {
         check(registry.containsKey(id)) { "Unknown workspace" }
-        if (id !in armed) armed.addLast(id)
+        if (id !in armed) { armed.addLast(id); changed() }
     }
-    fun disarm(id: String) = synchronized(mutationLock) { armed.remove(id); if (selected == id) pause() }
+    fun disarm(id: String) = synchronized(mutationLock) { armed.remove(id); changed(); if (selected == id) pause() }
     fun switch(id: String, gated: () -> Boolean, launch: (Workspace) -> Unit,
         observe: (Workspace) -> WorkspaceTarget): WorkspaceLease = synchronized(mutationLock) {
         revoke()

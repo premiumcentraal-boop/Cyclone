@@ -50,13 +50,13 @@ export function createFocusedPhonePage(
   onSettings: () => void,
   onPair: (device: DesktopDevice) => void,
 ): FocusedPhonePageHandle {
-  const page = el("section", "page focus-page");
+  const page = el("section", "page focus-page preview-first");
   const topbar = el("header", "focus-topbar");
-  const back = button("Back to all phones", "back-to-fleet");
+  const back = button("Back", "back-to-fleet");
   back.prepend(icon("←"));
   back.addEventListener("click", onBack);
   const focusHeading = el("div", "focus-heading");
-  focusHeading.append(el("div", "focus-kicker", "LIVE CONTROL"), el("h1", "focus-title", "Phone workspace"));
+  focusHeading.append(el("div", "focus-kicker", "PHONE SCREEN"), el("h1", "focus-title", device.name));
   const identity = el("div", "focus-device-identity");
   const identityName = el("div", "focus-device-name", device.name);
   const identityConnection = el("div", "phone-connection", device.connectionLabel);
@@ -164,7 +164,7 @@ export function createFocusedPhonePage(
     },
   });
   live.element.classList.add("focused-live-phone");
-  const liveHint = el("div", "direct-control-hint", "Foreground JPEG · display 0 live · click to tap · drag to swipe");
+  const liveHint = el("div", "direct-control-hint", "Click to tap · drag to swipe");
   const jpegHost = el("div", "task-jpeg-focus-host");
   jpegHost.hidden = true;
   liveColumn.append(liveHint, live.element, jpegHost);
@@ -327,9 +327,11 @@ export function createFocusedPhonePage(
       if (result.ok) {
         device.inputOwner = result.inputOwner ?? (kind === "yield_ai" ? "AI" : "HUMAN");
         ownerLabel.textContent = ownerCopy(device);
+        ownerText.textContent = device.inputOwner === "AI" ? "AI" : "Human";
+        ownerDot.classList.toggle("ai", device.inputOwner === "AI");
         controlStatus.textContent = kind === "yield_ai"
-          ? "AI has control · MCP can mutate after observe"
-          : "You have control · yield before MCP mutations";
+          ? "AI has control"
+          : "You have control";
         if (!disposed) await refreshSessions();
       } else {
         controlStatus.textContent = ownershipFailureCopy(label, result.verification);
@@ -466,9 +468,24 @@ export function createFocusedPhonePage(
   }
   more.append(summary, menu);
 
-  controls.append(primary, more, clipboardPanel);
-  workspace.append(contextPanel, liveColumn, controls);
-  page.append(topbar, trustRepairBanner, keyboardIndicator, workspace);
+  const ownership = el("div", "focus-ownership");
+  const ownerDot = el("span", "ownership-dot");
+  const ownerText = el("span", "ownership-label", device.inputOwner === "AI" ? "AI" : "Human");
+  ownership.append(el("div", "ownership-kicker", "Control"), ownerDot, ownerText, yieldAi, takeHuman);
+  yieldAi.textContent = "Give AI control";
+  takeHuman.textContent = "Take control";
+
+  const details = el("details", "focus-details") as HTMLDetailsElement;
+  const detailsSummary = el("summary", "focus-details-summary");
+  detailsSummary.append(
+    el("span", "focus-details-title", "Details"),
+    el("span", "focus-details-copy", "Connection health, MCP session and diagnostics"),
+  );
+  details.append(detailsSummary, contextPanel);
+
+  controls.append(primary, more, clipboardPanel, ownership);
+  workspace.append(liveColumn, controls);
+  page.append(topbar, trustRepairBanner, keyboardIndicator, workspace, details);
 
   const keydown = (event: KeyboardEvent) => {
     if (!keyboardActive) return;
@@ -519,6 +536,8 @@ export function createFocusedPhonePage(
       healthSlot.replaceChildren(createDeviceHealthPanel(next));
       trustRepairBanner.hidden = !needsTrustRepair(next);
       ownerLabel.textContent = ownerCopy(next);
+      ownerText.textContent = next.inputOwner === "AI" ? "AI" : "Human";
+      ownerDot.classList.toggle("ai", next.inputOwner === "AI");
       if (!disposed) {
         void refreshLayer2();
         void refreshSessions();

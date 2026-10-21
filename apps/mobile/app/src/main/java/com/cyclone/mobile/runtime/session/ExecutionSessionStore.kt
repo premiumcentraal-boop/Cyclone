@@ -1,6 +1,9 @@
 package com.cyclone.mobile.runtime.session
 
-class SessionIdentityException(message: String) : IllegalArgumentException(message)
+class SessionIdentityException(
+    message: String,
+    val errorClass: String = "SESSION_DISPLAY_MISMATCH",
+) : IllegalArgumentException(message)
 
 class ExecutionSessionStore {
     private val lock = Any()
@@ -63,7 +66,13 @@ class ExecutionSessionStore {
     }
 
     internal fun registerOwned(sessionId: String, displayId: Int, targetPackage: String): ExecutionSession = synchronized(lock) {
-        if (displayId <= 0 || sessionId in sessions || sessions.values.any { it.displayId == displayId }) {
+        if (sessionId.isBlank() || sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) {
+            throw SessionIdentityException("owned session requires a unique named identity")
+        }
+        if (displayId <= 0) {
+            throw SessionIdentityException("owned session requires a unique nonzero displayId")
+        }
+        if (sessionId in sessions || sessions.values.any { it.displayId == displayId }) {
             throw SessionIdentityException("owned session requires a unique nonzero displayId")
         }
         ExecutionSession(sessionId, displayId, targetPackage, ExecutionBackendKind.SHIZUKU,

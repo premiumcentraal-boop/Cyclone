@@ -36,6 +36,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         val crop: UiBounds?,
         val timestampMs: Long,
         val liveFrame: com.cyclone.mobile.ai.vision.live.LiveFrame? = null,
+        val displayBounds: UiBounds? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("filePath", file.absolutePath)
@@ -44,6 +45,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             .put("height", height)
             .put("timestampMs", timestampMs)
             .put("crop", crop?.toJson() ?: JSONObject.NULL)
+            .put("displayBounds", (displayBounds ?: crop)?.toJson() ?: JSONObject.NULL)
             .put("sessionId", liveFrame?.sessionId ?: "default-foreground")
             .put("displayId", liveFrame?.displayId ?: 0)
             .put("frameId", liveFrame?.frameId ?: JSONObject.NULL)
@@ -113,8 +115,13 @@ class CycloneAccessibilityService : AccessibilityService() {
         if (event.windowId != -1 && windowsOnAllDisplays.get(0).orEmpty().none { it.id == event.windowId }) return
         try {
             val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() }
-            packageName?.let { DeviceState.currentPackage = it }
-            event.className?.toString()?.takeIf { it.isNotBlank() }?.let { DeviceState.currentClassName = it }
+            val eventWindow = windowsOnAllDisplays.get(0).orEmpty().firstOrNull { it.id == event.windowId }
+            val host = preferredForegroundRoot()
+            if (!TaskSurfaceWindows.eventBelongsToTask(eventWindow?.type, packageName.orEmpty(), host?.packageName?.toString())) return
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                host?.packageName?.toString()?.let { DeviceState.currentPackage = it }
+                host?.className?.toString()?.let { DeviceState.currentClassName = it }
+            }
             DeviceState.lastUiEventAtMs = System.currentTimeMillis()
 
             if (automationRuntimeReady) {
@@ -185,7 +192,7 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     fun observe(markFresh: Boolean = true): UiSnapshot {
         if (markFresh) waitForUiQuiet()
-        val root = preferredForegroundRoot() ?: rootInActiveWindow
+        val root = preferredForegroundRoot()
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
         val consumedWindows = mutableSetOf<Int>()
@@ -193,11 +200,11 @@ class CycloneAccessibilityService : AccessibilityService() {
             collectNode(root, "0", null, 0, nodes)
             consumedWindows += root.windowId
         }
-        includeSiblingApplicationWindows(nodes, consumedWindows)
+        includeSiblingApplicationWindows(nodes, consumedWindows, root?.packageName?.toString().orEmpty())
         val folded = AccessibilityRoles.foldTalkBackHosts(nodes)
         nodes.clear()
         nodes.addAll(folded)
-        val windowsSnapshot = windows.orEmpty().map { window ->
+        val windowsSnapshot = windowsOnAllDisplays.get(0).orEmpty().filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }.map { window ->
             val rect = Rect().also { window.getBoundsInScreen(it) }
             UiWindowSnapshot(
                 id = window.id,
@@ -216,11 +223,11 @@ class CycloneAccessibilityService : AccessibilityService() {
             metrics.widthPixels,
             metrics.heightPixels,
         )
-        val packageName = root?.packageName?.toString()?.takeIf { it.isNotBlank() } ?: DeviceState.currentPackage
+        val packageName = root?.packageName?.toString()?.takeIf { it.isNotBlank() }
         val fingerprint = screenFingerprint(packageName, nodes)
         val snapshot = UiSnapshot(
             packageName = packageName,
-            className = DeviceState.currentClassName,
+            className = root?.className?.toString(),
             screenWidth = metrics.widthPixels,
             screenHeight = metrics.heightPixels,
             timestampMs = System.currentTimeMillis(),
@@ -349,15 +356,15 @@ class CycloneAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private fun includeSiblingApplicationWindows(nodes: MutableList<UiNodeSnapshot>, consumedWindows: MutableSet<Int>) {
-        val overlay = OverlayChromeRuntime.snapshot()
-        val includeOverlay = overlay.state == OverlayChromeState.GATE && !overlay.minimized
-        for (window in windows.orEmpty()) {
+    private fun includeSiblingApplicationWindows(nodes: MutableList<UiNodeSnapshot>, consumedWindows: MutableSet<Int>, hostPackage: String) {
+        // GATE is added separately as bounded synthetic state, never as the animated Compose tree.
+        for (window in windowsOnAllDisplays.get(0).orEmpty()) {
             val wroot = window.root ?: continue
             if (wroot.windowId in consumedWindows) continue
             val pkg = wroot.packageName?.toString().orEmpty()
             val isWeb = isWebishWindow(window, wroot)
-            if (!OverlayChromeObservation.shouldCollectSiblingWindow(window.type, pkg, isWeb, includeOverlay)) continue
+            if (!TaskSurfaceWindows.includeSibling(window.type, pkg, hostPackage)) continue
+            if (!OverlayChromeObservation.shouldCollectSiblingWindow(window.type, pkg, isWeb)) continue
             collectNode(wroot, "w${window.id}/0", null, 0, nodes)
             consumedWindows += wroot.windowId
         }
@@ -372,20 +379,18 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     private fun preferredForegroundRoot(): AccessibilityNodeInfo? {
+        val listed = windowsOnAllDisplays.get(0).orEmpty()
         val active = rootInActiveWindow
-        val activePkg = active?.packageName?.toString().orEmpty()
-        if (activePkg.isNotBlank() && activePkg != "com.android.systemui") return active
-        val listed = windows.orEmpty()
-        val app = listed.firstOrNull { window ->
-            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
-                (window.isActive || window.isFocused) &&
-                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
-        } ?: listed.firstOrNull { window ->
-            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
-                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
-        }
-        return app?.root ?: active
+        val selected = TaskSurfaceWindows.primary(listed.map { window ->
+            TaskSurfaceWindows.Window(window.id, window.type, window.root?.packageName?.toString().orEmpty(),
+                window.layer, window.isActive, window.isFocused)
+        }, active?.windowId)
+        if (selected != null) return listed.firstOrNull { it.id == selected.id }?.root
+        // OEM fallback only when enumeration is unavailable. Never use Cyclone's untyped overlay root.
+        return active?.takeIf { listed.isEmpty() && !it.packageName.isNullOrBlank() && it.packageName?.toString() !in setOf("com.cyclone.mobile", "com.android.systemui") }
     }
+
+    internal fun foregroundTaskWindowId(): Int? = preferredForegroundRoot()?.windowId
 
     /**
      * V2.9 replay optimization: a human may demonstrate a two-second hold, but if Android exposes
@@ -423,14 +428,8 @@ class CycloneAccessibilityService : AccessibilityService() {
     private inner class AccessibilityTypeLive : PhoneTypeEngine.LiveHost {
 
         override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
-            val roots = ArrayList<AccessibilityNodeInfo>()
-            rootInActiveWindow?.let(roots::add)
-            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
-            for (root in roots) {
-                val node = nodeAtPath(root, plan.path) ?: continue
-                if (node.isEditable) return AccessibilityTypeHandle(plan.path, node, plan.rawNodeId)
-            }
-            return null
+            val node = nodeAtTaskPath(plan.path) ?: return null
+            return if (node.isEditable) AccessibilityTypeHandle(plan.path, node, plan.rawNodeId) else null
         }
 
         override fun view(handle: Any): PhoneTypeEngine.LiveView? {
@@ -469,20 +468,14 @@ class CycloneAccessibilityService : AccessibilityService() {
 
         override fun refresh(handle: Any): Any? {
             val target = handle as? AccessibilityTypeHandle ?: return null
-            val roots = ArrayList<AccessibilityNodeInfo>()
-            rootInActiveWindow?.let(roots::add)
-            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
-            for (root in roots) {
-                val node = nodeAtPath(root, target.path) ?: continue
-                if (node.isEditable) return AccessibilityTypeHandle(target.path, node, target.rawNodeId)
-            }
-            return null
+            val node = nodeAtTaskPath(target.path) ?: return null
+            return if (node.isEditable) AccessibilityTypeHandle(target.path, node, target.rawNodeId) else null
         }
     }
 
     fun scroll(selector: ElementSelector?, forward: Boolean = true): Boolean {
         if (!agentCanAct()) return false
-        val node = selector?.let { resolveLiveTarget(it)?.second } ?: findScrollable(rootInActiveWindow)
+        val node = if (selector != null) resolveLiveTarget(selector)?.second else findScrollable(preferredForegroundRoot())
         node ?: return false
         val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         return node.performAction(action)
@@ -572,37 +565,21 @@ class CycloneAccessibilityService : AccessibilityService() {
         return match.node to live
     }
 
-    private fun liveNodeAtSnapshotPath(snapshotNode: UiNodeSnapshot): AccessibilityNodeInfo? {
-        val path = snapshotNode.path
-        val candidates = ArrayList<AccessibilityNodeInfo>()
-        preferredForegroundRoot()?.let(candidates::add)
-        rootInActiveWindow?.let { root ->
-            if (candidates.none { it.windowId == root.windowId }) candidates.add(root)
-        }
-        windows.orEmpty().forEach { window ->
-            val wroot = window.root ?: return@forEach
-            if (candidates.none { it.windowId == wroot.windowId }) candidates.add(wroot)
-        }
-        for (root in candidates) {
-            val live = nodeAtPath(root, path) ?: continue
-            if (sameNode(snapshotNode, live)) return live
-        }
-        return null
-    }
+    private fun liveNodeAtSnapshotPath(snapshotNode: UiNodeSnapshot): AccessibilityNodeInfo? =
+        nodeAtTaskPath(snapshotNode.path)?.takeIf { sameNode(snapshotNode, it) }
 
-    private fun nodeAtPath(root: AccessibilityNodeInfo, path: String): AccessibilityNodeInfo? {
-        val pieces = path.split('/').filter { it.isNotBlank() }
-        if (pieces.isEmpty()) return null
-        val start = pieces.first()
-        val walkRoot = if (start.startsWith("w")) {
-            val windowId = start.removePrefix("w").toIntOrNull() ?: return null
-            windows.orEmpty().firstOrNull { it.id == windowId }?.root ?: return null
-        } else {
-            if (start != "0") return null
-            root
+    private fun nodeAtTaskPath(path: String): AccessibilityNodeInfo? {
+        val parsed = TaskSurfaceWindows.parseNodePath(path) ?: return null
+        val primary = preferredForegroundRoot() ?: return null
+        val root = if (parsed.windowId == null || parsed.windowId == primary.windowId) primary else {
+            val window = windowsOnAllDisplays.get(0).orEmpty().firstOrNull { it.id == parsed.windowId } ?: return null
+            val candidate = window.root ?: return null
+            if (!TaskSurfaceWindows.includeSibling(window.type, candidate.packageName?.toString().orEmpty(),
+                    primary.packageName?.toString().orEmpty())) return null
+            candidate
         }
-        var node = walkRoot
-        for (index in pieces.drop(1)) node = node.getChild(index.toIntOrNull() ?: return null) ?: return null
+        var node = root
+        for (index in parsed.children) node = node.getChild(index) ?: return null
         return node
     }
 
@@ -689,7 +666,7 @@ class CycloneAccessibilityService : AccessibilityService() {
     private fun screenFingerprint(packageName: String?, nodes: List<UiNodeSnapshot>): String {
         val normalized = buildString {
             append(packageName.orEmpty())
-            nodes.filter { it.visibleToUser }.take(800).forEach {
+            nodes.filter { it.visibleToUser && it.windowId != OverlayChromeObservation.OVERLAY_WINDOW_ID }.take(800).forEach {
                 append('|').append(it.resourceId).append('|').append(it.text.take(120)).append('|').append(it.contentDescription.take(120))
                     .append('|').append(it.className).append('|').append(it.bounds.left).append(',').append(it.bounds.top)
                     .append(',').append(it.bounds.right).append(',').append(it.bounds.bottom)

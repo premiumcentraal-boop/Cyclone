@@ -25,6 +25,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CyclonePcParityBridgeTest {
+    @Test fun groundingFailureEscalatesDespitePageChurnAndSurvivesNextObserve() {
+        val bridge = CyclonePcParityBridge(FakeEnvironment(listOf(
+            card("one", "page-one", "one", "fp-one"),
+            card("two", "page-two", "two", "fp-two"),
+            card("three", "page-three", "three", "fp-three"))))
+        val cause = com.cyclone.mobile.agent.recovery.RecoverableCause.STALE_SELECTOR
+        bridge.observe("reject cookies")
+        assertEquals(com.cyclone.mobile.agent.recovery.RecoveryLevel.GOAL_RANKED_SEARCH,
+            bridge.recover(cause, "reject cookies", 1)?.level)
+        bridge.observe("reject cookies")
+        assertEquals(com.cyclone.mobile.agent.recovery.RecoveryLevel.SILENT_SCREENSHOT_VISION,
+            bridge.recover(cause, "reject cookies", 2)?.level)
+        bridge.observe("reject cookies")
+        assertTrue(bridge.consumeForcedVision())
+        assertFalse(bridge.consumeForcedVision())
+        assertTrue(bridge.claimVisionCapture())
+        assertFalse(bridge.claimVisionCapture())
+        bridge.observe("open reddit.com")
+        assertFalse(bridge.claimVisionCapture())
+        bridge.markVerifiedProgress()
+        assertTrue(bridge.claimVisionCapture())
+    }
+
     private class FakeEnvironment(cards: List<AgentPageCard>) : CycloneAgentEnvironmentApi {
         private val cards = cards.toMutableList()
         private var current: AgentPageCard? = null

@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV32App.kt"
 FEATURES = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV32FeaturePages.kt"
+SETTINGS_426 = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneSettings426.kt"
 AI_CHAT = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt"
 BRAIN_V39 = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV39BrainPage.kt"
 MANIFEST = ROOT / "apps/mobile/app/src/main/AndroidManifest.xml"
@@ -15,11 +16,11 @@ MAIN = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/MainActivity.kt"
 
 REQUIRED_APP = (
     "V32Destination.HOME -> V32HomePage",
-    "V32Destination.TEACH -> V32TeachPage",
+    "V32Destination.PROFILES -> CycloneProfilesPage",
     "V32Destination.AI -> V39AiChatPage",
-    "V32Destination.ROUTINES -> V32RoutinesPage",
+    "V32Destination.ROUTINES -> CycloneRoutinesPage",
     "V32Destination.BRAIN -> CycloneV39BrainPage",
-    "V32SettingsPage(context, refreshTick)",
+    "CycloneSettingsPage426(context, refreshTick,",
 )
 REQUIRED_FEATURES = (
     "internal fun V32TeachPage",
@@ -29,17 +30,32 @@ REQUIRED_FEATURES = (
     "GatewayAiCard(context, refreshTick)",
     'CycloneSectionTitle("Optional PC companion")',
 )
+REQUIRED_SETTINGS_426 = (
+    "internal fun CycloneSettingsPage426",
+    'Settings426Row("Model & API"',
+    'Settings426Row("Phone control"',
+    'Settings426Row("Profile engine"',
+    'Settings426Row("PC Gateway"',
+    "CycloneModelPill",
+    "CycloneAiAccessProfileStore.write",
+    "CyclonePermissionSetup.phoneControlSnapshot",
+    "BackgroundSetup.read",
+)
 REQUIRED_AI_CHAT = (
     "internal fun V39AiChatPage",
-    "OpenRouterAdaptiveAgent(context)",
+    "CycloneTextChat.answer(context",
+    "RequestIntentRouter.route(",
+    "WorkspaceTasks.queueRequest(normalized)",
     "OpenRouterModelPresets.all",
-    '"Ask Cyclone to do something…"',
+    '"Ask Cyclone…"',
+    "CycloneModelPill(",
+    "showModelPill = false",
 )
 REQUIRED_BRAIN_V39 = (
     "internal fun CycloneV39BrainPage",
-    'CycloneSectionTitle("Recent runs")',
+    'CycloneSectionTitle("Recent outcomes")',
     "TaskResultActivityV292",
-    '"Tap to inspect and download .txt"',
+    '"View details"',
 )
 REQUIRED_MANIFEST = (
     'android:name=".MainActivity"',
@@ -68,6 +84,7 @@ def check() -> list[str]:
     for path, required in (
         (APP, REQUIRED_APP),
         (FEATURES, REQUIRED_FEATURES),
+        (SETTINGS_426, REQUIRED_SETTINGS_426),
         (AI_CHAT, REQUIRED_AI_CHAT),
         (BRAIN_V39, REQUIRED_BRAIN_V39),
         (MANIFEST, REQUIRED_MANIFEST),
@@ -80,7 +97,7 @@ def check() -> list[str]:
             continue
         for token in missing_tokens(text, required):
             errors.append(f"{path.relative_to(ROOT)} missing invariant: {token}")
-        if path in (APP, FEATURES, AI_CHAT, MAIN):
+        if path in (APP, FEATURES, SETTINGS_426, AI_CHAT, MAIN):
             for retired in ("Teamwork Sniper", "TEAMWORK_SNIPER_PACKAGE", "coreWsUrl", "coreToken", "BridgeClient.start"):
                 if retired in text:
                     errors.append(f"{path.relative_to(ROOT)} exposes retired integration: {retired}")
@@ -94,8 +111,8 @@ def main() -> int:
             print(f"ERROR: {error}")
         return 1
     print(
-        "Cyclone mobile product invariants preserved: Home, Teach, 3.9 Ask Cyclone, Routines, "
-        "3.9 Brain runs, Settings, PC Gateway, accessibility and notification services"
+        "Cyclone mobile product invariants preserved: Home, Profiles, Ask Cyclone, Routines, "
+        "Brain, utility Settings, PC Gateway, accessibility and notification services"
     )
     return 0
 

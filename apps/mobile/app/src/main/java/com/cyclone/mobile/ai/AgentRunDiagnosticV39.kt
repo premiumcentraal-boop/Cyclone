@@ -10,7 +10,7 @@ import java.util.Locale
 
 /** High-signal, user-shareable projection of Cyclone's durable trace database. */
 object AgentRunDiagnosticV39 {
-    const val SCHEMA = "cyclone-run-diagnostic-v39/3"
+    const val SCHEMA = "cyclone-run-diagnostic-v39/4"
     const val MAX_BYTES = 1024 * 1024
 
     data class Metrics(
@@ -24,6 +24,7 @@ object AgentRunDiagnosticV39 {
         val completionRejections: Int,
         val modelContextSnapshots: Int,
         val freeModeEntries: Int,
+        val executorInvocations: Int,
     ) {
         /** Compatibility aggregate for existing Brain/result UI while diagnostics keep failure classes separate. */
         val failures: Int get() = toolFailures + verificationFailures
@@ -35,22 +36,42 @@ object AgentRunDiagnosticV39 {
     )
 
     fun metrics(events: List<AiTraceEvent>): Metrics {
-        val explicitToolCalls = events.count { it.kind in setOf("ACTION_REQUESTED", "TOOL_CALL") }
-        val runtimeToolCalls = events.count { it.kind == "TOOL_REQUESTED" }
+        // TOOL_RESULT is the turn summary; ANDROID_EXECUTION/ACTION_REJECTED are per-action
+        // results inside it. Count the detailed plane when present, and retain summary-only
+        // rejections (the exact failure mode of the 4.3.4 Reddit run).
+        val boundary = if (events.any { it.kind == "TOOL_REQUESTED" }) "TOOL_REQUESTED" else "ACTION_REQUESTED"
+        val groups = mutableListOf<MutableList<AiTraceEvent>>()
+        events.forEach { event ->
+            if (groups.isEmpty() || event.kind == boundary) groups += mutableListOf<AiTraceEvent>()
+            groups.last().add(event)
+        }
+        fun preferredCount(primary: String, fallback: String, predicate: (AiTraceEvent) -> Boolean): Int =
+            events.filter { it.kind == primary }.takeIf { it.isNotEmpty() }
+                ?.count(predicate) ?: events.count { it.kind == fallback && predicate(it) }
         return Metrics(
-            toolCalls = maxOf(explicitToolCalls, runtimeToolCalls),
-            toolFailures = events.count {
-                it.ok == false && it.kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT")
+            toolCalls = groups.sumOf { group ->
+                maxOf(group.count { it.kind in setOf("ACTION_REQUESTED", "TOOL_CALL") },
+                    group.count { it.kind == "TOOL_REQUESTED" })
             },
-            verificationFailures = events.count {
-                it.ok == false && it.kind in setOf("VERIFICATION", "PROGRESS_CLASSIFIED", "VERIFY")
+            executorInvocations = events.count { it.kind == "ANDROID_EXECUTION" && it.detail.orEmpty().contains("executorInvoked=true") },
+            toolFailures = groups.sumOf { group ->
+                val detailed = group.filter { it.kind in setOf("ANDROID_EXECUTION", "ACTION_REJECTED") }
+                (detailed.takeIf { it.isNotEmpty() } ?: group.filter { it.kind == "TOOL_RESULT" }).count { it.ok == false }
             },
-            recoveries = events.count { event ->
-                event.kind == "REPLAN" ||
-                    event.kind == "RECOVERY_SELECTED" ||
-                    (event.kind == "RECOVERY_CLASSIFIED" && event.code != "progress.continue")
+            verificationFailures = groups.sumOf { group ->
+                var accepted: Boolean? = null
+                val detailed = group.filter { it.kind == "VERIFICATION" }
+                if (detailed.isNotEmpty()) {
+                    group.count { event ->
+                        if (event.kind in setOf("ANDROID_EXECUTION", "ACTION_REJECTED")) accepted = event.ok
+                        event.kind == "VERIFICATION" && event.ok == false && accepted != false
+                    }
+                } else group.count { it.kind == "VERIFY" && it.ok == false && !it.code.orEmpty().startsWith("completion.") }
             },
-            visionChecks = events.count { it.kind.contains("VISION") },
+            recoveries = if (events.any { it.kind == "RECOVERY_CLASSIFIED" })
+                events.count { it.kind == "RECOVERY_CLASSIFIED" && it.code != "progress.continue" }
+                else preferredCount("RECOVERY_SELECTED", "REPLAN") { true },
+            visionChecks = preferredCount("VISION", "VISION_ESCALATION") { true },
             verifiedActions = events.count { it.kind == "VERIFICATION" && it.ok == true },
             completionChecks = events.count {
                 it.kind == "VERIFY" && it.code.orEmpty().startsWith("completion.")
@@ -139,6 +160,7 @@ object AgentRunDiagnosticV39 {
             appendLine("------------------------------------------------------------")
             appendLine("Model/decision turns: $effectiveTurns")
             appendLine("Tool calls: ${metrics.toolCalls}")
+            appendLine("Canonical executor invocations (explicit evidence): ${metrics.executorInvocations}")
             appendLine("Verified actions: ${metrics.verifiedActions}")
             appendLine("Tool failures: ${metrics.toolFailures}")
             appendLine("Verification failures: ${metrics.verificationFailures}")
@@ -185,7 +207,7 @@ object AgentRunDiagnosticV39 {
         kind in setOf("PAGE", "BRAIN", "MODEL_CONTEXT", "OBSERVE", "KNOWN_ROUTE_LOOKUP") -> "MODEL SAW / CONTEXT"
         kind in setOf("PLAN", "DECISION", "MODEL_DECISION") -> "MODEL DECISION"
         kind in setOf("ACTION_REQUESTED", "TOOL_REQUESTED", "TOOL_CALL") -> "TOOL REQUEST"
-        kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT") -> "TOOL RESULT"
+        kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT", "ACTION_REJECTED") -> "TOOL RESULT"
         kind in setOf("AFTER_OBSERVATION", "VERIFICATION", "PROGRESS_CLASSIFIED", "VERIFY") -> "VERIFICATION"
         kind.startsWith("RECOVERY") || kind == "REPLAN" -> "RECOVERY"
         kind == "FREE_MODE_ENTER" || kind == "FREE_MODE_EXIT" -> "ADAPTIVE FREE MODE"

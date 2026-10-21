@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -49,6 +50,11 @@
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
+        <service android:name=".runtime.workspaces.ProfileBootstrapService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-requested secure profile configuration transfer" />
+        </service>
+
+        <activity android:name=".ui.ProfileRescueActivity" android:exported="false" />
         <activity android:name=".ui.overlay.OverlayAttachmentActivity" android:exported="false" />
         <activity android:name=".ui.overlay.CycloneAiSettingsActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceProgressActivity" android:exported="false" />
@@ -132,5 +138,6 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+    <receiver android:name=".gateway.LivePhoneControlReceiver" android:exported="false" />
     </application>
 </manifest>

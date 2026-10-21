@@ -82,6 +82,10 @@ object CompiledSkillReplay {
             if (outcome.policyDenied) {
                 return miss(SkillMissReason.POLICY, SkillEscalateTo.FAST_PATH_LLM, "policy denied compiled step ${step.id}", route.id, stepsRun)
             }
+            if (!outcome.ok) {
+                return miss(SkillMissReason.AFTER_STATE_MISMATCH, SkillEscalateTo.FAST_PATH_LLM,
+                    "executor rejected compiled step", route.id, stepsRun)
+            }
             if (!outcome.selectorResolved) {
                 return miss(SkillMissReason.SELECTOR_MISS, escalateForTree(current), "executor could not resolve ${step.id}", route.id, stepsRun)
             }

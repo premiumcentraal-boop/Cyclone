@@ -5,8 +5,13 @@ import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.ai.vision.live.LiveVisionRuntime
 import com.cyclone.mobile.runtime.background.WorkspaceRuntime
+import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
 import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionContract
+import com.cyclone.mobile.runtime.session.SessionIdentityException
+import com.cyclone.mobile.runtime.session.SessionPlane
+import com.cyclone.mobile.runtime.session.SessionPlaneKind
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -25,6 +30,7 @@ internal object GatewaySessionAdapter {
     fun list(context: Context): JSONObject {
         val sessions = JSONArray()
         LiveVisionRuntime.sessions.snapshot().forEach { session ->
+            if (!session.isDefaultForeground && session.displayId <= 0) return@forEach
             sessions.put(sessionJson(context, session))
         }
         return JSONObject()
@@ -110,10 +116,25 @@ internal object GatewaySessionAdapter {
 
     /** One exact-session frame. Background frames come only from that workspace's live source. */
     fun snapshot(context: Context, args: JSONObject): JSONObject {
-        val execution = try {
-            ExecutionRequestScope.read(args)
+        failClosedNamedWorkspaceOnDisplayZero(args)
+        val plane = try {
+            val merged = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+            if (args.has("workspaceId") && !merged.has("workspaceId")) merged.put("workspaceId", args.get("workspaceId"))
+            if (args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+                merged.put("workspaceGeneration", args.get("workspaceGeneration"))
+            }
+            SessionContract.classify(merged)
+        } catch (error: SessionIdentityException) {
+            throw namedWorkspaceDisplayZeroOr(error, args)
         } catch (error: IllegalArgumentException) {
             throw GatewayProtocolException("PROTOCOL_MISMATCH", error.message ?: "Invalid execution context")
+        }
+        val execution = ExecutionContext(plane.sessionId, plane.displayId)
+        if (execution.sessionId != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID && execution.displayId <= 0) {
+            throw GatewayProtocolException(
+                "PROTOCOL_MISMATCH",
+                "Named workspace displayId must be > 0; display 0 is reserved for default-foreground / Layer 2",
+            )
         }
         if (execution.sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) {
             if (execution.displayId != 0) {
@@ -142,10 +163,14 @@ internal object GatewaySessionAdapter {
         }
         val payload = result.payload as? JSONObject
             ?: throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Exact-session frame returned no image payload")
-        return JSONObject(payload.toString())
+        val snapshot = JSONObject(payload.toString())
             .put("sessionId", execution.sessionId)
             .put("displayId", execution.displayId)
             .put("foregroundSubstitution", false)
+        return SessionContract.attach(
+            snapshot,
+            SessionPlane(SessionPlaneKind.SESSION_KERNEL_VD, execution.sessionId, execution.displayId),
+        )
     }
 
     private fun sessionJson(context: Context, session: ExecutionSession): JSONObject {
@@ -172,6 +197,66 @@ internal object GatewaySessionAdapter {
             .put("executionGeneration", generation ?: JSONObject.NULL)
             .put("frameHealthy", if (foreground) JSONObject.NULL else LiveVisionRuntime.healthy(session.sessionId))
             .put("appPackage", context.packageName)
+            .put("plane", SessionPlane(
+                if (foreground) SessionPlaneKind.FOREGROUND else SessionPlaneKind.SESSION_KERNEL_VD,
+                session.sessionId, session.displayId
+            ).toJson())
+    }
+
+    /**
+     * Named / owned workspaces must never bind display 0. Session Contract classify reports
+     * SESSION_DISPLAY_MISMATCH internally; the gateway wire code for this hole is PROTOCOL_MISMATCH.
+     */
+    private fun failClosedNamedWorkspaceOnDisplayZero(args: JSONObject) {
+        val sessionId = requestedSessionId(args)
+        if (sessionId.isBlank() || sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) return
+        val displayId = requestedDisplayId(args) ?: return
+        if (displayId <= 0) {
+            throw GatewayProtocolException(
+                "PROTOCOL_MISMATCH",
+                "Named workspace displayId must be > 0; display 0 is reserved for default-foreground / Layer 2",
+            )
+        }
+    }
+
+    private fun namedWorkspaceDisplayZeroOr(
+        error: SessionIdentityException,
+        args: JSONObject,
+    ): GatewayProtocolException {
+        val sessionId = requestedSessionId(args)
+        val displayId = requestedDisplayId(args)
+        val namedOnZero = sessionId.isNotBlank() &&
+            sessionId != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID &&
+            displayId != null &&
+            displayId <= 0
+        val code = if (namedOnZero || error.errorClass == SessionContract.SESSION_DISPLAY_MISMATCH) {
+            "PROTOCOL_MISMATCH"
+        } else {
+            error.errorClass
+        }
+        return GatewayProtocolException(code, error.message ?: "Invalid execution context")
+    }
+
+    private fun requestedSessionId(args: JSONObject): String {
+        fun read(json: JSONObject?): String {
+            if (json == null) return ""
+            val camel = json.optString("sessionId").trim()
+            if (camel.isNotBlank()) return camel
+            return json.optString("session_id").trim()
+        }
+        read(args).takeIf { it.isNotBlank() }?.let { return it }
+        read(args.optJSONObject("executionContext")).takeIf { it.isNotBlank() }?.let { return it }
+        return read(args.optJSONObject("params"))
+    }
+
+    private fun requestedDisplayId(args: JSONObject): Int? {
+        fun read(json: JSONObject?): Int? {
+            if (json == null) return null
+            if (json.has("displayId")) return json.optInt("displayId")
+            if (json.has("display_id")) return json.optInt("display_id")
+            return null
+        }
+        return read(args) ?: read(args.optJSONObject("executionContext")) ?: read(args.optJSONObject("params"))
     }
 
     private fun requiredSessionId(args: JSONObject): String {

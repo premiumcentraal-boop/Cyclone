@@ -57,12 +57,14 @@ data class CycloneTraceEvent(
     val observationIdentity: String? = null,
     val pageIdentity: String? = null,
     val actionSignature: String? = null,
+    val safeMessage: String? = null,
 )
 
 fun interface CycloneAgentTraceSink { fun emit(event: CycloneTraceEvent); object NoOp : CycloneAgentTraceSink { override fun emit(event: CycloneTraceEvent) = Unit } }
 interface CycloneTaskCheckpointStore { fun save(state: CycloneTaskState); object NoOp : CycloneTaskCheckpointStore { override fun save(state: CycloneTaskState) = Unit } }
 interface CycloneAgentModel { fun plan(state: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult }
 interface CycloneAgentTools {
+    fun onRecovery(state: CycloneTaskState, kind: CycloneRecoveryKind, code: String) {}
     fun observe(state: CycloneTaskState): CycloneObservation?
     fun execute(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn): CycloneToolResult
     fun verify(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn, toolResult: CycloneToolResult): CycloneVerificationResult
@@ -141,7 +143,7 @@ class CycloneLocalAgent(
         if (!state.gateSuspended || state.finalClassification != CycloneTaskClassification.HUMAN_OR_GATE) return false
         val pausedDuration = suspendedAt?.let { (now() - it).coerceAtLeast(0) } ?: 0
         suspendedAt = null
-        state = state.copy(taskStartTimeMs = state.taskStartTimeMs + pausedDuration, currentStage = CycloneAgentStage.OBSERVE, gateSuspended = false, requireFreshObservation = true, finalClassification = null, consecutiveRecoveryCyclesWithoutNewEvidence = 0, repeatedIdenticalActionWithoutProgress = 0)
+        state = state.copy(taskStartTimeMs = state.taskStartTimeMs + pausedDuration, currentStage = CycloneAgentStage.OBSERVE, latestObservationIdentity = null, latestPageIdentity = null, lastActionSignature = null, gateSuspended = false, requireFreshObservation = true, finalClassification = null, consecutiveRecoveryCyclesWithoutNewEvidence = 0, repeatedIdenticalActionWithoutProgress = 0)
         repeatedUnverifiedDone = 0
         emit(CycloneTraceEventType.GATE_RESUME); checkpoint(); return true
     }
@@ -265,7 +267,8 @@ class CycloneLocalAgent(
 
             executionBoundary()?.let { return it }
             val tool = tools.execute(state, observation, turn)
-            emit(CycloneTraceEventType.TOOL_RESULT, if (tool.ok) "tool.ok" else "tool.failed", observation, tool.actionSignature ?: turn.actionSignature); checkpoint()
+            emit(CycloneTraceEventType.TOOL_RESULT, if (tool.ok) "tool.ok" else "tool.failed", observation,
+                tool.actionSignature ?: turn.actionSignature, tool.message); checkpoint()
             executionBoundary()?.let { return it }
             if (!tool.policyAllowed) {
                 if (tool.gateRequired) return suspendForGate(tool.message)
@@ -331,6 +334,7 @@ class CycloneLocalAgent(
         emit(CycloneTraceEventType.RECOVERY_CLASSIFIED, code); checkpoint()
         if (kind == CycloneRecoveryKind.MALFORMED_MODEL && attempts > convergence.maxMalformedModelResponses) return nonConvergence("convergence.malformed_model")
         if (consecutive > convergence.maxConsecutiveRecoveryCyclesWithoutNewEvidence) return nonConvergence("convergence.recovery_without_evidence")
+        tools.onRecovery(state, kind, code)
         state = state.copy(currentStage = CycloneAgentStage.PLAN_OR_RECALL); emit(CycloneTraceEventType.REPLAN, code); checkpoint(); return null
     }
 
@@ -359,8 +363,8 @@ class CycloneLocalAgent(
         CycloneTaskClassification.HUMAN_OR_GATE -> CycloneAgentRunResult.Suspended(state)
         else -> CycloneAgentRunResult.Stopped(state)
     }
-    private fun emit(type: CycloneTraceEventType, code: String? = null, observation: CycloneObservation? = null, actionSignature: String? = null) {
-        trace.emit(CycloneTraceEvent(type, now(), state.taskId, state.currentStage, code?.take(160), observation?.identity, observation?.pageIdentity, actionSignature?.take(160)))
+    private fun emit(type: CycloneTraceEventType, code: String? = null, observation: CycloneObservation? = null, actionSignature: String? = null, safeMessage: String? = null) {
+        trace.emit(CycloneTraceEvent(type, now(), state.taskId, state.currentStage, code?.take(160), observation?.identity, observation?.pageIdentity, actionSignature?.take(160), safeMessage?.take(500)))
     }
     private fun checkpoint() {
         checkpoints.save(state)

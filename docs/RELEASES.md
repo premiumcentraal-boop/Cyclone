@@ -2,9 +2,25 @@
 
 Cyclone release artifacts are produced by GitHub Actions and tied to an exact source SHA.
 
-## Next One cut: Cyclone One 1.1.0 (operator-after-CI)
+## Next One cut: Cyclone One 1.1.1 (operator-after-CI)
 
-Tag `one-1.1.0` is the **next** Cyclone One **1.1.0** + gateway/MCP **4.1.0** cut (`Cyclone-PC-Companion-1.1.0-Setup.exe`). It is not cut in this PR. Do not claim the GitHub tag already exists. Mobile on this tree stays **4.0.4** / versionCode **75**. Mobile 4.1.0 is PR #73 / B5, out of scope. Physical Pixel 8 remains **UNVERIFIED**. Uninstall legacy Cyclone PC Companion **3.8.1**.
+Tag `one-1.1.1` is the **next** Cyclone One **1.1.1** cut (`Cyclone-PC-Companion-1.1.1-Setup.exe`) on published `one-1.1.0` + PR **#86** (Settings MCP tunnel). Gateway/MCP stay **4.1.0**. Mobile on this tree stays **4.0.4** / versionCode **75**. Physical Pixel 8 remains **UNVERIFIED**. Never replace `one-1.1.0`.
+
+Do not add a one-off publish workflow. Cut One 1.1.1 through existing `pc-companion-release.yml` **after** #86 is merged:
+
+1. Merge PR **#86** into `release/cyclone-one-v1.1.0`.
+2. Push the 1.1.1 identity bump to `release/cyclone-one-v1.1.0` for provenance. Do not push `release/cyclone-mobile-v*` for this One-only cut.
+3. Do **not** dispatch `mobile-ci.yml` / `mobile-release.yml` as part of this One cut.
+4. Dispatch **Cyclone PC Companion Release Candidate** (`pc-companion-release.yml`) with `--ref release/cyclone-one-v1.1.0`. Expect `Cyclone-PC-Companion-1.1.1-Setup.exe` (name from package.json — do not invent it).
+5. `gh release create one-1.1.1 --title "Cyclone One 1.1.1" --notes-file docs/RELEASE_ONE_1.1.1.md` attaching the Setup.exe, candidate zip, `SHA256SUMS.txt`, and `release-provenance.json` if present.
+
+Never force-push, delete tags, or overwrite a GitHub Release. Never replace an existing `one-1.1.0`.
+
+Product notes: [`docs/RELEASE_ONE_1.1.1.md`](RELEASE_ONE_1.1.1.md). Pairing: mobile >= 4.0.4.
+
+## Published One cut: Cyclone One 1.1.0
+
+Tag `one-1.1.0` is the Cyclone One **1.1.0** + gateway/MCP **4.1.0** cut (`Cyclone-PC-Companion-1.1.0-Setup.exe`). Mobile on that tree stays **4.0.4** / versionCode **75**. Mobile 4.1.0 is PR #73 / B5, out of scope. Physical Pixel 8 remains **UNVERIFIED**. Uninstall legacy Cyclone PC Companion **3.8.1**.
 
 Do not add a one-off publish workflow. Cut One 1.1.0 through existing `pc-companion-release.yml` plus `scripts/ci/cut_one_1_1_release.py` **after CI**, not in the A5 source PR:
 

@@ -76,10 +76,7 @@ class OverlayChromeMachine(
         )
     }
 
-    /**
-     * A stopped run is terminal for the run, not for the composer. Keep the visible result in the
-     * notification/run log and return the overlay to a clean, minimized request-ready state.
-     */
+    /** A stopped run is terminal for the run, not for the composer. */
     fun finishStopped(message: String) {
         cycloneState.pauseAgentForUser()
         snapshot = snapshot.copy(
@@ -95,10 +92,7 @@ class OverlayChromeMachine(
         )
     }
 
-    /**
-     * Completion must never strand the composer in DONE. Emit DONE for observers, then park the
-     * overlay in a clean minimized ANALYSIS state so the next invocation can type, dictate and send.
-     */
+    /** Completion emits DONE, then returns the overlay to a clean request-ready state. */
     fun completeDone(sessionId: String = snapshot.sessionId) {
         if (snapshot.state != OverlayChromeState.WORKING && snapshot.state != OverlayChromeState.LIVE) return
         val finishedSession = sessionId.ifBlank { snapshot.sessionId }
@@ -260,8 +254,18 @@ class OverlayChromeMachine(
         emitChrome(OverlayChromeEventKind.TAKE_CONTROL)
     }
 
+    /** Active work never vanishes into the idle hotspot; the Compose panel owns its compact level. */
     private fun minimize() {
         if (snapshot.state == OverlayChromeState.IDLE) return
+        if (snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE) {
+            snapshot = snapshot.copy(
+                minimized = false,
+                idleChipVisible = false,
+                voiceListening = false,
+                voiceMessage = null,
+            )
+            return
+        }
         snapshot = snapshot.copy(
             minimized = true,
             idleChipVisible = true,

@@ -1,24 +1,23 @@
-# Cyclone One 1.1.0 + gateway/MCP 4.1.0 release-lane identity; DEVICE TESTING: UNVERIFIED
-# publication_authorized=false; this is not a claim that GitHub tag one-1.1.0 already exists.
-# Mobile stays 4.0.4 / android_version_code 75.
+# Cyclone VMOS compatibility development baseline.
+# Mobile remains the published 4.3.6 identity; Cyclone One 1.5.1 is the VMOS/embedded-ADB candidate built on published One 1.5.0.
 schema = 1
-product_version = "4.0.4"
+product_version = "4.3.6"
 channel = "development"
-android_version_code = 75
+android_version_code = 97
 python_version = "4.1.0"
 
 [components]
-mobile = "4.0.4"
-pc_companion = "1.1.0"
+mobile = "4.3.6"
+pc_companion = "1.5.1"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.0.3"
+previous_mobile_version = "4.3.5"
 publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-one-1.1.0-session-contract-glass"
+candidate_generation = "cyclone-vmos-compatibility"

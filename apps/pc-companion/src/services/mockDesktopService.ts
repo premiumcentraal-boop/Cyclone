@@ -19,8 +19,13 @@ import type {
   PairQrConfirmResult,
   StreamDiagnosticEvent,
   StreamProfile,
+  McpTunnelMode,
+  McpTunnelSmokeResult,
+  McpTunnelStatus,
+  McpTunnelToken,
 } from "./types.js";
 import { bindLayer2Status, LAYER2_PROTOCOL } from "../core/layer2.js";
+import { stoppedTunnelStatus } from "../core/mcpTunnel.js";
 import { bindSessionTile, DEFAULT_FOREGROUND_SESSION_ID, isDefaultForegroundSession, jpegFocusTarget, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 const MOCK_CODE = "NOVA";
@@ -34,6 +39,9 @@ export class MockDesktopService implements DesktopService {
   private sessions = new Map<string, DeviceSessionDescriptor[]>();
   private layer2 = new Map<string, MockLayer2State>();
   private fleetListeners: Array<(event?: FleetWsEvent) => void> = [];
+  private tunnel: McpTunnelStatus = stoppedTunnelStatus(
+    "Mock Settings terminal. Packaged Cyclone One starts the real HTTPS tunnel from here.",
+  );
 
   constructor(deviceCount = 4) {
     this.devices = createMockDevices(deviceCount);
@@ -269,11 +277,14 @@ export class MockDesktopService implements DesktopService {
     return [
       {
         id: "codex", name: "Codex", description: "Use Cyclone phones from Codex.", state: "READY_TO_CONNECT", actionLabel: "Connect",
-        detected: true, configured: false, gatewayState: "READY", gatewayReachable: true,
-        readyDeviceCount: 3, deviceCount: 4, toolCount: 14, transport: "stdio", approvalMode: "writes",
+        aiState: "DETECTED", detected: true, configured: false, gatewayState: "READY", gatewayReachable: true,
+        readyDeviceCount: 3, deviceCount: 4, toolCount: 14, transport: "stdio", approvalMode: "writes", phoneState: "READY",
       },
-      { id: "deepseek-mcp", name: "DeepSeek / MCP harness", description: "Connect an MCP-capable reasoning harness.", state: "CONNECTED" },
-      { id: "generic-mcp", name: "Generic MCP", description: "Use a compatible MCP client.", state: "NOT_INSTALLED", actionLabel: "Set up" },
+      { id: "grok", name: "Grok", description: "Connect Grok on this PC.", state: "CONNECTED", aiState: "CONNECTED", detected: true, configured: true },
+      { id: "cursor", name: "Cursor", description: "Connect Cursor on this PC.", state: "READY_TO_CONNECT", aiState: "DETECTED", detected: true, configured: false },
+      { id: "opencode", name: "OpenCode", description: "Connect OpenCode on this PC.", state: "CONNECTED", aiState: "CONNECTED", detected: true, configured: true },
+      { id: "copilot", name: "Copilot", description: "Connect Copilot on this PC.", state: "NOT_INSTALLED", aiState: "UNKNOWN", detected: false },
+      { id: "generic", name: "Generic MCP", description: "Use a compatible MCP client.", state: "READY_TO_CONNECT", aiState: "DETECTED", detected: true },
     ];
   }
   async runConnectorAction(_connectorId: string, _action: "connect" | "install" | "repair"): Promise<ConnectorActionResult> {
@@ -292,6 +303,59 @@ export class MockDesktopService implements DesktopService {
     if (!pairing || pairing.pairingId !== pairingId) return { ok: false, pending: false, reason: "STALE_CODE" };
     return { ok: false, pending: true };
   }
+  async getMcpTunnelStatus(): Promise<McpTunnelStatus> { return { ...this.tunnel }; }
+  async startMcpTunnel(mode?: McpTunnelMode): Promise<McpTunnelStatus> {
+    this.tunnel = {
+      ...this.tunnel,
+      ok: true,
+      state: "running",
+      mode: mode ?? this.tunnel.mode,
+      tokenLast4: this.tunnel.tokenLast4 ?? "mock",
+      publicUrl: "https://mock-cyclone.trycloudflare.com",
+      mcpUrl: "https://mock-cyclone.trycloudflare.com/mcp",
+      healthUrl: "https://mock-cyclone.trycloudflare.com/health",
+      gatewayAlive: true,
+      cloudflaredAlive: true,
+      healthOk: true,
+      message: "Mock tunnel running. Packaged Cyclone One uses a real cloudflared hostname.",
+    };
+    return { ...this.tunnel };
+  }
+  async stopMcpTunnel(): Promise<McpTunnelStatus> {
+    this.tunnel = stoppedTunnelStatus("Mock tunnel stopped.");
+    return { ...this.tunnel };
+  }
+  async restartMcpTunnel(): Promise<McpTunnelStatus> {
+    const mode = this.tunnel.mode;
+    await this.stopMcpTunnel();
+    return this.startMcpTunnel(mode);
+  }
+  async rotateMcpTunnelToken(): Promise<McpTunnelStatus> {
+    this.tunnel = { ...this.tunnel, tokenLast4: "rot4", rotated: true, message: "Mock bearer rotated (last4 rot4)." };
+    return { ...this.tunnel };
+  }
+  async setMcpTunnelMode(mode: McpTunnelMode): Promise<McpTunnelStatus> {
+    this.tunnel = { ...this.tunnel, mode };
+    return { ...this.tunnel };
+  }
+  async copyMcpTunnelToken(): Promise<McpTunnelToken> {
+    return { token: "mock-tunnel-token-not-for-production", last4: "tion" };
+  }
+  async smokeMcpTunnel(): Promise<McpTunnelSmokeResult> {
+    return {
+      ok: true,
+      message: "SMOKE PASSED (mock)",
+      checks: [
+        { name: "GET /health 200", ok: true, detail: "status=200" },
+        { name: "POST /mcp without auth -> 401", ok: true, detail: "got 401" },
+        { name: "initialize 200 with bearer", ok: true, detail: "status=200" },
+      ],
+    };
+  }
+  async openMcpTunnelDocs(): Promise<string> {
+    return "mock://connector-setup";
+  }
+
   async getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
     return {
       backendReachable: true,

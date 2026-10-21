@@ -23,8 +23,13 @@ import type {
   FleetWsEvent,
   Layer2Operation,
   Layer2Status,
+  McpTunnelMode,
+  McpTunnelSmokeResult,
+  McpTunnelStatus,
+  McpTunnelToken,
 } from "./types.js";
 import { bindLayer2Status } from "../core/layer2.js";
+import { normalizeTunnelStatus } from "../core/mcpTunnel.js";
 import { isDefaultForegroundSession, parseFleetWsEvent, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 export interface HttpDesktopServiceOptions {
@@ -37,6 +42,25 @@ type ConnectorStatusPayload = {
   codex?: string;
   deepseek_harness?: string;
   generic_mcp?: string;
+  ai?: {
+    state?: string;
+    server_ready?: boolean;
+    adapters?: Record<string, {
+      id?: string;
+      state?: string;
+      detected?: boolean;
+      configured?: boolean;
+      server_ready?: boolean;
+      detail?: string;
+      config_path?: string | null;
+    }>;
+  };
+  phone?: {
+    state?: string;
+    reachable?: boolean;
+    ready_device_count?: number;
+    device_count?: number;
+  };
   details?: {
     codex?: {
       state?: string;
@@ -57,6 +81,14 @@ type ConnectorStatusPayload = {
       tool_count?: number;
       transport?: string;
     };
+    adapters?: Record<string, {
+      id?: string;
+      state?: string;
+      detected?: boolean;
+      configured?: boolean;
+      detail?: string;
+      config_path?: string | null;
+    }>;
   };
 };
 
@@ -418,36 +450,48 @@ export class HttpDesktopService implements DesktopService {
   async listConnectors(): Promise<ConnectorCard[]> {
     try {
       const status = await invoke<ConnectorStatusPayload>("connector_status");
-      const codexDetails = status.details?.codex;
+      const adapters = status.ai?.adapters ?? status.details?.adapters ?? {};
       const gatewayDetails = status.details?.gateway;
       const mcpDetails = status.details?.mcp;
-      const codexConnector = connector("codex", "Codex", "Give Codex instant, typed access to every trusted Cyclone phone.", status.codex);
-      if (codexConnector.state === "CONNECTED" && gatewayDetails?.reachable === false) {
-        codexConnector.state = "NEEDS_ATTENTION";
-        codexConnector.actionLabel = "Recheck";
+      const phoneState = status.phone?.state;
+      const names: Record<string, [string, string]> = {
+        grok: ["Grok", "Connect Grok on this PC to Cyclone phone control."],
+        codex: ["Codex", "Connect Codex on this PC to Cyclone phone control."],
+        cursor: ["Cursor", "Connect Cursor on this PC to Cyclone phone control."],
+        opencode: ["OpenCode", "Connect OpenCode on this PC to Cyclone phone control."],
+        copilot: ["Copilot", "Connect Copilot on this PC to Cyclone phone control."],
+        generic: ["Generic MCP", "Connect any compatible local MCP client."],
+      };
+      const cards = Object.keys(names).map((id) => {
+        const [name, description] = names[id];
+        const adapter = adapters[id] ?? adapters[id === "generic" ? "generic" : id];
+        const card = connectorFromAi(id, name, description, adapter?.state);
+        card.detected = adapter?.detected;
+        card.configured = adapter?.configured;
+        card.configPath = adapter?.config_path ?? undefined;
+        card.aiState = (adapter?.state as ConnectorCard["aiState"]) ?? card.aiState;
+        card.gatewayState = gatewayDetails?.state;
+        card.gatewayReachable = gatewayDetails?.reachable;
+        card.readyDeviceCount = gatewayDetails?.ready_device_count;
+        card.deviceCount = gatewayDetails?.device_count;
+        card.toolCount = mcpDetails?.tool_count;
+        card.transport = mcpDetails?.transport;
+        card.phoneState = phoneState as ConnectorCard["phoneState"];
+        if (id === "codex") card.approvalMode = status.details?.codex?.approval_mode;
+        return card;
+      });
+      if (!cards.some((item) => item.id === "opencode")) {
+        cards.push(connector("deepseek-mcp", "DeepSeek / MCP harness", "Use Cyclone from OpenCode or another DeepSeek-powered MCP harness.", status.deepseek_harness));
       }
-      return [
-        {
-          ...codexConnector,
-          detected: codexDetails?.detected,
-          configured: codexDetails?.configured,
-          configPath: codexDetails?.config_path,
-          gatewayState: gatewayDetails?.state,
-          gatewayReachable: gatewayDetails?.reachable,
-          readyDeviceCount: gatewayDetails?.ready_device_count,
-          deviceCount: gatewayDetails?.device_count,
-          toolCount: mcpDetails?.tool_count,
-          transport: mcpDetails?.transport,
-          approvalMode: codexDetails?.approval_mode,
-        },
-        connector("deepseek-mcp", "DeepSeek / MCP harness", "Use Cyclone from OpenCode or another DeepSeek-powered MCP harness.", status.deepseek_harness),
-        connector("generic-mcp", "Generic MCP", "Connect any compatible local MCP client.", status.generic_mcp),
-      ];
+      return cards;
     } catch {
       return [
-        connector("codex", "Codex", "Use your Cyclone phones directly from Codex.", "ATTENTION"),
-        connector("deepseek-mcp", "DeepSeek / MCP harness", "Use Cyclone from a DeepSeek-powered MCP harness.", "ATTENTION"),
-        connector("generic-mcp", "Generic MCP", "Connect any compatible local MCP client.", "READY"),
+        connectorFromAi("grok", "Grok", "Connect Grok on this PC to Cyclone phone control.", "UNKNOWN"),
+        connectorFromAi("codex", "Codex", "Connect Codex on this PC to Cyclone phone control.", "UNKNOWN"),
+        connectorFromAi("cursor", "Cursor", "Connect Cursor on this PC to Cyclone phone control.", "UNKNOWN"),
+        connectorFromAi("opencode", "OpenCode", "Connect OpenCode on this PC to Cyclone phone control.", "UNKNOWN"),
+        connectorFromAi("copilot", "Copilot", "Connect Copilot on this PC to Cyclone phone control.", "UNKNOWN"),
+        connectorFromAi("generic", "Generic MCP", "Connect any compatible local MCP client.", "DETECTED"),
       ];
     }
   }
@@ -468,6 +512,47 @@ export class HttpDesktopService implements DesktopService {
 
   getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
     return this.request("/v1/diagnostics/status");
+  }
+
+  async getMcpTunnelStatus(): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_status"));
+  }
+
+  async startMcpTunnel(mode?: McpTunnelMode): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_start", { mode: mode ?? null }));
+  }
+
+  async stopMcpTunnel(): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_stop"));
+  }
+
+  async restartMcpTunnel(): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_restart", { mode: null }));
+  }
+
+  async rotateMcpTunnelToken(): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_rotate_token"));
+  }
+
+  async setMcpTunnelMode(mode: McpTunnelMode): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_set_mode", { mode }));
+  }
+
+  copyMcpTunnelToken(): Promise<McpTunnelToken> {
+    return invoke<McpTunnelToken>("mcp_tunnel_token");
+  }
+
+  async smokeMcpTunnel(): Promise<McpTunnelSmokeResult> {
+    const result = await invoke<McpTunnelSmokeResult>("mcp_tunnel_smoke");
+    return {
+      ok: result.ok !== false,
+      checks: Array.isArray(result.checks) ? result.checks : [],
+      message: result.message || (result.ok !== false ? "SMOKE PASSED" : "SMOKE FAILED"),
+    };
+  }
+
+  openMcpTunnelDocs(): Promise<string> {
+    return invoke<string>("mcp_tunnel_open_docs");
   }
 
   private async verifySessionBinding(timeoutMs: number): Promise<void> {
@@ -573,20 +658,34 @@ class DesktopHttpError extends Error {
 }
 
 function connector(id: ConnectorCard["id"], name: string, description: string, raw?: string): ConnectorCard {
-  const state: ConnectorCard["state"] = raw === "READY"
+  return connectorFromAi(id, name, description, raw);
+}
+
+function connectorFromAi(id: ConnectorCard["id"], name: string, description: string, raw?: string): ConnectorCard {
+  const aiState = normalizeAiState(raw);
+  const state: ConnectorCard["state"] = aiState === "CONNECTED" || aiState === "CONFIGURED"
     ? "CONNECTED"
-    : raw === "NOT_INSTALLED"
-      ? "NOT_INSTALLED"
-      : raw === "CONNECTED"
-        ? "NEEDS_ATTENTION"
+    : aiState === "FAILED"
+      ? "NEEDS_ATTENTION"
+      : aiState === "UNKNOWN"
+        ? "NOT_INSTALLED"
         : "READY_TO_CONNECT";
   return {
     id,
     name,
     description,
     state,
-    actionLabel: state === "CONNECTED" ? "Recheck" : state === "NOT_INSTALLED" ? "Prepare connection" : "Connect",
+    aiState,
+    actionLabel: state === "CONNECTED" ? "Connected" : state === "NOT_INSTALLED" ? "Install" : state === "NEEDS_ATTENTION" ? "Configure" : "Connect",
   };
+}
+
+function normalizeAiState(raw?: string): NonNullable<ConnectorCard["aiState"]> {
+  if (raw === "CONNECTED" || raw === "CONFIGURED" || raw === "DETECTED" || raw === "FAILED" || raw === "UNKNOWN") return raw;
+  if (raw === "READY") return "CONNECTED";
+  if (raw === "NOT_INSTALLED") return "UNKNOWN";
+  if (raw === "ATTENTION") return "DETECTED";
+  return "UNKNOWN";
 }
 
 function stripSlash(value: string): string {

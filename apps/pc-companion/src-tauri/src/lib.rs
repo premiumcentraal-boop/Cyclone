@@ -1,3 +1,7 @@
+mod mcp_tunnel;
+mod live_phone;
+mod live_phone_bridge;
+
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use std::net::TcpListener;
@@ -67,11 +71,25 @@ fn open_diagnostics_folder(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 async fn connector_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["status", "--probe-gateway"]).await
+}
+
+#[tauri::command]
+async fn local_ai_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["status", "--probe-gateway"]).await
+}
+
+#[tauri::command]
+async fn local_ai_adapters(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["adapters"]).await
+}
+
+async fn sidecar_json(app: tauri::AppHandle, args: &[&str]) -> Result<serde_json::Value, String> {
     let output = app
         .shell()
         .sidecar("CycloneAgentMCP")
         .map_err(|error| error.to_string())?
-        .args(["status", "--probe-gateway"])
+        .args(args)
         .output()
         .await
         .map_err(|error| error.to_string())?;
@@ -110,8 +128,11 @@ async fn connector_action(
 ) -> Result<serde_json::Value, String> {
     let host = match connector_id.as_str() {
         "codex" => "codex",
-        "deepseek-mcp" => "opencode",
-        "generic-mcp" => "generic",
+        "grok" => "grok",
+        "cursor" => "cursor",
+        "opencode" | "deepseek-mcp" => "opencode",
+        "copilot" => "copilot",
+        "generic" | "generic-mcp" => "generic",
         _ => return Err("Unknown Cyclone connector".into()),
     };
     if action == "install" && host != "generic" {
@@ -204,6 +225,7 @@ fn cleanup_legacy_gateway_processes() {}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     cleanup_legacy_gateway_processes();
+    let _ = live_phone::live_phone_control("stop".into());
 
     let token = strong_token();
     let gateway_port =
@@ -217,6 +239,7 @@ pub fn run() {
     let parent_pid = std::process::id().to_string();
 
     tauri::Builder::default()
+        .manage(std::sync::Arc::new(live_phone_bridge::BridgeState::default()))
         .manage(GatewayState {
             token,
             http_base,
@@ -226,35 +249,64 @@ pub fn run() {
         .setup(move |app| {
             let runtime_dir = app.path().app_local_data_dir()?.join("runtime");
             std::fs::create_dir_all(&runtime_dir)?;
-            let command = app
-                .shell()
-                .sidecar("CyclonePCRuntime")?
-                .arg("serve")
-                .env("CYCLONE_DEVICE_GATEWAY_TOKEN", &runtime_token)
-                .env("CYCLONE_DEVICE_GATEWAY_URL", &runtime_http_base)
-                .env("CYCLONE_DEVICE_GATEWAY_PORT", &runtime_port)
-                .env(
-                    "CYCLONE_DEVICE_GATEWAY_RUNTIME",
-                    runtime_dir.to_string_lossy().to_string(),
-                )
-                .env("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "1")
-                .env("CYCLONE_PC_PARENT_PID", &parent_pid);
-            let (mut events, _child) = command.spawn()?;
-            tauri::async_runtime::spawn(async move {
-                // Drain sidecar output so pipes can never fill and stall the Gateway. The Python
-                // runtime also watches the parent PID and exits if this Companion process ends.
-                while events.recv().await.is_some() {}
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    let command = match handle.shell().sidecar("CyclonePCRuntime") {
+                        Ok(command) => command,
+                        Err(_) => break,
+                    };
+                    let command = command.arg("serve")
+                        .env("CYCLONE_DEVICE_GATEWAY_TOKEN", &runtime_token)
+                        .env("CYCLONE_DEVICE_GATEWAY_URL", &runtime_http_base)
+                        .env("CYCLONE_DEVICE_GATEWAY_PORT", &runtime_port)
+                        .env("CYCLONE_DEVICE_GATEWAY_RUNTIME", runtime_dir.to_string_lossy().to_string())
+                        .env("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "1")
+                        .env("CYCLONE_PC_PARENT_PID", &parent_pid);
+                    if let Ok((mut events, _child)) = command.spawn() {
+                        // Drain output, then restart the owned runtime at the same private endpoint.
+                        tauri::async_runtime::block_on(async move {
+                            while let Some(event) = events.recv().await {
+                                if matches!(event, tauri_plugin_shell::process::CommandEvent::Terminated(_)) { break; }
+                            }
+                        });
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             gateway_session,
+            live_phone::live_phone_status,
+            live_phone::live_phone_control,
+            live_phone_bridge::live_bridge_connect,
+            live_phone_bridge::live_bridge_status,
+            live_phone_bridge::live_bridge_disconnect,
+            live_phone_bridge::live_bridge_token,
             diagnostics_folder,
             open_diagnostics_folder,
             connector_status,
+            local_ai_status,
+            local_ai_adapters,
             connector_action,
-            legacy_companion_warning
+            legacy_companion_warning,
+            mcp_tunnel::mcp_tunnel_status,
+            mcp_tunnel::mcp_tunnel_start,
+            mcp_tunnel::mcp_tunnel_stop,
+            mcp_tunnel::mcp_tunnel_restart,
+            mcp_tunnel::mcp_tunnel_rotate_token,
+            mcp_tunnel::mcp_tunnel_set_mode,
+            mcp_tunnel::mcp_tunnel_token,
+            mcp_tunnel::mcp_tunnel_smoke,
+            mcp_tunnel::mcp_tunnel_open_docs
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Cyclone PC Companion");
+        .build(tauri::generate_context!())
+        .expect("error while building Cyclone One")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let _ = live_phone::live_phone_control("stop".into());
+                live_phone_bridge::shutdown(app.state::<std::sync::Arc<live_phone_bridge::BridgeState>>().inner());
+            }
+        });
 }

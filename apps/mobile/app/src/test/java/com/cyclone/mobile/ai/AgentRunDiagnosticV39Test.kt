@@ -5,6 +5,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentRunDiagnosticV39Test {
+    @Test fun redditFailureReplayCountsAttemptsInsteadOfDuplicateTelemetry() {
+        val events = mutableListOf<AiTraceEvent>()
+        fun add(kind: String, code: String = "", ok: Boolean? = null, detail: String? = null) {
+            val id = events.size.toString()
+            events += AiTraceEvent(id, "reddit", events.size.toLong(), kind, kind, code, ok, detail)
+        }
+        for (attempt in 1..12) {
+            val failed = attempt !in setOf(2, 3)
+            add("TOOL_REQUESTED")
+            if (attempt <= 4) {
+                add("ACTION_REQUESTED")
+                add("ANDROID_EXECUTION", ok = !failed, detail = "executorInvoked=true")
+                add("VERIFICATION", ok = !failed)
+                add("PROGRESS_CLASSIFIED", ok = !failed)
+            }
+            add("TOOL_RESULT", ok = !failed, detail = if (failed) "reason=STALE_OBSERVATION" else null)
+            if (failed) {
+                add("RECOVERY_CLASSIFIED", "target.stale")
+                add("RECOVERY_SELECTED", "SEARCH")
+                add("REPLAN")
+            }
+        }
+        add("VISION_ESCALATION")
+        add("VISION")
+        val metrics = AgentRunDiagnosticV39.metrics(events)
+        assertTrue(metrics.toolCalls == 12)
+        assertTrue(metrics.executorInvocations == 4)
+        assertTrue(metrics.toolFailures == 10)
+        assertTrue(metrics.verificationFailures == 0)
+        assertTrue(metrics.recoveries == 10)
+        assertTrue(metrics.visionChecks == 1)
+    }
+
     private fun session(status: String = "FAILED", terminal: Boolean = true) = AiTraceSession(
         id = "ai-test-session",
         goal = "go to ad.nl",
@@ -28,7 +61,7 @@ class AgentRunDiagnosticV39Test {
             AiTraceEvent("7", "ai-test-session", 1_700, "FREE_MODE_ENTER", "Structured recovery stalled; Cyclone is trying a different strategy", "adaptive.free.enter", true, "noProgressFailures=2"),
         )
         val text = AgentRunDiagnosticV39.format(session(), events)
-        assertTrue(text.contains("Schema: cyclone-run-diagnostic-v39/3"))
+        assertTrue(text.contains("Schema: cyclone-run-diagnostic-v39/4"))
         assertTrue(text.contains("MODEL SAW / CONTEXT"))
         assertTrue(text.contains("MODEL DECISION"))
         assertTrue(text.contains("TOOL REQUEST"))
@@ -97,7 +130,7 @@ class AgentRunDiagnosticV39Test {
         val metrics = AgentRunDiagnosticV39.metrics(events)
         assertTrue(metrics.completionChecks == 2)
         assertTrue(metrics.completionRejections == 2)
-        assertTrue(metrics.verificationFailures == 2)
+        assertTrue(metrics.verificationFailures == 0)
         assertTrue(metrics.toolFailures == 0)
         assertTrue(metrics.recoveries == 0)
         assertTrue(metrics.freeModeEntries == 1)
