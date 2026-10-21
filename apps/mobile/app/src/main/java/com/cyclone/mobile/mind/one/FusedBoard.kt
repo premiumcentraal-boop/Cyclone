@@ -288,6 +288,9 @@ object FusedBoard {
      * editable fields stay in for typing steps. Never more than [MAX_CONTROLS].
      */
     fun shortlist(screen: StepScreen, step: Step): List<StepControl> {
+        // Destructive controls are not offered unless the step names them: the gate still stops every action, but the
+        // model should not have to decline "Force stop" or "Delete Timer" when the goal never asked for them.
+        val offered = screen.controls.filterNot { DestructiveControls.hidden(it.label, step.target) }
         val words = com.cyclone.mobile.mind.modes.InstantGrammar.normalize(step.target.orEmpty()).split(' ').filter { it.length > 2 }.toSet()
         fun score(c: StepControl): Int {
             val label = com.cyclone.mobile.mind.modes.InstantGrammar.normalize(c.label)
@@ -295,7 +298,26 @@ object FusedBoard {
             val role = if (ControlRoles.matches(step.target.orEmpty(), c)) 8 else 0
             return words.count { label.contains(it) } * 10 + role + (if (c.editable && step.action == "type_text") 5 else 0)
         }
-        val ranked = screen.controls.withIndex().sortedWith(compareByDescending<IndexedValue<StepControl>> { score(it.value) }.thenBy { it.index })
+        val ranked = offered.withIndex().sortedWith(compareByDescending<IndexedValue<StepControl>> { score(it.value) }.thenBy { it.index })
         return ranked.take(MAX_CONTROLS).sortedBy { it.index }.map { it.value }
     }
+}
+
+/**
+ * Words that mean removing, stopping or wiping something. A control with one of them is left out of the model's
+ * shortlist unless the step's target names the same words. Code only; the approval gate still judges every action.
+ */
+internal object DestructiveControls {
+    private val PHRASES = listOf("force stop", "uninstall", "clear data", "clear storage", "delete", "remove", "erase", "reset", "sign out", "log out")
+
+    /** True when [label] is destructive and [target] does not name that destructive phrase: the control is left out. */
+    fun hidden(label: String, target: String?): Boolean {
+        val wanted = normalized(target)
+        return PHRASES.any { phrase -> containsPhrase(normalized(label), phrase) && !containsPhrase(wanted, phrase) }
+    }
+
+    private fun normalized(text: String?): String =
+        com.cyclone.mobile.mind.modes.InstantGrammar.normalize(text.orEmpty())
+
+    private fun containsPhrase(text: String, phrase: String): Boolean = (" $text ").contains(" $phrase ")
 }
