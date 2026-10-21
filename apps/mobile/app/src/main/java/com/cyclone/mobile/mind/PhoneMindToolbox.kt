@@ -2101,6 +2101,9 @@ class PhoneMindToolbox(
     private var finishedAnswer: String? = null
     override fun finalAnswer(): String? = finishedAnswer
 
+    /** Lab missions only: where each screen the crew sees is kept for replay (see [com.cyclone.mobile.mind.one.LabTrace]). */
+    var traceSink: ((org.json.JSONObject) -> Unit)? = null
+
     private fun finish(arguments: JSONObject): MindToolResult {
         val summary = arguments.optString("summary").trim()
         val evidence = arguments.optString("evidence").trim()
