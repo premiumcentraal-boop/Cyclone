@@ -23,8 +23,13 @@ import type {
   FleetWsEvent,
   Layer2Operation,
   Layer2Status,
+  McpTunnelMode,
+  McpTunnelSmokeResult,
+  McpTunnelStatus,
+  McpTunnelToken,
 } from "./types.js";
 import { bindLayer2Status } from "../core/layer2.js";
+import { normalizeTunnelStatus } from "../core/mcpTunnel.js";
 import { isDefaultForegroundSession, parseFleetWsEvent, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 export interface HttpDesktopServiceOptions {
@@ -468,6 +473,47 @@ export class HttpDesktopService implements DesktopService {
 
   getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
     return this.request("/v1/diagnostics/status");
+  }
+
+  async getMcpTunnelStatus(): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_status"));
+  }
+
+  async startMcpTunnel(mode?: McpTunnelMode): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_start", { mode: mode ?? null }));
+  }
+
+  async stopMcpTunnel(): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_stop"));
+  }
+
+  async restartMcpTunnel(): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_restart", { mode: null }));
+  }
+
+  async rotateMcpTunnelToken(): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_rotate_token"));
+  }
+
+  async setMcpTunnelMode(mode: McpTunnelMode): Promise<McpTunnelStatus> {
+    return normalizeTunnelStatus(await invoke<McpTunnelStatus>("mcp_tunnel_set_mode", { mode }));
+  }
+
+  copyMcpTunnelToken(): Promise<McpTunnelToken> {
+    return invoke<McpTunnelToken>("mcp_tunnel_token");
+  }
+
+  async smokeMcpTunnel(): Promise<McpTunnelSmokeResult> {
+    const result = await invoke<McpTunnelSmokeResult>("mcp_tunnel_smoke");
+    return {
+      ok: result.ok !== false,
+      checks: Array.isArray(result.checks) ? result.checks : [],
+      message: result.message || (result.ok !== false ? "SMOKE PASSED" : "SMOKE FAILED"),
+    };
+  }
+
+  openMcpTunnelDocs(): Promise<string> {
+    return invoke<string>("mcp_tunnel_open_docs");
   }
 
   private async verifySessionBinding(timeoutMs: number): Promise<void> {

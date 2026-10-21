@@ -132,10 +132,39 @@ class GatewaySessionAdapterTest {
             assertEquals("PROTOCOL_MISMATCH", error.code)
         }
         try {
+            GatewaySessionAdapter.snapshot(
+                context,
+                JSONObject().put("session_id", "workspace-missing").put("display_id", 0),
+            )
+            fail("named workspace snapshot must not accept snake_case display 0")
+        } catch (error: GatewayProtocolException) {
+            assertEquals("PROTOCOL_MISMATCH", error.code)
+        }
+        try {
             ExecutionSessionStore().registerOwned("workspace-store-zero", 0, "com.example.app")
             fail("store must reject named workspace display 0")
         } catch (_: SessionIdentityException) {
         }
+    }
+
+    @Test
+    fun listOmitsNamedDisplayZeroSyntheticSessions() {
+        LiveVisionRuntime.sessions.registerSynthetic(
+            "shared-context",
+            0,
+            ExecutionBackendKind.VIRTUAL_DISPLAY,
+        )
+        val listed = GatewaySessionAdapter.list(context)
+        val sessions = listed.getJSONArray("sessions")
+        val ids = (0 until sessions.length()).map { sessions.getJSONObject(it).getString("sessionId") }
+        assertTrue(ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID in ids)
+        assertFalse("shared-context" in ids)
+        assertFalse(
+            (0 until sessions.length()).map { sessions.getJSONObject(it) }.any {
+                it.getString("sessionId") != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID &&
+                    it.getInt("displayId") == 0
+            },
+        )
     }
 
     @Test

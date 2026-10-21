@@ -156,22 +156,69 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
 
     def test_helper_install_is_explicit_pinned_and_narrowly_shared(self):
         source = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/background"
-        installer = (source / "BackgroundSetupActivity.kt").read_text()
-        download = (source / "OfficialHelperDownload.kt").read_text()
+        installer = (source / "BackgroundSetupActivity.kt").read_text(encoding="utf-8")
+        download = (source / "OfficialHelperDownload.kt").read_text(encoding="utf-8")
+        policy = (source / "OfficialHelperInstallPolicy.kt").read_text(encoding="utf-8")
         self.assertIn("ACTION_MANAGE_UNKNOWN_APP_SOURCES", installer)
         self.assertIn("canRequestPackageInstalls()", installer)
         self.assertIn("installer.launch", installer)
         self.assertIn("BackHandler", installer)
+        self.assertIn("TextButton(onClick = onBack", installer)
+        self.assertIn('"Back"', installer)
         self.assertNotIn("market://", installer)
         self.assertNotIn("play.google.com", installer)
-        self.assertIn("github.com/RikkaApps/Shizuku/releases/download/", download)
+        self.assertIn("github.com/RikkaApps/Shizuku/releases/download/", policy)
+        self.assertIn("shizuku-v13.6.0", policy)
+        self.assertIn("6e273ab0e991c4e79bc8b1bbb9b9dd739ccac1a8712a541a214078886b7b790f", policy)
+        self.assertRegex(policy, r"[0-9a-f]{64}")
+        self.assertNotIn("import android.", policy)
         self.assertIn("digest(part) == SHA256", download)
         self.assertIn("info?.packageName == BackgroundSetup.SHIZUKU_PACKAGE", download)
+        self.assertIn("OfficialHelperInstallPolicy.URL", download)
+        self.assertIn("OfficialHelperInstallPolicy.SHA256", download)
+        self.assertIn("OfficialHelperInstallPolicy.PACKAGE", download)
+        self.assertIn("You can retry or go Back.", installer)
+        screen_start = installer.find("fun InstallerScreen(")
+        self.assertNotEqual(-1, screen_start)
+        screen = installer[screen_start:]
+        back_button = screen.find('TextButton(onClick = onBack')
+        back_label = screen.find('Text("Back")')
+        when_phase = screen.find("when (phase)")
+        self.assertNotEqual(-1, back_button)
+        self.assertNotEqual(-1, back_label)
+        self.assertNotEqual(-1, when_phase)
+        self.assertLess(
+            back_button,
+            when_phase,
+            "visible Back must stay outside when (phase) so INSTALLING/BLOCKED/failure keep it",
+        )
+        self.assertLess(back_label, when_phase)
+        self.assertNotIn("market://", screen)
+        self.assertNotIn("play.google.com", screen)
         provider = next(p for p in application_node(self.app_manifest).findall("provider")
                         if p.get(f"{ANDROID}name") == "androidx.core.content.FileProvider")
         self.assertEqual("false", provider.get(f"{ANDROID}exported"))
         paths = ET.parse(ROOT / "apps/mobile/app/src/main/res/xml/setup_helper_paths.xml").getroot()
         self.assertEqual([("cache-path", "setup-helper/")], [(p.tag, p.get("path")) for p in paths])
+
+    def test_helper_and_profile_setup_never_send_users_to_play_store(self):
+        roots = [
+            ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/background",
+            ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/workspaces",
+        ]
+        files = [path for root in roots for path in root.rglob("*.kt")]
+        files.append(ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/RootFeaturesCard.kt")
+        self.assertTrue(files)
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("market://", text, f"{path}: helper/profile setup must not open Play")
+            self.assertNotIn("play.google.com", text, f"{path}: helper/profile setup must not open Play")
+        profile = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/RootFeaturesCard.kt").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn('Text("Back")', profile)
+        self.assertNotIn("Shelter", profile)
+        self.assertNotIn("Island", profile)
 
     def test_sms_trigger_receiver_is_not_exposed_anywhere(self):
         for manifest in (self.app_manifest, self.diagnostics_manifest):

@@ -61,6 +61,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -327,29 +328,59 @@ internal fun V32BrainPage(context: Context, refreshTick: Int) {
 
 @Composable
 internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> Unit) {
+    var section by rememberSaveable { mutableStateOf("") }
+    androidx.activity.compose.BackHandler(section.isNotEmpty()) { section = "" }
     val aiPrefs = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
     var keyDraft by rememberSaveable { mutableStateOf("") }
     var hasKey by remember(refreshTick) { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
     var selectedModel by rememberSaveable { mutableStateOf(aiPrefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }) }
     var accessProfile by rememberSaveable { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
-    val primaryControl = CyclonePermissionSetup.primaryControlEnabled(context)
+    val phoneControl = CyclonePermissionSetup.phoneControlSnapshot(context)
     val notificationAccess = CyclonePermissionSetup.notificationAccessEnabled(context)
     val resultNotifications = CyclonePermissionSetup.resultNotificationsEnabled(context)
     val batteryUnrestricted = CyclonePermissionSetup.batteryUnrestricted(context)
-    val essentialReady = listOf(primaryControl, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
+    val essentialReady = listOf(phoneControl.ready, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
     fun open(intent: Intent) = context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
+    if (section.isEmpty()) {
+        LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("AI" to listOf("Model & API", "Default intelligence", "Phone autonomy"),
+                "Phone" to listOf("Phone control", "Notifications", "Background work", "Permissions"),
+                "Profiles" to listOf("Profile engine", "Storage"),
+                "Connections" to listOf("PC Gateway"),
+                "Privacy & safety" to listOf("Privacy & safety"), "About" to listOf("About")).forEach { (title, rows) ->
+                item { Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp)) }
+                items(rows) { row -> TextButton(onClick = { section = row }, modifier = Modifier.fillMaxWidth()) {
+                    Text(row, modifier = Modifier.weight(1f))
+                    if (row == "Phone control") Text(if (phoneControl.ready) "Ready" else if (phoneControl.needsRepair) "Repair" else "Setup needed")
+                    Text("  ›")
+                } }
+            }
+        }
+        return
+    }
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { CyclonePageIntro("Keep control", "Settings", "Phone access, AI, connections and safety in one quiet place.") }
-        item {
+        item { TextButton(onClick = { section = "" }) { Text("‹ $section") } }
+        if (section == "Default intelligence") item {
+            CycloneSimpleCard {
+                Text("How much should Cyclone think?", style = MaterialTheme.typography.titleMedium)
+                Text("Choose a lighter response or more thought for complex tasks.", style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Intelligence & autonomy", modifier = Modifier.weight(1f))
+                    CycloneIntelligenceControls(onChanged = refresh)
+                }
+            }
+        }
+        if (section == "Storage") item { Text("Routines and learned app knowledge are stored on this phone. Manage individual routines in Routines; view learned data in Brain.") }
+        if (section == "Background work") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("Background tasks")
                 Text("Let Cyclone work on a separate screen while you use your phone.")
                 Button(onClick = { open(Intent(context, com.cyclone.mobile.runtime.background.BackgroundSetupActivity::class.java)) }) { Text("Set up background tasks") }
             }
         }
-        item { com.cyclone.mobile.ui.RootFeaturesCard() }
-        item {
+        if (section == "Profile engine") item { com.cyclone.mobile.ui.RootFeaturesCard() }
+        if (section == "Phone control") item {
             CycloneHeroCard(
                 title = if (essentialReady == 4) "Phone setup complete" else "$essentialReady of 4 essentials ready",
                 body = "Every permission is optional, Android-owned and reversible. Cyclone asks only after you tap a setup row.",
@@ -359,10 +390,10 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 CycloneStatusPill(if (essentialReady == 4) "Ready" else "Finish setup", essentialReady == 4)
             }
         }
-        item {
+        if (section in listOf("Phone control", "Notifications")) item {
             CycloneSimpleCard {
                 CycloneSectionTitle("Essential access")
-                CyclonePermissionRow(Icons.Rounded.Security, "Phone control", "Read semantic controls and perform policy-approved taps, typing and gestures.", primaryControl, if (primaryControl) "Manage" else "Enable") {
+                CyclonePermissionRow(Icons.Rounded.Security, "Phone control", phoneControl.detail, phoneControl.ready, phoneControl.actionLabel) {
                     open(CyclonePermissionSetup.accessibilitySettings())
                 }
                 CyclonePermissionRow(Icons.Rounded.Notifications, "Notification triggers", "React to selected app notifications without watching screenshots.", notificationAccess, if (notificationAccess) "Manage" else "Enable") {
@@ -380,7 +411,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 }
             }
         }
-        item {
+        if (section == "Permissions") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("Advanced control")
                 val enhancedControl = CyclonePermissionSetup.enhancedControlEnabled(context)
@@ -418,7 +449,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 V32FeatureRow(Icons.Rounded.ScreenShare, "Screen sharing asks every session", "Android's screen-capture consent is never converted into a permanent background grant.")
             }
         }
-        item {
+        if (section == "Phone autonomy") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("AI access profile")
                 Text("Android permissions decide what Cyclone can do. This separate profile decides what AI may use without stopping.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -436,7 +467,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 Text("Payments, credentials, destructive changes, security settings and final send actions still require a current local confirmation in every profile.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        item {
+        if (section == "Model & API") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("AI model & key")
                 if (hasKey) {
@@ -454,10 +485,10 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 }
             }
         }
-        item {
+        if (section == "PC Gateway") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("Optional PC companion")
-                Text("Ask Cyclone, Teach, Routines and Brain run on this phone. Internal API models need an internet connection and your API key, with no PC pairing required.")
+                Text("Ask Cyclone, Profiles, Routines and Brain run on this phone. Internal API models need an internet connection and your API key, with no PC pairing required.")
                 Button(onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.Smartphone, null)
                     Spacer(Modifier.size(6.dp))
@@ -465,7 +496,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 }
             }
         }
-        item {
+        if (section == "Privacy & safety") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("Privacy & safety")
                 V32FeatureRow(Icons.Rounded.Security, "One action authority", "Every UI, AI, routine and PC request goes through Cyclone policy and the canonical phone executor.")
@@ -473,7 +504,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 V32FeatureRow(Icons.Rounded.Key, "Sensitive text stays private", "Passwords, OTPs, tokens and typed values are excluded from learning reports.")
             }
         }
-        item { Text("${CycloneRelease.label} · com.cyclone.mobile", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
+        if (section == "About") item { Text("${CycloneRelease.label} · com.cyclone.mobile", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
     }
 }
 

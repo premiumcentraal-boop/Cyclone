@@ -19,9 +19,11 @@ New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 & $BuildPython -m PyInstaller --clean --noconfirm --distpath $Dist --workpath (Join-Path $Repo 'build\pyinstaller\agent') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CycloneAgentMCP.spec')
 & $BuildPython -m PyInstaller --clean --noconfirm --distpath $Dist --workpath (Join-Path $Repo 'build\pyinstaller\runtime') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CyclonePCRuntime.spec')
 
+& $BuildPython -m PyInstaller --clean --noconfirm --distpath $Dist --workpath (Join-Path $Repo 'build\pyinstaller\live-phone') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CycloneLivePhone.spec')
+
 $TauriBinaries = Join-Path $Repo 'apps\pc-companion\src-tauri\binaries'
 New-Item -ItemType Directory -Force -Path $TauriBinaries | Out-Null
-foreach ($Name in @('CyclonePCRuntime', 'CycloneAgentMCP')) {
+foreach ($Name in @('CyclonePCRuntime', 'CycloneAgentMCP', 'CycloneLivePhone')) {
     $Source = Join-Path $Dist "$Name.exe"
     if (-not (Test-Path $Source)) { throw "Missing sidecar output: $Source" }
     Copy-Item $Source (Join-Path $TauriBinaries "$Name-$TargetTriple.exe") -Force

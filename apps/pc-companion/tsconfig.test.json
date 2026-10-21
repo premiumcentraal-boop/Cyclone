@@ -11,6 +11,7 @@
   },
   "include": [
     "src/core/**/*.ts",
+    "src/core/mcpTunnel.ts",
     "src/video/decoder.ts",
     "src/video/livePhoneController.ts",
     "src/video/webcodecsH264Decoder.ts",

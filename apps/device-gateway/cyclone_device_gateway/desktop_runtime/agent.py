@@ -174,6 +174,13 @@ class DesktopAgentService:
             "gateway_health": {"state": "READY" if allowed else "UNAVAILABLE"},
         }
 
+    @staticmethod
+    def _check_live_phone(session, payload, identity):
+        if (payload or {}).get("livePhone") is not True:
+            return
+        if getattr(session, "source", None) not in {"USB", "LAN"} or identity != {"sessionId": "default-foreground", "displayId": 0}:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Live Phone requires a physical foreground phone.")
+
     def observe(
         self,
         device_id: str,
@@ -184,7 +191,11 @@ class DesktopAgentService:
     ) -> dict[str, Any]:
         session = self._paired(device_id)  # USB/trust pairing, not execution sessionId.
         identity = self._execution_identity(payload)
-        raw_observation = self._request(session, "observe.semantic", dict(identity or {}))
+        self._check_live_phone(session, payload, identity)
+        observe_args = dict(identity or {})
+        if (payload or {}).get("livePhone") is True:
+            observe_args["livePhone"] = True
+        raw_observation = self._request(session, "observe.semantic", observe_args)
         if identity:
             raw_observation.setdefault("sessionId", identity["sessionId"])
             raw_observation.setdefault("displayId", identity["displayId"])
@@ -214,7 +225,7 @@ class DesktopAgentService:
             "screenshot": None,
         }
         if include_screenshot:
-            response["screenshot"] = self.screenshot(device_id, profile="thumbnail")["screenshot"]
+            response["screenshot"] = self.screenshot(device_id, profile="live-phone" if (payload or {}).get("livePhone") is True else "thumbnail")["screenshot"]
         return response
 
     def ui_search(self, device_id: str, query: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -261,6 +272,7 @@ class DesktopAgentService:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "params must be an object.")
         params = dict(params)
         identity = self._execution_identity(payload)
+        self._check_live_phone(session, payload, identity)
         self._reject_mixed_planes(params, identity)
         self._enforce_layer2_mutate_lock(device_id, tool, params, identity)
         if identity:
@@ -288,6 +300,8 @@ class DesktopAgentService:
         if identity:
             args["sessionId"] = identity["sessionId"]
             args["displayId"] = identity["displayId"]
+        if payload.get("livePhone") is True:
+            args["livePhone"] = True
         if expected:
             args["currentObservationId"] = expected
         execution = self._request(session, "action.execute", args)
@@ -621,7 +635,7 @@ class DesktopAgentService:
     def screenshot(self, device_id: str, *, profile: str = "thumbnail") -> dict[str, Any]:
         """Return a bounded per-device artifact reference, never frame bytes or a hidden default phone."""
         session = self.fleet.get(device_id)
-        if profile not in {"thumbnail", "focus"}:
+        if profile not in {"thumbnail", "focus", "live-phone"}:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unknown screenshot profile.")
         if str(getattr(getattr(session, "adb_device", None), "state", "") or "") != "device":
             return self._screenshot_unavailable(session, device_id, "SCREENSHOT_USB_UNAVAILABLE", "USB authorization is required for screenshots.")
