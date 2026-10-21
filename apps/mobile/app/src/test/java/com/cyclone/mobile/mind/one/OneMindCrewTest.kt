@@ -209,6 +209,20 @@ class OneMindCrewTest {
         assertEquals(0, asked)
     }
 
+    @Test fun `a screen read that comes back empty once is read again before the step gives up`() {
+        // A capture that changes under the read (OBSERVATION_CHANGED_DURING_CAPTURE) reads as no screen. The step must
+        // read again, not hand the run to the mind as "unreadable" on the first miss.
+        val hands = FakeHands()
+        val board = StepBoard { _, _ -> emptyList() }
+        val open = Step("s1", "open_app", args = mapOf("app" to "WhatsApp"), expect = Expect.AppIs("WhatsApp"))
+        val settled = Screens(list, chat).eyes
+        var reads = 0
+        val engine = StepEngine(StepEyes { image -> reads++; if (reads == 1) null else settled.look(image) }, board, hands)
+        val out = engine.run(open, score(open))
+        assertTrue("expected the step to finish after the second read, got $out", out is StepOutcome.Done)
+        assertTrue(reads >= 2)
+    }
+
     @Test fun `the board picks when code can't, and disagreement goes to the mind`() {
         val two = StepScreen("com.whatsapp", "WhatsApp", "list", "f1", listOf(StepControl("e1", "Anna de Vries"), StepControl("e2", "Anna Smit")))
         val step = Step("s", "tap", target = "Anna")

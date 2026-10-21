@@ -69,6 +69,15 @@ class StepEngine(
         try { return block() } finally { val ms = now() - from; stats = stats.copy(reads = stats.reads + 1, readMs = stats.readMs + ms) }
     }
 
+    /**
+     * A capture that changes under the read (OBSERVATION_CHANGED_DURING_CAPTURE) comes back empty. Read again, a bounded
+     * number of times, before the step hands the run to the mind as unreadable. A read never acts.
+     */
+    private fun lookSettled(): StepScreen? {
+        repeat(SCREEN_READS - 1) { read { eyes.look(false) }?.let { return it } }
+        return read { eyes.look(false) }
+    }
+
     /** The run's last moves and whether each was proven, for the fused call (plan 72). */
     private val moves = ArrayDeque<String>()
 
@@ -83,7 +92,7 @@ class StepEngine(
     fun run(step: Step, score: Score): StepOutcome = run(step, score, popups = 0)
 
     private fun run(step: Step, score: Score, popups: Int): StepOutcome {
-        val screen = takeObserved() ?: read { eyes.look(false) } ?: return StepOutcome.NeedsMind(step, "unreadable", "The screen could not be read")
+        val screen = takeObserved() ?: lookSettled() ?: return StepOutcome.NeedsMind(step, "unreadable", "The screen could not be read")
         if (screen.sensitive) return StepOutcome.NeedsMind(step, "sensitive", "A sensitive screen (password, code or a banking app): the crew stays off it")
 
         // Rung 0: direct actions need no screen decision.
@@ -119,7 +128,7 @@ class StepEngine(
 
     /** After a review at a barrier: carry out the move the step stopped at. */
     fun actAt(barrier: StepOutcome.AtBarrier, score: Score): StepOutcome {
-        val screen = eyes.look(false) ?: return StepOutcome.NeedsMind(barrier.step, "unreadable", "The screen could not be read")
+        val screen = lookSettled() ?: return StepOutcome.NeedsMind(barrier.step, "unreadable", "The screen could not be read")
         if (barrier.ref == null) {
             return when (val call = ToolSteps.direct(barrier.step, score)) {
                 is ToolSteps.Call.Ready -> act(barrier.step, call.name, call.args, screen, score, rung = 0, label = null)
@@ -376,6 +385,8 @@ class StepEngine(
     private fun id() = "one-${++calls}"
 
     companion object {
+        /** Reads of one screen before it counts as unreadable (the first read and two retries). */
+        const val SCREEN_READS = 3
         /** Interruptions the crew may close by itself; anything else asks the mind. */
         val AUTO_DISMISS = setOf("cookie_banner", "rating_prompt", "update_prompt", "ad")
         /** Actions that always carry the risk questions, whatever the plan says. */
