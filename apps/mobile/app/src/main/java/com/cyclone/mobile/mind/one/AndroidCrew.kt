@@ -21,7 +21,11 @@ object AndroidCrew {
     /** The fused call's deadline: a step waits at most this long for its decision. */
     const val STEP_DEADLINE_MS = 1_800L
 
-    fun eyes(toolbox: PhoneMindToolbox): StepEyes = StepEyes { image -> runCatching { toolbox.stepScreen(image) }.getOrNull() }
+    fun eyes(toolbox: PhoneMindToolbox): StepEyes {
+        val seen = StepEyes { image -> runCatching { toolbox.stepScreen(image) }.getOrNull() }
+        // A Lab mission with a sink keeps a copy of each screen the crew sees; owner missions have no sink.
+        return toolbox.traceSink?.let { RecordingEyes(seen, it) } ?: seen
+    }
 
     /** Plan 75 alpha 146: a clean, sure answer to an easy-to-undo move is enough to act once the grace below has passed. */
     const val EARLY_SURE = 0.8

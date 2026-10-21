@@ -63,11 +63,30 @@ object ScreenCodec {
 class RecordingEyes(private val inner: StepEyes, private val record: (JSONObject) -> Unit) : StepEyes {
     override fun look(image: Boolean): StepScreen? {
         val screen = inner.look(image)
-        if (screen != null) {
+        // A password, code or banking screen is never saved, whatever the owner has chosen for the words on other screens.
+        if (screen != null && !screen.sensitive) {
             runCatching {
                 record(JSONObject().put("kind", "screen").put("image", image).put("screen", ScreenCodec.encode(screen)))
             }
         }
         return screen
     }
+}
+
+/**
+ * Where a Lab mission's screens are saved on the phone: the app's own external folder, which only adb can read. Words are
+ * kept as they are, except secrets (passwords, codes), which are scrubbed by [ScreenCodec]. Nothing here leaves the phone
+ * except by the owner's own adb pull into the local, git-ignored results folder. Owner missions never get a sink.
+ */
+object LabTrace {
+    private val lock = Any()
+
+    fun sinkFor(context: android.content.Context, missionId: String): (JSONObject) -> Unit {
+        val root = context.getExternalFilesDir(null) ?: context.filesDir
+        val dir = java.io.File(root, "lab-traces").apply { mkdirs() }
+        val file = java.io.File(dir, "${safeName(missionId)}.jsonl")
+        return { line -> synchronized(lock) { file.appendText(line.toString() + "\n") } }
+    }
+
+    internal fun safeName(missionId: String): String = missionId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(80)
 }

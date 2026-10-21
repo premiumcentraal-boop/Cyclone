@@ -62,4 +62,16 @@ class ScreenTraceTest {
         assertNull(eyes.look(false))
         assertTrue(recorded.isEmpty())
     }
+
+    @Test fun `a sensitive screen is never recorded, and the crew still gets it`() {
+        val recorded = mutableListOf<JSONObject>()
+        val secret = screen.copy(sensitive = true)
+        val eyes = RecordingEyes(StepEyes { secret }) { recorded += it }
+        assertSame(secret, eyes.look(false))
+        assertTrue(recorded.isEmpty())
+    }
+
+    @Test fun `a trace file name keeps only letters, digits, dashes and underscores`() {
+        assertEquals("run-1ab", LabTrace.safeName("run-1/../ab"))
+    }
 }
