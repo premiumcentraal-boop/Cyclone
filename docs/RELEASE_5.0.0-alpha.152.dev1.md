@@ -20,7 +20,22 @@ fresh same-scope observation, but the step gave up on the first miss: a capture 
 
 ## What changed
 
-**Phone (`apps/mobile`, `mind/one/StepEngine.kt`):**
+Alpha 152 has three phone fixes. Each has a test that fails on the code before it (verified on a local build).
+
+**1. The owner's answer is reported when the plan runs out (`mind/one`, `mind/PhoneMindToolbox.kt`).**
+- A run that ended when its plan ran out reported the milestone titles ("Done: Confirm the square root result shown by
+  the calculator.") and dropped the answer the mind gave with `task_finish`. The owner never saw the answer.
+- The toolbox now keeps the finish answer, the crew exposes it, and the conductor reports it. With no answer, the
+  milestone report is unchanged.
+- Measured on the baseline batch: 2 of 37 answer-checked trials recorded only the milestone report, and both failed the
+  answer check. The `calc.sqrt` trial was scored a false success; the phone had computed 87 correctly.
+
+**2. Destructive controls are not offered to the model unless the step names them (`mind/one/FusedBoard.kt`).**
+- Force stop, Delete Timer and similar were in the model's shortlist on every screen. The approval gate still stops every
+  action; this only stops the model from choosing them when the goal never asked for them.
+- Matching is by whole word, so "Preset" and "Resetting" are not destructive.
+
+**3. An empty screen read is read again before a step gives up (`mind/one/StepEngine.kt`).**
 - A screen read that comes back empty is read again, up to three reads in all, before the step reports the screen as
   unreadable. The first successful read is used as before; nothing changes when the first read works.
 - The read never acts. It has no tap, typing, approval or gate of its own.
@@ -46,10 +61,15 @@ fresh same-scope observation, but the step gave up on the first miss: a capture 
 - `scripts/ci/mobile_product_guard.py`: invariants preserved.
 - Local guard tests (plain Python): `test_speed_guard`, `test_call_budget_guard`, `test_instant_proof_guard`,
   `test_phone_truth_guard`, `test_pilot_guard`: all OK.
-- Phone unit tests (`:app:testDebugUnitTest`): run by Mobile CI on the head of this release's pull request. Local Gradle
-  could not resolve the phone's test task on the build PC, so these are validated by CI, not locally.
-- Fail-before proof: the test commit alone was pushed to a separate branch for CI. Its result is recorded in the pull
-  request description.
+- Phone unit tests, local (`:app:testDebugUnitTest`): 2,919 of 2,920 passed. The one failure is
+  `CyTest.cyKeepsTheOverlaysRulesAndCanBeTurnedOff`, a text check on overlay source files this release does not touch; it
+  fails on the Windows build PC because of line endings, and Mobile CI on Linux is the authority for it.
+- Fail-before, local: with the original engine restored for one run, the re-read test fails (`16 tests completed, 1
+  failed`); with the conductor line restored to the old call, the answer test fails. Both restored byte-for-byte.
+- Testbench, local: `tools/cyclone-testbench/tests/test_versions.py`, 8 passed (the version gate's helper; no product
+  effect).
+- Local Gradle needed the SDK path with forward slashes in `apps/mobile/local.properties` (a Java properties escape bug on
+  Windows), and online dependency resolution once.
 
 ## Lab gate table
 
