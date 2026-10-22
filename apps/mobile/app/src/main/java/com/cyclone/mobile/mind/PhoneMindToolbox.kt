@@ -257,7 +257,7 @@ class PhoneMindToolbox(
         "tap_sequence" -> tapSequence(arguments)
         "long_press" -> onElement(arguments, "phone.long_press", "Long-pressed")
         "type_text" -> typeText(arguments)
-        "press_enter" -> onElement(arguments, "phone.submit_text", "Pressed Enter in", requireEditable = true)
+        "press_enter" -> calculatorEquals() ?: onElement(arguments, "phone.submit_text", "Pressed Enter in", requireEditable = true)
         "scroll" -> scroll(arguments)
         "back" -> act("phone.back", JSONObject(), "Pressed Back")
         "home" -> act("phone.home", JSONObject(), "Went to the Home screen")
@@ -843,6 +843,16 @@ class PhoneMindToolbox(
         val ref = refs.resolve(raw) ?: return null to MindToolResult.error(
             "$raw is not on the current screen. Use a ref from the latest screen (screen_read shows it).")
         return ref to null
+    }
+
+    /**
+     * On a calculator, Enter means "=": tap the equals key instead, which the approval gate does not treat as a send
+     * (see [CalculatorKeys]). Null when the screen is not a calculator or has no equals key, so Enter behaves as before.
+     */
+    private fun calculatorEquals(): MindToolResult? {
+        if (!CalculatorKeys.isCalculator(screen?.packageName)) return null
+        val equals = refs.all().firstOrNull { CalculatorKeys.isEquals(it.label) } ?: return null
+        return onElement(JSONObject().put("ref", equals.ref), "phone.click", "Tapped equals")
     }
 
     private fun onElement(arguments: JSONObject, tool: String, verb: String, requireEditable: Boolean = false): MindToolResult {
