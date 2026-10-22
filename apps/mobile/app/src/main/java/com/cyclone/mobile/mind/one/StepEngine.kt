@@ -108,6 +108,10 @@ class StepEngine(
         // Rung 0: a target that matches exactly one control (typing always goes past the tripwire questions).
         codeTarget(step, screen)?.let { control ->
             val risk = riskOf(step, control.label)
+            // Shadow (alpha 155): the general effect rule runs beside the current gate and only records its verdict.
+            EffectGate.decide(step, control, screen).let { shadow ->
+                record("gate-shadow", "${control.label} effect=${shadow.effect} allowed=${shadow.allowed} current=$risk | ${shadow.reason}")
+            }
             if (pendingVerify == null && step.branches.isEmpty() && step.action !in TRIPWIRE_ACTIONS) {
                 return if (risk == Risk.UNDOABLE) actOnRef(step, control, screen, score, rung = 0)
                 else StepOutcome.AtBarrier(step, control.ref, control.label)
