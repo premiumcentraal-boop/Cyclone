@@ -355,6 +355,9 @@ Every stage lists:
 
 ### Stage 0 · Foundations and decisions (M)
 
+**Status (2026-11-21):** run 0a built (alpha 156, draft PR; report `76-stage-reports/s00a.md`). Run 0b not
+started. Gate open: D1–D12 await the owner.
+
 **Goal:** make everything after it cheap to build correctly and possible to measure.
 
 **Platform:**

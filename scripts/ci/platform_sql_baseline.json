@@ -1,0 +1,77 @@
+{
+ "modules": {
+  "agent/loop.py": {
+   "schema": 0,
+   "sql": 7
+  },
+  "agent/store.py": {
+   "schema": 7,
+   "sql": 39
+  },
+  "agent/toolsets/workspace.py": {
+   "schema": 0,
+   "sql": 2
+  },
+  "automation.py": {
+   "schema": 2,
+   "sql": 20
+  },
+  "buttons.py": {
+   "schema": 2,
+   "sql": 10
+  },
+  "center.py": {
+   "schema": 14,
+   "sql": 108
+  },
+  "connections.py": {
+   "schema": 10,
+   "sql": 81
+  },
+  "delivery.py": {
+   "schema": 3,
+   "sql": 30
+  },
+  "health.py": {
+   "schema": 6,
+   "sql": 55
+  },
+  "hive.py": {
+   "schema": 7,
+   "sql": 49
+  },
+  "identities.py": {
+   "schema": 1,
+   "sql": 23
+  },
+  "pages.py": {
+   "schema": 4,
+   "sql": 28
+  },
+  "safe.py": {
+   "schema": 2,
+   "sql": 19
+  },
+  "safe_sync.py": {
+   "schema": 1,
+   "sql": 15
+  },
+  "signup.py": {
+   "schema": 6,
+   "sql": 28
+  },
+  "signup_starters.py": {
+   "schema": 0,
+   "sql": 10
+  },
+  "tables.py": {
+   "schema": 9,
+   "sql": 67
+  },
+  "vault.py": {
+   "schema": 3,
+   "sql": 24
+  }
+ },
+ "note": "Plan 76 stage 0 baseline (dev alpha 155): direct SQL calls and schema statements per Command Center module. Counts may only go down; see scripts/ci/tests/test_platform_store_guard.py."
+}

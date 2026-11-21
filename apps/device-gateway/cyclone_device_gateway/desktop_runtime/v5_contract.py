@@ -112,8 +112,9 @@ FORBIDDEN_SECRET_TOKENS = frozenset({
     "password", "passcode", "passwd", "pin", "otp", "token", "secret", "apikey",
     "authorization", "cookie", "cvv", "credential", "credentials", "typedtext", "typedvalue",
 })
+# Plan 76 (stage 0): a plural keyword ("passwords:", "credentials =") is refused too; the synthetic corpus found it slipping.
 INLINE_SECRET = re.compile(
-    r"(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value))\s*[:=]"
+    r"(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value))s?\s*[:=]"
 )
 PACKAGE_PLACE = re.compile(r"^package:[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
 CHROME_PLACE = re.compile(r"^chrome:https?://[^\s/]+(?::[0-9]{1,5})?$")

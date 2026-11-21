@@ -582,7 +582,7 @@ export const command = {
 };
 
 /** Words a secret-shaped answer would use. Glass refuses before sending; the gateway and phone refuse again. */
-const INLINE_SECRET = /(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\s*[:=]/i;
+const INLINE_SECRET = /(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)s?\s*[:=]/i;
 
 export function looksSecret(text: string): boolean {
   return INLINE_SECRET.test(text);

@@ -42,6 +42,8 @@ test("parsers are defensive and recipes fill their inputs", () => {
   assert.equal(fillRecipe("Post {caption} to {account}", { caption: "New drop" }), "Post New drop to {account}");
   assert.ok(looksSecret("password: hunter2"));
   assert.ok(!looksSecret("Post the weekly video"));
+  // Plan 76 stage 0: plural keywords are secret-shaped too, as on the gateway.
+  for (const text of ["passwords: x", "credentials = x", "tokens: x", "api_keys=x"]) assert.ok(looksSecret(text), text);
 });
 
 test("an approval shows the exact message and approves by its id", async () => {

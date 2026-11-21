@@ -51,7 +51,7 @@ const FORBIDDEN_SECRET_TOKENS = new Set([
   "setcookie",
 ]);
 
-const INLINE_SECRET = /(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value)|bearer)\s*[:=]/i;
+const INLINE_SECRET = /(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value)|bearer)s?\s*[:=]/i;
 const BEARER_VALUE = /(?:^|[\s"'])Bearer\s+[A-Za-z0-9._\-+=/]{8,}/i;
 const JWT_VALUE = /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/;
 

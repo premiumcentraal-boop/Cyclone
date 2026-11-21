@@ -212,6 +212,12 @@ class CommandCenter:
         from .safe_sync import SafeSync
         self.safe = SafeSync((safe or {}).get('root', path.parent / 'safe'), contract,
                              pinned_key=(safe or {}).get('pinned_key', lambda _: None), clock=clock)
+        # Plan 76 (stage 0): the store layer and numbered migrations. Last, so a migration can change any store's tables.
+        # A file from a newer Cyclone is refused here, before anything writes to it.
+        from .store import MIGRATIONS, Database, Migrator
+        self.store = Database(self._db, self._lock)
+        self.schema = Migrator(self.store, MIGRATIONS, clock=clock, backups=path.parent / "backups",
+                               connection=self._db).apply()
         self._task_listener = None
         self._wake = threading.Event()
         self._tick_done = threading.Condition()
