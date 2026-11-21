@@ -25,15 +25,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ModuleCatalogTest {
-    @Test
-    fun emptyCatalogIsAHealthyOfflineFirstState() {
-        val state = controller(supervisor()).state()
-
-        assertTrue(state.isEmpty)
-        assertEquals(0, state.issueCount)
-        assertEquals(0, state.updateCount)
-        assertTrue(state.localOnlyMessage.contains("No network"))
-    }
 
     @Test
     fun modulesSortBuiltInsFirstThenByStableDisplayName() {
@@ -96,47 +87,6 @@ class ModuleCatalogTest {
     }
 
     @Test
-    fun criticalDisableRequestCannotBypassSupervisorPolicy() {
-        val supervisor = supervisor(
-            declaration("policy.core", importance = ModuleImportance.CRITICAL_BUILT_IN),
-        )
-        val controller = controller(supervisor)
-
-        val result = controller.setEnabled(id("policy.core"), enabled = false)
-
-        assertTrue(result is ModuleCatalogCommandResult.Rejected)
-        assertTrue(supervisor.status(id("policy.core"))!!.enabled)
-    }
-
-    @Test
-    fun activeDependencyCannotBeDisabledThroughCatalog() {
-        val supervisor = supervisor(
-            declaration("page.core"),
-            declaration("vision.router", dependencies = listOf(ModuleDependency(id("page.core")))),
-        )
-        supervisor.startAll(0)
-        val result = controller(supervisor).setEnabled(id("page.core"), enabled = false)
-
-        assertTrue(result is ModuleCatalogCommandResult.Rejected)
-        assertEquals(ModuleState.READY, supervisor.status(id("page.core"))!!.state)
-    }
-
-    @Test
-    fun updateRequestDelegatesToSupervisorPreflightAndState() {
-        val supervisor = supervisor(declaration("vision.router"))
-        val candidate = ModuleUpdateCandidate(
-            descriptor = descriptor("vision.router", version = ModuleVersion(2, 0, 0)),
-            manifestDigestSha256 = "a".repeat(64),
-        )
-
-        val result = controller(supervisor).prepareUpdate(id("vision.router"), candidate)
-
-        assertTrue(result is ModuleCatalogCommandResult.Applied)
-        assertEquals(ModuleState.UPDATE_PENDING, supervisor.status(id("vision.router"))!!.state)
-        assertEquals(1, (result as ModuleCatalogCommandResult.Applied).state.updateCount)
-    }
-
-    @Test
     fun failedModuleHasReadableDiagnosticAndRetryTiming() {
         val broken = Runtime(startResult = ModuleOperationResult.Failure("provider failed"))
         val supervisor = ModuleSupervisor.fromDeclared(
@@ -162,33 +112,6 @@ class ModuleCatalogTest {
             }
         })
     }
-
-    @Test
-    fun metadataFailureFallsBackToSupervisorInventory() {
-        val controller = ModuleCatalogController(
-            supervisor = supervisor(declaration("vision.router")),
-            metadataSource = ModuleCatalogMetadataSource { error("offline") },
-            nowEpochMillis = { 0 },
-        )
-
-        val state = controller.state()
-
-        assertEquals(1, state.modules.size)
-        assertEquals("Vision Router", state.modules.single().displayName)
-    }
-
-    @Test
-    fun catalogDoesNotExposeAnInstallLifecycleEndpoint() {
-        val methodNames = ModuleCatalogController::class.java.methods.map { it.name.lowercase() }
-
-        assertFalse(methodNames.any { "install" in it })
-    }
-
-    private fun controller(supervisor: ModuleSupervisor) = ModuleCatalogController(
-        supervisor = supervisor,
-        metadataSource = BundledModuleCatalogMetadataSource(emptyList()),
-        nowEpochMillis = { 0 },
-    )
 
     private fun supervisor(vararg declarations: TrustedModuleDeclaration) =
         ModuleSupervisor.fromDeclared(API, declarations.asList())

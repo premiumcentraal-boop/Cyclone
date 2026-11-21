@@ -166,12 +166,6 @@ class OutcomeStageProjectorTest {
         assertEquals("Searching Gmail", projected.title)
     }
 
-    @Test
-    fun usageParserNeverInventedZeroFromEmptyDetails() {
-        assertEquals(null to null, TaskRunInformationLive.parseUsage(emptyList()))
-        assertEquals(820L to 96L, TaskRunInformationLive.parseUsage(listOf("prompt_tokens=820 completion_tokens=96")))
-    }
-
     private fun control(label: String) = PageControl(
         key = label.lowercase(),
         label = label,

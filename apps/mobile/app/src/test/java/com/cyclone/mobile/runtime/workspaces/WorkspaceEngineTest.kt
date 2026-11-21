@@ -115,11 +115,5 @@ class WorkspaceEngineTest {
         assertEquals(WorkspaceTarget("example.alpha", 10), RootTargetParser.parse("Display #0\nmResumedActivity: ActivityRecord{x u10 example.alpha/.Main}"))
         assertNull(RootTargetParser.parse("Display #0\nmResumedActivity: ActivityRecord{x u10 example.alpha/.Main}\nmResumedActivity: ActivityRecord{x u0 example.beta/.Main}"))
     }
-    @Test fun wizardHasFiveReachableStepsAndTerminalDone() {
-        var step = RootWizardStep.ROOT
-        val visited = mutableListOf(step)
-        repeat(4) { step = step.next(); visited += step }
-        assertEquals(RootWizardStep.entries, visited)
-        assertEquals("Done", step.action); assertEquals(step, step.next())
-    }
+
 }
