@@ -1,5 +1,6 @@
 package com.cyclone.mobile.guided
 
+import com.cyclone.mobile.secrets.SecretShape
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
@@ -32,9 +33,8 @@ data class TeachingWorkflowQualityReport(
  * never learned truth.
  */
 object TeachingWorkflowQuality {
-    private val sensitiveAssignment = Regex(
-        "(?i)(password|passcode|passwd|otp|verification.?code|api.?key|token|secret|cvv|pin)\\s*[:=]",
-    )
+    // The one rule, plus the spoken forms this gate has always caught ("verification code:", "api key:").
+    private val spokenSecret = Regex("(?i)(verification.?code|api.?key)\\s*[:=]")
 
     fun evaluate(session: RoutineTeachingSession): TeachingWorkflowQualityReport {
         val actions = session.steps.filter { it.kind != "page" }
@@ -148,5 +148,5 @@ object TeachingWorkflowQuality {
 
     private fun containsSensitivePlaintext(step: RoutineTeachingStep): Boolean =
         sequenceOf(step.summary, step.note, step.selectorJson.orEmpty())
-            .any { sensitiveAssignment.containsMatchIn(it) }
+            .any { SecretShape.INLINE.containsMatchIn(it) || spokenSecret.containsMatchIn(it) }
 }

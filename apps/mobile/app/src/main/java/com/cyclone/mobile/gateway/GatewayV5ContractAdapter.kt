@@ -1,6 +1,7 @@
 package com.cyclone.mobile.gateway
 
 import com.cyclone.mobile.automation.skill.SkillSecrets
+import com.cyclone.mobile.secrets.SecretShape
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
@@ -74,9 +75,6 @@ internal object GatewayV5ContractAdapter {
     private val packageName = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
     private val slotName = Regex("^[A-Za-z][A-Za-z0-9._-]{0,63}$")
     private val safeReason = Regex("^[A-Za-z0-9][A-Za-z0-9 ._/-]{0,119}$")
-    private val inlineSecret = Regex(
-        "(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(text|value))\\s*[:=]"
-    )
 
     fun dispatch(op: String, args: JSONObject): JSONObject = when (op) {
         "atlas.places" -> atlasPlaces(args)
@@ -141,7 +139,7 @@ internal object GatewayV5ContractAdapter {
         val slot = requiredString(args, "slot", 64)
         if (!slotName.matches(slot)) fail("INVALID_REQUEST", "slot must be metadata only.")
         val reason = requiredString(args, "reason", 120)
-        if (!safeReason.matches(reason) || inlineSecret.containsMatchIn(reason)) {
+        if (!safeReason.matches(reason) || SecretShape.INLINE.containsMatchIn(reason)) {
             fail("SECRET_PAYLOAD_REJECTED", "Secret-bearing request payload rejected.")
         }
         val metadata = GatewayV5SecretRequestMetadata(placeId, persona, slot, reason)

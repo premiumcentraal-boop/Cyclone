@@ -1749,9 +1749,7 @@ def _validate_profile_roster(profiles: Any, current: Any, *, require_android_use
 
 #: Plan 57 P3: anything shaped like `password: …` the phone's redaction might have left is masked again here, keyword
 #: and value together, so the general secret check below can still fail closed on anything else.
-DEBUG_SECRET_VALUE = re.compile(
-    r"(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value))\s*[:=]\s*\S*"
-)
+DEBUG_SECRET_VALUE = re.compile(INLINE_SECRET.pattern + r"\s*\S*")
 DEBUG_MAX_BYTES = 1_000_000
 
 

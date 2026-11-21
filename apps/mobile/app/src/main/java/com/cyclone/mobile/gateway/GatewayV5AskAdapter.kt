@@ -5,6 +5,7 @@ import android.os.Looper
 import android.content.Context
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.mind.modes.AskLedger
+import com.cyclone.mobile.secrets.SecretShape
 import com.cyclone.mobile.task.TaskCommand
 import com.cyclone.mobile.task.TaskCommands
 import com.cyclone.mobile.runtime.background.TaskPresentationProjector
@@ -24,9 +25,6 @@ import org.json.JSONObject
  */
 internal object GatewayV5AskAdapter {
     const val MAX_GOAL = 2_000
-    private val INLINE_SECRET = Regex(
-        "(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\\s*[:=]",
-    )
 
     /** Seams for JVM tests; production uses the overlay runtime and the task state flow. */
     internal var overlayReady: () -> Boolean = { OverlayChromeRuntime.isAttached() }
@@ -64,7 +62,7 @@ internal object GatewayV5AskAdapter {
         if (goal.isBlank() || goal.length > MAX_GOAL) {
             throw GatewayProtocolException("INVALID_REQUEST", "goal must be 1..$MAX_GOAL characters of text.")
         }
-        if (INLINE_SECRET.containsMatchIn(goal)) {
+        if (SecretShape.INLINE.containsMatchIn(goal)) {
             // Secrets enter only through the Secrets Card, never through a goal sentence.
             throw GatewayProtocolException("INVALID_REQUEST", "Do not put secrets in a goal; Cyclone will ask on the phone.")
         }

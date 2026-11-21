@@ -7,6 +7,7 @@ import com.cyclone.mobile.mind.MindToolCall
 import com.cyclone.mobile.mind.MindToolResult
 import com.cyclone.mobile.mind.MindCheckpoint
 import com.cyclone.mobile.mind.mission.MindRedaction
+import com.cyclone.mobile.secrets.SecretShape
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -70,7 +71,6 @@ data class MindLabVariant(
         private val NAME = Regex("^[A-Za-z0-9 ._-]{1,40}$")
         private val MODEL = Regex("^[a-z0-9][a-z0-9._-]{0,60}/[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$")
         private val EFFORTS = setOf("low", "medium", "high")
-        private val INLINE_SECRET = Regex("(?i)(password|passcode|otp|api[_-]?key|secret|token|cvv)\\s*[:=]")
         const val MAX_ADDENDUM = 1_500
 
         /** Parses a variant sent by the PC; every field is checked, anything unknown is refused. */
@@ -91,7 +91,7 @@ data class MindLabVariant(
             require(minutes == null || minutes in 2..60) { "variant.workingMinutes must be 2..60." }
             val addendum = json.optString("promptAddendum", "").trim()
             require(addendum.length <= MAX_ADDENDUM) { "variant.promptAddendum is longer than $MAX_ADDENDUM characters." }
-            require(!INLINE_SECRET.containsMatchIn(addendum)) { "Do not put secrets in a lab prompt." }
+            require(!SecretShape.INLINE.containsMatchIn(addendum)) { "Do not put secrets in a lab prompt." }
             val plane = json.optNullableString("plane")
             require(plane == null || plane in PLANES) { "variant.plane must be automatic, screen or background." }
             val context = json.optNullableString("context")

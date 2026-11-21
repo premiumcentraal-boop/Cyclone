@@ -51,7 +51,16 @@ const FORBIDDEN_SECRET_TOKENS = new Set([
   "setcookie",
 ]);
 
+/**
+ * Glass's one secret-shape rule: the gateway's INLINE_SECRET (desktop_runtime/v5_contract.py) plus `bearer`.
+ * scripts/ci/tests/test_secret_shape_parity.py keeps it in step with the gateway and the phone.
+ */
 const INLINE_SECRET = /(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value)|bearer)s?\s*[:=]/i;
+
+/** True when the text has a secret keyword followed by `:` or `=` ("password: …", "api_keys = …"). */
+export function looksInlineSecret(text: string): boolean {
+  return INLINE_SECRET.test(text);
+}
 const BEARER_VALUE = /(?:^|[\s"'])Bearer\s+[A-Za-z0-9._\-+=/]{8,}/i;
 const JWT_VALUE = /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/;
 

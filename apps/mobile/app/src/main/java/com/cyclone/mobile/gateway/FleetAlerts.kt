@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import com.cyclone.mobile.secrets.SecretShape
 import org.json.JSONObject
 
 /**
@@ -17,7 +18,6 @@ internal object FleetAlerts {
     const val CHANNEL = "cyclone-fleet-alerts"
     private val ALERT_ID = Regex("^alr_[A-Za-z0-9_-]{6,40}$")
     private val LEVELS = setOf("critical", "warning", "info")
-    private val INLINE_SECRET = Regex("(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\\s*[:=]")
 
     data class Alert(val id: String, val level: String, val title: String, val text: String)
 
@@ -34,7 +34,7 @@ internal object FleetAlerts {
         if (!ALERT_ID.matches(id)) throw invalid("alertId is malformed.")
         if (level !in LEVELS) throw invalid("level is critical, warning or info.")
         if (title.isEmpty() || title.length > 120 || text.length > 400) throw invalid("An alert is a title of 1..120 and a text of up to 400 characters.")
-        if (INLINE_SECRET.containsMatchIn("$title $text")) throw invalid("An alert never carries a secret.")
+        if (SecretShape.INLINE.containsMatchIn("$title $text")) throw invalid("An alert never carries a secret.")
         return Alert(id, level, title, text)
     }
 

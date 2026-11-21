@@ -12,6 +12,7 @@ import com.cyclone.mobile.policy.PublishGate
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.secrets.DeviceKey
 import com.cyclone.mobile.secrets.SealedDelivery
+import com.cyclone.mobile.secrets.SecretShape
 import com.cyclone.mobile.task.TaskCommand
 import com.cyclone.mobile.task.TaskCommandResult
 import com.cyclone.mobile.task.TaskCommands
@@ -34,7 +35,6 @@ internal object GatewayV5CommandAdapter {
     private val MISSION_ID = Regex("^m[a-z0-9]{6,40}$")
     private val REQUEST_ID = Regex("^[A-Za-z0-9._:-]{1,120}$")
     private val SIGNUP_PACKAGE = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
-    private val INLINE_SECRET = Regex("(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\\s*[:=]")
     val ANSWERS = setOf("approve", "decline", "reply", "fill", "stop")
 
     /** Seams for JVM tests; production uses the overlay, the Mind and Task Kit. */
@@ -127,7 +127,7 @@ internal object GatewayV5CommandAdapter {
         if (publish != null && publish != true) throw invalid("publish is true or left out.")
         val goal = (args.opt("goal") as? String)?.trim().orEmpty()
         if (goal.isBlank() || goal.length > MAX_GOAL) throw invalid("goal must be 1..$MAX_GOAL characters of text.")
-        if (INLINE_SECRET.containsMatchIn(goal)) throw invalid("Do not put secrets in a task; Cyclone asks on the phone.")
+        if (SecretShape.INLINE.containsMatchIn(goal)) throw invalid("Do not put secrets in a task; Cyclone asks on the phone.")
         if (!overlayReady()) throw GatewayProtocolException("OVERLAY_UNAVAILABLE", "Turn on Cyclone's accessibility service on the phone.")
         if (humanHasControl()) throw GatewayProtocolException("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
         if (busyFor(goal)) throw GatewayProtocolException("ASK_BUSY", "The phone is already running a task.")
@@ -206,7 +206,7 @@ internal object GatewayV5CommandAdapter {
             }
             "decline" -> TaskCommand.Decline
             "reply" -> (args.opt("text") as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 500 }
-                ?.also { if (INLINE_SECRET.containsMatchIn(it)) throw invalid("Do not put secrets in an answer.") }
+                ?.also { if (SecretShape.INLINE.containsMatchIn(it)) throw invalid("Do not put secrets in an answer.") }
                 ?.let { TaskCommand.Reply(it) } ?: throw invalid("reply needs text of 1..500 characters.")
             else -> {
                 if (open.kind != MomentKind.VALUES) throw invalid("Cyclone is not asking for details.")
@@ -250,7 +250,7 @@ internal object GatewayV5CommandAdapter {
         json.keys().forEach { key ->
             val value = json.opt(key) as? String ?: throw invalid("fill values must be text.")
             if (key.length > 60 || value.length > 300) throw invalid("fill values are too long.")
-            if (INLINE_SECRET.containsMatchIn("$key: $value") || INLINE_SECRET.containsMatchIn("$key=")) throw invalid("Secrets are typed on the phone, never sent from the PC.")
+            if (SecretShape.INLINE.containsMatchIn("$key: $value") || SecretShape.INLINE.containsMatchIn("$key=")) throw invalid("Secrets are typed on the phone, never sent from the PC.")
             if (value.isNotBlank()) out[key] = value.trim()
         }
         if (out.isEmpty() || out.size > 8) throw invalid("fill needs 1..8 values.")
