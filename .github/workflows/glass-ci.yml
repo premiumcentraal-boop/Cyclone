@@ -30,7 +30,8 @@ concurrency:
 jobs:
   glass:
     name: Glass web app + gateway hosting
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04 (2026-11), which has no Python 3.13.7 build; 24.04 is the image this job last passed on.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
