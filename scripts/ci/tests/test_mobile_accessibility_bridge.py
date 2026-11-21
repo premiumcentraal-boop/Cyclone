@@ -145,7 +145,7 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
 
     def test_packaged_agent_mcp_serves_canonical_locate_and_skill_surface(self):
         entrypoint = (ROOT / "scripts/pc-companion/entrypoints/agent_mcp.py").read_text(encoding="utf-8")
-        build = (ROOT / "scripts/pc-companion/build-sidecars.ps1").read_text(encoding="utf-8")
+        build = (ROOT / "scripts/pc/build-pc-package.ps1").read_text(encoding="utf-8")
         spec = (ROOT / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
         phone_server = (ROOT / "tools/codex-phone-mcp/cyclone_phone_mcp/mcp_server.py").read_text(encoding="utf-8")
         self.assertIn("from cyclone_phone_mcp.mcp_server import McpServer", entrypoint)

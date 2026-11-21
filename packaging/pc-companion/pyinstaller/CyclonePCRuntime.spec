@@ -11,7 +11,7 @@ version_file = Path(workpath) / "product_version.txt"
 version_file.parent.mkdir(parents=True, exist_ok=True)
 version_file.write_text(product_version, encoding="utf-8")
 if not (glass_dist / "index.html").is_file():
-    raise SystemExit("Cyclone Glass is not built: run `npm ci && npm run build` in apps/glass (build-sidecars.ps1 does this).")
+    raise SystemExit("Cyclone Glass is not built: run `npm ci && npm run build` in apps/glass (scripts/pc/build-pc-package.ps1 does this).")
 a = Analysis(
     [str(entrypoints / "pc_runtime.py")],
     pathex=[str(repo / "tools" / "codex-phone-mcp"), str(repo / "apps" / "device-gateway"), str(repo / "tools" / "cyclone-ports-sdk"), str(entrypoints)],
