@@ -83,7 +83,7 @@ browser on synthetic data, without touching the owner's Cyclone. Today's baselin
   it moved to `packaging/pc` and `scripts/pc`; the package is built from there. Existing installs are unaffected: their
   folders keep their names.
 - **The docs are folded.** Release notes are in `docs/releases/` (the release lane reads them there), history is in
-  `docs/archive/` and `Cyclone V5 plan/archive/`, and `docs/` keeps the 24 live documents with an index.
+  `docs/archive/` and `Cyclone V5 plan/archive/`, and `docs/` keeps 21 live documents with an index.
 - **57 stale pull requests are closed.** `scripts/ops/prune_branches.py` deletes the 429 old branches whose commits are
   kept elsewhere, when the owner runs it.
 
