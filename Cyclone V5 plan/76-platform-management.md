@@ -383,6 +383,9 @@ copy of the current database.
 
 ### Stage 1 · The event ledger and the live channel (L)
 
+**Status (2026-11-21):** run 1a built (the ledger; report `76-stage-reports/s01a.md`): 100,000-event replay
+matches, append p95 0.3 ms. Run 1b (the live channel) not started. Gate open.
+
 **Goal:** one source of truth for every fact, pushed live to Glass.
 
 **Platform:**

@@ -1,6 +1,6 @@
-# Cyclone V5 alpha.156 dev1: plan 76 stage 0a. The Command Center file gets numbered, checksummed, forward-only
-# migrations and a store layer; a guard holds raw SQL at its recorded count; the secret refusal now catches plural
-# keywords ("credentials ="). PC gateway and Glass. Physical acceptance UNVERIFIED.
+# Cyclone V5 alpha.156 dev1: plan 76 stage 0 and run 1a. Numbered migrations and a store layer for the Command Center;
+# a guard holds raw SQL at its recorded count; plural secret keywords are refused; the Glass baseline; and the event
+# ledger (append-only, hash-chained, fed by outbox triggers, with projections). PC gateway and Glass. Physical UNVERIFIED.
 schema = 1
 product_version = "5.0.0-alpha.156.dev1"
 channel = "development"

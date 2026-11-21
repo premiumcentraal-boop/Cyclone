@@ -8,7 +8,9 @@ only go down as later stages move them here.
 from __future__ import annotations
 
 from .database import Database
+from .events import EventError
+from .ledger import Ledger
 from .migrations import Migration, MigrationError, Migrator
 from .schema import MIGRATIONS
 
-__all__ = ["Database", "MIGRATIONS", "Migration", "MigrationError", "Migrator"]
+__all__ = ["Database", "EventError", "Ledger", "MIGRATIONS", "Migration", "MigrationError", "Migrator"]

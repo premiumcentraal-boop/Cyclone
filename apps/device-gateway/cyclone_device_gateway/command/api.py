@@ -748,6 +748,25 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def audit(limit: int = Query(default=200, ge=1, le=1000)):
         return call(lambda: cc().audit(limit))
 
+    # Plan 76 (stage 1): the event ledger, read only. Nothing outside the Command Center writes to it.
+    @router.get("/v1/cc/events", dependencies=[Depends(auth)])
+    def events(subject: str | None = Query(default=None, max_length=180), type: str | None = Query(default=None, max_length=60),
+               after: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=500)):
+        def run():
+            with cc()._lock:
+                cc().ledger.drain()
+                return cc().ledger.events(subject=subject, type_name=type, after=after, limit=limit)
+        return call(run)
+
+    @router.get("/v1/cc/events/verify", dependencies=[Depends(auth)])
+    def events_verify():
+        def run():
+            with cc()._lock:
+                ledger = cc().ledger
+                return {"chain": ledger.verify(), "replay": ledger.replay_check(), "sources": ledger.reconcile(),
+                        "skipped": ledger.skipped}
+        return call(run)
+
     return router
 
 

@@ -68,7 +68,7 @@ ends with an independent review of it.
 | 15 | T6 ships malicious code in the gateway | Pinned build dependencies, CI on every change | CI | Stage 16 reviews the dependency list |
 | 16 | T8 runs a bulk action on the wrong selection | Fleet missions and routines are owner actions; approvals stay human | Fleet tests | Stage 7: dry runs for every bulk action; typed confirmation for irreversible ones |
 | 17 | T8 or a bad migration corrupts the file | Numbered, checksummed, forward-only migrations in one transaction each; a copy before any change (`command/store/migrations.py`) | `tests/test_platform_store.py` (stage 0) | Stage 12: encrypted, restore-verified backups |
-| 18 | Anyone edits the audit trail to hide an action → A9 | Hash chain over every entry, verified on demand (`verify_audit`) | Command Center tests | Stage 1: the event ledger's own hash chain |
+| 18 | Anyone edits the audit trail to hide an action → A9 | Hash chain over every entry, verified on demand (`verify_audit`) | Command Center tests | Built in stage 1a: the ledger is append-only in the database and hash-chained (`command/store/ledger.py`, `tests/test_platform_ledger.py`) |
 | 19 | A newer database is opened by an older Cyclone and damaged | The migrator refuses an unknown schema before writing anything | `test_a_file_from_a_newer_cyclone_is_refused_at_start` | — |
 | 20 | Lab screen copies outlive their use → A10 | Scrubbed of secrets; Lab missions only; owner missions never saved | Phone unit tests (alpha 153) | Stage 12: retention per D7 |
 | 21 | Accounts made at volume get the owner banned, or break a service's terms | **GAP:** caps and block lists were removed on 2026-09-30 | — | Stage 5 and 8, with D3 and D4 |

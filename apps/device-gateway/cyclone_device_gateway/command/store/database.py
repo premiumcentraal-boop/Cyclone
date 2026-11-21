@@ -59,20 +59,23 @@ class Database:
     @contextmanager
     def transaction(self) -> Iterator["Database"]:
         """All or nothing. Top level: ``BEGIN IMMEDIATE`` (takes the write lock at once, so no other writer interleaves).
-        Nested: a savepoint, released on success and rolled back on failure, leaving the outer transaction going."""
+        Nested, or inside a transaction an older module opened itself (the vault's restore does): a savepoint, released on
+        success and rolled back on failure. It then commits or rolls back with the outer transaction, never on its own."""
         with self._lock:
-            if self._depth == 0 and self._db.in_transaction:
-                raise RuntimeError("A transaction was opened outside the store; finish it before using transaction().")
+            joined = self._depth == 0 and self._db.in_transaction
+            top = self._depth == 0 and not joined
             name = f"store_sp_{self._depth}"
-            self._db.execute("BEGIN IMMEDIATE" if self._depth == 0 else f"SAVEPOINT {name}")
+            self._db.execute("BEGIN IMMEDIATE" if top else f"SAVEPOINT {name}")
             self._depth += 1
             try:
                 yield self
             except BaseException:
                 self._depth -= 1
-                self._db.execute("ROLLBACK" if self._depth == 0 else f"ROLLBACK TO {name}")
-                if self._depth:
+                if top:
+                    self._db.execute("ROLLBACK")
+                else:
+                    self._db.execute(f"ROLLBACK TO {name}")
                     self._db.execute(f"RELEASE {name}")
                 raise
             self._depth -= 1
-            self._db.execute("COMMIT" if self._depth == 0 else f"RELEASE {name}")
+            self._db.execute("COMMIT" if top else f"RELEASE {name}")

@@ -57,6 +57,7 @@ def run(scale: seed.Scale, reps: int) -> tuple[dict[str, Any], list[tuple[str, d
             made = seed.seed(center, scale, phones)
             seed_s = time.perf_counter() - started
             table = made["tableId"]
+            first_account = center.list_accounts()[0]["id"]
             queries: list[tuple[str, Callable[[], Any]]] = [
                 ("Accounts: list all", center.list_accounts),
                 ("Tasks: newest 200", lambda: center.list_tasks(limit=200)),
@@ -70,13 +71,21 @@ def run(scale: seed.Scale, reps: int) -> tuple[dict[str, Any], list[tuple[str, d
                 ("Identities: list", lambda: center.identities.list(refresh=False)),
                 ("Health: fleet panel", center.health.public),
                 ("Audit: verify the whole chain", center.verify_audit),
+                # Plan 76 stage 1: the ledger.
+                ("Ledger: append one event (p95 budget 5 ms)", lambda: center.ledger.append(
+                    "audit.recorded", "bench-subject", {"action": "bench.append", "detail": {"n": 1}})),
+                ("Ledger: one account's events", lambda: center.ledger.events(subject=first_account)),
+                ("Ledger: newest 200 task states", lambda: center.ledger.events(type_name="task.changed", limit=200)),
+                ("Ledger: verify the whole chain", center.ledger.verify),
+                ("Ledger: rebuild every projection and compare", center.ledger.replay_check),
             ]
             results = [(name, timed(fn, reps)) for name, fn in queries]
             size = (Path(work) / "command.db").stat().st_size
             audit = center.store.scalar("SELECT COUNT(*) FROM audit")
+            events = center.ledger.count()
         finally:
             center.stop()
-    facts = {"scale": scale, "seed_seconds": seed_s, "file_mb": size / 1e6, "audit_entries": audit, "reps": reps,
+    facts = {"scale": scale, "seed_seconds": seed_s, "file_mb": size / 1e6, "audit_entries": audit, "events": events, "reps": reps,
              "python": platform.python_version(), "sqlite": sqlite3.sqlite_version, "cpus": os.cpu_count(),
              "machine": platform.machine(), "system": platform.system()}
     return facts, results
@@ -85,9 +94,9 @@ def run(scale: seed.Scale, reps: int) -> tuple[dict[str, Any], list[tuple[str, d
 def report(facts: dict[str, Any], results: list[tuple[str, dict[str, float]]]) -> str:
     s = facts["scale"]
     lines = [
-        "# Command Center benchmark (plan 76, stage 0)", "",
+        "# Command Center benchmark (plan 76)", "",
         f"- Data: {s.accounts:,} accounts, {s.tasks:,} tasks, {s.rows:,} table rows, {s.pages:,} pages, {s.phones:,} phones "
-        f"({facts['audit_entries']:,} audit entries; file {facts['file_mb']:.1f} MB).",
+        f"({facts['audit_entries']:,} audit entries; {facts['events']:,} ledger events; file {facts['file_mb']:.1f} MB).",
         f"- Seeding took {facts['seed_seconds']:.1f} s through the stores' own APIs.",
         f"- Machine: {facts['system']} {facts['machine']}, {facts['cpus']} CPUs; Python {facts['python']}; SQLite {facts['sqlite']}.",
         f"- Each query ran once to warm up, then {facts['reps']} times. Milliseconds.", "",

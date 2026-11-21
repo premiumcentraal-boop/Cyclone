@@ -66,16 +66,32 @@ def test_a_nested_failure_rolls_back_only_its_own_work(store: Database) -> None:
     assert sorted(r["v"] for r in store.query("SELECT v FROM t")) == ["after", "outer"]
 
 
-def test_the_store_owns_transactions(tmp_path: Path) -> None:
+def test_the_store_needs_an_autocommit_connection(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         Database(sqlite3.connect(str(tmp_path / "x.db")), threading.RLock())  # default isolation level: not autocommit
+
+
+def test_inside_an_outer_transaction_the_store_joins_it(tmp_path: Path) -> None:
+    """An older module may open its own transaction (the vault's restore does) and reach the store inside it. The store's
+    work then commits or rolls back with that transaction, and its own failure undoes only its own work."""
     db = connect(tmp_path / "y.db")
     store = Database(db, threading.RLock())
+    store.execute("CREATE TABLE t (v TEXT)")
     db.execute("BEGIN")
-    with pytest.raises(RuntimeError):
+    with store.transaction():
+        store.execute("INSERT INTO t VALUES ('joined')")
+    assert db.in_transaction, "the store did not commit the outer transaction"
+    with pytest.raises(ValueError):
         with store.transaction():
-            pass
+            store.execute("INSERT INTO t VALUES ('undone')")
+            raise ValueError("inner fails")
     db.execute("ROLLBACK")
+    assert store.query("SELECT v FROM t") == [], "the outer rollback takes the store's work with it"
+    db.execute("BEGIN")
+    with store.transaction():
+        store.execute("INSERT INTO t VALUES ('kept')")
+    db.execute("COMMIT")
+    assert [r["v"] for r in store.query("SELECT v FROM t")] == ["kept"]
 
 
 # ---------------------------------------------------------------- the migration list
@@ -184,6 +200,15 @@ def test_a_backup_is_made_before_a_change_and_only_five_are_kept(tmp_path: Path)
 
 # ---------------------------------------------------------------- the Command Center file
 
+def wind_back_to_alpha_155(db: sqlite3.Connection) -> None:
+    """Make a file look as alpha 155 left it: no migration history, no ledger, no outbox and none of its triggers."""
+    for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'cc_out_%'").fetchall():
+        db.execute(f"DROP TRIGGER {name}")
+    for table in ("cc_event", "cc_projection", "cc_outbox", TABLE):
+        db.execute(f"DROP TABLE IF EXISTS {table}")
+    db.execute("PRAGMA user_version = 0")
+
+
 def center_at(path: Path, phones: list[dict]) -> CommandCenter:
     return CommandCenter(path, FakeContract(), lambda: phones)
 
@@ -206,8 +231,7 @@ def test_an_alpha_155_file_upgrades_with_every_record_kept(tmp_path: Path) -> No
     made = seed.seed(center, seed.SMALL, phones)
     counts = {"accounts": len(center.list_accounts()), "tasks": len(center.list_tasks(limit=1000)),
               "rows": len(center.tables.all_rows(made["tableId"])), "pages": len(center.pages.tree())}
-    center._db.execute(f"DROP TABLE {TABLE}")
-    center._db.execute("PRAGMA user_version = 0")
+    wind_back_to_alpha_155(center._db)
     center.stop()
     copy = tmp_path / "new" / "command.db"
     copy.parent.mkdir()
@@ -218,6 +242,10 @@ def test_an_alpha_155_file_upgrades_with_every_record_kept(tmp_path: Path) -> No
         assert {"accounts": len(upgraded.list_accounts()), "tasks": len(upgraded.list_tasks(limit=1000)),
                 "rows": len(upgraded.tables.all_rows(made["tableId"])), "pages": len(upgraded.pages.tree())} == counts
         assert upgraded.verify_audit()
+        # Migration 2's backfill: every row of the old file is in the ledger, and the projections match the tables.
+        assert upgraded.ledger.reconcile()["ok"], upgraded.ledger.reconcile()
+        assert len(upgraded.ledger.projections("account")) == counts["accounts"]
+        assert upgraded.ledger.verify()["intact"]
     finally:
         upgraded.stop()
 

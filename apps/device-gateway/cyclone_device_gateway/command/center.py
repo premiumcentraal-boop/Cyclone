@@ -218,6 +218,10 @@ class CommandCenter:
         self.store = Database(self._db, self._lock)
         self.schema = Migrator(self.store, MIGRATIONS, clock=clock, backups=path.parent / "backups",
                                connection=self._db).apply()
+        # Plan 76 (stage 1): the event ledger. The first start after migration 2 turns today's rows into events.
+        from .store import Ledger
+        self.ledger = Ledger(self.store, clock)
+        self.ledger.drain()
         self._task_listener = None
         self._wake = threading.Event()
         self._tick_done = threading.Condition()
@@ -283,6 +287,14 @@ class CommandCenter:
         digest = hashlib.sha256(f"{prev}\n{at}\n{actor}\n{action}\n{obj}\n{body}".encode()).hexdigest()
         self._db.execute("INSERT INTO audit(at, actor, action, object, detail, prev_hash, hash) VALUES (?,?,?,?,?,?,?)",
                          (at, actor, action, obj, body, prev, digest))
+        # Plan 76 (stage 1): the same fact in the ledger, then the state changes the action made (drained from the outbox).
+        ledger = getattr(self, "ledger", None)
+        if ledger is not None:
+            from .store.ledger import ACTOR, SOURCES, safe_id, sanitize_detail
+            who = actor if ACTOR.match(actor) else "system"
+            ledger.append("audit.recorded", safe_id(obj) or "none", {"action": action[:80], "detail": sanitize_detail(detail)},
+                          actor=who, source=who if who in SOURCES else "system", occurred_at=at)
+            ledger.drain()
 
     def audit(self, limit: int = 200) -> dict[str, Any]:
         with self._lock:
@@ -1047,6 +1059,8 @@ class CommandCenter:
             self.hive.sweep(set(ready))
             self.signup.sync()
             self.buttons.sync()
+            # Plan 76 (stage 1): every change this tick made (runs, approvals, phone health) reaches the ledger now.
+            self.ledger.drain()
         self.safe.sweep(set(ready))
 
     def _fire_routines(self) -> None:

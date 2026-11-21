@@ -1,4 +1,4 @@
-# Cyclone Alpha 156: the platform's foundations (plan 76, stage 0a)
+# Cyclone Alpha 156: the platform's foundations and its event ledger (plan 76, stage 0 and run 1a)
 
 Developer alpha. It installs over Alpha 155. Nothing the owner sees changes, except that the Command Center now refuses
 a few more secret-shaped texts (below).
@@ -41,6 +41,20 @@ synthetic secret corpus found the gap and now proves every entry is refused at 1
 - `scripts/platform/command_center_bench.py`: query times at the plan's scale. The baseline is in
   `Cyclone V5 plan/76-stage-reports/s00a-bench.md`.
 
+**The event ledger (plan 76, stage 1, run 1a)** (`command/store/ledger.py`, migration 2):
+- **Every fact is recorded:** every audited action (in every module), and the state of every account, task, run,
+  approval and phone after each change, as one append-only, hash-chained list of events. The database refuses to
+  change or delete an event.
+- **Nothing is missed:** triggers on those tables write an outbox row in the same statement as each change, and the
+  outbox is drained after every action and every engine tick. A crash before a drain is caught up at the next start.
+- **Today's data is included:** the first start of this build turns every existing account, task, run, approval and
+  phone into events (the backfill), once.
+- **Projections** keep each subject's latest state, and can be rebuilt from the events alone and compared.
+- **Two read routes:** `GET /v1/cc/events` (by subject or type, paged) and `GET /v1/cc/events/verify` (chain, replay
+  and sources).
+- **Measured:** append p95 0.3 ms; replay of 100,000 events matches. Audited writes take about 0.8 ms longer, and the
+  file grows about 0.65 KB per event.
+
 **The Glass benchmark (plan 76, stage 0, run 0b)**, in `tools/glass-bench/`. It runs the real gateway and Glass in a
 browser on synthetic data, without touching the owner's Cyclone. Today's baseline:
 - **7 of 13 speed budgets met.** Writing, page opens and search are fast. A 10,000-row table takes 1.3 s to show
@@ -59,8 +73,8 @@ browser on synthetic data, without touching the owner's Cyclone. Today's baselin
 
 ## Validation
 
-- Gateway: 1,583 tests collected, all pass (one skipped, as before). New: `test_platform_store.py` (24),
-  `test_platform_secret_corpus.py` (326) and `test_platform_threat_controls.py` (1).
+- Gateway: 1,607 tests collected, all pass (one skipped, as before). New: `test_platform_store.py` (25),
+  `test_platform_secret_corpus.py` (326), `test_platform_threat_controls.py` (1) and `test_platform_ledger.py` (23).
 - Glass: 361 of 361 tests pass; the build and `glass_guard.py` pass.
 - CI guards: 439 tests pass, including the new store guard; `test_glass_bench_tools.py` adds 10.
 - `release_versions.py --check` and `mobile_product_guard.py` pass.
