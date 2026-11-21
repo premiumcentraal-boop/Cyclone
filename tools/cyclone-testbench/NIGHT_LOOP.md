@@ -223,12 +223,12 @@ Only run this phase when P4 passed, `releasesThisNight` is below `MAX_RELEASES`,
 **Bump these exact places, and nothing else:**
 - `release/version.toml`: `product_version`, `python_version`, `android_version_code`, `components.mobile`,
   `components.device_gateway` and `components.mcp` (when the PC code changed), `previous_mobile_version`,
-  `candidate_generation`, and the header comment. Leave `pc_companion` alone. Change `components.glass` only if `apps/glass`
+  `candidate_generation`, and the header comment. Change `components.glass` only if `apps/glass`
   changed.
 - `apps/mobile/app/build.gradle.kts`: `versionCode` and `versionName`.
 - The `pyproject.toml` `version` of each package whose code changed (`apps/device-gateway`, `tools/codex-phone-mcp`,
   `tools/cyclone-agent-mcp`, `tools/cyclone-testbench`).
-- `docs/RELEASE_<version>.md`. Write it the way the previous release notes do, with four honest parts: what changed,
+- `docs/releases/RELEASE_<version>.md`. Write it the way the previous release notes do, with four honest parts: what changed,
   what did not change, the validation you ran, and **what is UNVERIFIED on a real phone**. Put this cycle's measured
   numbers into the Lab gate table, with the experiment ids. Mark any number you did not measure as NOT MEASURED.
 

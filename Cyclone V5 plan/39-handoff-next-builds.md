@@ -94,7 +94,7 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 
    Then run `python scripts/ci/mobile_product_guard.py`.
 6. **Docs:**
-   - `docs/RELEASE_<mobile>.md`: what changed, safety and privacy, validation and limits, and the physical checks
+   - `docs/releases/RELEASE_<mobile>.md`: what changed, safety and privacy, validation and limits, and the physical checks
      owed;
    - an **As built** section in the plan;
    - the plan 35 row marked built;

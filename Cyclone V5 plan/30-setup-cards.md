@@ -73,7 +73,7 @@ Card 6 is only shown on Android 15 or later. The copy says nothing technical (no
 ## 5. Release
 
 Alpha.46 through the fast lane (AGENTS.md → Versioning): `5.0.0-alpha.46.dev1`, versionCode **190**, with
-`docs/RELEASE_5.0.0-alpha.46.dev1.md`. The PC companion stays frozen.
+`docs/releases/RELEASE_5.0.0-alpha.46.dev1.md`. The PC companion stays frozen.
 
 ## 6. Out of scope
 

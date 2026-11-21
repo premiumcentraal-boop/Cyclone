@@ -1,6 +1,6 @@
 # CONTINUE.md — hand-off
 
-Read this, then `AGENTS.md`, then `docs/FLEET.md` and `docs/FLEET_REVIEW.md`.
+Read this, then `AGENTS.md`, then `docs/FLEET.md` and `docs/archive/FLEET_REVIEW.md`.
 
 ## Baseline
 

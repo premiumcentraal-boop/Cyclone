@@ -1,6 +1,6 @@
 # 23 — One map, grounded skills and routines (alpha.39)
 
-**Status:** built in 5.0.0-alpha.39.dev1 (see `docs/RELEASE_5.0.0-alpha.39.dev1.md`), 2026-09-26. Moves plan 21 (Hands)
+**Status:** built in 5.0.0-alpha.39.dev1 (see `docs/releases/RELEASE_5.0.0-alpha.39.dev1.md`), 2026-09-26. Moves plan 21 (Hands)
 to alpha.40 and Desk to alpha.41.
 
 **Owner's ask:** "How solid is the full mapping and skills / routines build out now? New skills and routines should be

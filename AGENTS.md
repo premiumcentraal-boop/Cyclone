@@ -34,7 +34,7 @@ Load more context only when the task needs it.
 
 - Android runtime + UX: `apps/mobile/**`
 - Device gateway: `apps/device-gateway/**`
-- Cyclone for Windows (web-only): `packaging/pc/**`, `scripts/pc/**`, gateway PC features in `apps/device-gateway/cyclone_device_gateway/pc/**` and `terminal/**`; the retired desktop window in `apps/pc-companion/**` (reference only), PyInstaller specs in `packaging/pc-companion/**`
+- Cyclone for Windows (web-only): `packaging/pc/**`, `scripts/pc/**`, gateway PC features in `apps/device-gateway/cyclone_device_gateway/pc/**` and `terminal/**`; the package's PyInstaller specs, locks and bundled resources in `packaging/pc/**`
 - Cyclone Glass (local browser dashboard, no intelligence): `apps/glass/**`, gateway hosting in `apps/device-gateway/cyclone_device_gateway/glass/**`
 - PC agent adapters: `tools/codex-phone-mcp/**`, `tools/cyclone-agent-mcp/**`
 - Testing (round-the-clock Lab testbench): `tools/cyclone-testbench/**`, `.claude/skills/cyclone-testing/**`
@@ -51,12 +51,13 @@ The authoritative product/component metadata is `release/version.toml`. Android 
 
 Releases ship **Android, Glass and Cyclone for Windows** from one push. Cyclone for Windows is web-only (plan 31): the
 runtime (`CyclonePCRuntime.exe`), the agent MCP, Glass inside the runtime and the `cyclone` command, as one
-`Cyclone-PC-<product_version>.zip`. The Cyclone One desktop window (`apps/pc-companion`, Tauri) is retired: its source
-stays for reference, it is not built, and `pc_companion` in `release/version.toml` stays `1.6.0-alpha.43`.
+`Cyclone-PC-<product_version>.zip`. The Cyclone One desktop window (Tauri) was removed in alpha 156; its last version
+was `1.6.0-alpha.43` and its source is in git history. Owners' install paths (`%LOCALAPPDATA%\Cyclone One`, the
+`Cyclone\pc-companion` token folder) keep their names so existing installs keep working.
 
 To release: bump `product_version`, `components.mobile`, `android_version_code` (+ `build.gradle.kts`),
 `python_version`, `components.device_gateway` and `components.mcp` (+ the three `pyproject.toml` files) when PC code
-changed, and `components.glass` only when `apps/glass` changed; add `docs/RELEASE_<mobile>.md`; push to the dev branch.
+changed, and `components.glass` only when `apps/glass` changed; add `docs/releases/RELEASE_<mobile>.md`; push to the dev branch.
 `.github/workflows/v5-publish.yml` builds and smoke-tests the Windows package on a Windows runner (install into a
 scratch profile, `cyclone version`, the runtime serving Glass and the authenticated `/v1/pc/*` routes), waits for
 Mobile CI on that commit, signs the APK with the rotated key, builds the Glass zip and publishes, with every file's

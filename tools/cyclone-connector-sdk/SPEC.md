@@ -356,7 +356,7 @@ Schema: `root.status.result.schema.json`.
 - **Stored tuples now follow their profile:**
   - they go only when the profile is permanently deleted, or when Android says the app is gone from that profile;
   - a profile restored under a new Android user id keeps them.
-- **The handoff:** `docs/handoff/CLOAK_CONNECTOR_COMPAT.md`.
+- **The handoff:** `docs/archive/handoff/CLOAK_CONNECTOR_COMPAT.md`.
 
 ## 13. Asking the owner to open a profile (minor 3, alpha.122)
 

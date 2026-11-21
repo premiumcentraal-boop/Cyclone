@@ -26,7 +26,7 @@ Deliverables:
 3. Planner/UI split surface for MCP: planner tools (open_app/intent/wait/finish) vs UI sub-agent tools (get_tree, click/type/swipe by index).
 4. Kill extra LLM “verify” rounds for ordinary taps; local fingerprint is authority.
 5. Intent/deep-link landing before icon hunting (keep 3.9.12 workspace routing).
-6. Tests + `docs/V4_STAGE1_FASTPATH.md` + version identity toward **4.0.0-alpha.1** *module* flags (do not publish full v4 APK yet unless smoke green).
+6. Tests + `docs/archive/V4_STAGE1_FASTPATH.md` + version identity toward **4.0.0-alpha.1** *module* flags (do not publish full v4 APK yet unless smoke green).
 Acceptance: unit/integration tests for settle/fingerprint/nav-isolation; honest UNVERIFIED for physical; PR open.
 Out of scope: multi-VD scale-out, skill compiler, One V4 packaging, Magisk.
 
@@ -39,7 +39,7 @@ Deliverables:
 3. Types/APIs designed for N≥2 sessions. Product still hot-gates to 1 concurrent background Ask task (`WorkspaceTasks`). Do not claim 20 concurrent VDs.
 4. Fast Path settle/fingerprint/nav isolation preserved. Take control / Continue / GATE preserved. Handoff to display 0 is intentional human take-over, not a silent fallback.
 5. No silent fallback to display 0 for a named workspace. Unknown session rejected. Display mismatch rejected. Cross-session observation cannot authorize an action.
-6. Tests + `docs/V4_STAGE2_SESSION_KERNEL.md` + version identity **4.0.0-alpha.2** / versionCode 68. Physical Pixel 8 = UNVERIFIED.
+6. Tests + `docs/archive/V4_STAGE2_SESSION_KERNEL.md` + version identity **4.0.0-alpha.2** / versionCode 68. Physical Pixel 8 = UNVERIFIED.
 Acceptance: unit tests for display-scoped inject, flags, no cross-session action, gateway/MCP forwarding, N≥2 types, `ExecutionRequestScope` no display-0 rewrite; honest UNVERIFIED for physical; PR open.
 Out of scope: Skill compiler (S3), Cyclone One tiles/installer (S4), Magisk, requiring MCP `session_id` (Stage 4), claiming 20 concurrent VDs.
 Handoff: Stage 3 Skill Compiler is DONE in the follow-on PR; compile playbooks per package **and** per session/display. Do not restart Stage 2.
@@ -53,7 +53,7 @@ Deliverables:
 3. Replay (`CompiledSkillReplay`): try compiled skill first; miss → Fast Path LLM/UI sub-agent. Vision only on miss (empty tree / `perceptionMode=vision_escalate`). Unchanged is not a second click.
 4. Existing `automation.skill.SkillCompiler` (MCP draft capsules / `phone_skill_save`) is unchanged. Stage 3 is `com.cyclone.mobile.skills` runtime learn→compile→replay.
 5. Fast Path settle/fingerprint/nav isolation and Session Kernel + 3.9.12 Take control/GATE preserved. `PhoneToolExecutor` remains the only mutation engine.
-6. Tests (`PlaybookHintStoreTest`, `SkillRouteCompilerTest`, `CompiledSkillReplayTest`, `SkillRuntimeTest`) + `docs/V4_STAGE3_SKILL_COMPILER.md` + version identity **4.0.0-alpha.3** / versionCode 69. Physical Pixel 8 = UNVERIFIED.
+6. Tests (`PlaybookHintStoreTest`, `SkillRouteCompilerTest`, `CompiledSkillReplayTest`, `SkillRuntimeTest`) + `docs/archive/V4_STAGE3_SKILL_COMPILER.md` + version identity **4.0.0-alpha.3** / versionCode 69. Physical Pixel 8 = UNVERIFIED.
 Acceptance: unit tests for store/compile/replay/miss-escalate; honest UNVERIFIED for physical; PR open.
 Out of scope: Cyclone One tiles/installer (S4), Magisk, 20 hot LLM agents, requiring MCP `session_id` (Stage 4).
 Handoff: Stage 4 Cyclone One glass. MCP may require `session_id`; compiled skills already carry session/display. Do not start Stage 4 in this PR.

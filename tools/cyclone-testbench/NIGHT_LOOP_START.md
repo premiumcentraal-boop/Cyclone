@@ -88,7 +88,7 @@ until PR #234 is merged. Then use the dev branch
 **The release lane (every alpha goes through it):**
 - [`release/version.toml`](https://github.com/premiumcentraal-boop/Cyclone/blob/claude/vigilant-goodall-dy6z4y/release/version.toml): the release metadata.
 - [`apps/mobile/app/build.gradle.kts`](https://github.com/premiumcentraal-boop/Cyclone/blob/claude/vigilant-goodall-dy6z4y/apps/mobile/app/build.gradle.kts): the Android version code and name.
-- [`docs/RELEASE_5.0.0-alpha.151.dev1.md`](https://github.com/premiumcentraal-boop/Cyclone/blob/claude/vigilant-goodall-dy6z4y/docs/RELEASE_5.0.0-alpha.151.dev1.md): an example of honest release notes.
+- [`docs/releases/RELEASE_5.0.0-alpha.151.dev1.md`](https://github.com/premiumcentraal-boop/Cyclone/blob/claude/vigilant-goodall-dy6z4y/docs/releases/RELEASE_5.0.0-alpha.151.dev1.md): an example of honest release notes.
 - [`.github/PULL_REQUEST_TEMPLATE.md`](https://github.com/premiumcentraal-boop/Cyclone/blob/claude/vigilant-goodall-dy6z4y/.github/PULL_REQUEST_TEMPLATE.md): the pull request body.
 - [`.github/workflows/v5-publish.yml`](https://github.com/premiumcentraal-boop/Cyclone/blob/claude/vigilant-goodall-dy6z4y/.github/workflows/v5-publish.yml): what a merge into dev publishes.
 - [`scripts/ci/release_versions.py`](https://github.com/premiumcentraal-boop/Cyclone/blob/claude/vigilant-goodall-dy6z4y/scripts/ci/release_versions.py): the version coherence check.

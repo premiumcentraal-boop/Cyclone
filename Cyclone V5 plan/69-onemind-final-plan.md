@@ -575,4 +575,4 @@ and everything the owner sees.
   1509 on the work branch, 1510 on the release branch); APK SHA-256
   `d76210270ce6f82425b0ee5345964f076969d9986b6666dd7717c9911458382a` matches the manifest; signed v3 with the rotated
   release key `e78c6e0b32d66da05839243c65e9987ba54722d402543f00408b57b1585dbf60`. Release notes:
-  `docs/RELEASE_5.0.0-alpha.138.dev1.md`. Deferred items are listed under checkpoint 3.
+  `docs/releases/RELEASE_5.0.0-alpha.138.dev1.md`. Deferred items are listed under checkpoint 3.

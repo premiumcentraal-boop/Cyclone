@@ -1,6 +1,6 @@
 # A4 status — Settings MCP tunnel terminal
 
-Canonical copy: [`docs/A4_MCP_TUNNEL_SETTINGS.md`](../docs/A4_MCP_TUNNEL_SETTINGS.md).
+Canonical copy: [`docs/archive/A4_MCP_TUNNEL_SETTINGS.md`](../docs/archive/A4_MCP_TUNNEL_SETTINGS.md).
 
 ## What shipped
 

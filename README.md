@@ -6,9 +6,9 @@ This repository is intentionally kept as a current-product launchpad. Historical
 
 ## Current baseline — Cyclone 4.0.0 (V4 Session OS) + Cyclone One 1.1.0 (this branch)
 
-Mobile identity on the published V4 cut is `4.0.0` / versionCode `71` on the published **3.9.12** Background Intelligence foundation plus Stage 1 Fast Path, Stage 2 Session Kernel, Stage 3 Skill Compiler and Stage 4 Cyclone One glass (one Shizuku workspace, Take control / Continue, GATE confirm; a11y-first Page Cards, 300ms settle + fingerprint ladder; display-scoped `sessionId` + `displayId`; learn→compile→replay; JPEG-first live view, human/AI handoff, session tiles bound to `session_id`, MCP observe/act require `session_id`). Phone remains the mutation engine. Cyclone One **1.0.0** remains the last published glass/MCP companion. This branch is the One **1.1.0** PC sprint on mobile **4.0.4** / versionCode **75** with gateway/MCP **4.1.0**. Tag `one-1.1.0` is operator-after-CI and is not claimed. Physical Pixel 8 remains **UNVERIFIED**. See [One 1.1 Stage 5 release lane](docs/ONE_1.1_STAGE5_RELEASE.md), [One 1.1.0 product notes](docs/RELEASE_ONE_1.1.md), [V4 Stage 5 release lane](docs/V4_STAGE5_RELEASE.md), [V4 4.0.0 release notes](docs/RELEASE_V4.md), [V4 Stage 4 One glass](docs/V4_STAGE4_ONE_GLASS.md), [V4 Stage 3 Skill Compiler](docs/V4_STAGE3_SKILL_COMPILER.md), [V4 Stage 2 Session Kernel](docs/V4_STAGE2_SESSION_KERNEL.md) and [V4 Stage 1 Fast Path](docs/V4_STAGE1_FASTPATH.md).
+Mobile identity on the published V4 cut is `4.0.0` / versionCode `71` on the published **3.9.12** Background Intelligence foundation plus Stage 1 Fast Path, Stage 2 Session Kernel, Stage 3 Skill Compiler and Stage 4 Cyclone One glass (one Shizuku workspace, Take control / Continue, GATE confirm; a11y-first Page Cards, 300ms settle + fingerprint ladder; display-scoped `sessionId` + `displayId`; learn→compile→replay; JPEG-first live view, human/AI handoff, session tiles bound to `session_id`, MCP observe/act require `session_id`). Phone remains the mutation engine. Cyclone One **1.0.0** remains the last published glass/MCP companion. This branch is the One **1.1.0** PC sprint on mobile **4.0.4** / versionCode **75** with gateway/MCP **4.1.0**. Tag `one-1.1.0` is operator-after-CI and is not claimed. Physical Pixel 8 remains **UNVERIFIED**. See [One 1.1 Stage 5 release lane](docs/archive/ONE_1.1_STAGE5_RELEASE.md), [One 1.1.0 product notes](docs/releases/RELEASE_ONE_1.1.md), [V4 Stage 5 release lane](docs/archive/V4_STAGE5_RELEASE.md), [V4 4.0.0 release notes](docs/releases/RELEASE_V4.md), [V4 Stage 4 One glass](docs/archive/V4_STAGE4_ONE_GLASS.md), [V4 Stage 3 Skill Compiler](docs/archive/V4_STAGE3_SKILL_COMPILER.md), [V4 Stage 2 Session Kernel](docs/archive/V4_STAGE2_SESSION_KERNEL.md) and [V4 Stage 1 Fast Path](docs/archive/V4_STAGE1_FASTPATH.md).
 
-Cyclone 3.9.12 connected Ask Cyclone to isolated background app workspaces, with a compact running card, live View Progress, exact-task Take Control / Continue, local confirmation cards and preserved completed pages. Background work requires Android 15+, Shizuku and a compatible app; the PC companion remains optional. See [the 3.9.12 release notes](docs/RELEASE_3.9.12.md) for that behavior and device-testing limits.
+Cyclone 3.9.12 connected Ask Cyclone to isolated background app workspaces, with a compact running card, live View Progress, exact-task Take Control / Continue, local confirmation cards and preserved completed pages. Background work requires Android 15+, Shizuku and a compatible app; the PC companion remains optional. See [the 3.9.12 release notes](docs/releases/RELEASE_3.9.12.md) for that behavior and device-testing limits.
 
 ## Existing reliability foundation
 
@@ -42,16 +42,16 @@ required. Core/Hermes and the separate Teamwork Sniper app are retired integrati
 
 Cyclone 3.9.9 is promoted only from the exact Mobile CI artifact after unit tests, lint, repository
 and security guards pass. Physical Pixel 8 acceptance remains a separate evidence gate and must not
-be inferred from a green CI build. See the [3.9.9 release audit](docs/RELEASE_3.9.9.md) and the
-[broader reliability acceptance plan](docs/DUO_RELIABILITY_REVIEW.md).
+be inferred from a green CI build. See the [3.9.9 release audit](docs/releases/RELEASE_3.9.9.md) and the
+[broader reliability acceptance plan](docs/archive/DUO_RELIABILITY_REVIEW.md).
 
 ## Repository
 
 ```text
 apps/
   mobile/              Android product
-  device-gateway/      PC ↔ phone gateway
-  pc-companion/        Windows companion
+  device-gateway/      PC ↔ phone gateway (also Cyclone for Windows' runtime)
+  glass/               Cyclone Glass, the browser dashboard
 
 tools/
   codex-phone-mcp/     constrained PC agent tools
@@ -60,8 +60,9 @@ tools/
 scripts/
   ci/                  product/version guards
   phone-gateway/       gateway setup and acceptance helpers
-  pc-companion/        companion tooling
+  pc/                  Cyclone for Windows package build
 
+packaging/pc/         Cyclone for Windows specs, locks, installer and bundled resources
 docs/                  current architecture/development/release docs
 release/version.toml    product/component version source (this branch: One/gateway/MCP 1.1.0 / 4.1.0; mobile stays 4.0.4)
 .github/workflows/      current CI and candidate verification
