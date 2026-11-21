@@ -258,7 +258,7 @@ class Conductor(
                 continue
             }
             val next = nextStep()
-            if (next == null) { finish(null); continue }
+            if (next == null) { finish(crew.finalAnswer()); continue }
             val (milestone, step) = next
             enter(milestone)
             profile.maxSteps?.let { max -> if (stepsRun.add(step.id) && stepsRun.size > max) { handover("the Flash run passed $max steps"); continue } }
@@ -299,7 +299,7 @@ class Conductor(
                 when (o.action) {
                     Branch.BranchAction.SKIP -> milestoneEnd()
                     Branch.BranchAction.NEXT_MILESTONE -> { skipRestOfMilestone(); milestoneEnd() }
-                    Branch.BranchAction.DONE -> { skipRestOfMilestone(); finish(null) }
+                    Branch.BranchAction.DONE -> { skipRestOfMilestone(); finish(crew.finalAnswer()) }
                 }
             }
             is StepOutcome.Missed -> { retry(o.step); wake(WakeKind.REPLAN, "missed", o.reason, o.step, screen = true) }

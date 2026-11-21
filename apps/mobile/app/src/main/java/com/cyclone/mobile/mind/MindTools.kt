@@ -71,6 +71,11 @@ interface MindToolbox {
     fun execute(call: MindToolCall, arguments: JSONObject): MindToolResult
     /** A compact description of the current phone state for the opening message; never secrets. */
     fun situation(): String = ""
+    /**
+     * The answer the mission finished with (task_finish), kept so a run that ends when its plan runs out still reports
+     * it. Null until the mission has finished.
+     */
+    fun finalAnswer(): String? = null
     /** Plan 37 W3: the owner said something during the mission (a message); a toolbox may listen for memory requests. */
     fun onOwnerMessage(text: String) {}
     /** Plan 38: the owner changed the task (Steer). Returns the new goal version. */

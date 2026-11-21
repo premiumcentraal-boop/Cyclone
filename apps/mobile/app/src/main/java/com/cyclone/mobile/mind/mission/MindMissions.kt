@@ -738,6 +738,8 @@ object MindMissions {
                 // Plan 49: codes sent by text to this phone's own number fill themselves; never in a Lab mission.
                 codes = if (run.mission.lab == null) com.cyclone.mobile.codes.AndroidMindCodes(context) else null,
                 nativeSkills = skillsOn)
+            // Lab missions keep a local copy of the screens the crew saw, for replay on a computer. Owner missions get none.
+            if (run.mission.lab != null) toolbox.traceSink = com.cyclone.mobile.mind.one.LabTrace.sinkFor(context, run.id)
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
             // own owner question, answered on the same card as any other.
             planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }

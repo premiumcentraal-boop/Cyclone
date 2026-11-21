@@ -35,7 +35,7 @@ class SpeedGuard(unittest.TestCase):
 
     def test_the_read_after_a_move_starts_the_next_one_only_while_fresh(self):
         engine = read("mind/one/StepEngine.kt")
-        self.assertIn("val screen = takeObserved() ?: read { eyes.look(false) }", engine)
+        self.assertIn("val screen = takeObserved() ?: lookSettled()", engine)
         self.assertIn("observed = after?.let { it to now() }", engine)
         self.assertIn("if (now() - at > OBSERVED_MAX_AGE_MS) return null", engine)
 

@@ -13,6 +13,8 @@ interface Crew {
     fun run(step: Step, score: Score): StepOutcome
     fun actAt(barrier: StepOutcome.AtBarrier, score: Score): StepOutcome
     fun look(image: Boolean): StepScreen?
+    /** The answer the owner was given when the mission finished, or null. A run that ends with its plan reports it. */
+    fun finalAnswer(): String? = null
     /** Code's check of a done predicate on the screen now. */
     fun check(expect: Expect, score: Score): Verdict
     /** The DONE question: the careful yes across providers, or null when nobody answered. */
@@ -48,6 +50,7 @@ class EngineCrew(
     override fun run(step: Step, score: Score): StepOutcome = engine.run(step, score)
     override fun actAt(barrier: StepOutcome.AtBarrier, score: Score): StepOutcome = engine.actAt(barrier, score)
     override fun look(image: Boolean): StepScreen? = runCatching { eyes.look(image) }.getOrNull()
+    override fun finalAnswer(): String? = hands.finalAnswer()
 
     override fun check(expect: Expect, score: Score): Verdict =
         look(false)?.let { ExpectCheck.check(expect, it, null, score.facts, settings) } ?: Verdict.UNKNOWN
