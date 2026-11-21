@@ -5,7 +5,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 
 def load_script(name: str):
-    path = REPO / "scripts" / "pc-companion" / name
+    path = REPO / "scripts" / "pc" / name
     spec = importlib.util.spec_from_file_location(name.replace("-", "_"), path)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
@@ -13,7 +13,7 @@ def load_script(name: str):
     return module
 
 def test_sidecar_lock_is_exact_and_specs_exist():
-    lock = json.loads((REPO / "packaging/pc-companion/sidecar-build.lock.json").read_text())
+    lock = json.loads((REPO / "packaging/pc/build.lock.json").read_text())
     assert lock["python"] == "3.13.7"
     assert lock["pyinstaller"] == "6.22.2"
     assert lock["mcp"] == "2.0.0"
@@ -24,13 +24,13 @@ def test_sidecar_lock_is_exact_and_specs_exist():
 def test_frozen_gateway_declares_websocket_runtime():
     gateway = (REPO / "apps/device-gateway/pyproject.toml").read_text()
     build = (REPO / "scripts/pc/build-pc-package.ps1").read_text()
-    lock = json.loads((REPO / "packaging/pc-companion/sidecar-build.lock.json").read_text())
+    lock = json.loads((REPO / "packaging/pc/build.lock.json").read_text())
     assert f'"websockets=={lock["websockets"]}"' in gateway
     assert build.count("PyInstaller --clean --noconfirm") == 2  # the runtime and the agent MCP (plan 31)
 
 def test_pinned_scrcpy_notice_is_deterministic_and_complete(tmp_path):
     script = load_script("generate-third-party-notices.py")
-    data = script.load_lock(REPO / "packaging/pc-companion/third-party-binaries.lock.json")
+    data = script.load_lock(REPO / "packaging/pc/third-party-binaries.lock.json")
     a = script.render(data)
     b = script.render(data)
     assert a == b
@@ -59,4 +59,4 @@ def test_pc_ci_tests_the_stack_and_builds_the_real_package():
     assert "actions/upload-artifact" in text
     # The retired desktop window is not built.
     assert "tauri build" not in text
-    assert "apps/pc-companion/package" not in text
+    assert "apps/pc-companion" not in text

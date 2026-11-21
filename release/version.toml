@@ -10,9 +10,8 @@ python_version = "5.0.0-alpha.156.dev1"
 
 [components]
 mobile = "5.0.0-alpha.156.dev1"
-# The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
-# Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
-pc_companion = "1.6.0-alpha.43"
+# Cyclone for Windows ships as Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command), versioned with
+# the gateway. The retired Cyclone One desktop window was removed in alpha 156; its last version was 1.6.0-alpha.43.
 # Cyclone Glass web app (apps/glass). Its own line.
 glass = "1.0.0-alpha.69"
 device_gateway = "5.0.0-alpha.156.dev1"

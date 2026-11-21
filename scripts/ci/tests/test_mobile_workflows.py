@@ -73,6 +73,7 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
             "v5-combined-publish.yml",
             "pc-companion-ci.yml",
         )
+        self.assertFalse((ROOT / "apps/pc-companion").exists(), "the retired desktop window was removed in alpha 156")
         for path in WORKFLOWS.glob("*.yml"):
             self.assertNotRegex(path.name, r"^(v5-alpha\d|mobile-(dev-)?publish-v3)", "one release lane: v5-publish.yml")
         for name in retired:

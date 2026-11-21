@@ -96,7 +96,7 @@ class DirectBridgeTests(unittest.TestCase):
             self.assertTrue(tool["title"].startswith("Cyclone "))
         self.assertNotIn(
             "CycloneLivePhone",
-            Path("scripts/pc-companion/entrypoints/agent_mcp.py").read_text(),
+            Path("scripts/pc/entrypoints/agent_mcp.py").read_text(),
         )
 
     def test_legacy_typed_actions_remain_accepted_but_hidden(self):

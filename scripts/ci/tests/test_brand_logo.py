@@ -32,4 +32,4 @@ def test_glass_and_windows_use_the_same_mark():
     assert "%235b5bd6" not in (ROOT / "apps/glass/index.html").read_text(encoding="utf-8")  # the old indigo favicon
     assert (ROOT / "packaging/pc/cyclone.ico").stat().st_size > 1000
     assert 'Icon "cyclone.ico"' in (ROOT / "packaging/pc/cyclone-setup.nsi").read_text(encoding="utf-8")
-    assert '"cyclone.ico"' in (ROOT / "packaging/pc-companion/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")
+    assert '"cyclone.ico"' in (ROOT / "packaging/pc/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")

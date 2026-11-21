@@ -88,14 +88,10 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
             self.assertNotIn("BridgeClient.start", entry)
 
     def test_desktop_pairing_does_not_auto_start_fleet_video_and_has_crash_capture(self):
-        fleet = (ROOT / "apps/pc-companion/src/pages/fleetPage.ts").read_text(encoding="utf-8")
-        live = (ROOT / "apps/pc-companion/src/ui/livePhoneView.ts").read_text(encoding="utf-8")
         pairing = (ROOT / "apps/device-gateway/cyclone_device_gateway/desktop_runtime/pairing.py").read_text(encoding="utf-8")
         diagnostics = (ROOT / "apps/device-gateway/cyclone_device_gateway/desktop_runtime/diagnostics.py").read_text(encoding="utf-8")
         api = (ROOT / "apps/device-gateway/cyclone_device_gateway/desktop_runtime/api.py").read_text(encoding="utf-8")
         adb = (ROOT / "apps/device-gateway/cyclone_device_gateway/adb/client.py").read_text(encoding="utf-8")
-        self.assertIn("autoStart: false", fleet)
-        self.assertIn("options.autoStart === false", live)
         self.assertIn("_verify_post_pair_health", pairing)
         self.assertIn("_capture_pairing_diagnostics", pairing)
         self.assertIn("pair.complete.pc_submit", pairing)
@@ -127,26 +123,19 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         self.assertIn("rethrowFatal(error)", source)
         self.assertIn("VirtualMachineError", source)
 
-    def test_windows_release_hides_all_console_windows_without_breaking_agent_stdio(self):
-        main = (ROOT / "apps/pc-companion/src-tauri/src/main.rs").read_text(encoding="utf-8")
-        runtime = (ROOT / "apps/pc-companion/src-tauri/src/lib.rs").read_text(encoding="utf-8")
-        pc_runtime = (ROOT / "packaging/pc-companion/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")
-        agent = (ROOT / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
-        self.assertIn('windows_subsystem = "windows"', main)
+    def test_windows_executables_hide_their_console_without_breaking_agent_stdio(self):
+        pc_runtime = (ROOT / "packaging/pc/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")
+        agent = (ROOT / "packaging/pc/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
         # The runtime is also the `cyclone` terminal command: console subsystem, owned console hidden early.
         self.assertIn("console=True", pc_runtime)
         self.assertIn('hide_console="hide-early"', pc_runtime)
         self.assertIn("console=True", agent)
         self.assertIn('hide_console="hide-early"', agent)
-        self.assertIn("monitor-pc-console\\.ps1", runtime)
-        self.assertIn("CREATE_NO_WINDOW", runtime)
-        self.assertIn('Command::new("powershell.exe")', runtime)
-        self.assertNotIn('Command::new("cmd.exe")', runtime)
 
     def test_packaged_agent_mcp_serves_canonical_locate_and_skill_surface(self):
-        entrypoint = (ROOT / "scripts/pc-companion/entrypoints/agent_mcp.py").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "scripts/pc/entrypoints/agent_mcp.py").read_text(encoding="utf-8")
         build = (ROOT / "scripts/pc/build-pc-package.ps1").read_text(encoding="utf-8")
-        spec = (ROOT / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
+        spec = (ROOT / "packaging/pc/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
         phone_server = (ROOT / "tools/codex-phone-mcp/cyclone_phone_mcp/mcp_server.py").read_text(encoding="utf-8")
         self.assertIn("from cyclone_phone_mcp.mcp_server import McpServer", entrypoint)
         self.assertIn('sys.argv[1] == "serve"', entrypoint)

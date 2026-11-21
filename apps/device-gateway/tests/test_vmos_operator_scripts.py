@@ -12,16 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 CHECK = ROOT / "scripts" / "vmos" / "check-prerequisites.ps1"
 INSTALL = ROOT / "scripts" / "vmos" / "install-mobile.ps1"
-SYNC_FLEET = (
-    ROOT
-    / "apps"
-    / "pc-companion"
-    / "src-tauri"
-    / "resources"
-    / "chatgpt-attach"
-    / "scripts"
-    / "Sync-VmosFleet.ps1"
-)
+SYNC_FLEET = ROOT / "packaging" / "pc" / "resources" / "chatgpt-attach" / "scripts" / "Sync-VmosFleet.ps1"
 
 
 def test_vmos_operator_scripts_exist_and_use_canonical_mobile_identity():

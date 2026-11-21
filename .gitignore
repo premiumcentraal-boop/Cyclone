@@ -43,8 +43,9 @@ apps/mobile/.kotlin/
 apps/mobile/local.properties
 apps/device-gateway/third_party/scrcpy/scrcpy-server-v4.0
 
-# PC Companion generated binaries
-apps/pc-companion/src-tauri/binaries/
+# Cyclone for Windows: binaries the package build downloads (checksum-locked in packaging/pc)
+packaging/pc/resources/android-platform-tools/
+packaging/pc/resources/live-phone/cloudflared.exe
 
 # IDE / OS
 .vscode/

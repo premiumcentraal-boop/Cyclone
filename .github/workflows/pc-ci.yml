@@ -11,11 +11,11 @@ on:
       - 'tools/codex-phone-mcp/**'
       - 'tools/cyclone-ports-sdk/**'
       - 'packaging/pc/**'
-      - 'packaging/pc-companion/**'
+      - 'packaging/pc/**'
       - 'scripts/pc/**'
-      - 'scripts/pc-companion/**'
+      - 'scripts/pc/**'
       - 'scripts/vmos/**'
-      - 'apps/pc-companion/src-tauri/resources/**'
+      - 'packaging/pc/resources/**'
       - 'release/version.toml'
       - '.github/workflows/pc-ci.yml'
   push:
@@ -27,11 +27,11 @@ on:
       - 'tools/codex-phone-mcp/**'
       - 'tools/cyclone-ports-sdk/**'
       - 'packaging/pc/**'
-      - 'packaging/pc-companion/**'
+      - 'packaging/pc/**'
       - 'scripts/pc/**'
-      - 'scripts/pc-companion/**'
+      - 'scripts/pc/**'
       - 'scripts/vmos/**'
-      - 'apps/pc-companion/src-tauri/resources/**'
+      - 'packaging/pc/resources/**'
       - 'release/version.toml'
       - '.github/workflows/pc-ci.yml'
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
         shell: pwsh
         run: |
           $failed = $false
-          @(Get-ChildItem 'scripts/vmos/*.ps1') + @(Get-ChildItem 'scripts/pc/*.ps1') + @(Get-ChildItem 'apps/pc-companion/src-tauri/resources/chatgpt-attach/scripts/*.ps1') | ForEach-Object {
+          @(Get-ChildItem 'scripts/vmos/*.ps1') + @(Get-ChildItem 'scripts/pc/*.ps1') + @(Get-ChildItem 'packaging/pc/resources/chatgpt-attach/scripts/*.ps1') | ForEach-Object {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null

@@ -35,7 +35,7 @@ def resources_dir() -> Path:
         return Path(explicit).expanduser()
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[4] / "apps" / "pc-companion" / "src-tauri" / "resources"
+    return Path(__file__).resolve().parents[4] / "packaging" / "pc" / "resources"
 
 
 def install_root() -> Path:

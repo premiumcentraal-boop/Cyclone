@@ -14,7 +14,6 @@ class ReleaseVersionsTest(unittest.TestCase):
         return {
             "product": "3.9.0",
             "expectedMobile": "3.9.0",
-            "expectedPc": "3.8.4",
             "expectedGatewayPython": "3.8.4",
             "expectedMcpPython": "3.8.4",
             "androidVersionName": "3.9.0",
@@ -22,10 +21,6 @@ class ReleaseVersionsTest(unittest.TestCase):
             "gatewayPython": "3.8.4",
             "mcpPython": "3.8.4",
             "agentMcpPython": "3.8.4",
-            "pcPackage": "3.8.4",
-            "pcPackageLock": "3.8.4",
-            "pcCargo": "3.8.4",
-            "pcTauri": "3.8.4",
             "expectedAndroidVersionCode": 54,
         }
 

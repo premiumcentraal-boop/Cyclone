@@ -15,18 +15,18 @@ param(
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$Lock = Get-Content (Join-Path $Repo 'packaging\pc-companion\sidecar-build.lock.json') -Raw | ConvertFrom-Json
-$Resources = Join-Path $Repo 'apps\pc-companion\src-tauri\resources'
+$Lock = Get-Content (Join-Path $Repo 'packaging\pc\build.lock.json') -Raw | ConvertFrom-Json
+$Resources = Join-Path $Repo 'packaging\pc\resources'
 $Venv = Join-Path $Repo 'build\pc-package-venv'
 $Python = Join-Path $Venv 'Scripts\python.exe'
 if (-not (Test-Path $Python)) { python -m venv $Venv }
 
-# Bundled third-party binaries, each checksum-locked (packaging/pc-companion/third-party-binaries.lock.json).
-& $Python (Join-Path $Repo 'scripts\pc-companion\prepare-scrcpy-server.py') --repo $Repo
-& $Python (Join-Path $Repo 'scripts\pc-companion\prepare-android-platform-tools.py') --repo $Repo
+# Bundled third-party binaries, each checksum-locked (packaging/pc/third-party-binaries.lock.json).
+& $Python (Join-Path $Repo 'scripts\pc\prepare-scrcpy-server.py') --repo $Repo
+& $Python (Join-Path $Repo 'scripts\pc\prepare-android-platform-tools.py') --repo $Repo
 & $Python -m pip install --disable-pip-version-check "pyinstaller==$($Lock.pyinstaller)"
 & $Python -m pip install --disable-pip-version-check (Join-Path $Repo 'apps\device-gateway') (Join-Path $Repo 'tools\cyclone-agent-mcp') (Join-Path $Repo 'tools\codex-phone-mcp') (Join-Path $Repo 'tools\cyclone-ports-sdk')
-& $Python (Join-Path $Repo 'scripts\pc-companion\prepare-live-bridge.py')
+& $Python (Join-Path $Repo 'scripts\pc\prepare-live-bridge.py')
 
 # Glass ships inside the runtime; the gateway serves it at /glass/.
 Push-Location (Join-Path $Repo 'apps\glass')
@@ -34,8 +34,8 @@ try { npm ci --no-audit --no-fund; npm run build } finally { Pop-Location }
 
 $Work = Join-Path $Repo 'build\pc-package'
 $Exes = Join-Path $Work 'exe'
-& $Python -m PyInstaller --clean --noconfirm --distpath $Exes --workpath (Join-Path $Work 'agent') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CycloneAgentMCP.spec')
-& $Python -m PyInstaller --clean --noconfirm --distpath $Exes --workpath (Join-Path $Work 'runtime') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CyclonePCRuntime.spec')
+& $Python -m PyInstaller --clean --noconfirm --distpath $Exes --workpath (Join-Path $Work 'agent') (Join-Path $Repo 'packaging\pc\pyinstaller\CycloneAgentMCP.spec')
+& $Python -m PyInstaller --clean --noconfirm --distpath $Exes --workpath (Join-Path $Work 'runtime') (Join-Path $Repo 'packaging\pc\pyinstaller\CyclonePCRuntime.spec')
 
 $Stage = Join-Path $Work 'stage'
 if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
@@ -49,7 +49,7 @@ foreach ($folder in @('android-platform-tools', 'mcp-tunnel', 'chatgpt-attach', 
 }
 # Never ship an owner's local secrets from a developer checkout.
 Get-ChildItem -Recurse -Force $Stage -Include 'gateway.env', 'fleet.dpapi', '*.ephemeral.json' | Remove-Item -Force
-& $Python (Join-Path $Repo 'scripts\pc-companion\generate-third-party-notices.py') --lock (Join-Path $Repo 'packaging\pc-companion\third-party-binaries.lock.json') --output (Join-Path $Stage 'THIRD_PARTY_NOTICES')
+& $Python (Join-Path $Repo 'scripts\pc\generate-third-party-notices.py') --lock (Join-Path $Repo 'packaging\pc\third-party-binaries.lock.json') --output (Join-Path $Stage 'THIRD_PARTY_NOTICES')
 
 $Adb = Join-Path $Stage 'android-platform-tools\adb.exe'
 $AdbVersion = (& $Adb version 2>&1) -join "`n"

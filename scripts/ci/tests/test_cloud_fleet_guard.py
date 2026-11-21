@@ -82,7 +82,7 @@ def test_ssh_is_a_foreground_loopback_tunnel_and_the_key_only_travels_by_askpass
     # The secret is never put on ssh's argv.
     argv = tunnel[tunnel.index("def ssh_argv"):tunnel.index("def explain")]
     assert "secret" not in argv
-    entry = text(ROOT / "scripts/pc-companion/entrypoints/pc_runtime.py")
+    entry = text(ROOT / "scripts/pc/entrypoints/pc_runtime.py")
     assert entry.index("askpass_main()") < entry.index("persist_runtime_bearer(")
 
 

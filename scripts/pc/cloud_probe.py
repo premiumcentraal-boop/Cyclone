@@ -1,7 +1,7 @@
 """Plan 56 run 0: test Cyclone's VMOS client against the owner's real account, one stage at a time, and record every
 answer (keys removed) so a failure can be debugged from facts.
 
-Run from a repo checkout on the owner's PC (see docs/handoff/VMOS_LIVE_TEST.md):
+Run from a repo checkout on the owner's PC (see docs/archive/handoff/VMOS_LIVE_TEST.md):
 
     python -m pip install -e apps/device-gateway
     python scripts/pc/cloud_probe.py --stage read --out cloud-probe
