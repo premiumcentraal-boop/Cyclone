@@ -131,3 +131,6 @@ These are implementation decisions inside the stage. They are recorded so they c
 | S0-4 | Migration 1 **adopts** the alpha 155 schema without changing it. The stores still create their own tables; every later schema change is a numbered migration. | It records a starting point without touching data the owner already has. |
 | S0-5 | Before a migration that changes anything, the file is **copied** next to itself (`command/backups/`) and the newest five copies are kept. | A failed upgrade can be restored by hand. Encrypted, verified backups are stage 12. |
 | S0-6 | Stage 0 works on the designated branch `claude/vigilant-goodall-dy6z4y`, not `platform/s00-…` as plan 76 §8 names it. | This session may push to that branch only. |
+| S0-7 | The browser benchmark runs on demand and at the end of each stage; CI checks its grading, statistics, audit and report logic. | Shared CI machines are too noisy for millisecond budgets; a CI gate on them would fail at random. |
+| S0-8 | The acceptance script runs as an automated stand-in; every pass is checked on the server or the screen. A timed run by the owner is OWED. | Plan 76 §5.7 allows a recorded stand-in. |
+| S0-9 | Frame budgets: one 60 Hz frame (16.7 ms) for a keystroke, and 57 fps for scrolling. | The benchmark times until the next frame starts, and 60 fps is the display's ceiling. |

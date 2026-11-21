@@ -355,8 +355,9 @@ Every stage lists:
 
 ### Stage 0 · Foundations and decisions (M)
 
-**Status (2026-11-21):** run 0a built (alpha 156, draft PR; report `76-stage-reports/s00a.md`). Run 0b not
-started. Gate open: D1–D12 await the owner.
+**Status (2026-11-21):** runs 0a and 0b built (alpha 156, draft PR; reports `76-stage-reports/s00a.md` and
+`s00b.md`). Baseline: 7 of 13 speed budgets met; acceptance script 7 passed, 5 missing. Gate open: D1–D12 await the
+owner.
 
 **Goal:** make everything after it cheap to build correctly and possible to measure.
 

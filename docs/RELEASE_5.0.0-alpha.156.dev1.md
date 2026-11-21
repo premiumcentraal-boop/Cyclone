@@ -41,6 +41,14 @@ synthetic secret corpus found the gap and now proves every entry is refused at 1
 - `scripts/platform/command_center_bench.py`: query times at the plan's scale. The baseline is in
   `Cyclone V5 plan/76-stage-reports/s00a-bench.md`.
 
+**The Glass benchmark (plan 76, stage 0, run 0b)**, in `tools/glass-bench/`. It runs the real gateway and Glass in a
+browser on synthetic data, without touching the owner's Cyclone. Today's baseline:
+- **7 of 13 speed budgets met.** Writing, page opens and search are fast. A 10,000-row table takes 1.3 s to show
+  its first rows and scrolls at 32 fps, a cell edit takes 1.8 s to appear, a change made elsewhere takes 2.3 s, and
+  undo does not exist yet.
+- **The acceptance script: 7 of 12 tasks pass; 5 features are missing.** None fails.
+- **The design audit:** 191 colours, 742 spacing values and 102 glyphs outside the design system.
+
 **Plan documents:** decision records (`76-decisions.md`), the threat model (`76-threat-model.md`), the test-data policy
 (`76-test-data-policy.md`) and the stage report (`76-stage-reports/s00a.md`).
 
@@ -54,7 +62,7 @@ synthetic secret corpus found the gap and now proves every entry is refused at 1
 - Gateway: 1,583 tests collected, all pass (one skipped, as before). New: `test_platform_store.py` (24),
   `test_platform_secret_corpus.py` (326) and `test_platform_threat_controls.py` (1).
 - Glass: 361 of 361 tests pass; the build and `glass_guard.py` pass.
-- CI guards: 439 tests pass, including the new store guard.
+- CI guards: 439 tests pass, including the new store guard; `test_glass_bench_tools.py` adds 10.
 - `release_versions.py --check` and `mobile_product_guard.py` pass.
 - Android unit tests were not run in this change: no phone source changed. Mobile CI builds the APK.
 

@@ -1,0 +1,2 @@
+# The Glass benchmark's own tooling. Glass itself ships no runtime packages; this runs beside it, on a developer's PC.
+playwright==1.58.0
