@@ -78,6 +78,15 @@ browser on synthetic data, without touching the owner's Cyclone. Today's baselin
 - **The phone now refuses plural secret keywords** (`passwords:`, `api_keys =`) and `typed_text:`, as the gateway does.
   This closes the gap the stage 0 report listed.
 
+**The old parts are removed (owner approved):**
+- **The retired Cyclone One desktop window is deleted** (`apps/pc-companion`). The files the Windows package used from
+  it moved to `packaging/pc` and `scripts/pc`; the package is built from there. Existing installs are unaffected: their
+  folders keep their names.
+- **The docs are folded.** Release notes are in `docs/releases/` (the release lane reads them there), history is in
+  `docs/archive/` and `Cyclone V5 plan/archive/`, and `docs/` keeps the 24 live documents with an index.
+- **57 stale pull requests are closed.** `scripts/ops/prune_branches.py` deletes the 429 old branches whose commits are
+  kept elsewhere, when the owner runs it.
+
 **Plan documents:** decision records (`76-decisions.md`), the threat model (`76-threat-model.md`), the test-data policy
 (`76-test-data-policy.md`) and the stage report (`76-stage-reports/s00a.md`).
 
@@ -91,7 +100,7 @@ browser on synthetic data, without touching the owner's Cyclone. Today's baselin
 - Gateway: 1,605 pass, 3 skipped. New: `test_platform_store.py` (25),
   `test_platform_secret_corpus.py` (326), `test_platform_threat_controls.py` (1) and `test_platform_ledger.py` (23).
 - Glass: 361 of 361 tests pass; the build and `glass_guard.py` pass.
-- CI guards: 411 tests pass (the deleted release scripts took their tests with them), including the store guard and
+- CI guards: 415 tests pass (the deleted release scripts took their tests with them), including the store guard and
   `test_glass_bench_tools.py` (10).
 - `release_versions.py --check` and `mobile_product_guard.py` pass.
 - CI guards: `test_secret_shape_parity.py` (3) added; the workflow and signing guards now read the live lanes.

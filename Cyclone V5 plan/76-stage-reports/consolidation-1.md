@@ -33,19 +33,19 @@ names any of its top-level declarations (Kotlin), imports it (Python) or imports
 checked by hand against tests, guards and docs. Glass has no dead files. The scan is repeatable and can join CI as a
 ratchet in a later run.
 
-## 3. For the owner to decide (not done)
+## 3. The owner's cuts (approved 2026-11-21: "Cleanup all the old stuff you recommended")
 
-| # | Cut | Size | Why it needs you |
-|---|---|---|---|
-| O1 | **Close the stale pull requests** | ~50 open, all but #234 last touched before 2026-10-12 (4.x phone work, Cyclone One 1.5.x, V5 alpha 7–30 candidates) | Closing is outward-facing. Each is superseded by published releases, but you may want one kept. |
-| O2 | **Delete merged and abandoned branches** | ~466 remote branches | Hard to undo for anyone with a local checkout. A list of branches merged into the dev branch can be made safely first. |
-| O3 | **Delete the retired desktop app** (`apps/pc-companion`, 156 files) | the live Windows build still borrows 20 resource files from it, plus `packaging/pc-companion` specs and `scripts/pc-companion` tools | AGENTS.md says to keep it for reference. Doing it means moving the borrowed files to `packaging/pc` first, then proving the Windows package in CI. One focused run. |
-| O4 | **Fold the docs** | 300 files in `docs/` (210 release notes, 11 handoffs), 173 plan files | Release notes could move into one `CHANGELOG` per year, and finished plans into an archive folder. History stays in git. |
-| O5 | **One Glass data system** | tables, plan boards and live views are three database-like systems | This is plan 76 stage 3 (one record model). It is already planned, not a quick cut. |
+| # | Cut | Result |
+|---|---|---|
+| O1 | Close the stale pull requests | **Done.** 57 closed. Only #234 is open. Their commits stay on GitHub under each pull request. |
+| O2 | Delete old branches | **Script ready; the owner runs it.** This session's git access may push only its own branch, so it cannot delete others. `scripts/ops/prune_branches.py` lists 429 branches whose commits are kept by the dev branch, main, a tag or a pull request, and deletes them with `--delete`. 33 branches hold commits that exist nowhere else; it keeps them. |
+| O3 | Delete the retired desktop app | **Done.** `apps/pc-companion` (136 files) is gone. The files the Windows package borrowed moved to `packaging/pc/resources`, `packaging/pc` (specs, `build.lock.json`, the binaries lock) and `scripts/pc`. `pc_companion` leaves the version metadata. Owners' install paths keep their names. |
+| O4 | Fold the docs | **Done.** `docs/` keeps 24 live documents and an index. 210 release notes are in `docs/releases/`; the release lane reads them there. 47 historical documents are in `docs/archive/`, and the V5 orchestrator files and plan handoffs in `Cyclone V5 plan/archive/`. Every path and relative link to a moved file was rewritten (broken links: 6 before, 5 after). `test_docs_layout.py` keeps it folded. |
+| O5 | One Glass data system | **Not a cleanup:** it is plan 76 stage 3 (one record model), built in its own run. |
 
 ## 4. Validation
 
-- Gateway: 1,605 pass, 3 skipped. CI guards: 411 pass. Glass: 361 of 361; the build and `glass_guard.py` pass.
+- Gateway: 1,605 pass, 3 skipped. CI guards: 415 pass (with `test_docs_layout.py`). Glass: 361 of 361; the build and `glass_guard.py` pass.
 - Agent MCP 91, phone MCP, Ports SDK 94, `test_pc_web_only.py` 6, `release_versions.py --check`,
   `mobile_product_guard.py`: pass.
 - Android unit tests: not run here (no Android SDK in this container). Mobile CI runs them on the pull request. A
