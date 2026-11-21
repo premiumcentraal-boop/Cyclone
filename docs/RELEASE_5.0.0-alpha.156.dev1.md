@@ -1,11 +1,11 @@
-# Cyclone Alpha 156: the platform's foundations and its event ledger (plan 76, stage 0 and run 1a)
+# Cyclone Alpha 156: the platform's foundations, its event ledger and a consolidation (plan 76, stage 0 and run 1a)
 
-Developer alpha. It installs over Alpha 155. Nothing the owner sees changes, except that the Command Center now refuses
-a few more secret-shaped texts (below).
+Developer alpha. It installs over Alpha 155. Nothing the owner sees changes, except that the Command Center and the
+phone now refuse a few more secret-shaped texts (below).
 
 ## Versions
 
-- **Mobile:** `5.0.0-alpha.156.dev1` (version code 310). Phone source unchanged; only the version moves.
+- **Mobile:** `5.0.0-alpha.156.dev1` (version code 310). Phone source: dead code removed and one secret rule (below).
 - **Cyclone for Windows, gateway and MCP:** `5.0.0-alpha.156.dev1`.
 - **Glass:** `1.0.0-alpha.69`.
 
@@ -63,6 +63,21 @@ browser on synthetic data, without touching the owner's Cyclone. Today's baselin
 - **The acceptance script: 7 of 12 tasks pass; 5 features are missing.** None fails.
 - **The design audit:** 191 colours, 742 spacing values and 102 glyphs outside the design system.
 
+**A consolidation: fewer, solid parts** (report: `Cyclone V5 plan/76-stage-reports/consolidation-1.md`):
+- **One release lane, one PC lane.** 49 dead workflows are gone: the per-release publishers (alpha 4–43, the 3.9.x
+  phone publishers, the combined and dev-alpha publishers), the retired desktop window's publish and release lanes, an
+  unused action and the scripts only they called. 55 workflows become 6. `v5-publish.yml` is the one release lane.
+- **PC CI tests the product it ships.** It no longer builds the retired Tauri window and its installer on every pull
+  request. It runs the full PC tests on Windows, then builds, installs and smoke-tests the real Cyclone for Windows
+  package with the release's own script. Its check keeps its name.
+- **Phone code nothing runs is removed:** 14 files (1,251 lines) that only their own tests used, and their tests. The
+  gateway's unused `api/stream_schemas.py` goes too.
+- **One secret-shape rule per runtime.** The phone had seven copies with five keyword lists. They are now one,
+  `secrets/SecretShape.kt`, the gateway's rule exactly. Glass uses one copy, and the gateway's debug redaction is built
+  from its rule. A new guard (`test_secret_shape_parity.py`) keeps the three in step and fails on a new copy.
+- **The phone now refuses plural secret keywords** (`passwords:`, `api_keys =`) and `typed_text:`, as the gateway does.
+  This closes the gap the stage 0 report listed.
+
 **Plan documents:** decision records (`76-decisions.md`), the threat model (`76-threat-model.md`), the test-data policy
 (`76-test-data-policy.md`) and the stage report (`76-stage-reports/s00a.md`).
 
@@ -73,16 +88,19 @@ browser on synthetic data, without touching the owner's Cyclone. Today's baselin
 
 ## Validation
 
-- Gateway: 1,607 tests collected, all pass (one skipped, as before). New: `test_platform_store.py` (25),
+- Gateway: 1,605 pass, 3 skipped. New: `test_platform_store.py` (25),
   `test_platform_secret_corpus.py` (326), `test_platform_threat_controls.py` (1) and `test_platform_ledger.py` (23).
 - Glass: 361 of 361 tests pass; the build and `glass_guard.py` pass.
-- CI guards: 439 tests pass, including the new store guard; `test_glass_bench_tools.py` adds 10.
+- CI guards: 411 tests pass (the deleted release scripts took their tests with them), including the store guard and
+  `test_glass_bench_tools.py` (10).
 - `release_versions.py --check` and `mobile_product_guard.py` pass.
-- Android unit tests were not run in this change: no phone source changed. Mobile CI builds the APK.
+- CI guards: `test_secret_shape_parity.py` (3) added; the workflow and signing guards now read the live lanes.
+- Android unit tests were not run in this container (no Android SDK). Mobile CI runs `:app:testDebugUnitTest` and
+  builds the APK. A scan of the phone tests found no test text that the stricter rule now refuses.
 
 ## What is UNVERIFIED on a real PC or phone
 
 - Opening an owner's existing Command Center file. The upgrade test proves it on a production-shaped synthetic file;
   the owner's own file is upgraded on first start of this build.
-- The phone still accepts plural secret keywords in its own checks (six copies of the rule, listed in the stage
-  report). That is a separate phone change.
+- The phone's stricter secret rule on a real phone. Its unit tests run in Mobile CI.
+- The slimmed PC CI on its first Windows run, on this pull request.
