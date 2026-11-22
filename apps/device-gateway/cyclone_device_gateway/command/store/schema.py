@@ -14,18 +14,23 @@ OUTBOX_SOURCES = (("account", "account", "id"), ("task", "task", "id"), ("run", 
                   ("phone", "phone_health", "device_id"))
 
 
-def _outbox_triggers() -> tuple[str, ...]:
+#: Migration 3 (plan 76, run 1b): routines and the workspace, so the live channel can tell Glass what changed.
+WORKSPACE_SOURCES = (("routine", "routine", "id"), ("page", "page", "id"), ("table", "cc_table", "id"),
+                     ("property", "cc_property", "id"), ("row", "cc_row", "id"), ("view", "cc_view", "id"))
+
+
+def _outbox_triggers(sources: tuple[tuple[str, str, str], ...] = OUTBOX_SOURCES) -> tuple[str, ...]:
     out: list[str] = []
-    for kind, table, column in OUTBOX_SOURCES:
+    for kind, table, column in sources:
         for when, row in (("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")):
             out.append(f"CREATE TRIGGER cc_out_{kind}_{when.lower()} AFTER {when} ON {table} BEGIN "
                        f"INSERT INTO cc_outbox(kind, subject, origin, at) VALUES ('{kind}', {row}.{column}, 'change', {NOW_MS}); END")
     return tuple(out)
 
 
-def _backfill() -> tuple[str, ...]:
+def _backfill(sources: tuple[tuple[str, str, str], ...] = OUTBOX_SOURCES) -> tuple[str, ...]:
     return tuple(f"INSERT INTO cc_outbox(kind, subject, origin, at) SELECT '{kind}', {column}, 'backfill', {NOW_MS} FROM {table}"
-                 for kind, table, column in OUTBOX_SOURCES)
+                 for kind, table, column in sources)
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -46,5 +51,10 @@ MIGRATIONS: tuple[Migration, ...] = (
         " origin TEXT NOT NULL, at INTEGER NOT NULL)",
         *_outbox_triggers(),
         *_backfill(),
+    )),
+    # Plan 76, run 1b: routines and the workspace (pages, tables, properties, rows, views) reach the ledger too.
+    Migration(3, "routines and the workspace in the ledger", (
+        *_outbox_triggers(WORKSPACE_SOURCES),
+        *_backfill(WORKSPACE_SOURCES),
     )),
 )

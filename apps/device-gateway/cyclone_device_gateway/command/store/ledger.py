@@ -6,7 +6,8 @@
 - **Idempotent.** An append carries an idempotency key; the same key returns the same event and writes nothing. Reusing a
   key for different content is refused.
 - **Typed.** Payloads are checked against ``events.TYPES`` before anything is stored.
-- **Nothing is missed.** Triggers on the source tables (account, task, run, approval, phone_health) write an outbox row
+- **Nothing is missed.** Triggers on the source tables (account, task, run, approval, phone_health, and since migration 3
+  routine and the workspace: page, cc_table, cc_property, cc_row, cc_view) write an outbox row
   in the same statement as each change. ``drain()`` turns the outbox into ``<kind>.changed`` snapshot events. A crash
   before a drain leaves the outbox rows, and the next drain picks them up.
 - **Projections.** Each snapshot event updates ``cc_projection`` (the latest state of each subject) in the same
@@ -84,13 +85,52 @@ def _snap_phone(r: Any) -> dict[str, Any]:
             "freeStorageGb": storage // 1024 if type(storage) is int else None, "deleted": False}
 
 
-#: kind -> (source table, id column, snapshot builder). The triggers in migration 2 cover the same tables.
+def _digest(r: Any, *columns: str) -> str:
+    """A short fingerprint of a row's content: it changes when the row does, and holds none of its text."""
+    return hashlib.sha256(canonical({c: r[c] for c in columns}).encode("utf-8")).hexdigest()[:16]
+
+
+def _snap_page(r: Any) -> dict[str, Any]:
+    return {"parentId": safe_id(r["parent_id"]), "version": _int(r["version"]), "archived": r["archived_at"] is not None,
+            "digest": _digest(r, "title", "icon", "blocks", "position", "parent_id"), "deleted": False}
+
+
+def _snap_table(r: Any) -> dict[str, Any]:
+    return {"version": _int(r["version"]), "archived": r["archived_at"] is not None,
+            "digest": _digest(r, "title", "icon", "description"), "deleted": False}
+
+
+def _snap_property(r: Any) -> dict[str, Any]:
+    return {"tableId": safe_id(r["table_id"]), "digest": _digest(r, "name", "type", "config", "position"), "deleted": False}
+
+
+def _snap_row(r: Any) -> dict[str, Any]:
+    return {"tableId": safe_id(r["table_id"]), "version": _int(r["version"]), "archived": r["archived_at"] is not None,
+            "digest": _digest(r, "cells", "blocks", "position"), "deleted": False}
+
+
+def _snap_view(r: Any) -> dict[str, Any]:
+    return {"tableId": safe_id(r["table_id"]), "digest": _digest(r, "name", "layout", "config", "position"), "deleted": False}
+
+
+def _snap_routine(r: Any) -> dict[str, Any]:
+    return {"paused": bool(r["paused"]), "accountId": safe_id(r["account_id"]), "nextRunAt": _int(r["next_run_at"]),
+            "digest": _digest(r, "title", "goal", "devices", "schedule", "paused", "account_id"), "deleted": False}
+
+
+#: kind -> (source table, id column, snapshot builder). The triggers in migrations 2 and 3 cover the same tables.
 SOURCES_BY_KIND: dict[str, tuple[str, str, Callable[[Any], dict[str, Any]]]] = {
     "account": ("account", "id", _snap_account),
     "task": ("task", "id", _snap_task),
     "run": ("run", "id", _snap_run),
     "approval": ("approval", "id", _snap_approval),
     "phone": ("phone_health", "device_id", _snap_phone),
+    "routine": ("routine", "id", _snap_routine),
+    "page": ("page", "id", _snap_page),
+    "table": ("cc_table", "id", _snap_table),
+    "property": ("cc_property", "id", _snap_property),
+    "row": ("cc_row", "id", _snap_row),
+    "view": ("cc_view", "id", _snap_view),
 }
 
 

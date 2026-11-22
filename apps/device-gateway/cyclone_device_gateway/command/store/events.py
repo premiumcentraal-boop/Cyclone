@@ -3,8 +3,9 @@
 A type lists its fields and their kinds; unknown fields are refused, every string is bounded, and no string may look like
 a secret (the Command Center's ``INLINE_SECRET`` rule). Two families:
 - ``audit.recorded``: every owner, engine or phone action the audit chain records, in the ledger as well.
-- ``<kind>.changed``: the state of one account, task, run, approval or phone after a change, as a snapshot. Replaying the
-  snapshots in order gives the current state exactly (the projections).
+- ``<kind>.changed``: the state of one account, task, run, approval, phone, routine, page, table, property, row or view
+  after a change, as a snapshot. Replaying the snapshots in order gives the current state exactly (the projections). The
+  workspace kinds carry ids, versions and a digest, never the text a person wrote.
 """
 from __future__ import annotations
 
@@ -131,5 +132,23 @@ TYPES: dict[str, EventType] = {t.name: t for t in (
         "batteryBucket": Field("int"), "charging": Field("bool"), "thermal": Field("text", 20), "network": Field("text", 20),
         "appVersion": Field("text", 40), "freeStorageGb": Field("int"), "deleted": Field("bool", optional=False)},
         state_kind="phone"),
+    # Plan 76, run 1b: the workspace and routines, so the live channel can tell Glass what changed. These carry ids, the
+    # version and a short digest of the row, never its text: the page or row itself is read through its own route.
+    EventType("page.changed", 1, {
+        "parentId": Field("id"), "version": Field("int"), "archived": Field("bool"), "digest": Field("text", 16),
+        "deleted": Field("bool", optional=False)}, state_kind="page"),
+    EventType("table.changed", 1, {
+        "version": Field("int"), "archived": Field("bool"), "digest": Field("text", 16), "deleted": Field("bool", optional=False)},
+        state_kind="table"),
+    EventType("property.changed", 1, {
+        "tableId": Field("id"), "digest": Field("text", 16), "deleted": Field("bool", optional=False)}, state_kind="property"),
+    EventType("row.changed", 1, {
+        "tableId": Field("id"), "version": Field("int"), "archived": Field("bool"), "digest": Field("text", 16),
+        "deleted": Field("bool", optional=False)}, state_kind="row"),
+    EventType("view.changed", 1, {
+        "tableId": Field("id"), "digest": Field("text", 16), "deleted": Field("bool", optional=False)}, state_kind="view"),
+    EventType("routine.changed", 1, {
+        "paused": Field("bool"), "accountId": Field("id"), "nextRunAt": Field("int"), "digest": Field("text", 16),
+        "deleted": Field("bool", optional=False)}, state_kind="routine"),
 )}
 STATE_TYPES = {t.state_kind: t for t in TYPES.values() if t.state_kind}
