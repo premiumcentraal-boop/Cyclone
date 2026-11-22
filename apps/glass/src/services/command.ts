@@ -4,6 +4,7 @@
  * ordinary Mind mission. No secret value is ever typed here: accounts are metadata, and the phone asks for passwords.
  */
 import type { GatewayClient } from "./gateway.js";
+import { looksInlineSecret } from "./secretGuards.js";
 
 export type OwnerBasis = "mine" | "company" | "client";
 export type TwoFactor = "none" | "totp" | "passkey" | "sms" | "email" | "app";
@@ -582,10 +583,8 @@ export const command = {
 };
 
 /** Words a secret-shaped answer would use. Glass refuses before sending; the gateway and phone refuse again. */
-const INLINE_SECRET = /(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\s*[:=]/i;
-
 export function looksSecret(text: string): boolean {
-  return INLINE_SECRET.test(text);
+  return looksInlineSecret(text);
 }
 
 export function taskStatusLabel(status: TaskStatus): string {

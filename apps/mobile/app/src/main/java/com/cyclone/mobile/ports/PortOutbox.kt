@@ -1,5 +1,6 @@
 package com.cyclone.mobile.ports
 
+import com.cyclone.mobile.secrets.SecretShape
 import java.util.Base64
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -269,7 +270,7 @@ class PortOutbox(
 object PortScrub {
     private val SECRET_WORDS = setOf("password", "passcode", "passwd", "pin", "otp", "token", "secret", "apikey", "api", "authorization",
         "cookie", "cvv", "cvc", "credential", "credentials", "typedtext", "typedvalue", "card")
-    private val INLINE = Regex("(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value))\\s*[:=]")
+    private val INLINE = SecretShape.INLINE
     private val STAGES = setOf("started", "page", "step", "needs_you", "created", "done", "failed", "cancelled")
 
     fun secretName(key: String): Boolean {

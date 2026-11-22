@@ -111,7 +111,7 @@ JVM-tested. Android glue stays thin.
 ## 5. The releases
 
 Each release is shippable alone. It passes the full validation in `AGENTS.md`, adds its guard tests, writes
-`docs/RELEASE_<version>.md` with honest limits, and states physical Pixel status as UNVERIFIED until the owner tests it.
+`docs/releases/RELEASE_<version>.md` with honest limits, and states physical Pixel status as UNVERIFIED until the owner tests it.
 
 ### D1 — Drive: talk (the foundation)
 

@@ -82,7 +82,7 @@ yourself (never echo the token).
    the setup (ADB, lock, model), not Cyclone. When a test itself is wrong (a check that doesn't match this phone's
    UI language or app version), fix the mission and say so in the finding's note.
 2. **Message the owner** in the SKILL.md format: headline numbers, top findings, anything you need from them.
-3. **Alpha.107 physical acceptance** (owed; do it with the owner, from `docs/RELEASE_5.0.0-alpha.107.dev1.md`):
+3. **Alpha.107 physical acceptance** (owed; do it with the owner, from `docs/releases/RELEASE_5.0.0-alpha.107.dev1.md`):
    1. Glass → Command Center → Multi-phone shows the phone with a green dot, "Ready", its make and model, and
       Rooted / Not rooted.
    2. Rename it and pick a colour. It survives a Cyclone restart.

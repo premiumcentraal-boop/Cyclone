@@ -7,6 +7,7 @@ The PC agent MCP servers do not call these routes (guarded in CI): approving sta
 from __future__ import annotations
 
 import asyncio
+import json
 import queue
 from typing import Any
 
@@ -608,7 +609,18 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
 
     @router.post("/v1/cc/pages/{page_id}", dependencies=[Depends(auth)])
     def page_update(page_id: str, body: dict[str, Any]):
-        return call(lambda: cc().pages.update(page_id, body_of(body)))
+        def run():
+            data = body_of(body)
+            if isinstance(data, dict) and "blocks" in data:
+                # Plan 76 run 2a: the whole-page save is retired; a page's blocks change through operations.
+                raise CommandError("Send the page's changes as operations to /v1/cc/pages/{id}/ops.")
+            return cc().pages.update(page_id, data)
+        return call(run)
+
+    @router.post("/v1/cc/pages/{page_id}/ops", dependencies=[Depends(auth)])
+    def page_ops(page_id: str, body: dict[str, Any]):
+        """Plan 76 run 2a: a batch of operations on one page, applied all or nothing (``command/pageops.py``)."""
+        return call(lambda: cc().pages.apply(page_id, body_of(body)))
 
     @router.post("/v1/cc/pages/{page_id}/move", dependencies=[Depends(auth)])
     def page_move(page_id: str, body: dict[str, Any]):
@@ -747,6 +759,140 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     @router.get("/v1/cc/audit", dependencies=[Depends(auth)])
     def audit(limit: int = Query(default=200, ge=1, le=1000)):
         return call(lambda: cc().audit(limit))
+
+    # Plan 76 (stage 1): the event ledger, read only. Nothing outside the Command Center writes to it.
+    @router.get("/v1/cc/events", dependencies=[Depends(auth)])
+    def events(subject: str | None = Query(default=None, max_length=180), type: str | None = Query(default=None, max_length=60),
+               after: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=500)):
+        def run():
+            with cc()._lock:
+                cc().ledger.drain()
+                return cc().ledger.events(subject=subject, type_name=type, after=after, limit=limit)
+        return call(run)
+
+    @router.websocket("/v1/cc/live")
+    async def live(websocket: WebSocket, after: int = Query(default=-1, ge=-1)):
+        """The live channel (plan 76, run 1b; ``command/live.py``): the ledger's new events for the topics a tab has
+        open. ``after`` resumes from the last ``seq`` the tab saw."""
+        from ..desktop_runtime.api import _accepted_subprotocol, _websocket_authorized
+        from .live import MAX_REPLAY, PING_EVERY_S, PROTOCOL, SEND_TIMEOUT_S, LiveError, LiveFeed, LiveHub, check_topics, topics_of, frame_of
+        if not _websocket_authorized(websocket, token):
+            await websocket.close(code=4401)
+            return
+        center = getattr(runtime, "command", None)
+        if center is None:
+            await websocket.close(code=4503)
+            return
+        await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
+        hub = getattr(center, "live_hub", None)
+        if hub is None:
+            hub = center.live_hub = LiveHub(center)
+        feed = LiveFeed(center)
+        topics: set[str] = set()
+        sending = asyncio.Lock()
+        # Reading a batch and moving the cursor, and adding topics with their catch-up, never interleave: otherwise a
+        # batch read with the old topics could move the cursor past events the new topics should get.
+        progress = asyncio.Lock()
+        loop = asyncio.get_running_loop()
+        state: dict[str, Any] = {"cursor": 0, "sent_at": loop.time()}
+
+        async def send(frame: dict[str, Any]) -> None:
+            async with sending:
+                # A tab that cannot take a frame in time is closed; it resumes from its cursor when it reconnects.
+                await asyncio.wait_for(websocket.send_json(frame), SEND_TIMEOUT_S)
+                state["sent_at"] = loop.time()
+
+        async def catch_up(new: set[str], since: int) -> None:
+            """Events for newly subscribed topics between what the tab last saw and the cursor, so a change made while
+            the tab was loading is not missed. Only the new topics: nothing is sent twice."""
+            start = max(since, state["cursor"] - MAX_REPLAY)
+            while start < state["cursor"]:
+                with center._lock:
+                    page = center.ledger.events(after=start, limit=500)
+                if not page["events"]:
+                    return
+                for event in page["events"]:
+                    if event["seq"] > state["cursor"]:
+                        return
+                    start = event["seq"]
+                    hits = [x for x in topics_of(event) if x in new]
+                    if hits:
+                        await send(frame_of(event, hits))
+
+        async def read() -> None:
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    message = json.loads(raw) if len(raw) <= 20_000 else None
+                except ValueError:
+                    message = None
+                if not isinstance(message, dict):
+                    await send({"type": "error", "message": "Frames are JSON objects."})
+                    continue
+                kind = message.get("type")
+                try:
+                    wanted = check_topics(message.get("topics", [])) if kind in ("subscribe", "unsubscribe") else None
+                except LiveError as exc:
+                    await send({"type": "error", "message": str(exc)})
+                    continue
+                if kind == "subscribe" and wanted is not None:
+                    async with progress:
+                        new = wanted - topics
+                        since = message.get("from")
+                        if new and type(since) is int and 0 <= since < state["cursor"]:
+                            await catch_up(new, since)
+                        topics.update(wanted)
+                        await send({"type": "subscribed", "topics": sorted(wanted), "seq": state["cursor"]})
+                elif kind == "unsubscribe" and wanted is not None:
+                    async with progress:
+                        topics.difference_update(wanted)
+                else:
+                    await send({"type": "error", "message": "Send subscribe or unsubscribe."})
+
+        reader: asyncio.Task | None = None
+        await hub.join()
+        try:
+            head = await asyncio.to_thread(feed.head)
+            state["cursor"] = after if 0 <= after <= head else head
+            await send({"type": "ready", "protocol": PROTOCOL, "seq": head, "from": state["cursor"]})
+            if head - state["cursor"] > MAX_REPLAY:
+                state["cursor"] = head
+                await send({"type": "resync", "seq": head})
+            reader = loop.create_task(read())
+            generation = hub.generation
+            while not reader.done():
+                async with progress:
+                    cursor, frames = await asyncio.to_thread(feed.batch, state["cursor"], set(topics))
+                    moved = cursor != state["cursor"]
+                    state["cursor"] = cursor
+                    for frame in frames:
+                        await send(frame)
+                if moved:
+                    continue  # more may be waiting: read again before sleeping
+                generation = await hub.wait(generation, PING_EVERY_S)
+                if loop.time() - state["sent_at"] >= PING_EVERY_S and not reader.done():
+                    # A quiet tab still hears from the gateway, so a dead connection is noticed on both sides.
+                    await send({"type": "ping", "seq": state["cursor"]})
+        except (WebSocketDisconnect, RuntimeError, asyncio.TimeoutError):
+            pass
+        finally:
+            if reader is not None:
+                reader.cancel()
+            await hub.leave()
+            if hasattr(websocket, "application_state") and websocket.application_state.name != "DISCONNECTED":
+                try:
+                    await websocket.close(code=4429)
+                except RuntimeError:
+                    pass
+
+    @router.get("/v1/cc/events/verify", dependencies=[Depends(auth)])
+    def events_verify():
+        def run():
+            with cc()._lock:
+                ledger = cc().ledger
+                return {"chain": ledger.verify(), "replay": ledger.replay_check(), "sources": ledger.reconcile(),
+                        "skipped": ledger.skipped}
+        return call(run)
 
     return router
 

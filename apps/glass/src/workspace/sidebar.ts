@@ -10,6 +10,7 @@ import { el, setChildren } from "../ui/dom.js";
 import { icon, type IconName } from "../ui/icons.js";
 import { workspaceBus } from "./directory.js";
 import { openQuickFind } from "./quickFind.js";
+import { follow } from "../services/live.js";
 
 const DATABASES: Array<{ tab: "tasks" | "routines" | "results" | "accounts" | "connections" | "ports" | "vault" | "health"; label: string; icon: IconName }> = [
   { tab: "tasks", label: "Tasks", icon: "runs" },
@@ -21,7 +22,6 @@ const DATABASES: Array<{ tab: "tasks" | "routines" | "results" | "accounts" | "c
   { tab: "vault", label: "Vault", icon: "lock" },
   { tab: "health", label: "Health", icon: "pulse" },
 ];
-const REFRESH_MS = 15_000;
 
 export interface WorkspaceSidebar {
   element: HTMLElement;
@@ -278,11 +278,16 @@ export function createWorkspaceSidebar(context: () => GlassContext, brand: HTMLE
   setChildren(bottom, item("Trash", "close", { name: "command", tab: "trash" }, "trash"));
   const scroll = el("div", "ws-scroll");
   scroll.append(nav, pagesHead, tree, newButton);
-  element.append(brand, search, askAi, scroll, el("div", "sidebar-spacer"), bottom);
+  // Plan 76 run 1b: the live channel's state, once and quietly: only after 3 seconds without the gateway.
+  const reconnecting = el("p", "ws-live-status", "Reconnecting…");
+  reconnecting.setAttribute("role", "status");
+  reconnecting.hidden = ctx.live?.status !== "offline";
+  const offStatus = ctx.live?.onStatus((s) => { reconnecting.hidden = s !== "offline"; }) ?? (() => undefined);
+  element.append(brand, search, askAi, scroll, el("div", "sidebar-spacer"), reconnecting, bottom);
   drawNav();
   drawTree();
   void load();
-  const timer = setInterval(() => void load(), REFRESH_MS);
+  const unfollow = follow(ctx.live, ["pages", "approvals"], () => void load());
   const unlisten = workspaceBus.onPagesChanged(() => void load());
 
   return {
@@ -295,7 +300,8 @@ export function createWorkspaceSidebar(context: () => GlassContext, brand: HTMLE
     find,
     destroy() {
       destroyed = true;
-      clearInterval(timer);
+      unfollow();
+      offStatus();
       unlisten();
     },
   };

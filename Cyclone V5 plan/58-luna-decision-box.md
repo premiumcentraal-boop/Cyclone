@@ -675,7 +675,7 @@ All on the owner's phone, measured over the Lab golden set and a week of shadow 
 - **Faster, at a cost:** cut the waits to 2–3 days each, with less shadow data behind each switch. About 1½ weeks.
 
 Every release also brings:
-- its `docs/RELEASE_*.md`, stating what is **UNVERIFIED** on a real phone;
+- its `docs/releases/RELEASE_*.md`, stating what is **UNVERIFIED** on a real phone;
 - its rows in **`docs/LUNA_DEVICE_MATRIX.md`**, the owner's on-phone checklist (written in alpha.123, grown each release).
 
 ### 11.5 The first build session: alpha.123 (Foundation), in order
@@ -708,7 +708,7 @@ Every release also brings:
    - `./gradlew :app:testDebugUnitTest`;
    - `python -m pytest scripts/ci/tests -q`;
    - push the code without a bump; Mobile CI green;
-   - then the alpha.123 bump, `docs/RELEASE_5.0.0-alpha.123.dev1.md`, and the first device-matrix rows.
+   - then the alpha.123 bump, `docs/releases/RELEASE_5.0.0-alpha.123.dev1.md`, and the first device-matrix rows.
 
 ---
 

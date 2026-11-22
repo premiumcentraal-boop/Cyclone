@@ -18,8 +18,11 @@ The Android app (`com.cyclone.mobile`). It contains:
 ### `apps/device-gateway`
 The PC-side device bridge. It handles device discovery/ADB forwarding and exposes a constrained local interface to Cyclone on the phone.
 
-### `apps/pc-companion`
-Cyclone One — the Windows glass: JPEG live view, human/AI handoff, and session tiles bound to `session_id`. It does not run a second phone-control engine.
+### Cyclone for Windows (`packaging/pc`, `scripts/pc`)
+The web-only Windows package (plan 31): the gateway runtime, the agent MCP, Glass inside the runtime and the `cyclone` command, as one zip. It does not run a second phone-control engine. (The Cyclone One desktop window it replaced was removed in alpha 156.)
+
+### `apps/glass`
+Cyclone Glass, the local browser dashboard. It renders and commands; the gateway holds the data.
 
 ### `tools/codex-phone-mcp` and `tools/cyclone-agent-mcp`
 Constrained MCP adapters for external coding/agent clients. They route through Cyclone's gateway contract rather than exposing a generic shell.
@@ -39,7 +42,7 @@ compiled skill replay (goal + pageKey + sessionId + displayId)
 → final result
 ```
 
-A matching compiled skill hits without an LLM turn. Miss falls back to known route / Fast Path LLM / UI sub-agent. Vision is only on miss: empty accessibility tree or `perceptionMode=vision_escalate`. Unchanged after settle is `verified=false` and must not dispatch a second click channel. Consequential actions retain explicit approval boundaries. See [`V4_STAGE3_SKILL_COMPILER.md`](V4_STAGE3_SKILL_COMPILER.md) and [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md).
+A matching compiled skill hits without an LLM turn. Miss falls back to known route / Fast Path LLM / UI sub-agent. Vision is only on miss: empty accessibility tree or `perceptionMode=vision_escalate`. Unchanged after settle is `verified=false` and must not dispatch a second click channel. Consequential actions retain explicit approval boundaries. See [`V4_STAGE3_SKILL_COMPILER.md`](archive/V4_STAGE3_SKILL_COMPILER.md) and [`V4_STAGE1_FASTPATH.md`](archive/V4_STAGE1_FASTPATH.md).
 
 ### Task Kit (since 5.0.0-alpha.29)
 
@@ -217,7 +220,7 @@ card or the mission's request card, and journals/diagnostics are redacted and ne
 screenshots. Simple "open <app>" launches keep their fast path; background workspaces and owners who switch Cyclone Mind
 off use the step agent above. Design and device test plan: `Cyclone V5 plan/16-cyclone-mind.md`.
 
-Observe/act that can run in a workspace carry `sessionId` + `displayId`. Default-foreground is display 0 (`default-foreground`). Named workspace sessions never fall back to display 0; unknown session, display mismatch, and cross-session observation are rejected before mutation. Compiled skills carry the same session/display binding. See [`V4_STAGE2_SESSION_KERNEL.md`](V4_STAGE2_SESSION_KERNEL.md).
+Observe/act that can run in a workspace carry `sessionId` + `displayId`. Default-foreground is display 0 (`default-foreground`). Named workspace sessions never fall back to display 0; unknown session, display mismatch, and cross-session observation are rejected before mutation. Compiled skills carry the same session/display binding. See [`V4_STAGE2_SESSION_KERNEL.md`](archive/V4_STAGE2_SESSION_KERNEL.md).
 
 ## Cyclone Safe recovery (Alpha 135 local candidate)
 
@@ -229,7 +232,7 @@ ordinary runtimes closed during recovery; owner-only full deletion requires the
 native screen lock and signed PC acknowledgement. No model operation can mint it.
 This protects the last verified snapshot, not newer unsaved changes. Physical
 uninstall/reinstall behavior is **UNVERIFIED** and publication is owner-gated.
-See [implementation and limits](SAFE-IMPLEMENTATION.md).
+See [implementation and limits](archive/SAFE-IMPLEMENTATION.md).
 
 ## Observability
 

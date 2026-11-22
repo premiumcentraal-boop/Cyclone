@@ -27,7 +27,6 @@ def collect() -> dict[str, str | int]:
     product = str(metadata["product_version"])
     components = metadata.get("components", {})
     mobile_version = str(components.get("mobile", product))
-    pc_version = str(components.get("pc_companion", product))
     glass_version = str(components.get("glass", ""))
     gateway_version = str(components.get("device_gateway", metadata.get("python_version", product)))
     mcp_version = str(components.get("mcp", metadata.get("python_version", product)))
@@ -37,16 +36,11 @@ def collect() -> dict[str, str | int]:
     gateway = read_text("apps/device-gateway/pyproject.toml")
     mcp = read_text("tools/codex-phone-mcp/pyproject.toml")
     agent_mcp = read_text("tools/cyclone-agent-mcp/pyproject.toml")
-    package_json = read_text("apps/pc-companion/package.json")
-    package_lock = read_text("apps/pc-companion/package-lock.json")
-    cargo = read_text("apps/pc-companion/src-tauri/Cargo.toml")
-    tauri = read_text("apps/pc-companion/src-tauri/tauri.conf.json")
     glass_package = read_text("apps/glass/package.json")
 
     return {
         "product": product,
         "expectedMobile": mobile_version,
-        "expectedPc": pc_version,
         "expectedGlass": glass_version,
         "expectedGatewayPython": gateway_version,
         "expectedMcpPython": mcp_version,
@@ -55,10 +49,6 @@ def collect() -> dict[str, str | int]:
         "gatewayPython": extract(r'^version\s*=\s*"([^"]+)"', gateway, "gateway package version"),
         "mcpPython": extract(r'^version\s*=\s*"([^"]+)"', mcp, "MCP package version"),
         "agentMcpPython": extract(r'^version\s*=\s*"([^"]+)"', agent_mcp, "agent MCP package version"),
-        "pcPackage": extract(r'^\s*"version"\s*:\s*"([^"]+)"', package_json, "PC package version"),
-        "pcPackageLock": extract(r'^\s*"version"\s*:\s*"([^"]+)"', package_lock, "PC lockfile version"),
-        "pcCargo": extract(r'^version\s*=\s*"([^"]+)"', cargo, "PC Cargo version"),
-        "pcTauri": extract(r'^\s*"version"\s*:\s*"([^"]+)"', tauri, "Tauri version"),
         "glassPackage": extract(r'^\s*"version"\s*:\s*"([^"]+)"', glass_package, "Glass package version"),
         "expectedAndroidVersionCode": version_code,
     }
@@ -66,7 +56,6 @@ def collect() -> dict[str, str | int]:
 
 def check(values: dict[str, str | int]) -> list[str]:
     mobile_version = str(values["expectedMobile"])
-    pc_version = str(values["expectedPc"])
     gateway_version = str(values["expectedGatewayPython"])
     mcp_version = str(values["expectedMcpPython"])
     expected_code = int(values["expectedAndroidVersionCode"])
@@ -76,9 +65,6 @@ def check(values: dict[str, str | int]) -> list[str]:
         errors.append(f"androidVersionName={values['androidVersionName']!r} expected {mobile_version!r}")
     # package.json / Cargo / tauri.conf are the shipped versions. The lockfile root
     # version can lag a coordinated beta bump without changing resolved packages.
-    for field in ("pcPackage", "pcCargo", "pcTauri"):
-        if values[field] != pc_version:
-            errors.append(f"{field}={values[field]!r} expected {pc_version!r}")
     # Cyclone Glass (apps/glass) has its own line; collect() always reports it for the live tree.
     if "expectedGlass" in values:
         glass_version = str(values["expectedGlass"])

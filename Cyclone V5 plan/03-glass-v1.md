@@ -114,7 +114,7 @@ Cyclone One stays what it was: the Windows operator console (fleet, JPEG live, M
 ## Decision record (what went wrong before, 2026-09-18 → 23)
 
 1. **2026-09-18/19** — An Artemis-based local web Glass was built on `feature/pc-glass-artemis` (`apps/pc-glass`, 19 commits). It ran as a browser app, but it was Google Artemis with its own agent brain (Flash/Pro profiles, OpenRouter key) steering the phone through the gateway. It was never merged.
-2. **2026-09-21** — The V5 plan defined Glass as "the same Tauri app (`apps/pc-companion`), new product surface". In V4, "glass" already meant *Cyclone One as a display-only PC window* (`docs/V4_STAGE4_ONE_GLASS.md`), and the plan read "Cyclone Glass" as a rename of Cyclone One.
+2. **2026-09-21** — The V5 plan defined Glass as "the same Tauri app (`apps/pc-companion`), new product surface". In V4, "glass" already meant *Cyclone One as a display-only PC window* (`docs/archive/V4_STAGE4_ONE_GLASS.md`), and the plan read "Cyclone Glass" as a rename of Cyclone One.
 3. **2026-09-21 → 23** — Three Glass agent runs and alpha.3–alpha.6 built Maps, Ask and Vault pages into Cyclone One, shipped as "Glass 1.6.0-alpha.x" in the Cyclone One installer.
 4. **2026-09-23** — The owner restated the product (this document).
 

@@ -11,6 +11,7 @@ import { el, setChildren } from "../ui/dom.js";
 import { relativeTime, whenLabel } from "../ui/format.js";
 import type { GlassPage } from "../pages/page.js";
 import { workspaceBus } from "./directory.js";
+import { follow } from "../services/live.js";
 
 const TEMPLATES: Array<{ id: Template; icon: string; title: string; body: string }> = [
   { id: "blank", icon: "📄", title: "Empty page", body: "Write, plan, and mention anything with @" },
@@ -112,7 +113,7 @@ export function createWorkspaceHome(ctx: GlassContext, now = () => new Date()): 
     if (!destroyed) draw(approvals, tasks, routines, pages);
   }
   void load();
-  const timer = setInterval(() => void load(), 10_000);
+  const unfollow = follow(ctx.live, ["approvals", "tasks", "routines", "pages"], () => void load());
   const unlisten = workspaceBus.onPagesChanged(() => void load());
-  return { element, destroy() { destroyed = true; clearInterval(timer); unlisten(); }, update(next) { ctx = next; void load(); } };
+  return { element, destroy() { destroyed = true; unfollow(); unlisten(); }, update(next) { ctx = next; void load(); } };
 }

@@ -9,6 +9,7 @@ import { monthGrid, pagesApi, sameDay, type Block, type ViewLayout, type ViewSou
 import { chip } from "../ui/components.js";
 import { el, setChildren } from "../ui/dom.js";
 import { relativeTime, whenLabel } from "../ui/format.js";
+import { follow } from "../services/live.js";
 
 type View = Extract<Block, { type: "view" }>;
 
@@ -21,7 +22,6 @@ export const LAYOUTS_FOR: Record<ViewSource, ViewLayout[]> = {
   pages: ["gallery", "list"], results: ["list", "table"], accounts: ["table", "list"], connections: ["list", "table"],
 };
 const LAYOUT_LABEL: Record<ViewLayout, string> = { list: "List", table: "Table", board: "Board", calendar: "Calendar", gallery: "Gallery" };
-const REFRESH_MS = 10_000;
 
 interface Row {
   icon: string;
@@ -39,6 +39,11 @@ export interface LiveView {
 }
 
 /** A live view block. [change] saves the view's own settings (layout, filter), never the data it shows. */
+const TOPICS: Record<ViewSource, string[]> = {
+  tasks: ["tasks"], routines: ["routines"], approvals: ["approvals"], phones: ["phones"], pages: ["pages"],
+  results: ["runs", "tasks"], accounts: ["accounts"], connections: [],
+};
+
 export function createLiveView(ctx: GlassContext, block: View, pageId: string | null, change: (next: View) => void): LiveView {
   const element = el("div", "ws-view");
   const head = el("div", "ws-view-head");
@@ -174,8 +179,9 @@ export function createLiveView(ctx: GlassContext, block: View, pageId: string | 
 
   drawHead();
   void load();
-  const timer = setInterval(() => void load(), REFRESH_MS);
-  return { element, destroy() { destroyed = true; clearInterval(timer); } };
+  // Plan 76 run 1b: each source reloads when its kind changes; connections are not in the ledger yet and load on open.
+  const unfollow = follow(ctx.live, TOPICS[block.source], () => void load());
+  return { element, destroy() { destroyed = true; unfollow(); } };
 }
 
 export const TASK_GROUPS = ["Waiting", "Running", "Needs you", "Done", "Stopped"];

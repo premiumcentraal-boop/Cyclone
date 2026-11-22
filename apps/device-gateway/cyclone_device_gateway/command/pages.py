@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterator
 
 from ..desktop_runtime.v5_contract import INLINE_SECRET
 
@@ -64,6 +64,9 @@ MAX_ITEMS = 500
 MAX_PAGE_BYTES = 1_000_000
 MAX_PAGES = 5_000
 MAX_DEPTH = 10
+#: Plan 76 run 2a: blocks nest (a text block holds children), at most this deep. MAX_BLOCKS counts every nested block.
+MAX_NEST = 8
+MAX_BLOCK_VERSION = 2**31 - 1
 ICON = re.compile(r"^[^\x00-\x1f<>&\"'`]{0,8}$")
 
 TEMPLATES: dict[str, dict[str, Any]] = {
@@ -169,7 +172,7 @@ def _spans(value: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _block(value: Any, ids: set[str]) -> dict[str, Any]:
+def _block(value: Any, ids: set[str], depth: int = 0) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CommandError("A block is an object.")
     kind = value.get("type")
@@ -178,11 +181,25 @@ def _block(value: Any, ids: set[str]) -> dict[str, Any]:
         block_id = _new("b", 9)
     if not isinstance(block_id, str) or not BLOCK_ID.match(block_id) or block_id in ids:
         raise CommandError("Each block has its own id.")
+    if len(ids) >= MAX_BLOCKS:
+        raise CommandError(f"A page holds at most {MAX_BLOCKS} blocks.")
     ids.add(block_id)
-    out: dict[str, Any] = {"id": block_id, "type": kind}
+    # Plan 76 run 2a: every block carries its own version, raised by each operation that changes it.
+    version = value.get("v", 1)
+    if type(version) is not int or not 1 <= version <= MAX_BLOCK_VERSION:
+        raise CommandError("A block's version is a positive whole number.")
+    out: dict[str, Any] = {"id": block_id, "type": kind, "v": version}
     if kind in TEXT_BLOCKS:
-        _only(value, {"id", "type", "text", "checked", "icon"}, "block")
+        _only(value, {"id", "type", "text", "checked", "icon", "v", "children"}, "block")
         out["text"] = _spans(value.get("text", []))
+        children = value.get("children")
+        if children is not None:
+            if not isinstance(children, list):
+                raise CommandError("A block's children are a list of blocks.")
+            if children and depth + 1 >= MAX_NEST:
+                raise CommandError(f"Blocks nest at most {MAX_NEST} deep.")
+            if children:
+                out["children"] = [_block(c, ids, depth + 1) for c in children]
         if kind == "todo":
             if not isinstance(value.get("checked", False), bool):
                 raise CommandError("A to-do is checked or not.")
@@ -194,14 +211,14 @@ def _block(value: Any, ids: set[str]) -> dict[str, Any]:
             out["icon"] = icon
         return out
     if kind == "divider":
-        _only(value, {"id", "type"}, "block")
+        _only(value, {"id", "type", "v"}, "block")
         return out
     if kind == "ref":
-        _only(value, {"id", "type", "ref"}, "block")
+        _only(value, {"id", "type", "ref", "v"}, "block")
         out["ref"] = _ref(value.get("ref"))
         return out
     if kind == "view":
-        _only(value, {"id", "type", "source", "layout", "filter", "title"}, "block")
+        _only(value, {"id", "type", "source", "layout", "filter", "title", "v"}, "block")
         if value.get("source") not in VIEW_SOURCES:
             raise CommandError(f"A live view shows one of: {', '.join(VIEW_SOURCES)}.")
         if value.get("layout", "list") not in LAYOUTS:
@@ -225,7 +242,7 @@ def _block(value: Any, ids: set[str]) -> dict[str, Any]:
         return out
     if kind == "table":
         # Plan 43 (T1): one of the owner's tables, shown through one of its saved views. The rows live in the table.
-        _only(value, {"id", "type", "tableId", "viewId"}, "block")
+        _only(value, {"id", "type", "tableId", "viewId", "v"}, "block")
         table_id, view_id = value.get("tableId"), value.get("viewId")
         if not isinstance(table_id, str) or not REF_IDS["table"].match(table_id):
             raise CommandError("A table block names a table by its id.")
@@ -234,7 +251,7 @@ def _block(value: Any, ids: set[str]) -> dict[str, Any]:
         out.update(tableId=table_id, viewId=view_id)
         return out
     if kind == "board":
-        _only(value, {"id", "type", "title", "layout", "items"}, "block")
+        _only(value, {"id", "type", "title", "layout", "items", "v"}, "block")
         if value.get("layout", "board") not in BOARD_LAYOUTS:
             raise CommandError("A plan's layout is board, table or calendar.")
         items = value.get("items", [])
@@ -281,9 +298,16 @@ def validate_blocks(value: Any) -> list[dict[str, Any]]:
     return blocks
 
 
+def walk(blocks: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+    """Every block of a page, nested ones included, in reading order."""
+    for block in blocks:
+        yield block
+        yield from walk(block.get("children") or [])
+
+
 def references(blocks: list[dict[str, Any]]) -> set[tuple[str, str]]:
     refs: set[tuple[str, str]] = set()
-    for block in blocks:
+    for block in walk(blocks):
         for span in block.get("text") or []:
             if "ref" in span:
                 refs.add((span["ref"]["kind"], span["ref"]["id"]))
@@ -300,7 +324,7 @@ def references(blocks: list[dict[str, Any]]) -> set[tuple[str, str]]:
 
 def plain_text(blocks: list[dict[str, Any]]) -> str:
     parts: list[str] = []
-    for block in blocks:
+    for block in walk(blocks):
         for span in block.get("text") or []:
             parts.append(span["t"] if "t" in span else span["ref"]["label"])
         if block.get("title"):
@@ -436,39 +460,63 @@ class PageStore:
             self._c._audit(actor, "page.create", page_id, {"parent": parent, "template": template})
             return self._public(self._row(page_id))
 
+    def apply(self, page_id: str, body: Any, *, actor: str = "owner") -> dict[str, Any]:
+        """Plan 76 run 2a: apply a batch of operations (``command/pageops.py``) to one page, all or nothing.
+
+        Every block an operation names carries the version it was made against; a block changed since refuses the whole
+        batch (409 ``PAGE_CHANGED`` with ``blockId``), and the writer merges. The page's own version rises once per batch.
+        """
+        from .pageops import apply_ops
+
+        if not isinstance(body, dict):
+            raise CommandError("Send {ops: [...]}.")
+        _only(body, {"ops"}, "operations")
+        with self._c._lock:
+            row = self._row(page_id)
+            if row["archived_at"] is not None:
+                raise CommandError("That page is in the trash. Restore it to edit it.")
+            tree, page, _changed = apply_ops(json.loads(row["blocks"]), body.get("ops"))
+            blocks = validate_blocks(tree)
+            fields: dict[str, Any] = {"blocks": json.dumps(blocks, ensure_ascii=False), "plain": plain_text(blocks)}
+            if "title" in page:
+                fields["title"] = _text(page["title"], "The title", 200).strip() or "Untitled"
+            if "icon" in page:
+                if not isinstance(page["icon"], str) or not ICON.match(page["icon"]):
+                    raise CommandError("The icon is one emoji.")
+                fields["icon"] = page["icon"]
+            sets = ", ".join(f"{k} = ?" for k in fields)
+            # New platform code writes through the store layer (plan 76, stage 0); the SQL ratchet holds pages.py's count.
+            self._c.store.execute(f"UPDATE page SET {sets}, version = version + 1, updated_at = ? WHERE id = ?",
+                                  (*fields.values(), self._c._clock(), page_id))
+            self._index(page_id, blocks)
+            if "title" in fields and fields["title"] != row["title"]:
+                self._c._audit(actor, "page.rename", page_id)
+            elif actor != "owner":
+                self._c._audit(actor, "page.edit", page_id)
+            return self._public(self._row(page_id))
+
     def update(self, page_id: str, body: Any, *, actor: str = "owner") -> dict[str, Any]:
+        """A whole-page write for writers inside the gateway (the AI's tools, imports): the new blocks are turned into
+        operations against the current page and applied like any other batch. The HTTP route takes title and icon only;
+        Glass sends operations."""
         if not isinstance(body, dict) or "version" not in body:
             raise CommandError("Send {version, title?, icon?, blocks?}.")
         _only(body, {"version", "title", "icon", "blocks"}, "page")
-        fields: dict[str, Any] = {}
-        if "title" in body:
-            fields["title"] = _text(body["title"], "The title", 200).strip() or "Untitled"
-        if "icon" in body:
-            if not isinstance(body["icon"], str) or not ICON.match(body["icon"]):
-                raise CommandError("The icon is one emoji.")
-            fields["icon"] = body["icon"]
-        blocks = validate_blocks(body["blocks"]) if "blocks" in body else None
+        from .pageops import diff_ops
+
+        wanted = validate_blocks(body["blocks"]) if "blocks" in body else None
         with self._c._lock:
             row = self._row(page_id)
             if row["archived_at"] is not None:
                 raise CommandError("That page is in the trash. Restore it to edit it.")
             if body["version"] != row["version"]:
                 raise PageConflict("This page changed in another tab or window since you opened it. It has been reloaded.")
-            if blocks is not None:
-                fields["blocks"] = json.dumps(blocks, ensure_ascii=False)
-                fields["plain"] = plain_text(blocks)
-            if not fields:
+            current = json.loads(row["blocks"])
+            ops = diff_ops(current, wanted if wanted is not None else current, title=body.get("title"), icon=body.get("icon"))
+            if not ops:
                 return self._public(row)
-            sets = ", ".join(f"{k} = ?" for k in fields)
-            self._c._db.execute(f"UPDATE page SET {sets}, version = version + 1, updated_at = ? WHERE id = ?",
-                                (*fields.values(), self._c._clock(), page_id))
-            if blocks is not None:
-                self._index(page_id, blocks)
-            if "title" in fields and fields["title"] != row["title"]:
-                self._c._audit(actor, "page.rename", page_id)
-            elif actor != "owner":
-                self._c._audit(actor, "page.edit", page_id)
-            return self._public(self._row(page_id))
+            # One write path: every change to a page, whole or partial, is a batch of operations.
+            return self.apply(page_id, {"ops": ops}, actor=actor)
 
     def move(self, page_id: str, body: Any) -> dict[str, Any]:
         if not isinstance(body, dict):

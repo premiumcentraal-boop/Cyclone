@@ -92,7 +92,7 @@ Test it: `python -m cyclone_ports.conformance http://127.0.0.1:8780`, then write
   - `schemas/signature-vectors.json` lets any language prove its signature check;
   - `schemas/*.schema.json` describe every message.
 - Design review and confidence: `Cyclone V5 plan/47-run-ports-review.md`. To hand the work to an agent, send it
-  `Cyclone V5 plan/HANDOFF-build-a-connector.md`.
+  `Cyclone V5 plan/archive/HANDOFF-build-a-connector.md`.
 
 ## Scenario format
 
@@ -125,7 +125,7 @@ The contract is a frozen draft. The real Port Hub lands in the gateway in plan 4
 - MCP plugins (`cyclone_port_wait`) and recipes (YAML) come in P5.
 
 Plugins built against this kit keep working once the real hub ships. Builders start at
-`Cyclone V5 plan/HANDOFF-run-ports-plugins.md`.
+`Cyclone V5 plan/archive/HANDOFF-run-ports-plugins.md`.
 
 ## Publish your plugin (plan 50)
 

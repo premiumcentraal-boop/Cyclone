@@ -83,28 +83,6 @@ class SkillDraftSinkTest {
     }
 
     @Test
-    fun workersAndPcCannotFlipDraftToVerified() {
-        val store = AutomationStore.inMemory()
-        val compiler = SkillCompiler(store)
-        val written = compiler.compile(settingsPath(verified = true, includeAfterState = true, now = 1_000L))
-        assertTrue(written is SkillCompileResult.DraftWritten)
-        val id = (written as SkillCompileResult.DraftWritten).capsule.id
-
-        val worker = SkillPromotion.requestStatus(store, id, SkillActor.FLEET_WORKER, SkillCapsuleStatus.VERIFIED)
-        val pc = SkillPromotion.requestStatus(
-            store,
-            id,
-            SkillActor.PC_COMPANION,
-            SkillCapsuleStatus.VERIFIED,
-            PcGateEnvelope(autoApprove = true, requestedCapsuleStatus = "verified"),
-        )
-        assertTrue(worker is SkillPromotionResult.Rejected)
-        assertTrue(pc is SkillPromotionResult.Rejected)
-        assertFalse(store.getAutomation(id)!!.enabled)
-        assertTrue(store.getAutomation(id)!!.description.contains("status=draft"))
-    }
-
-    @Test
     fun overlayAnalysisIsIgnoredAndDoesNotWrite() {
         val store = AutomationStore.inMemory()
         val sink = sink(store)

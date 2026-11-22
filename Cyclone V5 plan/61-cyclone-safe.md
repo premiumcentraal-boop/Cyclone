@@ -201,7 +201,7 @@ minted after the screen-lock check. Glass can't delete a safe.
    - the guard above;
    - gateway storage keeps three and stores ciphertext only;
    - the delete token check.
-4. **Release:** `docs/RELEASE_5.0.0-alpha.135.dev1.md`, with physical-device verification **UNVERIFIED**.
+4. **Release:** `docs/releases/RELEASE_5.0.0-alpha.135.dev1.md`, with physical-device verification **UNVERIFIED**.
 
 ## 6. The owner's phone today (Alpha 132), honestly
 

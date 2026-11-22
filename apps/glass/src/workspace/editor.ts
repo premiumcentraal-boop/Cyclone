@@ -204,7 +204,7 @@ export function createEditor(ctx: GlassContext, pageId: string, initial: Block[]
 
   function rowFor(index: number): Row {
     const block = blocks[index];
-    const element = el("div", `ws-block ws-block-${block.type}`);
+    const element = el("div", `ws-block ws-block-${block.type}${block.depth ? ` ws-depth-${Math.min(block.depth, 7)}` : ""}`);
     element.dataset.blockId = block.id;
     element.dataset.type = block.type;
     const gutter = el("div", "ws-gutter");
@@ -372,6 +372,11 @@ export function createEditor(ctx: GlassContext, pageId: string, initial: Block[]
   }
 
   function insertAt(index: number, block: Block, focusAt: number | null = 0): void {
+    // Plan 76 run 2a: a new block sits at the level of the block above it (nested pages keep their shape).
+    if (block.depth === undefined && index > 0) {
+      const above = blocks[index - 1]?.depth;
+      if (above) block.depth = above;
+    }
     blocks.splice(index, 0, block);
     const row = rowFor(index);
     const before = rows[index]?.element ?? element.querySelector?.(".ws-editor-tail") ?? null;

@@ -38,33 +38,6 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
         self.assertIn("Upload Android test and lint reports\n        if: always()", workflow)
         self.assertIn("apps/mobile/app/build/test-results/", workflow)
 
-    def test_release_reuses_verifies_and_signs_without_publication(self):
-        workflow = self.text("mobile-release.yml")
-        self.assertIn("actions/download-artifact", workflow)
-        self.assertIn("sha256sum --check", workflow)
-        self.assertNotIn("gradlew", workflow)
-        self.assertNotIn("gh release", workflow)
-        self.assertIn("contents: read", workflow)
-        self.assertIn("cancel-in-progress: false", workflow)
-        self.assertIn("environment: mobile-release-approval", workflow)
-        self.assertIn(".github/workflows/mobile-ci.yml", workflow)
-        self.assertIn(".conclusion", workflow)
-        self.assertIn("'.event'", workflow)
-        self.assertIn('= "push"', workflow)
-        self.assertIn("EXPECTED_HEAD_SHA", workflow)
-        self.assertIn("run-id.txt", workflow)
-        self.assertIn("'.head_repository.full_name'", workflow)
-        self.assertIn("release/cyclone-mobile-v*", workflow)
-        self.assertNotIn("main|release/cyclone-mobile-v*", workflow)
-        self.assertIn("UNSIGNED_VERIFIED_CANDIDATE", workflow)
-        self.assertIn("CYCLONE_ANDROID_KEYSTORE_B64", workflow)
-        self.assertIn("CYCLONE_ANDROID_STORE_PASSWORD", workflow)
-        self.assertIn("CYCLONE_ANDROID_KEY_ALIAS", workflow)
-        self.assertIn("CYCLONE_ANDROID_KEY_PASSWORD", workflow)
-        self.assertIn("apksigner", workflow)
-        self.assertIn("SIGNED_PROTECTED_ENVIRONMENT", workflow)
-        self.assertNotIn("teamwork-sniper", workflow)
-
     def test_authoritative_ci_tracks_only_current_product_paths(self):
         workflow = self.text("mobile-ci.yml")
         self.assertIn("\n  push:", workflow)
@@ -94,12 +67,21 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
             "apply-v295-ui-polish.yml",
             "mobile-ai-runtime.yml",
             "mobile-backend.yml",
+            # Removed in the alpha 157 consolidation: per-release publishers and the retired desktop window's lanes.
+            "mobile-release.yml",
+            "mobile-publish-v3910.yml",
+            "v5-combined-publish.yml",
+            "pc-companion-ci.yml",
         )
+        self.assertFalse((ROOT / "apps/pc-companion").exists(), "the retired desktop window was removed in alpha 156")
+        for path in WORKFLOWS.glob("*.yml"):
+            self.assertNotRegex(path.name, r"^(v5-alpha\d|mobile-(dev-)?publish-v3)", "one release lane: v5-publish.yml")
         for name in retired:
             self.assertFalse((WORKFLOWS / name).exists(), name)
 
     def test_external_workflow_actions_are_immutable_sha_pinned(self):
-        for name in ("_mobile-build.yml", "mobile-release.yml"):
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            name = path.name
             for action, ref in re.findall(r"uses:\s*([^\s@]+)@([^\s#]+)", self.text(name)):
                 if action.startswith("./"):
                     continue

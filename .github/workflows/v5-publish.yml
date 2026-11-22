@@ -73,14 +73,13 @@ jobs:
           print(f"mobile={mobile}")
           print(f"code={data['android_version_code']}")
           print(f"glass={data['components']['glass']}")
-          print(f"pc={data['components']['pc_companion']}")
           print(f"product={data['product_version']}")
           print(f"tag=v{mobile}")
           print(f"apk=Cyclone-{mobile}.apk")
           PY
           cat "$GITHUB_OUTPUT"
           mobile="$(sed -n 's/^mobile=//p' "$GITHUB_OUTPUT")"
-          test -f "docs/RELEASE_${mobile}.md" || { echo "docs/RELEASE_${mobile}.md is missing: no release." >&2; exit 1; }
+          test -f "docs/releases/RELEASE_${mobile}.md" || { echo "docs/releases/RELEASE_${mobile}.md is missing: no release." >&2; exit 1; }
           if gh release view "v${mobile}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "v${mobile} is already published; nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -272,7 +271,7 @@ jobs:
           kit = sorted(Path('connector').glob('Cyclone-Connector-*'))
           manifest['sha256'].update({p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in kit})
           Path('release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-          notes = Path(f"docs/RELEASE_{os.environ['MOBILE']}.md").read_text()
+          notes = Path(f"docs/releases/RELEASE_{os.environ['MOBILE']}.md").read_text()
           title = next(line[2:].strip() for line in notes.splitlines() if line.startswith('# '))
           Path('release-title.txt').write_text(f"{title} (developer alpha)")
           install = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/install.ps1"

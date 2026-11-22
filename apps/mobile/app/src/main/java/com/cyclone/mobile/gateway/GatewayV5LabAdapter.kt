@@ -11,6 +11,7 @@ import com.cyclone.mobile.mind.mission.Mission
 import com.cyclone.mobile.owner.OwnerMoment
 import com.cyclone.mobile.owner.OwnerMomentsRuntime
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.secrets.SecretShape
 import com.cyclone.mobile.task.TaskCommand
 import com.cyclone.mobile.task.TaskCommandResult
 import com.cyclone.mobile.task.TaskCommands
@@ -31,7 +32,6 @@ import org.json.JSONObject
 internal object GatewayV5LabAdapter {
     const val MAX_GOAL = 2_000
     private val MISSION_ID = Regex("^m[a-z0-9]{6,40}$")
-    private val INLINE_SECRET = Regex("(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\\s*[:=]")
     val ANSWERS = setOf("reply", "fill", "decline", "stop", "steer", "approve")
     const val LAB_FILE = "cyclone-lab-note.txt"
     const val LAB_RECIPIENT = "cyclone-lab@example.com"
@@ -67,7 +67,7 @@ internal object GatewayV5LabAdapter {
         requireOnly(args, setOf("goal", "runId", "variant"))
         val goal = (args.opt("goal") as? String)?.trim().orEmpty()
         if (goal.isBlank() || goal.length > MAX_GOAL) throw invalid("goal must be 1..$MAX_GOAL characters of text.")
-        if (INLINE_SECRET.containsMatchIn(goal)) throw invalid("Do not put secrets in a goal; Cyclone will ask on the phone.")
+        if (SecretShape.INLINE.containsMatchIn(goal)) throw invalid("Do not put secrets in a goal; Cyclone will ask on the phone.")
         val runId = (args.opt("runId") as? String).orEmpty()
         if (!MissionLab.RUN_ID.matches(runId)) throw invalid("runId must be 6..80 letters, digits, dash or underscore.")
         val variant = MindLabVariant.parse(args.optJSONObject("variant")).getOrElse { throw invalid(it.message ?: "variant is malformed.") }
@@ -103,13 +103,13 @@ internal object GatewayV5LabAdapter {
         live()?.takeIf { it.id == id } ?: throw GatewayProtocolException("RUN_NOT_FOUND", "That mission is not running.")
         val command = when (action) {
             "reply" -> (args.opt("text") as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 500 }
-                ?.also { if (INLINE_SECRET.containsMatchIn(it)) throw invalid("Do not put secrets in a lab answer.") }
+                ?.also { if (SecretShape.INLINE.containsMatchIn(it)) throw invalid("Do not put secrets in a lab answer.") }
                 ?.let { TaskCommand.Reply(it) } ?: throw invalid("reply needs text of 1..500 characters.")
             "fill" -> TaskCommand.Fill(values(args.optJSONObject("values")), remember = false)
             "decline" -> TaskCommand.Decline
             // Plan 38: the lab changes the task mid-run, the same Steer the owner sends from the Ask bar.
             "steer" -> (args.opt("text") as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 500 }
-                ?.also { if (INLINE_SECRET.containsMatchIn(it)) throw invalid("Do not put secrets in a lab answer.") }
+                ?.also { if (SecretShape.INLINE.containsMatchIn(it)) throw invalid("Do not put secrets in a lab answer.") }
                 ?.let { TaskCommand.Steer(it) } ?: throw invalid("steer needs text of 1..500 characters.")
             "approve" -> {
                 val requestId = (args.opt("requestId") as? String).orEmpty()
@@ -200,7 +200,7 @@ internal object GatewayV5LabAdapter {
         json.keys().forEach { key ->
             val value = json.opt(key) as? String ?: throw invalid("fill values must be text.")
             if (key.length > 60 || value.length > 300) throw invalid("fill values are too long.")
-            if (INLINE_SECRET.containsMatchIn("$key: $value") || INLINE_SECRET.containsMatchIn("$key=")) throw invalid("Secrets never go through a lab fill.")
+            if (SecretShape.INLINE.containsMatchIn("$key: $value") || SecretShape.INLINE.containsMatchIn("$key=")) throw invalid("Secrets never go through a lab fill.")
             if (value.isNotBlank()) out[key] = value.trim()
         }
         if (out.isEmpty() || out.size > 8) throw invalid("fill needs 1..8 values.")

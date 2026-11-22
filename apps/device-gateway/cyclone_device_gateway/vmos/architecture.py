@@ -6,7 +6,8 @@ from typing import Final
 
 
 CYCLONE_MOBILE_PACKAGE: Final = "com.cyclone.mobile"
-CYCLONE_ONE_COMPONENT: Final = "apps/pc-companion"
+# Cyclone for Windows (plan 31): the runtime package. The retired desktop window (apps/pc-companion) was removed.
+CYCLONE_ONE_COMPONENT: Final = "packaging/pc"
 DEVICE_GATEWAY_COMPONENT: Final = "apps/device-gateway"
 PHONE_MUTATION_ENGINE: Final = "PhoneToolExecutor"
 

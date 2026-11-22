@@ -1,6 +1,6 @@
 # 22 — Glass Atlas and mapping missions: the final build plan (alpha.38)
 
-**Status:** built in 5.0.0-alpha.38.dev1 (see `docs/RELEASE_5.0.0-alpha.38.dev1.md`); final plan, 2026-09-26. Supersedes the Glass parts of plan 20 §7 and moves plan 21 (Hands) to alpha.39.
+**Status:** built in 5.0.0-alpha.38.dev1 (see `docs/releases/RELEASE_5.0.0-alpha.38.dev1.md`); final plan, 2026-09-26. Supersedes the Glass parts of plan 20 §7 and moves plan 21 (Hands) to alpha.39.
 **Inputs:**
 - the owner's three mockup sheets: fleet dashboard, app map with scenarios and zones, zone detail, place and door
   inspector, door replay;

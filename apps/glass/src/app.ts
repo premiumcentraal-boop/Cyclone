@@ -32,6 +32,7 @@ import { createWorkspaceHome } from "./workspace/home.js";
 import { createPageView } from "./workspace/pageView.js";
 import { createTrashPage } from "./workspace/trash.js";
 import type { SocketLike } from "./services/aiStream.js";
+import { createLive, type LiveChannel } from "./services/live.js";
 import { isMacLike, shortcutLabel, shortcutOf } from "./core/keys.js";
 import { createDock, type Dock } from "./manager/dock.js";
 import { createPalette, type Palette } from "./manager/palette.js";
@@ -55,6 +56,8 @@ export interface GlassContext {
   navigate(route: Route): void;
   selectDevice(id: string): void;
   refreshDevices(): Promise<void>;
+  /** Plan 76 run 1b: the live channel. Views subscribe to what they show instead of polling. Absent in tests. */
+  live?: LiveChannel | null;
 }
 
 export interface GlassAppOptions {
@@ -69,6 +72,8 @@ export interface GlassAppOptions {
   clearInterval(handle: unknown): void;
   /** Plan 55 R2/R4: opens Cyber's live event socket (the browser's WebSocket); without it Cyber polls. */
   cyberSocket?: (url: string, protocols: string[]) => SocketLike;
+  /** Plan 76 run 1b: opens the live channel's socket (the browser's WebSocket); without it the workspace is not live. */
+  liveSocket?: (url: string, protocols: string[]) => SocketLike;
 }
 
 type PageFactory = (ctx: GlassContext, route: Route) => GlassPage;
@@ -270,7 +275,19 @@ export class GlassApp {
       navigate: (route) => this.options.setHash(routeHref(route)),
       selectDevice: (id) => this.selectDevice(id),
       refreshDevices: () => this.refreshDevices(),
+      live: this.liveChannel(),
     };
+  }
+
+  private live: LiveChannel | null | undefined;
+
+  /** One live channel per tab, opened on first use. */
+  private liveChannel(): LiveChannel | null {
+    if (this.live === undefined) {
+      const socket = this.options.liveSocket;
+      this.live = socket ? createLive(this.options.client, { socket }) : null;
+    }
+    return this.live;
   }
 
   private selectDevice(id: string): void {

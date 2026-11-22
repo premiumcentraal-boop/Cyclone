@@ -112,8 +112,9 @@ FORBIDDEN_SECRET_TOKENS = frozenset({
     "password", "passcode", "passwd", "pin", "otp", "token", "secret", "apikey",
     "authorization", "cookie", "cvv", "credential", "credentials", "typedtext", "typedvalue",
 })
+# Plan 76 (stage 0): a plural keyword ("passwords:", "credentials =") is refused too; the synthetic corpus found it slipping.
 INLINE_SECRET = re.compile(
-    r"(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value))\s*[:=]"
+    r"(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value))s?\s*[:=]"
 )
 PACKAGE_PLACE = re.compile(r"^package:[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
 CHROME_PLACE = re.compile(r"^chrome:https?://[^\s/]+(?::[0-9]{1,5})?$")
@@ -1748,9 +1749,7 @@ def _validate_profile_roster(profiles: Any, current: Any, *, require_android_use
 
 #: Plan 57 P3: anything shaped like `password: …` the phone's redaction might have left is masked again here, keyword
 #: and value together, so the general secret check below can still fail closed on anything else.
-DEBUG_SECRET_VALUE = re.compile(
-    r"(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential|typed[_-]?(?:text|value))\s*[:=]\s*\S*"
-)
+DEBUG_SECRET_VALUE = re.compile(INLINE_SECRET.pattern + r"\s*\S*")
 DEBUG_MAX_BYTES = 1_000_000
 
 

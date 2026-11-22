@@ -1,27 +1,29 @@
-# Cyclone V5 alpha.155 dev1: one general effect rule for approvals, in shadow mode (it records its verdict; behaviour unchanged).
-# Phone only. Physical acceptance UNVERIFIED.
+# Cyclone V5 alpha.156 dev1: plan 76 stage 0 and run 1a. Numbered migrations and a store layer for the Command Center;
+# a guard holds raw SQL at its recorded count; plural secret keywords are refused; the Glass baseline; and the event
+# ledger (append-only, hash-chained, fed by outbox triggers, with projections); the live channel to Glass (no workspace
+# polling); page operations with per-block versions (migration 4); a consolidation (6 workflows, one secret rule per runtime, dead phone code removed). Phone, PC gateway and
+# Glass. Physical UNVERIFIED.
 schema = 1
-product_version = "5.0.0-alpha.155.dev1"
+product_version = "5.0.0-alpha.156.dev1"
 channel = "development"
-android_version_code = 309
-python_version = "5.0.0-alpha.155.dev1"
+android_version_code = 310
+python_version = "5.0.0-alpha.156.dev1"
 
 [components]
-mobile = "5.0.0-alpha.155.dev1"
-# The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
-# Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
-pc_companion = "1.6.0-alpha.43"
+mobile = "5.0.0-alpha.156.dev1"
+# Cyclone for Windows ships as Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command), versioned with
+# the gateway. The retired Cyclone One desktop window was removed in alpha 156; its last version was 1.6.0-alpha.43.
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.68"
-device_gateway = "5.0.0-alpha.151.dev1"
-mcp = "5.0.0-alpha.151.dev1"
+glass = "1.0.0-alpha.69"
+device_gateway = "5.0.0-alpha.156.dev1"
+mcp = "5.0.0-alpha.156.dev1"
 
 [release]
-previous_mobile_version = "5.0.0-alpha.154.dev1"
+previous_mobile_version = "5.0.0-alpha.155.dev1"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha155-effect-gate-shadow"
+candidate_generation = "cyclone-v5-alpha156-platform-store"

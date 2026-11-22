@@ -95,4 +95,4 @@ below as requirements for whoever builds the Port Hub.
 **Overall: 9/10 that a connector built now will plug into Cyclone Ports and keep working as Ports improves.** The last
 point is the real hub, and it is closed by building the hub against this same suite.
 
-Connector builders start at: `Cyclone V5 plan/HANDOFF-build-a-connector.md`.
+Connector builders start at: `Cyclone V5 plan/archive/HANDOFF-build-a-connector.md`.

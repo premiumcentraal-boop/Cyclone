@@ -4,6 +4,7 @@
  * operations the editor uses (so they are tested without a browser).
  */
 import type { GatewayClient } from "./gateway.js";
+import type { PageOp } from "./pageops.js";
 
 export type RefKind = "page" | "device" | "skill" | "routine" | "task" | "account" | "connection";
 export const REF_KINDS: readonly RefKind[] = ["page", "device", "skill", "routine", "task", "account", "connection"];
@@ -38,15 +39,21 @@ export interface PlanItem {
   taskId: string | null;
 }
 
-export type TextBlock = { id: string; type: TextType; text: Span[]; checked?: boolean; icon?: string };
+/**
+ * Plan 76 run 2a: every block carries its version (`v`, set by the gateway). A text block may hold `children`. The
+ * editor works on a flat list where each block carries its `depth` instead (services/pageops.ts); `depth` never leaves
+ * Glass.
+ */
+type Versioned = { v?: number; depth?: number };
+export type TextBlock = { id: string; type: TextType; text: Span[]; checked?: boolean; icon?: string; children?: Block[] } & Versioned;
 export type Block =
   | TextBlock
-  | { id: string; type: "divider" }
-  | { id: string; type: "ref"; ref: Ref }
-  | { id: string; type: "view"; source: ViewSource; layout: ViewLayout; title: string; filter: { status?: "open" | "done" | "all"; deviceId?: string; routineId?: string; accountId?: string } }
-  | { id: string; type: "board"; title: string; layout: PlanLayout; items: PlanItem[] }
+  | ({ id: string; type: "divider" } & Versioned)
+  | ({ id: string; type: "ref"; ref: Ref } & Versioned)
+  | ({ id: string; type: "view"; source: ViewSource; layout: ViewLayout; title: string; filter: { status?: "open" | "done" | "all"; deviceId?: string; routineId?: string; accountId?: string } } & Versioned)
+  | ({ id: string; type: "board"; title: string; layout: PlanLayout; items: PlanItem[] } & Versioned)
   /** Plan 43 (T1): one of the owner's tables through one of its saved views. An empty tableId is a table being made. */
-  | { id: string; type: "table"; tableId: string; viewId: string | null };
+  | ({ id: string; type: "table"; tableId: string; viewId: string | null } & Versioned);
 
 export interface PageMeta {
   id: string;
@@ -109,6 +116,13 @@ function parseItem(raw: unknown): PlanItem {
 }
 
 export function parseBlock(raw: unknown): Block | null {
+  const block = parseOne(raw);
+  // The block's version is the gateway's; operations name it so a block changed elsewhere is caught.
+  if (block && typeof obj(raw).v === "number") block.v = obj(raw).v as number;
+  return block;
+}
+
+function parseOne(raw: unknown): Block | null {
   const r = obj(raw);
   const id = str(r.id);
   if (!id) return null;
@@ -116,6 +130,8 @@ export function parseBlock(raw: unknown): Block | null {
     const block: TextBlock = { id, type: r.type as TextType, text: parseSpans(r.text) };
     if (r.type === "todo") block.checked = r.checked === true;
     if (r.type === "callout") block.icon = str(r.icon, "💡");
+    const children = list(r.children).map(parseBlock).filter((b): b is Block => b !== null);
+    if (children.length) block.children = children;
     return block;
   }
   if (r.type === "divider") return { id, type: "divider" };
@@ -172,8 +188,12 @@ export const pagesApi = {
     const r = obj(await client.get(`/v1/cc/pages/${enc(id)}/version`));
     return { version: num(r.version), archivedAt: typeof r.archivedAt === "number" ? r.archivedAt : null };
   },
-  save: async (client: GatewayClient, id: string, body: { version: number; title?: string; icon?: string; blocks?: Block[] }) =>
+  /** Title and icon only: a page's blocks change through `ops` (plan 76 run 2a). */
+  save: async (client: GatewayClient, id: string, body: { version: number; title?: string; icon?: string }) =>
     parsePage(await client.post(`/v1/cc/pages/${enc(id)}`, body)),
+  /** A batch of operations on one page, applied all or nothing (services/pageops.ts). */
+  ops: async (client: GatewayClient, id: string, ops: PageOp[]) =>
+    parsePage(await client.post(`/v1/cc/pages/${enc(id)}/ops`, { ops })),
   move: async (client: GatewayClient, id: string, parentId: string | null, before?: string) =>
     parsePage(await client.post(`/v1/cc/pages/${enc(id)}/move`, before ? { parentId, before } : { parentId })),
   archive: (client: GatewayClient, id: string) => client.post(`/v1/cc/pages/${enc(id)}/archive`),
@@ -280,6 +300,9 @@ export function textBlock(type: TextType = "p", text: Span[] = []): TextBlock {
 /** Turns a text block into another text type, keeping its words (and a to-do's tick when it stays a to-do). */
 export function convertBlock(block: TextBlock, type: TextType): TextBlock {
   const out: TextBlock = { id: block.id, type, text: block.text };
+  if (block.v !== undefined) out.v = block.v;
+  if (block.depth !== undefined) out.depth = block.depth;
+  if (block.children) out.children = block.children;
   if (type === "todo") out.checked = block.type === "todo" ? Boolean(block.checked) : false;
   if (type === "callout") out.icon = block.icon ?? "💡";
   return out;

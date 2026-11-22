@@ -6,7 +6,7 @@ Cyclone release artifacts are produced by GitHub Actions and tied to an exact so
 
 Candidate SHA is on `agent/cyclone-4.8.0-destination-authority` and `release/cyclone-mobile-v4.8.0`. Mobile **4.8.0** / versionCode **140**. Gateway/MCP stay **4.1.0**. Physical Pixel 8 remains **UNVERIFIED**.
 
-Product notes: [`docs/RELEASE_4.8.0.md`](RELEASE_4.8.0.md).
+Product notes: [`docs/releases/RELEASE_4.8.0.md`](releases/RELEASE_4.8.0.md).
 
 Cut through existing `mobile-ci.yml` + `mobile-publish-v3910.yml` by pushing `release/cyclone-mobile-v4.8.0`. Do not add a one-off publish workflow. Never overwrite `v4.7.9`.
 
@@ -20,11 +20,11 @@ Do not add a one-off publish workflow. Cut One 1.1.1 through existing `pc-compan
 2. Push the 1.1.1 identity bump to `release/cyclone-one-v1.1.0` for provenance. Do not push `release/cyclone-mobile-v*` for this One-only cut.
 3. Do **not** dispatch `mobile-ci.yml` / `mobile-release.yml` as part of this One cut.
 4. Dispatch **Cyclone PC Companion Release Candidate** (`pc-companion-release.yml`) with `--ref release/cyclone-one-v1.1.0`. Expect `Cyclone-PC-Companion-1.1.1-Setup.exe` (name from package.json — do not invent it).
-5. `gh release create one-1.1.1 --title "Cyclone One 1.1.1" --notes-file docs/RELEASE_ONE_1.1.1.md` attaching the Setup.exe, candidate zip, `SHA256SUMS.txt`, and `release-provenance.json` if present.
+5. `gh release create one-1.1.1 --title "Cyclone One 1.1.1" --notes-file docs/releases/RELEASE_ONE_1.1.1.md` attaching the Setup.exe, candidate zip, `SHA256SUMS.txt`, and `release-provenance.json` if present.
 
 Never force-push, delete tags, or overwrite a GitHub Release. Never replace an existing `one-1.1.0`.
 
-Product notes: [`docs/RELEASE_ONE_1.1.1.md`](RELEASE_ONE_1.1.1.md). Pairing: mobile >= 4.0.4.
+Product notes: [`docs/releases/RELEASE_ONE_1.1.1.md`](releases/RELEASE_ONE_1.1.1.md). Pairing: mobile >= 4.0.4.
 
 ## Published One cut: Cyclone One 1.1.0
 
@@ -36,11 +36,11 @@ Do not add a one-off publish workflow. Cut One 1.1.0 through existing `pc-compan
 2. After the stack lands, create and push `release/cyclone-one-v1.1.0` from the merged SHA for provenance. Do not push `release/cyclone-mobile-v*` for this One-only cut.
 3. Do **not** dispatch `mobile-ci.yml` / `mobile-release.yml` as part of this One cut.
 4. Dispatch **Cyclone PC Companion Release Candidate** (`pc-companion-release.yml`) with `--ref release/cyclone-one-v1.1.0`. Expect `Cyclone-PC-Companion-1.1.0-Setup.exe` (name from package.json — do not invent it).
-5. `python scripts/ci/cut_one_1_1_release.py` prints the exact commands (dry-run, no network). `--execute` runs `gh release create one-1.1.0 --title "Cyclone One 1.1.0" --notes-file docs/RELEASE_ONE_1.1.md` and attaches the Setup.exe if present. It refuses leftover `1.1.0-alpha.4` / `4.1.0-alpha.4`, a dirty tree, SHA mismatch, an existing tag/release, missing notes, and UNVERIFIED physical unless `--allow-unverified-physical` is passed honestly.
+5. `python scripts/ci/cut_one_1_1_release.py` prints the exact commands (dry-run, no network). `--execute` runs `gh release create one-1.1.0 --title "Cyclone One 1.1.0" --notes-file docs/releases/RELEASE_ONE_1.1.md` and attaches the Setup.exe if present. It refuses leftover `1.1.0-alpha.4` / `4.1.0-alpha.4`, a dirty tree, SHA mismatch, an existing tag/release, missing notes, and UNVERIFIED physical unless `--allow-unverified-physical` is passed honestly.
 
 Never force-push, delete tags, or overwrite a GitHub Release. Never replace an existing `one-1.1.0`.
 
-Operator cut path detail: [`docs/ONE_1.1_STAGE5_RELEASE.md`](ONE_1.1_STAGE5_RELEASE.md). Product notes: [`docs/RELEASE_ONE_1.1.md`](RELEASE_ONE_1.1.md). Pairing: mobile >= 4.0.4; ideally 4.1.0 for Layer 2 MCP.
+Operator cut path detail: [`docs/archive/ONE_1.1_STAGE5_RELEASE.md`](archive/ONE_1.1_STAGE5_RELEASE.md). Product notes: [`docs/releases/RELEASE_ONE_1.1.md`](releases/RELEASE_ONE_1.1.md). Pairing: mobile >= 4.0.4; ideally 4.1.0 for Layer 2 MCP.
 
 ## Current product: Cyclone 4.0.0 + One 1.0.0
 
@@ -53,7 +53,7 @@ Do not add a one-off `mobile-publish-v400.yml`. Cut the pair through the existin
 3. Wait for Mobile CI success on that SHA. Copy `build_run_id` and the exact `artifact_name` from that run (typically `Cyclone-Android-4.0.0` if `versionName` is `4.0.0` — do not invent the name).
 4. Dispatch **Cyclone Mobile Release Signing** (`mobile-release.yml`) with those inputs. Signing is `release/cyclone-mobile-v*` push-run only; that workflow must not run `gh release`.
 5. Dispatch **Cyclone PC Companion Release Candidate** (`pc-companion-release.yml`) for the One 1.0.0 NSIS installer.
-6. `python scripts/ci/cut_v4_release.py` prints the exact commands (dry-run, no network). `--execute` runs `gh release create v4.0.0 --title "Cyclone 4.0.0 + One 1.0.0" --notes-file docs/RELEASE_V4.md` and attaches the signed APK and One installer if present. It refuses a dirty tree, SHA mismatch, an existing tag/release, missing notes, and UNVERIFIED physical unless `--allow-unverified-physical` is passed honestly.
+6. `python scripts/ci/cut_v4_release.py` prints the exact commands (dry-run, no network). `--execute` runs `gh release create v4.0.0 --title "Cyclone 4.0.0 + One 1.0.0" --notes-file docs/releases/RELEASE_V4.md` and attaches the signed APK and One installer if present. It refuses a dirty tree, SHA mismatch, an existing tag/release, missing notes, and UNVERIFIED physical unless `--allow-unverified-physical` is passed honestly.
 
 Never force-push, delete tags, or overwrite a GitHub Release.
 

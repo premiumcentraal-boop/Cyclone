@@ -655,7 +655,7 @@ Shizuku ✓ · Cloak ✓ approved ✓ · 47 settings ✓ · 312 skills ✓".
 
 **Release:**
 1. Bump `release/version.toml`, `build.gradle.kts` (272), the three `pyproject.toml` files, and add
-   `docs/RELEASE_5.0.0-alpha.118.dev1.md`.
+   `docs/releases/RELEASE_5.0.0-alpha.118.dev1.md`.
 2. Push to `claude/cyclone-v5-handoff-review-9qrs40`.
 3. Wait for Mobile CI and publish.
 4. Verify the manifest `source_sha`, every checksum and the APK signer.

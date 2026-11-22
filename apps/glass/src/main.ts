@@ -71,6 +71,7 @@ async function boot(): Promise<void> {
     setInterval: (fn, ms) => window.setInterval(fn, ms),
     clearInterval: (handle) => window.clearInterval(handle as number),
     cyberSocket: typeof WebSocket === "undefined" ? undefined : (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike,
+    liveSocket: typeof WebSocket === "undefined" ? undefined : (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike,
   });
   await app.start();
   const keys: ShortcutState = { pendingG: null };
