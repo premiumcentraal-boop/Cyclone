@@ -1,4 +1,4 @@
-# Cyclone Alpha 156: the platform's foundations, its event ledger, the live channel and a consolidation (plan 76, stages 0 and 1)
+# Cyclone Alpha 156: the platform's foundations, its event ledger, the live channel, page operations and a consolidation (plan 76, stages 0–2a)
 
 Developer alpha. It installs over Alpha 155. Nothing the owner sees changes, except that the Command Center and the
 phone now refuse a few more secret-shaped texts (below).
@@ -70,6 +70,20 @@ second.
   the same time. Report: `Cyclone V5 plan/76-stage-reports/s01b.md`.
 - **Not live yet:** the connections list (it is not in the ledger) and the Command Center screens outside the workspace.
 
+**Pages are edited through operations (plan 76, stage 2, run 2a):**
+- **Every edit is an operation.** Typing, deleting, moving a block, turning it into another type, ticking a to-do,
+  bold or italic: Glass sends only what changed (`POST /v1/cc/pages/{id}/ops`), never the whole page.
+- **Two people, one page.** Every block has its own version. Edits to different blocks from two windows (or you and the
+  AI) both land. An edit to a block that changed elsewhere is refused and merged, as before.
+- **Blocks can nest.** A text block can hold other blocks; Glass shows them indented. Making nested blocks with Tab
+  comes in a later run.
+- **Your pages are converted once** at the first start (migration 4): every block gains a version, and each page is
+  checked block by block. Nothing else changes; a page that could not be read stops the conversion and nothing is
+  written.
+- **Changes from elsewhere show faster:** about 300 ms.
+- **For integrations:** `POST /v1/cc/pages/{id}` with `blocks` is refused. Send operations instead; the AI's own tools
+  already do.
+
 **The Glass benchmark (plan 76, stage 0, run 0b)**, in `tools/glass-bench/`. It runs the real gateway and Glass in a
 browser on synthetic data, without touching the owner's Cyclone. Today's baseline:
 - **7 of 13 speed budgets met.** Writing, page opens and search are fast. A 10,000-row table takes 1.3 s to show
@@ -112,9 +126,9 @@ browser on synthetic data, without touching the owner's Cyclone. Today's baselin
 
 ## Validation
 
-- Gateway: 1,618 pass, 3 skipped. New: `test_platform_live.py` (13). New: `test_platform_store.py` (25),
+- Gateway: 1,631 pass, 3 skipped. New: `test_platform_live.py` (13) and `test_platform_pageops.py` (14). New: `test_platform_store.py` (25),
   `test_platform_secret_corpus.py` (326), `test_platform_threat_controls.py` (1) and `test_platform_ledger.py` (23).
-- Glass: 366 of 366 tests pass (new: `live.test.mjs`, 5); the build and `glass_guard.py` pass.
+- Glass: 371 of 371 tests pass (new: `live.test.mjs`, 5, and `pageops.test.mjs`, 5); the build and `glass_guard.py` pass.
 - CI guards: 418 tests pass (the deleted release scripts took their tests with them), including the store guard, the
   live-channel polling guard (`test_glass_live_guard.py`) and
   `test_glass_bench_tools.py` (10).

@@ -437,6 +437,10 @@ exists.
 **Foundation (D11):** the default is a hand-built editor inside the Glass rules. The work is split into these runs,
 each with its own exit report.
 
+**Status (2026-11-22):** run 2a built (`76-stage-reports/s02a.md`): pages are trees of versioned blocks, every edit is
+an operation applied per page with per-block versions, the whole-page save is retired, and migration 4 converted every
+page with no loss. Runs 2b–2e not started.
+
 **Run 2a · Document model and operations.**
 - Blocks gain `children`, so nesting is possible.
 - Edits become **operations**:
