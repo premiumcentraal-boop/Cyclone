@@ -408,3 +408,12 @@ a.ws-crumb:hover { background: var(--ws-hover); color: var(--ws-ink); }
   .ws-top-btn { padding: 4px 6px; }
   .mode-command .ws-sidebar { position: static; height: auto; max-height: 45vh; }
 }
+
+/* Plan 76 run 2a: nested blocks (a text block's children) are indented one step per level. */
+.ws-depth-1 { margin-left: calc(var(--space-5, 24px) * 1); }
+.ws-depth-2 { margin-left: calc(var(--space-5, 24px) * 2); }
+.ws-depth-3 { margin-left: calc(var(--space-5, 24px) * 3); }
+.ws-depth-4 { margin-left: calc(var(--space-5, 24px) * 4); }
+.ws-depth-5 { margin-left: calc(var(--space-5, 24px) * 5); }
+.ws-depth-6 { margin-left: calc(var(--space-5, 24px) * 6); }
+.ws-depth-7 { margin-left: calc(var(--space-5, 24px) * 7); }

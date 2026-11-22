@@ -3,11 +3,16 @@
  * pages that mention it. Edits save by themselves a moment after typing stops; a save names the version it edited.
  * When the page changed elsewhere (another window, the AI), a quiet page reloads in place, and a refused save is
  * merged block by block (mergeBlocks) instead of losing either side's edits.
+ *
+ * Plan 76 run 2a: a save sends operations, never the whole page. `base` is the page as the gateway last had it (a tree
+ * of versioned blocks); the editor holds a flat copy where each block carries its depth; a save sends the operations
+ * between the two (services/pageops.ts), and each names the version of the block it changes.
  */
 import type { GlassContext } from "../app.js";
 import { looksSecret } from "../services/command.js";
 import { GatewayError } from "../services/gateway.js";
 import { mergeBlocks, pagesApi, type Block, type Page } from "../services/pages.js";
+import { diffOps, flattenBlocks, nestBlocks, type PageOp } from "../services/pageops.js";
 import { el, setChildren } from "../ui/dom.js";
 import { emptyState, loadingState } from "../ui/components.js";
 import { relativeTime } from "../ui/format.js";
@@ -28,8 +33,15 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
   let page: Page | null = null;
   let editor: Editor | null = null;
   let version = 0;
-  /** The blocks as the server had them at `version`: the base for a three-way merge. */
+  /** The blocks as the server had them at `version` (a tree, with versions): what operations are made against, and the
+   * base for a three-way merge. `page.blocks` is the editor's flat list. */
   let base: Block[] = [];
+  /** A page from the gateway, as this view keeps it: the tree becomes `base`, the editor gets the flat list. */
+  const adopt = (from: Page): Page => {
+    base = from.blocks;
+    version = from.version;
+    return { ...from, blocks: flattenBlocks(from.blocks) };
+  };
   let watching = false;
   /** Merges in a row without a successful save: a page that keeps changing under us is reloaded instead. */
   let merges = 0;
@@ -63,7 +75,7 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
     let retry = false;
     let refused = false;
     try {
-      const saved = await pagesApi.save(ctx.client, page.id, { version, ...body });
+      const saved = await saveEdits(page.id, body);
       version = saved.version;
       base = saved.blocks;
       merges = 0;
@@ -89,6 +101,14 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
     else if (!refused && Object.keys(pending).length) timer = setTimeout(() => void flush(), SAVE_AFTER_MS);
   }
 
+  /** The operations between the gateway's page and this tab's, sent as one batch. Nothing to send, nothing sent. */
+  async function saveEdits(id: string, body: typeof pending): Promise<Page> {
+    const ops: PageOp[] = body.blocks ? diffOps(base, nestBlocks(body.blocks)) : [];
+    if (body.title !== undefined || body.icon !== undefined) ops.push({ op: "page", title: body.title, icon: body.icon });
+    if (!ops.length) return { ...page!, blocks: base, version };
+    return pagesApi.ops(ctx.client, id, ops);
+  }
+
   /** A save was refused because the page changed elsewhere: take theirs, put my edits on top, and save that. */
   async function merge(mine: typeof pending): Promise<void> {
     pending = {};
@@ -103,10 +123,8 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
       const fresh = await pagesApi.get(ctx.client, pageId);
       if (destroyed) return;
       const where = editor?.caretAt() ?? null;
-      const blocks = mine.blocks ? mergeBlocks(base, editor?.blocks() ?? mine.blocks, fresh.blocks) : fresh.blocks;
-      page = { ...fresh, blocks };
-      version = fresh.version;
-      base = fresh.blocks;
+      const blocks = mine.blocks ? mergeBlocks(flattenBlocks(base), editor?.blocks() ?? mine.blocks, flattenBlocks(fresh.blocks)) : flattenBlocks(fresh.blocks);
+      page = { ...adopt(fresh), blocks };
       drawBar(page);
       drawDoc(page);
       if (where) editor?.focusBlock(where.blockId, where.offset);
@@ -122,11 +140,12 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
   }
 
   /** Pick up a version made elsewhere while nothing here is waiting to save. */
-  async function check(): Promise<void> {
+  async function check(known?: { version: number; archivedAt: number | null }): Promise<void> {
     if (watching || destroyed || !page || saving || timer || Object.keys(pending).length) return;
     watching = true;
     try {
-      const now = await pagesApi.version(ctx.client, pageId);
+      // The live channel's event carries the page's new version: no extra request to learn it.
+      const now = known ?? await pagesApi.version(ctx.client, pageId);
       if (destroyed || now.version <= version || saving || timer || Object.keys(pending).length) return;
       if (now.archivedAt) return void open(false);
       const fresh = await pagesApi.get(ctx.client, pageId);
@@ -134,11 +153,9 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
       const titleFocused = globalThis.document?.activeElement?.classList?.contains("ws-title");
       if (titleFocused) return;
       const where = editor?.caretAt() ?? null;
-      page = fresh;
-      version = fresh.version;
-      base = fresh.blocks;
-      drawBar(fresh);
-      drawDoc(fresh);
+      page = adopt(fresh);
+      drawBar(page);
+      drawDoc(page);
       if (where) editor?.focusBlock(where.blockId, where.offset);
       say("Updated", "ok");
     } catch {
@@ -254,16 +271,14 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
     try {
       const loaded = await pagesApi.get(ctx.client, pageId);
       if (destroyed) return;
-      page = loaded;
-      version = loaded.version;
-      base = loaded.blocks;
+      page = adopt(loaded);
       if (loaded.archivedAt) {
         setChildren(doc, emptyState({ icon: "book", title: "This page is in the trash", body: "Restore it from the trash to edit it." }));
         setChildren(bar);
         return;
       }
-      drawBar(loaded);
-      drawDoc(loaded);
+      drawBar(page);
+      drawDoc(page);
       if (first) say("");
     } catch (err) {
       if (destroyed) return;
@@ -273,7 +288,10 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
 
   void open(true);
   // Plan 76 run 1b: a version made elsewhere arrives over the live channel; nothing polls.
-  const unfollow = follow(ctx.live, [`page:${pageId}`], () => void check());
+  const unfollow = follow(ctx.live, [`page:${pageId}`], (event) => {
+    const v = event?.payload.version;
+    void check(typeof v === "number" ? { version: v, archivedAt: event?.payload.archived === true ? 1 : null } : undefined);
+  });
   const unlisten = workspaceBus.onPageChanged((id) => { if (id === pageId) void check(); });
   return {
     element,

@@ -14,6 +14,7 @@ import { workspaceBus } from "../.test-dist/workspace/directory.js";
 import { createEditor } from "../.test-dist/workspace/editor.js";
 import { createPlanView } from "../.test-dist/workspace/plan.js";
 import { createPageView } from "../.test-dist/workspace/pageView.js";
+import { applyOps } from "../.test-dist/services/pageops.js";
 import { createWorkspaceHome } from "../.test-dist/workspace/home.js";
 import { createCommandPage } from "../.test-dist/pages/commandPage.js";
 
@@ -337,19 +338,22 @@ test("a page saves by itself with its version, and merges when the page changed 
   const saves = [];
   let version = 5;
   let conflicts = 0;
-  let extra = [];
-  const page = () => ({ ...meta(PAGE, "Weekly plan", null, { icon: "🗓️" }), blocks: [{ id: "bone0001", type: "p", text: [{ t: "Hello" }] }, ...extra], version, archivedAt: null,
+  // The gateway's page: operations are applied to it as the gateway would (plan 76 run 2a: no whole-page saves).
+  let blocks = [{ id: "bone0001", type: "p", v: 1, text: [{ t: "Hello" }] }];
+  const page = () => ({ ...meta(PAGE, "Weekly plan", null, { icon: "🗓️" }), blocks, version, archivedAt: null,
     path: [{ id: "pg_parent0001", title: "Shop", icon: "🛍️" }], children: [meta("pg_child00001", "Replies")], backlinks: [meta("pg_other00001", "Daily check")] });
   const gateway = fakeGateway({ ...DIRECTORY_ROUTES, [`GET /v1/cc/pages/${PAGE}`]: page,
     [`GET /v1/cc/pages/${PAGE}/version`]: () => ({ id: PAGE, version, archivedAt: null }),
-    [`POST /v1/cc/pages/${PAGE}`]: ({ body }) => {
+    [`POST /v1/cc/pages/${PAGE}/ops`]: ({ body }) => {
       saves.push(body);
       if (conflicts > 0) {
         conflicts -= 1;
         return new Response(JSON.stringify({ detail: { code: "PAGE_CHANGED", message: "changed" } }), { status: 409 });
       }
+      const touched = new Set(body.ops.filter((o) => o.id).map((o) => o.id));
+      blocks = applyOps(blocks, body.ops).map((b) => (touched.has(b.id) ? { ...b, v: (b.v ?? 1) + 1 } : { v: 1, ...b }));
       version += 1;
-      return { ...page(), blocks: body.blocks ?? page().blocks };
+      return page();
     } });
   const { ctx } = ctxWith(gateway.fetch);
   const view = createPageView(ctx, PAGE);
@@ -364,16 +368,16 @@ test("a page saves by itself with its version, and merges when the page changed 
     title.dispatchEvent({ type: "input" });
     await sleep(700);
     await flush();
-    assert.deepEqual(saves[0], { version: 5, title: "Week 40" });
+    assert.deepEqual(saves[0], { ops: [{ op: "page", title: "Week 40" }] });
     const text = view.element.querySelector(".ws-text");
     type(text, "Hello there");
     await sleep(700);
     await flush();
-    assert.equal(saves[1].version, 6);
-    assert.deepEqual(saves[1].blocks[0].text, [{ t: "Hello there" }]);
-    // Elsewhere (the AI, another window) the page moved on: its first line is back to "Hello" there and a line was added.
+    assert.deepEqual(saves[1], { ops: [{ op: "text_insert", id: "bone0001", v: 1, at: 5, text: [{ t: " there" }] }] },
+      "an edit sends only what changed, naming the block's version");
+    // Elsewhere (the AI, another window) the page moved on: its first line is back to "Hello" and a line was added.
+    blocks = [{ id: "bone0001", type: "p", v: 7, text: [{ t: "Hello" }] }, { id: "bai00001", type: "p", v: 1, text: [{ t: "Added by the AI" }] }];
     version = 9;
-    extra = [{ id: "bai00001", type: "p", text: [{ t: "Added by the AI" }] }];
     conflicts = 1;
     type(view.element.querySelector(".ws-text"), "My edit");
     await sleep(700);
@@ -382,8 +386,8 @@ test("a page saves by itself with its version, and merges when the page changed 
     await sleep(700);
     await flush(12);
     const last = saves.at(-1);
-    assert.equal(last.version, 9, "the merge saves on top of the newest version");
-    assert.deepEqual(last.blocks.map((b) => b.text[0].t), ["My edit", "Added by the AI"], "both sides' edits survive");
+    assert.ok(last.ops.every((o) => o.id !== "bone0001" || o.v === 7), "the merge is sent against the newest version of each block");
+    assert.deepEqual(blocks.map((b) => b.text[0].t), ["My edit", "Added by the AI"], "both sides' edits survive on the gateway");
     assert.deepEqual([...view.element.querySelectorAll(".ws-text")].map((n) => n.textContent), ["My edit", "Added by the AI"]);
   } finally {
     view.destroy();
@@ -451,9 +455,9 @@ test("a refused save (a secret in the text) is not retried; the next edit saves"
   installMiniDom();
   workspaceBus.pagesChanged();
   const saves = [];
-  const page = { ...meta(PAGE, "Notes"), blocks: [{ id: "bone0001", type: "p", text: [] }], version: 1, archivedAt: null, path: [], children: [], backlinks: [] };
+  const page = { ...meta(PAGE, "Notes"), blocks: [{ id: "bone0001", type: "p", v: 1, text: [] }], version: 1, archivedAt: null, path: [], children: [], backlinks: [] };
   const gateway = fakeGateway({ ...DIRECTORY_ROUTES, [`GET /v1/cc/pages/${PAGE}`]: () => page,
-    [`POST /v1/cc/pages/${PAGE}`]: ({ body }) => {
+    [`POST /v1/cc/pages/${PAGE}/ops`]: ({ body }) => {
       saves.push(body);
       if (JSON.stringify(body).includes("password:")) return new Response(JSON.stringify({ detail: { code: "INVALID_REQUEST", message: "That looks like a password, code or key." } }), { status: 400 });
       return { ...page, version: 2 };
@@ -473,7 +477,7 @@ test("a refused save (a secret in the text) is not retried; the next edit saves"
     await sleep(700);
     await flush();
     assert.equal(saves.length, 2);
-    assert.deepEqual(saves[1].blocks[0].text, [{ t: "Ask the vault instead" }]);
+    assert.deepEqual(saves[1].ops, [{ op: "text_insert", id: "bone0001", v: 1, at: 0, text: [{ t: "Ask the vault instead" }] }]);
     assert.equal(view.element.querySelector(".ws-save").textContent, "Saved");
   } finally {
     view.destroy();
