@@ -1,4 +1,4 @@
-# Cyclone Alpha 156: the platform's foundations, its event ledger and a consolidation (plan 76, stage 0 and run 1a)
+# Cyclone Alpha 156: the platform's foundations, its event ledger, the live channel and a consolidation (plan 76, stages 0 and 1)
 
 Developer alpha. It installs over Alpha 155. Nothing the owner sees changes, except that the Command Center and the
 phone now refuse a few more secret-shaped texts (below).
@@ -55,6 +55,21 @@ synthetic secret corpus found the gap and now proves every entry is refused at 1
 - **Measured:** append p95 0.3 ms; replay of 100,000 events matches. Audited writes take about 0.8 ms longer, and the
   file grows about 0.65 KB per event.
 
+**The live channel (plan 76, stage 1, run 1b):** changes now appear in Glass by themselves, in about a third of a
+second.
+- **Before:** an open page checked for changes every 4 seconds, and the sidebar, Home and tables every 10 to 15. A
+  change made by the AI, a phone or another tab took about 2.3 seconds to show.
+- **Now:** one connection per tab (`/v1/cc/live`) tells Glass what changed, wherever the change came from. Measured:
+  364 ms. The workspace has no polling timers left; a CI guard keeps it that way.
+- **Nothing is missed.** After a drop, a tab reconnects and gets every change it missed, in order. "Reconnecting…"
+  shows quietly at the foot of the sidebar, only after 3 seconds offline.
+- **Your edits are safe.** A table with a cell being edited waits until you finish before it reloads.
+- **The ledger now also records** pages, tables, properties, rows, views and routines (migration 3), as ids, versions
+  and a fingerprint, never their text. The first start backfills today's ones once.
+- **No cost measured.** The other speed budgets are the same before and after, on the same machine; a page save takes
+  the same time. Report: `Cyclone V5 plan/76-stage-reports/s01b.md`.
+- **Not live yet:** the connections list (it is not in the ledger) and the Command Center screens outside the workspace.
+
 **The Glass benchmark (plan 76, stage 0, run 0b)**, in `tools/glass-bench/`. It runs the real gateway and Glass in a
 browser on synthetic data, without touching the owner's Cyclone. Today's baseline:
 - **7 of 13 speed budgets met.** Writing, page opens and search are fast. A 10,000-row table takes 1.3 s to show
@@ -97,10 +112,11 @@ browser on synthetic data, without touching the owner's Cyclone. Today's baselin
 
 ## Validation
 
-- Gateway: 1,605 pass, 3 skipped. New: `test_platform_store.py` (25),
+- Gateway: 1,618 pass, 3 skipped. New: `test_platform_live.py` (13). New: `test_platform_store.py` (25),
   `test_platform_secret_corpus.py` (326), `test_platform_threat_controls.py` (1) and `test_platform_ledger.py` (23).
-- Glass: 361 of 361 tests pass; the build and `glass_guard.py` pass.
-- CI guards: 415 tests pass (the deleted release scripts took their tests with them), including the store guard and
+- Glass: 366 of 366 tests pass (new: `live.test.mjs`, 5); the build and `glass_guard.py` pass.
+- CI guards: 418 tests pass (the deleted release scripts took their tests with them), including the store guard, the
+  live-channel polling guard (`test_glass_live_guard.py`) and
   `test_glass_bench_tools.py` (10).
 - `release_versions.py --check` and `mobile_product_guard.py` pass.
 - CI guards: `test_secret_shape_parity.py` (3) added; the workflow and signing guards now read the live lanes.

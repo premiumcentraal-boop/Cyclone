@@ -383,8 +383,9 @@ copy of the current database.
 
 ### Stage 1 · The event ledger and the live channel (L)
 
-**Status (2026-11-21):** run 1a built (the ledger; report `76-stage-reports/s01a.md`): 100,000-event replay
-matches, append p95 0.3 ms. Run 1b (the live channel) not started. Gate open.
+**Status (2026-11-22): gate met.** Run 1a built the ledger (`76-stage-reports/s01a.md`): 100,000-event replay
+matches, append p95 0.3 ms. Run 1b built the live channel (`76-stage-reports/s01b.md`): a change made elsewhere shows in
+364 ms (it took 2,306 ms), and the workspace has no polling timers left.
 
 **Goal:** one source of truth for every fact, pushed live to Glass.
 

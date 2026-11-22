@@ -52,7 +52,8 @@ ends with an independent review of it.
 | # | Threat (actor → asset) | Control today | Test or guard | Stage that closes the gap |
 |---|---|---|---|---|
 | 1 | T1 reaches the API from the network → A1–A9 | The gateway binds `127.0.0.1` (`config.py`, `host: str = "127.0.0.1"`) | Configuration tests in the gateway suite | — |
-| 2 | T2 calls the loopback API without the bearer | Every Command Center route depends on the bearer (`command/api.py`) | Route tests with and without the bearer | — |
+| 2 | T2 calls the loopback API without the bearer | Every Command Center route depends on the bearer (`command/api.py`); the live channel (`/v1/cc/live`, run 1b) checks it on the WebSocket handshake and closes with 4401 | Route tests with and without the bearer; `test_the_live_socket_needs_the_bearer` | — |
+| 2a | T2 or T3 uses the live channel to read more than a tab shows, or to stall the gateway | Topics are checked against a fixed list and never widened; the audit trail is never sent; workspace events carry ids, versions and a digest, never text; each tab reads from its own cursor, and a tab that cannot take a frame in 5 s is closed (`command/live.py`) | `tests/test_platform_live.py` (topics, no text, a stuck tab) | — |
 | 3 | T2 reads the bearer from disk | DPAPI on Windows; a `0600` file elsewhere (`tooling_seam.py`) | `tooling_seam` tests | — |
 | 4 | T2 or T4 reads vault secrets from the file → A1, A2 | Zero-knowledge vault: AES-256-GCM in the browser, per-item keys, PBKDF2 passphrase wrap (`command/vault.py`) | `tests/test_command_vault.py` | Stage 12 adds Windows Hello unlock |
 | 5 | T4 reads workspace content and personal columns → A7 | **GAP:** plaintext at rest; personal columns are only kept out of exports | — | Stage 12: personal columns encrypted at rest |
