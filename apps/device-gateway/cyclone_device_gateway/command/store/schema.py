@@ -6,7 +6,8 @@ change to the file is a numbered migration here.
 """
 from __future__ import annotations
 
-from .migrations import Migration
+from .database import Database
+from .migrations import Migration, MigrationError
 
 NOW_MS = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)"
 #: kind -> (table, id column): the source tables whose every change reaches the ledger through the outbox.
@@ -33,6 +34,41 @@ def _backfill(sources: tuple[tuple[str, str, str], ...] = OUTBOX_SOURCES) -> tup
                  for kind, table, column in sources)
 
 
+def stamp_block_versions_v1(db: Database) -> None:
+    """Plan 76 run 2a: every block of every page gets its own version (``v`` = 1), so operations can be checked block by
+    block. Nothing else changes: each page is compared before and after, block by block, and a page that would lose or
+    change anything stops the migration (it rolls back and the file stays as it was)."""
+    import json
+
+    def stamped(blocks: list) -> list:
+        out = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                raise MigrationError("A page holds a block that is not an object; it was left as it was.")
+            copy = dict(block)
+            copy.setdefault("v", 1)
+            if isinstance(copy.get("children"), list):
+                copy["children"] = stamped(copy["children"])
+            out.append(copy)
+        return out
+
+    def flat(blocks: list) -> list:
+        out = []
+        for block in blocks:
+            out.append({k: v for k, v in block.items() if k not in ("v", "children")})
+            out.extend(flat(block.get("children") or []))
+        return out
+
+    if not db.columns("page"):  # a file without pages (tests of the migrator alone)
+        return
+    for row in db.query("SELECT id, blocks FROM page"):
+        before = json.loads(row["blocks"])
+        after = stamped(before)
+        if flat(before) != flat(after) or [b.get("id") for b in flat(before)] != [b.get("id") for b in flat(after)]:
+            raise MigrationError(f"Page {row['id']} would change while gaining block versions; nothing was changed.")
+        db.execute("UPDATE page SET blocks = ? WHERE id = ?", (json.dumps(after, ensure_ascii=False), row["id"]))
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "adopt the alpha 155 schema"),
     # Plan 76, stage 1: the event ledger, its projections, the outbox that feeds it, and the backfill of today's rows.
@@ -57,4 +93,6 @@ MIGRATIONS: tuple[Migration, ...] = (
         *_outbox_triggers(WORKSPACE_SOURCES),
         *_backfill(WORKSPACE_SOURCES),
     )),
+    # Plan 76, run 2a: pages become trees of versioned blocks, edited through operations (``command/pageops.py``).
+    Migration(4, "every block has its own version", steps=(stamp_block_versions_v1,)),
 )

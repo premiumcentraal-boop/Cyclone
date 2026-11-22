@@ -129,6 +129,11 @@ def cell_edit(page: Any) -> dict[str, Any]:
     return {"cell_shown": shown, "cell_confirmed": shown, "cell_optimistic": False}
 
 
+def _length(spans: list[dict[str, Any]]) -> int:
+    """A block's text length as operations count it: characters, and one per mention."""
+    return sum(1 if "ref" in s else len(s.get("t", "")) for s in spans)
+
+
 def live_change(context: Any, gw: Gateway, fx: Fixture, samples: int = 5) -> dict[str, Any]:
     """A change made elsewhere (another tab, the AI, a phone): the page is changed through the API while a fresh tab with
     no edits of its own shows it. Samples start at spread-out moments, so they fall across any polling cycle."""
@@ -142,9 +147,12 @@ def live_change(context: Any, gw: Gateway, fx: Fixture, samples: int = 5) -> dic
         page.wait_for_timeout(int(rng.uniform(500, 4500)))
         current = gw.call("GET", f"/v1/cc/pages/{fx.big_page}")
         marker = f"livechange marker {n}"
-        blocks = current["blocks"][:-1] + [{"type": "p", "text": [{"t": marker}]}]
+        last = current["blocks"][-1]
+        # Plan 76 run 2a: a page changes through operations: replace the last block's words with the marker.
+        ops = [{"op": "text_delete", "id": last["id"], "v": last["v"], "at": 0, "len": _length(last["text"])}] if _length(last["text"]) else []
+        ops.append({"op": "text_insert", "id": last["id"], "v": last["v"], "at": 0, "text": [{"t": marker}]})
         start = time.perf_counter()
-        gw.call("POST", f"/v1/cc/pages/{fx.big_page}", {"version": current["version"], "blocks": blocks})
+        gw.call("POST", f"/v1/cc/pages/{fx.big_page}/ops", {"ops": ops})
         page.wait_for_function("(m) => document.body.innerText.includes(m)", arg=marker, polling=FRAME_POLL, timeout=60000)
         took.append((time.perf_counter() - start) * 1000)
     page.close()

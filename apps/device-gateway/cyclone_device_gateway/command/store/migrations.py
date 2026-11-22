@@ -3,7 +3,8 @@
 Rules:
 - **Numbered.** Migration ids run 1, 2, 3… with no gaps. The file's ``PRAGMA user_version`` is the highest applied id,
   and ``cc_schema_migration`` keeps one row per applied migration with its name, checksum and time.
-- **Checksummed.** A migration is plain SQL, so its checksum is stable in a frozen Windows build. If an applied
+- **Checksummed.** A migration is plain SQL, plus named data steps for what SQL cannot do (since run 2a), so its
+  checksum is stable in a frozen Windows build. If an applied
   migration's text changes later, the file is refused: history is never rewritten.
 - **Forward only.** A file written by a newer Cyclone (an id this build does not know) is refused, and nothing is
   changed. Downgrades are not supported, as on the phone.
@@ -39,9 +40,14 @@ class Migration:
     id: int
     name: str
     statements: tuple[str, ...] = ()
+    #: Data steps (plan 76, run 2a): Python functions that rewrite rows SQL cannot, run after the statements in the
+    #: same transaction. A step is named for good and never edited once shipped; its name is part of the checksum.
+    steps: tuple[Callable[[Database], None], ...] = ()
 
     def checksum(self) -> str:
         text = f"{self.id}\n{self.name}\n" + "\n;\n".join(s.strip() for s in self.statements)
+        if self.steps:
+            text += "\nsteps:" + ",".join(step.__name__ for step in self.steps)
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -117,12 +123,14 @@ class Migrator:
             applied = self._applied()
             self._check(applied)
             pending = [m for m in self._migrations if m.id not in applied]
-            if any(m.statements for m in pending):
+            if any(m.statements or m.steps for m in pending):
                 self._backup(self._db.user_version())
             for migration in pending:
                 with self._db.transaction():
                     for statement in migration.statements:
                         self._db.execute(statement)
+                    for step in migration.steps:
+                        step(self._db)
                     self._db.execute(f"INSERT INTO {TABLE}(id, name, checksum, applied_at) VALUES (?,?,?,?)",
                                      (migration.id, migration.name, migration.checksum(), self._clock()))
                     self._db.execute(f"PRAGMA user_version = {int(migration.id)}")

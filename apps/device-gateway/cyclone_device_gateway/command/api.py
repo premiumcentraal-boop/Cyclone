@@ -609,7 +609,18 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
 
     @router.post("/v1/cc/pages/{page_id}", dependencies=[Depends(auth)])
     def page_update(page_id: str, body: dict[str, Any]):
-        return call(lambda: cc().pages.update(page_id, body_of(body)))
+        def run():
+            data = body_of(body)
+            if isinstance(data, dict) and "blocks" in data:
+                # Plan 76 run 2a: the whole-page save is retired; a page's blocks change through operations.
+                raise CommandError("Send the page's changes as operations to /v1/cc/pages/{id}/ops.")
+            return cc().pages.update(page_id, data)
+        return call(run)
+
+    @router.post("/v1/cc/pages/{page_id}/ops", dependencies=[Depends(auth)])
+    def page_ops(page_id: str, body: dict[str, Any]):
+        """Plan 76 run 2a: a batch of operations on one page, applied all or nothing (``command/pageops.py``)."""
+        return call(lambda: cc().pages.apply(page_id, body_of(body)))
 
     @router.post("/v1/cc/pages/{page_id}/move", dependencies=[Depends(auth)])
     def page_move(page_id: str, body: dict[str, Any]):
