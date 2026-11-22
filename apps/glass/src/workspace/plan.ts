@@ -11,6 +11,7 @@ import {
 } from "../services/pages.js";
 import { el, setChildren } from "../ui/dom.js";
 import { loadDirectory, routeOfRef } from "./directory.js";
+import { follow } from "../services/live.js";
 
 type Board = Extract<Block, { type: "board" }>;
 const STATUSES: PlanStatus[] = ["todo", "doing", "done"];
@@ -422,8 +423,8 @@ export function createPlanView(ctx: GlassContext, initial: Board, change: (next:
   drawHead();
   draw();
   void refreshTasks();
-  const timer = setInterval(() => void refreshTasks(), 15_000);
-  return { element, destroy() { clearInterval(timer); globalThis.document?.removeEventListener?.("keydown", onKey as EventListener); } };
+  const unfollow = follow(ctx.live, ["tasks"], () => void refreshTasks());
+  return { element, destroy() { unfollow(); globalThis.document?.removeEventListener?.("keydown", onKey as EventListener); } };
 }
 
 function isoDate(ms: number): string {

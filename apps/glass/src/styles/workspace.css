@@ -115,6 +115,8 @@
 .ws-new-page { color: var(--ws-faint); }
 .ws-plus { width: 16px; text-align: center; font-size: 16px; }
 .ws-nav-bottom { border-top: 1px solid var(--ws-line); padding-top: var(--space-2); }
+/* Plan 76 run 1b: the live channel's state, shown only after 3 seconds offline. */
+.ws-live-status { margin: 0; padding: var(--space-1) var(--space-2); color: var(--ws-faint); font-size: var(--text-sm); }
 .ws-toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 60; background: var(--ws-ink); color: var(--surface);
   padding: 10px 16px; border-radius: var(--radius-md); box-shadow: var(--shadow-md); font-size: var(--text-md); max-width: 480px;

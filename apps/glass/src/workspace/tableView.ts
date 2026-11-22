@@ -18,6 +18,7 @@ import {
 import { el, setChildren } from "../ui/dom.js";
 import { createEditor, type Editor } from "./editor.js";
 import { createButtonEditor, describeActions } from "./buttonEditor.js";
+import { follow, type LiveEvent } from "../services/live.js";
 
 type TableBlock = Extract<Block, { type: "table" }>;
 
@@ -26,7 +27,6 @@ export interface TableBlockView {
   destroy(): void;
 }
 
-const REFRESH_MS = 15_000;
 const SAVE_PAGE_AFTER_MS = 700;
 
 function btn(label: string, className: string, title?: string): HTMLButtonElement {
@@ -142,8 +142,10 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
   const fail = (err: unknown) => say(err instanceof Error ? err.message : "That didn't work.");
   const view = (): TableView | null => (table ? table.views.find((v) => v.id === block.viewId) ?? table.views[0] ?? null : null);
   const commitBlock = (next: TableBlock) => {
+    const moved = next.tableId !== block.tableId;
     block = next;
     change(block);
+    if (moved) followTable();  // the live channel follows the table this block now shows
   };
 
   function closePopover(): void {
@@ -202,9 +204,34 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
     }
   }
 
-  const timer = setInterval(() => {
-    if (!editing && !popover && !peek && block.tableId) void load();
-  }, REFRESH_MS);
+  // Plan 76 run 1b: a change made elsewhere arrives over the live channel. While a cell, a menu or a peek is open the
+  // reload waits for it to close, so an edit in progress is never redrawn under the owner.
+  let stale = false;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+  function reloadWhenIdle(event: LiveEvent | null = null): void {
+    if (destroyed || !block.tableId) return;
+    // This tab's own edit comes back as a row event: the row it already shows, at that version, needs no reload.
+    if (event?.event === "row.changed" && !stale) {
+      const version = event.payload.version;
+      const shown = result?.rows.find((r) => r.id === event.subject);
+      if (shown && typeof version === "number" && shown.version >= version) return;
+    }
+    if (!editing && !popover && !peek) {
+      stale = false;
+      void load();
+      return;
+    }
+    stale = true;
+    retry ??= setTimeout(() => {
+      retry = null;
+      if (stale) reloadWhenIdle(null);
+    }, 500);
+  }
+  let unfollow = follow(ctx.live, block.tableId ? [`table:${block.tableId}`] : [], reloadWhenIdle);
+  function followTable(): void {
+    unfollow();
+    unfollow = follow(ctx.live, block.tableId ? [`table:${block.tableId}`] : [], reloadWhenIdle);
+  }
 
   // ---------------------------------------------------------------------------------------------- a new block: make or link
 
@@ -1705,7 +1732,8 @@ export function createTableBlock(ctx: GlassContext, initial: TableBlock, change:
     element,
     destroy() {
       destroyed = true;
-      clearInterval(timer);
+      unfollow();
+      if (retry) clearTimeout(retry);
       closePopover();
       peek?.close();
       globalThis.document?.removeEventListener?.("mousedown", onDocClick as EventListener);

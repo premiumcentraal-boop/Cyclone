@@ -14,9 +14,9 @@ import { relativeTime } from "../ui/format.js";
 import type { GlassPage } from "../pages/page.js";
 import { workspaceBus } from "./directory.js";
 import { createEditor, type Editor } from "./editor.js";
+import { follow } from "../services/live.js";
 
 const SAVE_AFTER_MS = 600;
-const WATCH_MS = 4_000;
 const ICONS = ["📄", "🗓️", "✅", "🎬", "📱", "🛍️", "💡", "📌", "🚀", "📈", "🔁", "✨", "🧭", "📝", "💬", "🔥", "⭐", "🏠", "🎯", "🧪"];
 
 export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
@@ -124,7 +124,6 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
   /** Pick up a version made elsewhere while nothing here is waiting to save. */
   async function check(): Promise<void> {
     if (watching || destroyed || !page || saving || timer || Object.keys(pending).length) return;
-    if (globalThis.document?.hidden) return;
     watching = true;
     try {
       const now = await pagesApi.version(ctx.client, pageId);
@@ -273,14 +272,14 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
   }
 
   void open(true);
-  const watch = globalThis.setInterval?.(() => void check(), WATCH_MS);
-  (watch as { unref?: () => void } | undefined)?.unref?.();
+  // Plan 76 run 1b: a version made elsewhere arrives over the live channel; nothing polls.
+  const unfollow = follow(ctx.live, [`page:${pageId}`], () => void check());
   const unlisten = workspaceBus.onPageChanged((id) => { if (id === pageId) void check(); });
   return {
     element,
     destroy() {
       destroyed = true;
-      if (watch !== undefined) globalThis.clearInterval?.(watch);
+      unfollow();
       unlisten();
       if (Object.keys(pending).length) void flush();
       editor?.destroy();
